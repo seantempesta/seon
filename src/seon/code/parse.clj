@@ -3,7 +3,6 @@
   (:require [clojure.string :as str]
             [clojure.tools.reader.reader-types :as rt]
             [edamame.core :as eda]
-            [hasch.core :as hasch]
             [jolt.analyzer]
             [jolt.host]
             [jolt.ir :as ir]
@@ -223,37 +222,35 @@
 (defn semantic-hash
   {:malli/schema [:=> [:cat :symbol :any] [:string {:min 16, :max 16}]], :cost/ticks 3000000, :cost/bytes 3000000}
   [nsym form]
-  (-> (str (hasch/uuid [nsym (clean-edn-for-hash (strip-docstring form))]))
-      (str/replace "-" "")
-      (subs 0 16)))
+  (sha256-hex16 (pr-str [nsym (clean-edn-for-hash (strip-docstring form))])))
 
 (defn form-identity
-  {:malli/schema [:=> [:cat :symbol :any :string] :map], :cost/ticks 3000000, :cost/bytes 3000000}
-  [nsym form src]
-  (if (and (seq? form) (symbol? (first form)))
-    (let [hd (symbol (name (first form)))
-          arg1 (second form)]
-      (cond
-        (= 'ns hd)
-        {:key (str nsym "#ns") :def-sym nil :test? false}
+{:malli/schema [:=> [:cat :symbol :any :string] :map], :cost/ticks 3000000, :cost/bytes 3000000}
+[nsym form src]
+(if (and (seq? form) (symbol? (first form)))
+  (let [hd (symbol (name (first form)))
+        arg1 (second form)]
+    (cond
+      (= 'ns hd)
+      {:key (str nsym "#ns") :def-sym nil :test? false}
 
-        (and (contains? def-heads hd) (symbol? arg1))
-        {:key (str nsym "/" (name arg1))
-         :def-sym arg1
-         :test? (= 'deftest hd)}
+      (and (contains? def-heads hd) (symbol? arg1))
+      {:key (str nsym "/" (name arg1))
+       :def-sym arg1
+       :test? (= 'deftest hd)}
 
-        (and (= 'defmethod hd) (symbol? arg1))
-        {:key (str nsym "/" (name arg1) "#method#" (pr-str (nth form 2 nil)))
-         :def-sym nil
-         :test? false}
+      (and (= 'defmethod hd) (symbol? arg1))
+      {:key (str nsym "/" (name arg1) "#method#" (pr-str (nth form 2 nil)))
+       :def-sym nil
+       :test? false}
 
-        :else
-        {:key (str nsym "#expr#" (subs (str/replace (str (hasch/uuid src)) "-" "") 0 10))
-         :def-sym nil
-         :test? false}))
-    {:key (str nsym "#expr#" (subs (str/replace (str (hasch/uuid src)) "-" "") 0 10))
-     :def-sym nil
-     :test? false}))
+      :else
+      {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10))
+       :def-sym nil
+       :test? false}))
+  {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10))
+   :def-sym nil
+   :test? false}))
 
 (defn collect-symbols
   {:malli/schema [:=> [:cat [:set :symbol] :any] [:set :symbol]], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -556,3 +553,13 @@
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
+
+(defn- sha256-hex16 [^String s]
+  (let [md (java.security.MessageDigest/getInstance "SHA-256")
+        bs (.digest md (.getBytes (or s "") "UTF-8"))
+        sb (StringBuilder. 16)]
+    (dotimes [i 8]
+      (let [b (bit-and (aget bs i) 0xff)]
+        (when (< b 16) (.append sb \0))
+        (.append sb (Integer/toHexString b))))
+    (.toString sb)))

@@ -235,22 +235,65 @@
 (defonce ^:private ^:seon.flow/edge db-registry-cache
   (cw/lru-cache-factory {} :threshold 32))
 
+(defn schema-tempid [& args] (apply six/schema-tempid args))
+
+(defn extract-schema-ast-edges [& args] (apply six/extract-schema-ast-edges args))
+
+(defn enrich-schema-entity-tx [& args] (apply six/enrich-schema-entity-tx args))
+
+(defn stale-schema-edge-retracts [& args] (apply six/stale-schema-edge-retracts args))
+
+(defn enrich-schema-entities-tx [& args] (apply six/enrich-schema-entities-tx args))
+
+(defn- strip-schema-doc [x]
+  (cond
+    (map? x)
+    (let [m (dissoc x :seon.schema/doc)]
+      (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} m))
+    (vector? x)
+    (let [v (mapv strip-schema-doc x)]
+      (if (and (>= (count v) 2) (map? (nth v 1)) (empty? (nth v 1)))
+        (into [(nth v 0)] (subvec v 2))
+        v))
+    :else x))
+
+(defonce ^:private ^:seon.flow/edge stripped-base-cache (atom {:forms nil :stripped nil}))
+
 (defn registry-for-db
 "Returns `{:registry :forms :merge-meta :declarations}` combining `base-registry` + any branch-specific
- `:seon.schema/key` entities on `db` + optional `extra-forms`, cached O(1) per immutable DB snapshot while
- preserving exact `datahike.reads` dependencies."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
+ `:seon.schema/key` entities on `db` + optional `extra-forms`, reusing COW `@base-registry` whenever DB
+ schemas match disk up to `:seon.schema/doc` while preserving exact `datahike.reads` dependencies."
+{:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
 ([db] (registry-for-db db nil))
 ([db extra-forms]
  (let [compute (fn []
                  (let [db-forms (db-schema-forms db)
                        base @base-registry
-                       merged (if (and (empty? db-forms) (empty? extra-forms))
-                                (:forms base)
-                                (merge (:forms base) db-forms extra-forms))]
-                   (if (= merged (:forms base))
+                       bforms (:forms base)]
+                   (if (and (empty? db-forms) (empty? extra-forms))
                      base
-                     (cached-compiled-registry merged))))
+                     (let [cur @stripped-base-cache
+                           stripped-base (if (identical? (:forms cur) bforms)
+                                           (:stripped cur)
+                                           (let [s (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} bforms)]
+                                             (reset! stripped-base-cache {:forms bforms :stripped s})
+                                             s))
+                           matches-base? (and (empty? extra-forms)
+                                              (reduce-kv
+                                               (fn [_ k v]
+                                                 (let [bv (get stripped-base k ::missing)]
+                                                   (if (or (identical? bv ::missing)
+                                                           (not= (if (identical? v bv) v (strip-schema-doc v)) bv))
+                                                     (reduced false)
+                                                     true)))
+                                               true
+                                               db-forms))]
+                       (if matches-base?
+                         base
+                         (let [merged (merge bforms db-forms extra-forms)]
+                           (if (= merged bforms)
+                             base
+                             (cached-compiled-registry merged))))))))
        ck (when (and (empty? extra-forms) (instance? datahike.db.DB db))
             [(get-in db [:config :store :id])
              (get-in db [:config :branch])
@@ -268,13 +311,16 @@
                       (fn [_]
                         (let [[v rs] (reads/with-reads compute)]
                           {:val v :reads rs})))]
-           (when (seq (:reads entry)) (swap! outer into (:reads entry)))
-           (:val entry))
+           (if (and (map? entry) (contains? entry :reads))
+             (do (when (seq (:reads entry)) (swap! outer into (:reads entry)))
+                 (:val entry))
+             (let [[v rs] (reads/with-reads compute)]
+               (swap! db-registry-cache cache/miss ck {:val v :reads rs})
+               (when (seq rs) (swap! outer into rs))
+               v)))
          (:val (cw/lookup-or-miss
                 db-registry-cache ck
-                (fn [_]
-                  (let [[v rs] (reads/with-reads compute)]
-                    {:val v :reads rs}))))))))))
+                (fn [_] {:val (compute)})))))))))
 
 (defn validate-against
   "Validates `value` against registered Malli `schema-key` on `db`.
@@ -539,13 +585,3 @@
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
   ([db] (:entity-index (if db (registry-for-db db) @base-registry)))
   ([db extra-forms] (:entity-index (if db (registry-for-db db extra-forms) (cached-compiled-registry (merge (:forms @base-registry) extra-forms))))))
-
-(defn schema-tempid [& args] (apply six/schema-tempid args))
-
-(defn extract-schema-ast-edges [& args] (apply six/extract-schema-ast-edges args))
-
-(defn enrich-schema-entity-tx [& args] (apply six/enrich-schema-entity-tx args))
-
-(defn stale-schema-edge-retracts [& args] (apply six/stale-schema-edge-retracts args))
-
-(defn enrich-schema-entities-tx [& args] (apply six/enrich-schema-entities-tx args))
