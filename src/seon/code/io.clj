@@ -10,11 +10,18 @@
             [seon.code.analyze :as analyze]))
 
 (defn doc-sections [db path]
-  (->> (d/datoms db :avet :seon.code.doc/path path)
-       (map #(d/pull db '[:seon.code.doc/id :seon.code.doc/path :seon.code.doc/order
-                          :seon.code.doc/heading :seon.code.doc/body] (:e %)))
-       (sort-by (juxt :seon.code.doc/order :seon.code.doc/id))
-       vec))
+(->> (d/datoms db :avet :seon.code.doc/path path)
+     (map (fn [dt]
+            (reduce (fn [m d1]
+                      (let [a (:a d1)]
+                        (if (contains? #{:seon.code.doc/id :seon.code.doc/path :seon.code.doc/order
+                                         :seon.code.doc/heading :seon.code.doc/body} a)
+                          (assoc m a (:v d1))
+                          m)))
+                    {}
+                    (d/datoms db :eavt (:e dt)))))
+     (sort-by (juxt :seon.code.doc/order :seon.code.doc/id))
+     vec))
 
 (defn render-doc [db path]
   (let [secs (doc-sections db path)]
@@ -26,9 +33,20 @@
   {:malli/schema [:=> [:cat :seon.host/db :symbol] [:vector :map]]}
   [db nsym]
   (->> (d/datoms db :avet :seon.code.form/ns nsym)
-       (map #(d/pull db '[:db/id :seon.code.form/key :seon.code.form/ns :seon.code.form/order
-                          :seon.code.form/lead :seon.code.form/src :seon.code.form/hash
-                          :seon.code.form/deps :seon.code.form/test?] (:e %)))
+       (map (fn [dt]
+       (let [eid (:e dt)]
+         (reduce (fn [m d1]
+                   (let [a (:a d1)]
+                     (case a
+                       (:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                        :seon.code.form/lead :seon.code.form/src :seon.code.form/hash
+                        :seon.code.form/test?)
+                       (assoc m a (:v d1))
+                       :seon.code.form/deps
+                       (update m a (fnil conj []) (:v d1))
+                       m)))
+                 {:db/id eid}
+                 (d/datoms db :eavt eid)))))
        (sort-by (fn [f]
                   [(if (str/ends-with? (str (:seon.code.form/key f)) "#ns") 0 1)
                    (long (or (:seon.code.form/order f) 0))
@@ -36,10 +54,23 @@
        vec))
 
 (defn ns-vars [db nsym]
+(let [dh-sch (:schema db)]
   (->> (d/datoms db :avet :seon.code.var/ns nsym)
-       (map #(d/pull db '[*] (:e %)))
+       (map (fn [dt]
+              (let [eid (:e dt)]
+                (reduce (fn [m d1]
+                          (let [a (:a d1)
+                                adef (get dh-sch a)
+                                v (if (= :db.type/ref (:db/valueType adef))
+                                    {:db/id (:v d1)}
+                                    (:v d1))]
+                            (if (= :db.cardinality/many (:db/cardinality adef))
+                              (update m a (fnil conj []) v)
+                              (assoc m a v))))
+                        {:db/id eid}
+                        (d/datoms db :eavt eid)))))
        (sort-by #(str (:seon.code.var/name %)))
-       vec))
+       vec)))
 
 (defn render-schema-file
   "Renders all `:seon.schema/key` entities whose owner path is `path` into a clean EDN map."
@@ -221,3 +252,61 @@
      (files/rule-file-path? path)   (files/import-rules-tx db path text batch-ctx)
      (files/agent-file-path? path)  (files/import-agents-tx db path text)
      :else [{:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? (boolean exec?)}])))
+
+(defn- ns-form-index [db nsym]
+  (when (and db (contains? (:schema db) :seon.code.form/ns))
+    (reduce
+     (fn [acc dt]
+       (let [eid (:e dt)
+             info (reduce (fn [m d1]
+                            (let [a (:a d1)]
+                              (case a
+                                :seon.code.form/key   (assoc m :key (:v d1))
+                                :seon.code.form/hash  (assoc m :hash (:v d1))
+                                :seon.code.form/order (assoc m :order (:v d1))
+                                :seon.code.form/lead  (assoc m :lead (:v d1))
+                                :seon.code.form/src   (assoc m :src (:v d1))
+                                :seon.code.form/test? (assoc m :test? (:v d1))
+                                :seon.code.form/deps  (update m :deps (fnil conj #{}) (:v d1))
+                                m)))
+                          {:eid eid :deps #{}}
+                          (d/datoms db :eavt eid))]
+         (if-let [k (:key info)]
+           (assoc acc k info)
+           acc)))
+     {}
+     (d/datoms db :avet :seon.code.form/ns nsym))))
+
+(defn- ns-var-index [db nsym]
+  (when (and db (contains? (:schema db) :seon.code.var/ns))
+    (reduce
+     (fn [acc dt]
+       (let [eid (:e dt)
+             info (reduce (fn [m d1]
+                            (case (:a d1)
+                              :seon.code.var/name   (assoc m :name (:v d1))
+                              :seon.code.var/form   (assoc m :form (:v d1))
+                              :seon.code.var/ns-ref (assoc m :ns-ref (:v d1))
+                              m))
+                          {:eid eid}
+                          (d/datoms db :eavt eid))]
+         (if-let [vn (:name info)]
+           (assoc acc vn info)
+           acc)))
+     {}
+     (d/datoms db :avet :seon.code.var/ns nsym))))
+
+(defn- existing-ns-state [db nsym]
+  (when (and db (contains? (:schema db) :seon.code.ns/name))
+    (when-let [eid (:e (first (d/datoms db :avet :seon.code.ns/name nsym)))]
+      (reduce (fn [m d1]
+                (case (:a d1)
+                  :seon.code.ns/path        (assoc m :path (:v d1))
+                  :seon.code.ns/tail        (assoc m :tail (:v d1))
+                  :seon.code.ns/doc         (assoc m :doc (:v d1))
+                  :seon.code.ns/parent      (assoc m :parent (:v d1))
+                  :seon.code.ns/requires    (update m :requires (fnil conj #{}) (:v d1))
+                  :seon.code.ns/requires-ns (update m :requires-ns (fnil conj #{}) (:v d1))
+                  m))
+              {:eid eid :requires #{} :requires-ns #{}}
+              (d/datoms db :eavt eid)))))
