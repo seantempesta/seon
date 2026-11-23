@@ -243,35 +243,47 @@
 (defn- cap-eval-text [^String s cap h-str]
   (if (<= (count s) cap)
     s
-    (let [tail (str "\n... (" (- (count s) (max 100 (- cap 140))) " chars omitted; (user/expand! '" h-str "))")
+    (let [has-exp? (str/includes? s "(user/expand! 'result/")
+          tail (str "\n... (" (- (count s) (max 100 (- cap 140))) " chars omitted"
+                    (when-not has-exp? (str "; (user/expand! '" h-str ")")) ")")
           keep-n (max 0 (min (count s) (- cap (count tail))))]
       (if (pos? keep-n)
         (str (subs s 0 keep-n) tail)
         (subs tail 0 (min cap (count tail)))))))
 
 (defn- render-eval-val-text [eff-db parsed sch eff-opts cap h-str]
-  (if (and (string? parsed)
+  (let [exp-str? (and (string? parsed)
+                      (or (:expanded? eff-opts)
+                          (str/includes? parsed "(user/expand!")
+                          (boolean (re-find #"(?m)^(?:Vector|Map|Set|Seq|Large map|Large string) \(" parsed))))]
+    (cond
+      (and (string? parsed) exp-str?)
+      (cap-eval-text parsed (if (:expanded? eff-opts) (max cap 16000) cap) h-str)
+
+      (and (string? parsed)
            (<= (count parsed) (min cap 2000))
            (<= (count (str/split-lines parsed)) 20))
-    parsed
-    (let [target (detect-schema-target eff-db parsed sch)
-          sk (:schema target)
-          ent (:ent target)
-          disc (when (and eff-db sk (map? ent)) (fit/discover-renderers eff-db [sk]))
-          hiccup (cond
-                   (seq disc)
-                   (let [fp (fit/fit-projections eff-db
-                                                 [{:entity (or (:db/id ent) :eval) :schema sk :data ent}]
-                                                 {:target :wire :token-budget (max 128 (min 1500 (quot cap 4)))})]
-                     (or (get-in fp [:selected 0 :hiccup])
-                         (render/render-value eff-db (with-meta ent {:seon/schema sk}) eff-opts)))
+      parsed
 
-                   (and eff-db sk (map? ent))
-                   (render/render-value eff-db (with-meta ent {:seon/schema sk}) eff-opts)
+      :else
+      (let [target (detect-schema-target eff-db parsed sch)
+            sk (:schema target)
+            ent (:ent target)
+            disc (when (and eff-db sk (map? ent)) (fit/discover-renderers eff-db [sk]))
+            hiccup (cond
+                     (seq disc)
+                     (let [fp (fit/fit-projections eff-db
+                                                   [{:entity (or (:db/id ent) :eval) :schema sk :data ent}]
+                                                   {:target :wire :token-budget (max 128 (min 1500 (quot cap 4)))})]
+                       (or (get-in fp [:selected 0 :hiccup])
+                           (render/render-value eff-db (with-meta ent {:seon/schema sk}) eff-opts)))
 
-                   :else
-                   (render/render-value eff-db parsed eff-opts))]
-      (cap-eval-text (render/hiccup->text hiccup) cap h-str))))
+                     (and eff-db sk (map? ent))
+                     (render/render-value eff-db (with-meta ent {:seon/schema sk}) eff-opts)
+
+                     :else
+                     (render/render-value eff-db parsed eff-opts))]
+        (cap-eval-text (render/hiccup->text hiccup) cap h-str)))))
 
 (defn- media-frame-map? [x]
   (and (map? x)
@@ -509,7 +521,7 @@
                   [:cat :map] :string]
    :cost/ticks 500000
    :cost/bytes 1048576}
-  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars db main-db fallback-db]}]
+  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars db main-db fallback-db code]}]
   (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
         cap (long (max 256 (if (number? max-chars) max-chars 8000)))
         h-str (if handle (str handle) "result/e?")
@@ -527,11 +539,22 @@
                                     (when sch (str sch))
                                     (when branch (str branch (when branch-tx (str " @ tx " branch-tx))))])))
         out-s (when (and (some? out) (not (str/blank? (str out))))
-                (let [os (str out)]
-                  (if (> (count os) cap)
-                    (str "; stdout (" (count os) " chars; full stdout in (:seon.eval/out (meta #'" h-str "))):\n"
-                         (subs os 0 (min 2000 (count os))) "\n... (" (- (count os) 2000) " chars omitted) ...")
-                    (str "; stdout:\n" os))))
+                (let [os (str out)
+                                      n (count os)]
+                                  (if (> n cap)
+                                    (let [budget (min n (max 120 (- cap 400)))
+                                          head-n (quot (* budget 3) 4)
+                                          tail-n (max 0 (- budget head-n))
+                                          omitted (max 0 (- n head-n tail-n))]
+                                      (str "; stdout (" n " chars; full stdout in (:seon.eval/out (meta #'" h-str "))):
+                "
+                                           (subs os 0 head-n)
+                                           "
+                ... (" omitted " chars omitted; full stdout in (:seon.eval/out (meta #'" h-str "))) ...
+                "
+                                           (when (pos? tail-n) (subs os (- n tail-n)))))
+                                    (str "; stdout:
+                " os))))
         body (if-not eff-ok?
                (str "ERROR: " (or error "Unknown error"))
                (let [val-str (if (nil? value) "nil" (str value))
@@ -542,9 +565,10 @@
                      parsed (:val pr)
                      eff-db (choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
                      eff-opts (cond-> {:handle (symbol h-str) :max-chars cap :limit 20
-                                       :budget (min 1200 (quot cap 4)) :mode :model}
-                                sch (assoc :schema sch)
-                                eff-db (assoc :render-root? true :main-db (or main-db eff-db)))
+                                     :budget (min 1200 (quot cap 4)) :mode :model}
+                              (and (string? code) (str/includes? code "expand!")) (assoc :expanded? true)
+                              sch (assoc :schema sch)
+                              eff-db (assoc :render-root? true :main-db (or main-db eff-db)))
                      media-txt (when parsed-ok? (format-media-eval-value parsed sch))
                      safe-val-str (strip-raw-base64-text val-str)
                      val-body (cond
