@@ -159,34 +159,6 @@
 
 (defn missing-contract-violations [& args] (apply contracts/missing-contract-violations args))
 
-(defn caused-by-branch
-  "Returns only the structural/schema health errors *introduced* by `theirs-db` relative to `ours-db`
-   (including `:retyped-attribute`, `:schema-breaks-stored-data`, new `:blocking-in-flow-proc`,
-   new `:used-before-defined`, and new `:missing-ns-form`). When `touched-nss` is supplied,
-   runs `used-before-defined` and `missing-ns-forms` in O(|Delta|) instead of scanning all N forms."
-  {:malli/schema [:function [:=> [:cat :any :any :map] [:vector :map]] [:=> [:cat :any :any :map [:maybe [:sequential :symbol]]] [:vector :map]]]}
-  ([ours-db theirs-db changed-schema-forms]
-   (caused-by-branch ours-db theirs-db changed-schema-forms nil))
-  ([ours-db theirs-db changed-schema-forms touched-nss]
-   (let [schema-errs (schema-violations ours-db changed-schema-forms)
-         base-blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db))
-         new-blocks (->> (blocking-in-flow-procs theirs-db)
-                         (remove #(contains? base-blocks ((juxt :class :subject :var) %))))
-         base-ubd (into #{} (map :subject) (used-before-defined ours-db touched-nss))
-         new-ubd (->> (used-before-defined theirs-db touched-nss)
-                      (remove #(contains? base-ubd (:subject %))))
-         base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
-         new-mns (->> (missing-ns-forms theirs-db touched-nss)
-                      (remove #(contains? base-mns (:subject %))))]
-     (let [base-bref (into #{} (map :subject) (broken-symbol-refs ours-db))
-         new-bref (remove #(contains? base-bref (:subject %)) (broken-symbol-refs theirs-db))
-         base-dref (into #{} (map :subject) (broken-doc-refs ours-db))
-         new-dref (remove #(contains? base-dref (:subject %)) (broken-doc-refs theirs-db))
-         base-imp (into #{} (map :subject) (impure-generatable-fns ours-db))
-         new-imp (remove #(contains? base-imp (:subject %)) (impure-generatable-fns theirs-db))]
-     (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
-                  (missing-contract-violations ours-db theirs-db touched-nss)))))))
-
 (defn test-digest-supersession "Two flat AEVT scans (no nested loops): `:var->green-tx` maps a test var to the highest\n             tx at which one of its `:seon.test` rows passed; `:eid->pass-tx` maps each test entity\n             (digest) to the tx of its `:seon.test/pass?` datom. Used to detect stale failing digests\n             that a later green run has superseded."
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:var->green-tx :map] [:eid->pass-tx :map]]], :cost/ticks 800000, :cost/bytes 20000, :malli/examples [[[{}] {:var->green-tx {}, :eid->pass-tx {}}]]}
   [db] (let [var-by-eid (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.test/var))] (reduce (fn [m [e pass? tx]] (let [m (assoc-in m [:eid->pass-tx e] tx)] (if-let [vsym (and pass? (get var-by-eid e))] (update-in m [:var->green-tx vsym] (fnil max -1) tx) m))) {:var->green-tx {}, :eid->pass-tx {}} (map (juxt :e :v :tx) (d/datoms db :aevt :seon.test/pass?)))))
@@ -560,3 +532,38 @@
           edit-a (when (and branch-db (seq branch-edited))
                    (filterv #(or (= :error (:severity %)) (:fix %)) (eff/static-efficiency-warnings branch-db scope)))]
       (vec (take 8 (distinct (concat err-a edit-a (fast-scoped-test-alerts main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals) sig-a)))))))
+
+(defonce ^:private ^:seon.flow/edge branch-base-health-cache (store/lru-cache 8))
+
+(defn caused-by-branch
+"Returns only the structural/schema health errors *introduced* by `theirs-db` relative to `ours-db`
+ (including `:retyped-attribute`, `:schema-breaks-stored-data`, new `:blocking-in-flow-proc`,
+ new `:used-before-defined`, and new `:missing-ns-form`). When `touched-nss` is supplied,
+ runs `used-before-defined` and `missing-ns-forms` in O(|Delta|) instead of scanning all N forms."
+{:malli/schema [:function [:=> [:cat :any :any :map] [:vector :map]] [:=> [:cat :any :any :map [:maybe [:sequential :symbol]]] [:vector :map]]]}
+([ours-db theirs-db changed-schema-forms]
+ (caused-by-branch ours-db theirs-db changed-schema-forms nil))
+([ours-db theirs-db changed-schema-forms touched-nss]
+ (let [schema-errs (schema-violations ours-db changed-schema-forms)
+       ocid (when (instance? datahike.db.DB ours-db) (d/commit-id ours-db))
+       base-sets (let [compute (fn []
+                                 {:blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db))
+                                  :bref (into #{} (map :subject) (broken-symbol-refs ours-db))
+                                  :dref (into #{} (map :subject) (broken-doc-refs ours-db))
+                                  :imp (into #{} (map :subject) (impure-generatable-fns ours-db))})]
+                   (if ocid
+                     (store/lru-get! branch-base-health-cache 8 [(get-in ours-db [:config :store :id]) ocid] compute)
+                     (compute)))
+       new-blocks (->> (blocking-in-flow-procs theirs-db)
+                       (remove #(contains? (:blocks base-sets) ((juxt :class :subject :var) %))))
+       base-ubd (into #{} (map :subject) (used-before-defined ours-db touched-nss))
+       new-ubd (->> (used-before-defined theirs-db touched-nss)
+                    (remove #(contains? base-ubd (:subject %))))
+       base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
+       new-mns (->> (missing-ns-forms theirs-db touched-nss)
+                    (remove #(contains? base-mns (:subject %))))
+       new-bref (remove #(contains? (:bref base-sets) (:subject %)) (broken-symbol-refs theirs-db))
+       new-dref (remove #(contains? (:dref base-sets) (:subject %)) (broken-doc-refs theirs-db))
+       new-imp (remove #(contains? (:imp base-sets) (:subject %)) (impure-generatable-fns theirs-db))]
+   (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
+                (missing-contract-violations ours-db theirs-db touched-nss))))))

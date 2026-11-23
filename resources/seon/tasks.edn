@@ -25,6 +25,14 @@
   :seon.task/tests #{seon.core-test/lossless-clj-and-md-roundtrip-plus-structured-var-facts-test
                      seon.core-test/runaway-eval-tick-budget-and-multi-tool-error-isolation-test},
   :seon.task/title "Split seon.code (< 8k tok) by extracting reach graph and eval runner"}
+ {:seon.task/scope seon.render.markdown,
+  :seon.task/title "Focus: seon.render.markdown/render-activity-fold",
+  :seon.task/curated [[:seon.code.var/name seon.render.markdown/render-activity-fold]],
+  :seon.task/created-by :user,
+  :seon.task/id :seon.focus/render-activity-fold,
+  :seon.task/done? true,
+  :seon.task/plan "render-activity-fold triggers a :large-function health warning (see :seon.render.markdown/split-activity-fold). Extract clean pure helpers so the warning disappears while preserving exact rendered output and passing all tests.",
+  :seon.task/owner :agent/render-activity-fold}
  {:seon.task/done? true,
   :seon.task/id :seon.fork/split-oversized-namespace,
   :seon.task/plan "seon.fork is currently ~16.5k tokens. Extract install-agent-helpers! and user/* REPL helpers into seon.fork.helpers while keeping ForkParent and worker loop in seon.fork.",
@@ -33,7 +41,7 @@
   :seon.task/tests #{seon.flow-e2e-test/persistent-agent-runtime-autonomous-tree-and-cold-reboot-test
                      seon.core-test/context-self-improvement-and-session-compaction-test},
   :seon.task/title "Split seon.fork (< 8k tok) by extracting agent REPL user/* helpers"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.health.metrics/eval-summary-by-agent,
   :seon.task/plan "Add a clean public function that summarizes one agent's evals (counts, error rate, token totals, cache hit rate, max allocation bytes) from a Datahike db without full-table scans, plus unit tests covering empty and non-empty agents.",
   :seon.task/scope seon.health.metrics,
@@ -59,15 +67,16 @@
   :seon.task/id :seon.model/surface-model-error-state,
   :seon.task/done? true,
   :seon.task/plan "When seon.model/model-proc hits HTTP 429 or an upstream model transport error, record a typed error attribute on the agent entity (rather than only synthesizing (user/wait-for-mail!) into :idle) so the UI, reconciler, and seon.bench.cluster/wait-for-agent! distinguish clean completion from model or budget halts, with unit tests."}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.render.chronicle/bench-runs-rollup,
   :seon.task/plan "Add a pure public helper that rolls up a collection of :seon.bench.run/* maps into total/passed/failed trial counts, pass rate, mean evals, total tokens, and KV-cache hit rate (safe on empty or partial maps), with unit tests.",
   :seon.task/scope seon.render.chronicle,
   :seon.task/title "Add benchmark runs rollup helper to seon.render.chronicle"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.render.markdown/split-activity-fold,
   :seon.task/plan "render-activity-fold currently triggers a :large-function health warning. Extract clean pure helpers so the warning disappears while preserving exact rendered output and passing all tests.",
   :seon.task/scope seon.render.markdown,
+  :seon.task/summary "Solved & merged by live 1-click :op :spawn-on-entity DeepSeek agent (:agent/render-activity-fold, 15 turns, 519/519 PASS, :large-function warning on seon.render.markdown/render-activity-fold eliminated).",
   :seon.task/title "Split seon.render.markdown/render-activity-fold below the :large-function budget"}
  {:seon.task/done? true,
   :seon.task/id :seon.render.ui/optimize-slow-renders,
