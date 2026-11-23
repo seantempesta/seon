@@ -159,7 +159,8 @@
   {:malli/schema [:=> [:cat :map] :map]
    :cost/ticks 5000000}
   [c]
-  (let [m (when (contains? c :hiccup) (measure-hiccup (:hiccup c)))
+  (let [m (when (and (contains? c :hiccup) (not (and (integer? (:tokens c)) (integer? (:chars c)) (integer? (:min-width c)) (integer? (:area c)) (integer? (:lines c)))))
+          (measure-hiccup (:hiccup c)))
         chars (max 0 (safe-long (or (:chars c) (:chars m)) 0))
         tokens (max 0 (safe-long (or (:tokens c) (:tokens m)
                                      (when (pos? chars) (max 1 (quot (+ chars 3) 4)))) 0))

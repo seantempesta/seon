@@ -7,7 +7,9 @@
             [seon.store :as store]
             [clojure.string :as str]
             [seon.cite :as cite]
-            [seon.code.analyze :as analyze]))
+            [seon.code.analyze :as analyze]
+            [seon.code :as code]
+            [malli.core :as m]))
 
 (defn doc-sections
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :map]]}
@@ -25,7 +27,9 @@
      (sort-by (juxt :seon.code.doc/order :seon.code.doc/id))
      vec))
 
-(defn render-doc [db path]
+(defn render-doc
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]], :cost/ticks 15000000}
+  [db path]
   (let [secs (doc-sections db path)]
     (when (seq secs)
       (apply str (map (fn [s] (str (:seon.code.doc/heading s "") (:seon.code.doc/body s ""))) secs)))))
@@ -78,6 +82,7 @@
 
 (defn render-schema-file
   "Renders all `:seon.schema/key` entities whose owner path is `path` into a clean EDN map."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]], :cost/ticks 15000000}
   [db path]
   (files/render-schema-file db path))
 
@@ -120,7 +125,9 @@
                  valid-attrs))))
           ents)))))))
 
-(defn render-ns [db nsym]
+(defn render-ns
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :string]], :cost/ticks 15000000}
+  [db nsym]
   (when-let [ns-ent (d/pull db '[:seon.code.ns/name :seon.code.ns/tail] [:seon.code.ns/name nsym])]
     (when (:seon.code.ns/name ns-ent)
       (let [fs (ns-forms db nsym)]
@@ -417,3 +424,59 @@
                         acc vars)))
             {:ns->ref ex-ns :var->ref ex-var}
             texts)))
+
+(defn merged-ns-src
+  "Returns the 3-way merged source of `nsym` combining `main`, `branch`, and their merge-base."
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :symbol] :string]
+   :cost/ticks 15000000}
+  [conn branch nsym]
+  (let [bdb @conn
+        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+        base-db (when (not= branch :main) (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)))
+        ns-forms-of (fn [db]
+                      (->> (d/datoms db :avet :seon.code.form/ns nsym)
+                           (map #(d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/src] (:e %)))
+                           (sort-by #(or (:seon.code.form/order %) 0))))
+        m-fs (ns-forms-of mdb)
+        b-fs (ns-forms-of bdb)
+        b-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) b-fs)
+        base-by-k (if base-db (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms-of base-db)) {})
+        m-keys (into #{} (map :seon.code.form/key) m-fs)
+        kept-m (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                       (let [bs (get b-by-k key)]
+                         (cond
+                           (and (nil? bs) (contains? base-by-k key)) nil
+                           (and bs (not= bs (get base-by-k key))) bs
+                           :else src)))
+                     (if (seq m-fs) m-fs b-fs))
+        added-b (when (seq m-fs)
+                  (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                          (when-not (contains? m-keys key) src))
+                        b-fs))]
+    (str/join "\n\n" (concat kept-m added-b))))
+
+(defn resolve-form-target
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :any] :map], :cost/ticks 10000000}
+  [conn branch target]
+  (let [s (str target)
+        bdb @conn
+        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+        [nsym fkey] (cond
+                      (str/ends-with? s "#ns") [(symbol (subs s 0 (- (count s) 3))) s]
+                      (str/includes? s "/")
+                      (let [sym (symbol s)
+                            fk (or (:seon.code.var/form (d/pull bdb '[:seon.code.var/form] [:seon.code.var/name sym]))
+                                   (:seon.code.var/form (d/pull mdb '[:seon.code.var/form] [:seon.code.var/name sym]))
+                                   s)]
+                        [(symbol (namespace sym)) fk])
+                      :else [(symbol s) (str s "#ns")])
+        path (or (:seon.code.ns/path (d/pull bdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
+                 (:seon.code.ns/path (d/pull mdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
+                 (code/ns->default-path nsym))
+        f-ent (let [b (d/pull bdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])]
+                (if (:seon.code.form/src b) b
+                    (d/pull mdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])))]
+    {:ns nsym :key fkey :path path
+     :src (:seon.code.form/src f-ent)
+     :order (:seon.code.form/order f-ent)
+     :lead (:seon.code.form/lead f-ent)}))

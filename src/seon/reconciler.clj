@@ -325,12 +325,9 @@
            merged? (and raw-ready? (empty? unread) (some? merged-tx) (= tested-tx head-tx) (= merged-tx head-tx))
            {:keys [live-pid busy? needs-release?]} (live-release-state (get live-map agent-id) cur-eval-eids paused? merged?)
            active? (and (not paused?) (not busy?) (not awaiting-blocked?))
-           max-tool-turns (let [v (when (contains? (:schema main-db) :seon.config/max-tool-turns)
-                                    (store/config-val main-db agent-id :seon.config/max-tool-turns))]
-                            (if (number? v) (long v) 24))
+           max-tool-turns (let [v (when (contains? (:schema main-db) :seon.config/max-tool-turns) (store/config-val main-db agent-id :seon.config/max-tool-turns))] (if (number? v) (long v) 24))
            under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
-           review-ops (if (or (contains? gate-notified-set [agent-id head-tx :review])
-                          (some #(= :review-note (:seon.agent.message/type %)) unread))
+           review-ops (if (or (contains? gate-notified-set [agent-id head-tx :review]) (some #(= :review-note (:seon.agent.message/type %)) unread))
                       []
                       (gate/compute-review-ops main-db branch-db ma
                         {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?

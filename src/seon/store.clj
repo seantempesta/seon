@@ -56,7 +56,7 @@
    :seon.config/max-os-procs             6
    :seon.config/max-test-workers         4
    :seon.config/max-model-slots          4
-   :seon.config/child-cache-mb           16
+   :seon.config/child-cache-mb           32
    :seon.config/gc-generations           6
    :seon.config/store-map-bytes          1099511627776
    :seon.config/gc-keep-merged-branches  16
@@ -176,8 +176,8 @@
 (defn child-cfg
   {:malli/schema [:=> [:cat :map [:maybe :int]] :map], :cost/ticks 200000, :cost/bytes 131072}
   [cfg mb]
-  (let [min-mb (long (get default-config-values :seon.config/child-cache-mb 16))]
-  (assoc cfg :store-cache-bytes (* (max min-mb (long (or mb min-mb))) 1024 1024))))
+  (let [min-mb (long (get default-config-values :seon.config/child-cache-mb 32))]
+    (assoc cfg :store-cache-bytes (* (max min-mb (long (or mb min-mb))) 1024 1024))))
 
 (defn attach-ids!
   {:malli/schema [:=> [:cat :seon.host/conn] :seon.host/conn]}
@@ -220,12 +220,6 @@
   (when-not (branch? conn new-branch)
     (d/branch! conn from-branch new-branch))
   new-branch)
-
-(defn head
-  {:malli/schema [:=> [:cat [:or :seon.host/conn :seon.host/db :map] :keyword] :any]}
-  [store-or-conn branch]
-  (let [s (if (instance? clojure.lang.IDeref store-or-conn) (:store @store-or-conn) store-or-conn)]
-    (d/branch-as-db s branch)))
 
 (defn db-at
   {:malli/schema [:=> [:cat [:or :seon.host/conn :seon.host/db :map] :map] :any]}
@@ -789,3 +783,19 @@
          swept @(d/gc-storage conn cutoff)
          n-swept (if (coll? swept) (count swept) swept)]
      {:ok? true :pruned pruned :swept n-swept :history-hours hrs})))
+
+(defonce ^:private ^:seon.flow/edge head-db-cache (lru-cache 16))
+
+(defn head
+  {:malli/schema [:=> [:cat [:or :seon.host/conn :seon.host/db :map] :keyword] :any]}
+  [store-or-conn branch]
+  (let [s (if (instance? clojure.lang.IDeref store-or-conn)
+            (:store @store-or-conn)
+            (or (:store store-or-conn) store-or-conn))
+        raw-head (try (k/get s branch nil {:sync? true}) (catch Throwable _ nil))
+        cid (get-in raw-head [:meta :datahike/commit-id])]
+    (if (and raw-head cid)
+      (lru-get! head-db-cache 16 [s branch cid]
+                #(datahike.writing/stored->db
+                  (datahike.writing/resolve-head s branch raw-head {:sync? true}) s))
+      (d/branch-as-db s branch))))

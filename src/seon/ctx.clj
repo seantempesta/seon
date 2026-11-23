@@ -35,8 +35,8 @@
   "Advances `seon.ctx/ctx` incrementally if bound and `conn` moved."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :any]] :any] :cost/ticks 25000000}
   [db' tx-datoms]
-  (when (and ctx (satisfies? ICtxAtom ctx))
-    (-advance! ctx db' tx-datoms)))
+  (when (and ctx (satisfies? ICtxAtom ctx) (seq (.getWatches ^clojure.lang.IRef ctx)))
+  (-advance! ctx db' tx-datoms)))
 
 (defn agent-world-datoms
   "Generic 2-read agent world discovery."
@@ -183,16 +183,17 @@
                                                           (select-keys % [:rule-id :stratum :category :fired :reads-count :ms :skipped?]))
                                                        runs-s))
                                :skipped-rules (vec (keep #(when (:skipped? %) (:rule-id %)) runs-s))}})))
-         ck (when (and (not (false? (:use-cache? o))) mc bc (empty? disabled) (nil? (:rules o)))
-              [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb)
-              agent-id target (count eff-rs) (:seon.agent/task ag) (:seon.agent/scope ag) (:seon.agent/context-prefs ag)])
+         ck (when (and (not (false? (:use-cache? o))) mc bc (empty? disabled) (or (nil? (:rules o)) (keyword? (:rules-tag o))))
+            [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb)
+             agent-id target (:rules-tag o) (:zone-filter o) (count eff-rs)
+             (:seon.agent/task ag) (:seon.agent/scope ag) (:seon.agent/context-prefs ag) (:seon.agent/target ag) (:seon.agent/pinned ag) (when rules/*base-rules-override* (System/identityHashCode rules/*base-rules-override*))])
          ru (if ck (store/lru-get! ctx-ru-cache 24 ck run-ru) (run-ru))
          cands (proj/augment-and-hydrate-candidates main-db bdb tdb ag world (:projs ru) o)]
      {:agent ag :world world :candidates cands :ctx-trace (:trace ru)})))
 
 (defn- build-filtered-neighborhood [db aid]
   (let [{:keys [candidates]} (gather-agent-candidates db db aid {:target :wire :enrich? false :situational? false
-                                                                 :include-evals? false :semantic? true :use-cache? false})
+                                                                :include-evals? false :semantic? true :use-cache? true})
         ranked (take 8 (filter #(and (integer? (:entity %)) (map? (:data %)) (integer? (get-in % [:data :db/id])))
                                (fit/rank-candidates candidates)))]
     (reduce (fn [acc item]
@@ -346,7 +347,7 @@
   ([snap db' tx-datoms conn]
    (cond
      (nil? snap) nil
-     (= (:commit snap) (d/commit-id db')) snap
+     (and (= (:commit snap) (d/commit-id db')) (= (:tx snap) (:max-tx db'))) snap
      :else
      (let [eid (:eid snap)
            pattern-moved? (boolean (some #(and (= (:e %) eid) (= (:a %) :seon.ctx/pattern)) tx-datoms))]
@@ -401,16 +402,47 @@
   [db eid old-m new-m]
   (tree/diff-entity-tx db eid old-m new-m))
 
+(defn tail-rules-with-producers
+  "Returns the ordered subset of `all-rs` needed to evaluate `:ephemeral-tail` rules on Turn 2+, including transitive `$wm` fact producers."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :map]]] :cost/ticks 500000}
+  [all-rs]
+  (let [tail-rs (filterv (fn [r]
+                           (let [as (:seon.rule/assert r)]
+                             (and (sequential? as) (seq as)
+                                  (some #(and (map? %) (= :ephemeral-tail (:zone %))) as))))
+                         all-rs)
+        asserted-attrs (fn [r]
+                         (into #{} (keep #(when (and (vector? %) (>= (count %) 2) (keyword? (second %))) (second %)))
+                               (:seon.rule/assert r)))
+        by-attr (reduce (fn [m r]
+                          (reduce (fn [acc a] (update acc a (fnil conj []) r)) m (asserted-attrs r)))
+                        {} all-rs)]
+    (when (seq tail-rs)
+      (loop [chosen (into {} (map (juxt :seon.rule/id identity)) tail-rs)
+             frontier tail-rs]
+        (let [need-attrs (into #{} (mapcat rules/rule-wm-read-attrs) frontier)
+              add-rs (into [] (comp (mapcat #(get by-attr %))
+                                    (remove #(contains? chosen (:seon.rule/id %))))
+                           need-attrs)]
+          (if (empty? add-rs)
+            (vec (sort-by (juxt #(or (:seon.rule/stratum %) 0) #(str (:seon.rule/id %))) (vals chosen)))
+            (recur (into chosen (map (juxt :seon.rule/id identity)) add-rs) add-rs)))))))
+
 (deftype CtxAtom [conn ^:volatile-mutable snap ^:volatile-mutable watches ^:volatile-mutable validator]
   clojure.lang.IDeref
   (deref [this]
     (let [cur-db @conn]
-      (when (and snap (not= (:commit snap) (d/commit-id cur-db)))
+      (when (and snap (or (not= (:commit snap) (d/commit-id cur-db)) (not= (:tx snap) (:max-tx cur-db))))
         (-advance! this cur-db nil))
       (:val snap)))
 
   clojure.lang.IRef
-  (addWatch [this k f] (set! watches (assoc watches k f)) this)
+  (addWatch [this k f]
+    (let [cur-db @conn]
+      (when (and snap (or (not= (:commit snap) (d/commit-id cur-db)) (not= (:tx snap) (:max-tx cur-db))))
+        (-advance! this cur-db nil)))
+    (set! watches (assoc watches k f))
+    this)
   (removeWatch [this k] (set! watches (dissoc watches k)) this)
   (getWatches [_] watches)
   (getValidator [_] validator)
@@ -464,29 +496,3 @@
     (let [old (.deref this)] [old (.reset this (f old a b))]))
   (swapVals [this f a b args]
     (let [old (.deref this)] [old (.reset this (apply f old a b args))])))
-
-(defn tail-rules-with-producers
-  "Returns the ordered subset of `all-rs` needed to evaluate `:ephemeral-tail` rules on Turn 2+, including transitive `$wm` fact producers."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :map]]] :cost/ticks 500000}
-  [all-rs]
-  (let [tail-rs (filterv (fn [r]
-                           (let [as (:seon.rule/assert r)]
-                             (and (sequential? as) (seq as)
-                                  (some #(and (map? %) (= :ephemeral-tail (:zone %))) as))))
-                         all-rs)
-        asserted-attrs (fn [r]
-                         (into #{} (keep #(when (and (vector? %) (>= (count %) 2) (keyword? (second %))) (second %)))
-                               (:seon.rule/assert r)))
-        by-attr (reduce (fn [m r]
-                          (reduce (fn [acc a] (update acc a (fnil conj []) r)) m (asserted-attrs r)))
-                        {} all-rs)]
-    (when (seq tail-rs)
-      (loop [chosen (into {} (map (juxt :seon.rule/id identity)) tail-rs)
-             frontier tail-rs]
-        (let [need-attrs (into #{} (mapcat rules/rule-wm-read-attrs) frontier)
-              add-rs (into [] (comp (mapcat #(get by-attr %))
-                                    (remove #(contains? chosen (:seon.rule/id %))))
-                           need-attrs)]
-          (if (empty? add-rs)
-            (vec (sort-by (juxt #(or (:seon.rule/stratum %) 0) #(str (:seon.rule/id %))) (vals chosen)))
-            (recur (into chosen (map (juxt :seon.rule/id identity)) add-rs) add-rs)))))))

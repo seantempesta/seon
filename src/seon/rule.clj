@@ -7,7 +7,9 @@
             [seon.schema :as schema]
             [seon.schema.index :as six]
             [seon.store :as store]
-            [datahike.index.interface :as di]))
+            [datahike.index.interface :as di]
+            [datahike.query :as dq]))
+
 (defn- dsch [db] (or (:schema db) (when db (d/schema db)) {}))
 
 (defn- db-req-empty? [db-req dbs]
@@ -412,10 +414,13 @@
 
 (defn- query-meta [q]
   (if-not (or (vector? q) (map? q))
-    {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :wm-not-req [] :db-req [] :db-keys #{} :uses-agent? false :eff-q nil :eff-ins []}
+    {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :wm-not-req [] :db-req [] :db-keys #{} :fn-syms [] :uses-agent? false :eff-q nil :eff-ins []}
     (store/lru-get! query-meta-cache 256 q
       (fn []
         (let [pq (parse-query q) ws (:where pq)
+              fn-syms (vec (distinct (keep #(when (and (seq? %) (qualified-symbol? (first %))) (first %))
+                                           (tree-seq coll? seq ws))))
+              _ (doseq [s fn-syms] (try (requiring-resolve s) (catch Throwable _ nil)))
               raw-ins (vec (or (seq (:in pq)) ['$])) ins-set (set raw-ins)
               wm-v? #(and (vector? %) (>= (count %) 3) (= '$wm (first %)) (keyword? (nth % 2)))
               const-v? #(not (and (symbol? %) (or (= '_ %) (.startsWith (name %) "?"))))
@@ -453,7 +458,8 @@
                                               (if (neg? i) v (vec (concat (subvec v 0 (inc i)) ['$ ] (subvec v (inc i))))))
                             :else q))]
           {:pq pq :ins raw-ins :wm-attrs wm-attrs :wm-req wm-req :wm-const-req wm-const-req :wm-not-req wm-not-req
-           :db-req db-req :db-keys db-keys
+           :db-req db-req :db-keys db-keys :fn-syms fn-syms
+           :db-fn-call? (boolean (some #(and (seq? %) (qualified-symbol? (first %)) (some #{'$ '$main '$branch '$code '$task} (rest %))) (tree-seq coll? seq ws)))
            :uses-agent? (boolean (or (ins-set '?agent) (ins-set '?agent-eid)))
            :eff-q eff-q :eff-ins (if need-$? (into ['$ ] raw-ins) raw-ins)})))))
 
@@ -495,14 +501,19 @@
                      (:wm-not-req qm)))))))
 
 (defn eval-rule-query
-  "Executes `rule`'s native Datahike `:seon.rule/query` via `d/q` and returns binding env maps."
+  "Executes `rule`'s native Datahike `:seon.rule/query` via `d/q` and returns binding env maps.
+   Bypasses Datahike's static `*query-result-cache?*` inheritance when a `:where` fn reads a DB directly
+   (preserving exact `datahike.reads/with-reads` dependency tracking in `step-rules`)."
   {:malli/schema [:=> [:cat :map :map [:maybe :keyword] :map] [:vector :map]] :cost/ticks 10000000}
   [wm dbs agent-id rule]
-  (let [{:keys [pq db-req eff-q eff-ins] :as qm} (query-meta (:seon.rule/query rule))]
-    (if (or (nil? eff-q) (wm-req-miss? wm qm) (db-req-empty? db-req dbs))
+  (let [{:keys [pq db-req fn-syms db-fn-call? eff-q eff-ins] :as qm} (query-meta (:seon.rule/query rule))]
+    (if (or (nil? eff-q) (wm-req-miss? wm qm) (db-req-empty? db-req dbs)
+            (and (seq fn-syms) (not-every? #(or (resolve %) (try (requiring-resolve %) (catch Throwable _ nil))) fn-syms)))
       []
       (if-let [args (resolve-query-inputs eff-ins wm dbs agent-id)]
-        (rows->envs pq (apply d/q eff-q args))
+        (rows->envs pq (if db-fn-call?
+                         (binding [dq/*query-result-cache?* false] (apply d/q eff-q args))
+                         (apply d/q eff-q args)))
         []))))
 
 (defn- step-one-rule [state r stratum dbs agent-id prev-state tx-datoms dirty-attrs recomputed skipped]

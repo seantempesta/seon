@@ -31,55 +31,7 @@
           attr-map (when (map? (first after-doc)) (first after-doc))]
       (or (:malli/schema attr-map) (:malli/schema sym-meta)))))
 
-(defn- merged-ns-src [conn branch nsym]
-  (let [bdb @conn
-        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
-        base-db (when (not= branch :main) (try (store/merge-base-db conn :main branch) (catch Throwable _ nil)))
-        ns-forms-of (fn [db]
-                      (->> (d/datoms db :avet :seon.code.form/ns nsym)
-                           (map #(d/pull db '[:seon.code.form/key :seon.code.form/order :seon.code.form/src] (:e %)))
-                           (sort-by #(or (:seon.code.form/order %) 0))))
-        m-fs (ns-forms-of mdb)
-        b-fs (ns-forms-of bdb)
-        b-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) b-fs)
-        base-by-k (if base-db (into {} (map (juxt :seon.code.form/key :seon.code.form/src)) (ns-forms-of base-db)) {})
-        m-keys (into #{} (map :seon.code.form/key) m-fs)
-        kept-m (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                       (let [bs (get b-by-k key)]
-                         (cond
-                           (and (nil? bs) (contains? base-by-k key)) nil
-                           (and bs (not= bs (get base-by-k key))) bs
-                           :else src)))
-                     (if (seq m-fs) m-fs b-fs))
-        added-b (when (seq m-fs)
-                  (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                          (when-not (contains? m-keys key) src))
-                        b-fs))]
-    (str/join "\n\n" (concat kept-m added-b))))
-
-(defn- resolve-form-target [conn branch target]
-  (let [s (str target)
-        bdb @conn
-        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
-        [nsym fkey] (cond
-                      (str/ends-with? s "#ns") [(symbol (subs s 0 (- (count s) 3))) s]
-                      (str/includes? s "/")
-                      (let [sym (symbol s)
-                            fk (or (:seon.code.var/form (d/pull bdb '[:seon.code.var/form] [:seon.code.var/name sym]))
-                                   (:seon.code.var/form (d/pull mdb '[:seon.code.var/form] [:seon.code.var/name sym]))
-                                   s)]
-                        [(symbol (namespace sym)) fk])
-                      :else [(symbol s) (str s "#ns")])
-        path (or (:seon.code.ns/path (d/pull bdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
-                 (:seon.code.ns/path (d/pull mdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
-                 (code/ns->default-path nsym))
-        f-ent (let [b (d/pull bdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])]
-                (if (:seon.code.form/src b) b
-                    (d/pull mdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])))]
-    {:ns nsym :key fkey :path path
-     :src (:seon.code.form/src f-ent)
-     :order (:seon.code.form/order f-ent)
-     :lead (:seon.code.form/lead f-ent)}))
+(defn- resolve-form-target [& args] (apply cio/resolve-form-target args))
 
 (defn- single-form-upsert-tx
   "O(1-form) delta persistence for non-`#ns` form edits with compiler-exact var enrichment."
@@ -151,7 +103,7 @@
                             {:account (when-not is-ns? (analyze/analyze-form-account ns new-fsrc false)) :error nil})
                      eval-err (:error ev-res)
                      tx (if is-ns?
-                          (let [file-src (merged-ns-src conn branch ns)
+                          (let [file-src (cio/merged-ns-src conn branch ns)
                                 idx (.indexOf ^String file-src ^String src)]
                             (when-not (neg? idx)
                               (code/file-import-tx @conn path
@@ -194,7 +146,7 @@
   [nsym]
   (when-let [{:keys [conn branch]} *agent-ctx*]
     (let [s (if (string? nsym) (symbol nsym) nsym)
-          fsrc (merged-ns-src conn branch s)]
+          fsrc (cio/merged-ns-src conn branch s)]
       (if (str/blank? fsrc)
         {:ok? false :error :ns-not-found :ns s}
         (let [analysis (cst-ns/analyze-ns-requires fsrc)]
@@ -215,7 +167,7 @@
    (when-let [{:keys [conn branch]} *agent-ctx*]
      (let [s (if (string? nsym) (symbol nsym) nsym)
            {:keys [path key src]} (resolve-form-target conn branch s)
-           fsrc (merged-ns-src conn branch s)]
+           fsrc (cio/merged-ns-src conn branch s)]
        (if (str/blank? fsrc)
          {:ok? false :error :ns-not-found :ns s}
          (let [res (cst-ns/prune-unused-requires-src fsrc)
@@ -305,7 +257,7 @@
              dry-run? {:ok? true :dry-run? true :ns s :added (:added res) :diff (cst/unified-diff src (:src res) key)}
              :else
              (let [new-ns-src (:src res)
-                   file-src (merged-ns-src conn branch s)
+                   file-src (cio/merged-ns-src conn branch s)
                    idx (.indexOf ^String file-src ^String src)
                    tx (when-not (neg? idx)
                         (code/file-import-tx @conn path
@@ -439,57 +391,6 @@
        :ex-data ed
        :hint (str type-tip "Predicates are symbols (number?, set?); built-ins: :int, :string, :boolean, :keyword, :symbol, :map, :any, [:vector :any], [:set :any], :seon.host/db.")}))))
 
-(defn set-meta!
-  "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)
-   into a `(defn ...)` / `(defn- ...)` attr-map, preserving formatting and compiler-analyzed edges.
-   Validates `:malli/schema` upfront against the live registry. Supports single target or batch map."
-  {:malli/schema [:function
-                  [:=> [:cat :any] :map]
-                  [:=> [:cat :any :map] [:maybe :map]]
-                  [:=> [:cat :any :map :map] [:maybe :map]]]}
-  ([target-or-batch]
-   (if (map? target-or-batch)
-     (let [results (into {} (map (fn [[t m]] [t (dissoc (set-meta! t m {}) :diff)])) target-or-batch)]
-       {:ok? (every? :ok? (vals results))
-        :updated (count (filter :ok? (vals results)))
-        :total (count results)
-        :results results})
-     {:ok? false :error :invalid-args
-      :hint "Call (user/set-meta! 'ns/fn {:malli/schema ...}) or (user/set-meta! {'ns/f1 {...} ...})."}))
-  ([target meta-map] (set-meta! target meta-map {}))
-  ([target meta-map {:keys [dry-run? eval?] :or {eval? true}}]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
-       (if (str/blank? (str src))
-         {:ok? false :error :form-not-found :target target :key key}
-         (let [sch-err (when (contains? meta-map :malli/schema)
-                         (validate-defn-malli-schema @conn target key
-                                                     (try (binding [*ns* (or (find-ns ns) *ns*)] (read-string src)) (catch Throwable _ nil))
-                                                     (:malli/schema meta-map)))]
-           (if sch-err
-             sch-err
-             (let [res (cst-ns/set-defn-meta-src src meta-map)]
-               (if-not (:ok? res)
-                 (assoc res :target target :key key)
-                 (let [new-fsrc (:src res)
-                       udiff (cst/unified-diff src new-fsrc key)]
-                   (if dry-run?
-                     {:ok? true :dry-run? true :target target :key key :action (:action res) :diff udiff}
-                     (let [ev-res (if eval?
-                                    (analyze/eval-form-with-account! @conn ns new-fsrc false)
-                                    {:account (analyze/analyze-form-account ns new-fsrc false) :error nil})
-                           eval-err (:error ev-res)
-                           tx (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res))
-                           tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
-                                    :seon.tx/branch branch
-                                    :seon.tx/reason (str "set-meta! " target)}
-                           r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))]
-                       (ctx/refresh-active! (:db-after r) (:tx-data r))
-                       (cond-> {:ok? (nil? eval-err)
-                                :target target :key key :action (:action res)
-                                :tx (:max-tx (:db-after r)) :diff udiff}
-                         eval-err (assoc :eval-error eval-err))))))))))))))
-
 (defn add-fn!
   "Adds or replaces a top-level definition form inside `target-ns`, auto-formats 1-line minified
    strings, auto-seeds `(ns ... (:require [clojure.test :refer [deftest is testing]]))` for brand-new
@@ -548,3 +449,83 @@
                    (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
                      seed-ns-src (assoc :seeded-ns? true)
                      eval-err (assoc :eval-error eval-err))))))))))))
+
+(defn- prep-meta-edit [conn db branch target meta-map]
+  (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
+    (if (str/blank? (str src))
+      {:ok? false :error :form-not-found :target target :key key}
+      (if-let [se (when (contains? meta-map :malli/schema)
+                    (validate-defn-malli-schema db target key
+                      (try (binding [*ns* (or (find-ns ns) *ns*)] (read-string src)) (catch Throwable _ nil))
+                      (:malli/schema meta-map)))]
+        se
+        (let [res (cst-ns/set-defn-meta-src src meta-map)]
+          (if-not (:ok? res)
+            (assoc res :target target :key key)
+            {:ok? true :ns ns :key key :path path :order order :lead lead :old-src src :src (:src res) :action (:action res)}))))))
+
+(defn set-meta!
+  "Structurally inserts or merges metadata into a `(defn ...)` / `(defn- ...)` attr-map.
+   Validates `:malli/schema` upfront against the live registry. Supports single target or atomic 1-tx batch map."
+  {:seon.eval/budget-override {:ticks 300000000 :bytes 536870912}
+   :malli/schema [:function
+                  [:=> [:cat :any] :map]
+                  [:=> [:cat :any :map] [:maybe :map]]
+                  [:=> [:cat :any :map :map] [:maybe :map]]]}
+  ([target-or-batch]
+   (cond
+     (not (map? target-or-batch))
+     {:ok? false :error :invalid-args :hint "Call (user/set-meta! 'ns/fn {...}) or (user/set-meta! {'ns/f1 {...} ...})."}
+
+     (nil? *agent-ctx*)
+     {:ok? false :error :no-agent-ctx}
+
+     :else
+     (let [{:keys [conn branch]} *agent-ctx*
+           db0 @conn
+           grouped (reduce (fn [acc [target meta-map]]
+                             (let [k (or (:key (resolve-form-target conn branch target)) target)]
+                               (update acc k (fn [prev]
+                                               {:targets (conj (or (:targets prev) []) target)
+                                                :target (or (:target prev) target)
+                                                :meta (merge (or (:meta prev) {}) meta-map)}))))
+                           {} target-or-batch)
+           step (reduce
+                 (fn [{:keys [tx results ok-n]} [_ {:keys [target targets meta]}]]
+                   (let [p (prep-meta-edit conn db0 branch target meta)]
+                     (if-not (:ok? p)
+                       {:tx tx :results (reduce #(assoc %1 %2 (assoc p :target %2)) results targets) :ok-n ok-n}
+                       (let [{:keys [ns key path order lead src action]} p
+                             ev (analyze/eval-form-with-account! db0 ns src false)
+                             err (:error ev)
+                             r-one (cond-> {:ok? (nil? err) :target target :key key :action action} err (assoc :eval-error err))]
+                         {:tx (into tx (single-form-upsert-tx db0 ns key path order lead src (:account ev)))
+                          :results (reduce #(assoc %1 %2 (assoc r-one :target %2)) results targets)
+                          :ok-n (if (nil? err) (+ ok-n (count targets)) ok-n)}))))
+                 {:tx [] :results {} :ok-n 0}
+                 grouped)
+           r (when (seq (:tx step))
+               (binding [store/*tx-meta* {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl) :seon.tx/branch branch :seon.tx/reason (str "set-meta! batch (" (count grouped) ")")}]
+                 (d/transact conn {:tx-data (:tx step)})))]
+       (when r (ctx/refresh-active! (:db-after r) (:tx-data r)))
+       {:ok? (every? :ok? (vals (:results step))) :updated (:ok-n step) :total (count target-or-batch) :tx (when r (:max-tx (:db-after r))) :results (:results step)})))
+  ([target meta-map] (set-meta! target meta-map {}))
+  ([target meta-map {:keys [dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [db0 @conn
+           p (prep-meta-edit conn db0 branch target meta-map)]
+       (if-not (:ok? p)
+         p
+         (let [{:keys [ns key path order lead old-src src action]} p
+               udiff (cst/unified-diff old-src src key)]
+           (if dry-run?
+             {:ok? true :dry-run? true :target target :key key :action action :diff udiff}
+             (let [ev (if eval? (analyze/eval-form-with-account! db0 ns src false)
+                          {:account (analyze/analyze-form-account ns src false) :error nil})
+                   err (:error ev)
+                   tx (single-form-upsert-tx db0 ns key path order lead src (:account ev))
+                   r (binding [store/*tx-meta* {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl) :seon.tx/branch branch :seon.tx/reason (str "set-meta! " target)}]
+                       (d/transact conn {:tx-data tx}))]
+               (ctx/refresh-active! (:db-after r) (:tx-data r))
+               (cond-> {:ok? (nil? err) :target target :key key :action action :tx (:max-tx (:db-after r)) :diff udiff}
+                 err (assoc :eval-error err))))))))))

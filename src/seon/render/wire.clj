@@ -134,14 +134,11 @@
 
 (defonce ^:private ^:seon.flow/edge branch-errors-cache (store/lru-cache 32))
 
-(defn- gather-branch-status-data [main-db branch-db ag]
+(defn- gather-branch-status-data [main-db branch-db ag evals]
   (let [branch (:seon.agent/branch ag :main) aid (:seon.agent/id ag)]
     (when (and main-db branch-db (not= branch :main))
       (let [mcid (live-cid main-db) bcid (live-cid branch-db)
-            turns (if (and aid ((db-schema branch-db) :seon.agent.eval/agent))
-                    (->> (d/datoms branch-db :avet :seon.agent.eval/agent aid)
-                         (keep #(:seon.agent.eval/turn (d/pull branch-db '[:seon.agent.eval/turn] (:e %))))
-                         distinct count) 0)
+            turns (if (seq evals) (count (distinct (keep :seon.agent.eval/turn evals))) 0)
             max-t (if (pos? turns)
                     (long (or (when (and aid ((db-schema main-db) :seon.config/max-tool-turns))
                                 (store/config-val main-db aid :seon.config/max-tool-turns)) 32))
@@ -194,7 +191,7 @@
   (let [role (if (rdata/router-agent? ag) :router :worker)
         o (assoc opts
                  :now-ms (long (or (:now-ms opts) (System/currentTimeMillis)))
-                 :branch-status (when (= role :worker) (gather-branch-status-data main-db branch-db ag)))
+                 :branch-status (when (= role :worker) (gather-branch-status-data main-db branch-db ag evals)))
         blocks (->> tail-specs
                     (filter #(or (= :all (:roles %)) (= role (:roles %))))
                     (keep (fn [{:keys [key render data]}]
@@ -380,9 +377,9 @@
     (when (seq tail-rs)
       (let [{:keys [candidates]} (ctx/gather-agent-candidates
                                   main-db branch-db (:seon.agent/id ag)
-                                  (cond-> {:agent ag :target :wire :rules tail-rs :minimal? true
-                                           :zone-filter :ephemeral-tail :enrich? true
-                                           :include-evals? false :include-ctx-snapshot? false}
+                                  (cond-> {:agent ag :target :wire :rules tail-rs :rules-tag :ephemeral-tail :minimal? true
+                                          :zone-filter :ephemeral-tail :enrich? true
+                                          :include-evals? false :include-ctx-snapshot? false}
                                     (seq (:disabled-rules opts)) (assoc :disabled-rules (:disabled-rules opts))))
             tail-cands (filterv #(= :ephemeral-tail (:zone %)) candidates)]
         (when (seq tail-cands)
@@ -425,7 +422,7 @@
                 tail-blocks (vec (concat (:blocks tail-res) live-tail))
                 activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
                 wire (model/build-agent-wire-messages
-                      {:thinking? true :replay-reasoning? true :vision? (boolean vision?) :out-max-chars (store/config-val main-db agent-id :seon.config/eval-out-chars)}
+                      {:thinking? true :replay-reasoning? true :vision? (boolean vision?) :out-max-chars (store/config-val main-db agent-id :seon.config/eval-out-chars) :format-tool-fn rstatus/cached-format-tool-content}
                       {:agent-id agent-id :branch branch :role (:seon.agent/role ag :worker)
                        :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
                        :examples (rstatus/build-wire-examples main-db branch-db conn ag) :walk-text walk-text
