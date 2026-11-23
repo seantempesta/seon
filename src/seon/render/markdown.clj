@@ -1,7 +1,6 @@
 (ns seon.render.markdown
   "Pure Clojure Markdown -> Hiccup renderer, timeline interleaving, activity folds, and Phosphor SVG icons."
-  (:require [clojure.string :as str]
-            [seon.render :as render]))
+  (:require [clojure.string :as str]))
 
 (def svg-sidebar
   [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
@@ -37,30 +36,6 @@
    [:line {:x1 "8" :y1 "13" :x2 "8" :y2 "3.5"}]
    [:polyline {:points "3.75 7.5 8 3.25 12.25 7.5"}]])
 
-(defn render-tile-card
-  {:malli/schema [:function [:=> [:cat :seon.host/db :map :any] :any] [:=> [:cat :seon.host/db [:maybe :seon.host/db] :map :any] :any]]}
-  ([branch-db tile agent-id] (render-tile-card branch-db nil tile agent-id))
-  ([branch-db main-db {:keys [id source handle ref tags layout] :as tile} agent-id]
-   (let [src-name (name (or source :rule))
-         lay-name (when (and layout (not= layout :expanded-card)) (name layout))
-         extra-tags (remove #(or (= (name %) src-name) (= (name %) lay-name)) (sort tags))]
-     [:div {:id id :class "tile-wrap"}
-      [:div {:class "tile-meta"}
-       [:div {:class "pill-row"}
-        [:span {:class (str "badge " (case source :eval "green" :pinned "amber" :ctx "amber" :child "blue" :rule "purple" :curated "green" :tree "purple" "muted"))}
-         src-name]
-        (when handle
-          [:span {:class "badge mono handle-pill"} (str handle)])
-        (when lay-name
-          [:span {:class "badge muted mono"} lay-name])
-        (for [tg extra-tags]
-          [:span {:class "badge amber mono"} (name tg)])]
-       (when (and (= source :pinned) ref)
-         [:button {:type "button" :class "link-muted tiny stage-remove"
-                   :on-click (list 'seon.web/unpin-tile! agent-id ref)}
-          "× unpin"])]
-      (render/render-tile-node branch-db tile {:mode :human :agent-id agent-id :main-db main-db})])))
-
 (defn interleave-timeline
   "Interleaves inbox messages and evals in true conversational order using `:seon.agent.eval/seen-messages`:
    messages consumed by turn T appear directly above turn T's evals/reply; unseen messages appear at the end.
@@ -93,29 +68,6 @@
                        (sort-by :seon.agent.message/seq)
                        (map (fn [m] {:kind :msg :data m})))]
      (into items trailing))))
-
-(defn render-emphasis
-  "Parses `**bold**`, `*italic*`, and `~~strikethrough~~` inside non-code prose segments into Hiccup nodes."
-  [^String s]
-  (if (or (str/blank? s) (not (or (str/includes? s "*") (str/includes? s "~~"))))
-    [s]
-    (let [pat #"\*\*([^\s*](?:[^*]*?[^\s*])?)\*\*|\*([^\s*](?:[^*]*?[^\s*])?)\*|~~([^\s~](?:[^~]*?[^\s~])?)~~"
-          m (re-matcher pat s)]
-      (loop [pos 0 acc []]
-        (if (.find m)
-          (let [start (.start m)
-                end (.end m)
-                bold (.group m 1)
-                ital (.group m 2)
-                strike (.group m 3)
-                acc (if (> start pos) (conj acc (subs s pos start)) acc)
-                node (cond bold [:strong bold]
-                           ital [:em ital]
-                           strike [:del strike])]
-            (recur end (conj acc node)))
-          (if (< pos (count s))
-            (conj acc (subs s pos))
-            acc))))))
 
 (defn render-inline-prose
 "Formats inline backtick code spans, `**bold**`, `*italic*`, and `~~strike~~` (including inline code spans nested inside emphasis)."
