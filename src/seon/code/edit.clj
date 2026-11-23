@@ -132,11 +132,13 @@
                str-pairs (mapv (fn [[o n]] [(to-src o) (to-src n)]) pairs)
                raw-patched (cst/patch-form-source-batch src str-pairs {:occurrence occurrence})
                patched (if (:ok? raw-patched)
-                         {:ok? true
-                          :cur-src (:src raw-patched)
-                          :first-line (:line raw-patched)
-                          :applied (:applied raw-patched)}
-                         (assoc raw-patched :target target :key key))]
+                       {:ok? true
+                        :cur-src (:src raw-patched)
+                        :first-line (:line raw-patched)
+                        :applied (:applied raw-patched)}
+                       (cond-> (assoc raw-patched :target target :key key)
+                         (and (str/ends-with? key "#ns") (= :no-match (:error raw-patched)))
+                         (assoc :hint "Target 'ns edits ONLY the (ns ...) header form. To edit a function, pass 'ns/fn; to add or replace a full defn, use (user/add-fn! 'ns \"(defn ...)\").")))]
            (if-not (:ok? patched)
              patched
              (let [new-fsrc (:cur-src patched)
