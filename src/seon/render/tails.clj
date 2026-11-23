@@ -154,24 +154,25 @@
                     "): "
                     (if (integer? eid) (safe-el :db/id eid (str preview) "mono tiny") (str preview))]))])]})))
 
-(defn render-inbox-tail
-  "Pure `ns-map -> ns-map` Hiccup renderer for unread inbox messages."
+(defn ^:seon.ui/hiccup render-inbox-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for unread inbox messages (preserves full bodies)."
   {:malli/schema [:=> [:cat [:map [:seon.tail/inbox :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 500000}
   [{{:keys [unread]} :seon.tail/inbox}]
-  (when-let [us (when (and (coll? unread) (not (map? unread))) (seq unread))]
+  (when-let [us (when (and (coll? unread) (not (map? unread))) (seq (filter map? unread)))]
     {:tag "unread-inbox"
      :seon.ui/hiccup
      [:section {:class "tail-block" :data-min-width 200}
       [:p (str "Unread inbox (" (count us) "):")]
-      (into [:ul] (for [m (take 6 us) :when (map? m)
-                        :let [from (or (:seon.agent.message/from m) :user)]]
+      (into [:ul] (for [m us
+                        :let [from (or (:seon.agent.message/from m) (:from m) :user)
+                              mtype (or (:seon.agent.message/type m) (:type m) :chat)
+                              body (str (or (:seon.agent.message/body m) (:body m) ""))]]
                     [:li
                      (if (qualified-keyword? from)
                        (safe-el :seon.agent/id from (str from) "mono tiny")
                        (str from))
-                     (str " [" (kw-label (:seon.agent.message/type m) "chat") "]: "
-                          (one-line (:seon.agent.message/body m) 120))]))]}))
+                     (str " [" (kw-label mtype "chat") "]: " body)]))]}))
 
 (defn render-system-health-tail
   "Pure `ns-map -> ns-map` Hiccup renderer for ambient operational signals & system health."
@@ -244,3 +245,27 @@
        [:section {:class "tail-block" :data-min-width 220}
         [:p (str "User has been waiting " es "s (" ec " eval(s)) for a reply" (when ps (str " to: " ps)))]
         [:p "If you have the answer, reply directly in plain prose with NO tool calls. If still working, update live progress via (user/set-status! {:label \"...\" :detail \"...\" :pct 50 :stage :researching :svg \"<svg ...>...</svg>\"}) so the user sees a visual card."]]})))
+
+(defn ^:seon.ui/hiccup render-chronicle-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for recent Chronicle anchor summaries."
+  {:malli/schema [:=> {:examples [[[{:seon.tail/chronicle [{:seon.summary/from-tx 1 :seon.summary/to-tx 10 :seon.summary/kind :milestone :seon.summary/title "Shipped"}]}]
+                                   {:tag "chronicle"
+                                    :seon.ui/hiccup [:section {:class "tail-block" :data-min-width 220}
+                                                     [:p "Chronicle anchors:"]
+                                                     [:ul [:li "[1..10 · milestone] Shipped"]]]}]]}
+                  [:cat [:map [:seon.tail/chronicle [:sequential :map]]]]
+                  [:maybe [:map [:tag :string] [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 500000}
+  [{summaries :seon.tail/chronicle}]
+  (when-let [rec (when (and (coll? summaries) (not (map? summaries))) (seq (filter map? summaries)))]
+    {:tag "chronicle"
+     :seon.ui/hiccup
+     [:section {:class "tail-block" :data-min-width 220}
+      [:p "Chronicle anchors:"]
+      (into [:ul]
+            (for [s (take 5 rec)
+                  :let [sid (:seon.summary/id s)
+                        lbl (str "[" (:seon.summary/from-tx s) ".." (:seon.summary/to-tx s)
+                                 " · " (kw-label (:seon.summary/kind s) "milestone") "] "
+                                 (one-line (:seon.summary/title s) 120))]]
+              [:li (if (uuid? sid) (safe-el :seon.summary/id sid lbl "mono tiny") lbl)]))]}))

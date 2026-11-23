@@ -96,29 +96,11 @@
           (:attrs res) (assoc :attrs (:attrs res))
           (:image res) (assoc :image (:image res)))))
     (and (map? res) (or (not (str/blank? (str (:text res)))) (:image res)))
-    (cond-> {:tag (or (:tag res) "tail")
-             :text (or (:text res) (when (:hiccup res) (render/hiccup->text (:hiccup res))) "")}
+    (cond-> {:tag (or (:tag res) "tail") :text (or (:text res) "")}
       (:hiccup res) (assoc :hiccup (:hiccup res))
       (:attrs res) (assoc :attrs (:attrs res))
       (:image res) (assoc :image (:image res)))
-    (vector? res) {:tag "tail" :hiccup res :text (render/hiccup->text res)}
-    :else nil))
-
-(defn- gather-chronicle-tail [main-db]
-  (when (and main-db ((db-schema main-db) :seon.summary/id))
-    (let [rec (->> (d/datoms main-db :aevt :seon.summary/id)
-                   (map #(d/pull main-db '[:seon.summary/title :seon.summary/kind :seon.summary/from-tx :seon.summary/to-tx] (:e %)))
-                   (sort-by #(long (or (:seon.summary/to-tx %) 0)))
-                   (take-last 3) reverse vec)]
-      (when (seq rec)
-        {:tag "chronicle"
-         :seon.ui/hiccup
-         [:section {:class "tail-block" :data-min-width 220}
-          [:p "Chronicle anchors:"]
-          (into [:ul] (for [s rec]
-                        [:li (str "[" (:seon.summary/from-tx s) ".." (:seon.summary/to-tx s)
-                                  " · " (name (or (:seon.summary/kind s) :milestone)) "] "
-                                  (:seon.summary/title s))]))]}))))
+    (vector? res) {:tag "tail" :hiccup res :text (render/hiccup->text res)}))
 
 (defn neighborhood-recent-activity
   "Renders neighborhood activity through the unified pure Hiccup tail pipeline."
@@ -178,32 +160,29 @@
           items)))
 
 (defn- build-wire-candidate-pool [main-db walk-db task-db ag opts]
-(let [prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
-      minimal? (boolean (if (contains? opts :minimal?) (:minimal? opts) (:minimal? prefs)))
-      p-dis (:disabled-rules prefs)
-      o-dis (:disabled-rules opts)
-      eff-disabled (into #{} (concat (when (coll? p-dis) p-dis) (when (coll? o-dis) o-dis)))
-      sem? (if (contains? opts :semantic?) (boolean (:semantic? opts)) (if (contains? prefs :semantic?) (boolean (:semantic? prefs)) (not minimal?)))
-      sit? (if (contains? opts :situational?) (boolean (:situational? opts)) (if (contains? prefs :situational?) (boolean (:situational? prefs)) (not minimal?)))
-      rich? (if (contains? opts :rich-ns?) (boolean (:rich-ns? opts)) (if (contains? prefs :rich-ns?) (boolean (:rich-ns? prefs)) (not minimal?)))
-      {:keys [candidates ctx-trace]}
-      (ctx/gather-agent-candidates main-db walk-db (:seon.agent/id ag)
-                                   {:agent ag :task-db task-db :target :wire
-                                    :include-evals? false :include-ctx-snapshot? true
-                                    :health-summary-fn fast-health-summary
-                                    :disabled-rules eff-disabled
-                                    :minimal? minimal? :semantic? sem? :enrich? (not minimal?)
-                                    :situational? sit? :rich-ns? rich?})
-      items (ensure-fallback-candidates main-db walk-db ag candidates)]
-  {:all-items items
-   :walk-db walk-db
-   :ctx-trace ctx-trace
-   :rule-trace {:rules-count (long (or (:rules-total ctx-trace) 0))
-                :facts-count (count items)
-                :ms (reduce + 0.0 (map #(double (or (:ms %) 0.0)) (:fired-rules ctx-trace)))
-                :runs (vec (:fired-rules ctx-trace))
-                :recomputed (long (or (:recomputed ctx-trace) 0))
-                :skipped (long (or (:skipped ctx-trace) 0))}}))
+  (let [prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
+        minimal? (boolean (if (contains? opts :minimal?) (:minimal? opts) (:minimal? prefs)))
+        flag (fn [k d] (cond (contains? opts k) (boolean (get opts k)) (contains? prefs k) (boolean (get prefs k)) :else d))
+        eff-disabled (into #{} (concat (when (coll? (:disabled-rules prefs)) (:disabled-rules prefs))
+                                       (when (coll? (:disabled-rules opts)) (:disabled-rules opts))))
+        {:keys [candidates ctx-trace]}
+        (ctx/gather-agent-candidates main-db walk-db (:seon.agent/id ag)
+                                     {:agent ag :task-db task-db :target :wire
+                                      :include-evals? false :include-ctx-snapshot? true
+                                      :health-summary-fn fast-health-summary
+                                      :disabled-rules eff-disabled :minimal? minimal?
+                                      :semantic? (flag :semantic? (not minimal?))
+                                      :enrich? (not minimal?)
+                                      :situational? (flag :situational? (not minimal?))
+                                      :rich-ns? (flag :rich-ns? (not minimal?))})
+        items (ensure-fallback-candidates main-db walk-db ag candidates)]
+    {:all-items items :walk-db walk-db :ctx-trace ctx-trace
+     :rule-trace {:rules-count (long (or (:rules-total ctx-trace) 0))
+                  :facts-count (count items)
+                  :ms (reduce + 0.0 (map #(double (or (:ms %) 0.0)) (:fired-rules ctx-trace)))
+                  :runs (vec (:fired-rules ctx-trace))
+                  :recomputed (long (or (:recomputed ctx-trace) 0))
+                  :skipped (long (or (:skipped ctx-trace) 0))}}))
 
 (defn- fit-wire-pool [{:keys [all-items walk-db rule-trace]} main-db opts]
   (let [budget (long (or (:token-budget opts) 16000))
@@ -311,7 +290,7 @@
                                     (and base-db scope-in-base?) base-db
                                     :else branch-db)
                       pool (build-wire-candidate-pool main-db walk-db (if task? branch-db main-db) ag opts)]
-                  {:pool pool :default-fit (delay (fit-wire-pool pool main-db pref-fit))})))
+                  {:pool pool :walk-main-cid (live-cid main-db) :default-fit (delay (assoc (fit-wire-pool pool main-db pref-fit) :walk-main-cid (live-cid main-db)))})))
       default-opts? (and (empty? (:already-shown opts))
                          (nil? (:token-budget opts))
                          (nil? (:strategy opts))
@@ -319,7 +298,7 @@
                          (not (:explain? opts)))]
   (if default-opts?
     @(:default-fit cached)
-    (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)))))
+    (assoc (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)) :walk-main-cid (:walk-main-cid cached)))))
 
 (defonce ^:private ^:seon.flow/edge branch-errors-cache (store/lru-cache 32))
 
@@ -353,32 +332,54 @@
              :last-proofs (:seon.agent/last-proofs ag) :show-budget? show-b?
              :turns-used turns :max-turns max-t :rem-turns rem-t}))))))
 
+(defn- gather-chronicle-data [main-db]
+  (when (and main-db ((db-schema main-db) :seon.summary/id))
+    (->> (d/datoms main-db :aevt :seon.summary/id)
+         (map #(d/pull main-db '[:seon.summary/id :seon.summary/title :seon.summary/kind :seon.summary/from-tx :seon.summary/to-tx] (:e %)))
+         (sort-by #(long (or (:seon.summary/to-tx %) 0)))
+         (take-last 3) reverse vec not-empty)))
+
+(def ^:private tail-specs
+  [{:roles :all    :key :seon.tail/inbox         :render rtails/render-inbox-tail
+    :data (fn [_ _ _ _ opts] (when-let [u (seq (:unread opts))] {:unread u}))}
+   {:roles :router :key :seon.tail/system-health :render rtails/render-system-health-tail
+    :data (fn [mdb _ _ _ _] (when mdb (sig/all-signals mdb)))}
+   {:roles :worker :key :seon.tail/branch-status :render rtails/render-branch-status-tail
+    :data (fn [_ _ _ _ opts] (:branch-status opts))}
+   {:roles :worker :key :seon.tail/scoped-health :render rtails/render-scoped-health-tail
+    :data (fn [mdb bdb ag evals opts] (gather-scoped-health-data mdb bdb ag evals (:branch-status opts)))}
+   {:roles :all    :key :seon.tail/activity      :render rtails/render-activity-tail
+    :data (fn [mdb bdb ag _ _] (gather-activity-data mdb bdb ag))}
+   {:roles :all    :key :seon.tail/wait-nudge    :render rtails/render-wait-nudge-tail
+    :data (fn [mdb bdb ag evals opts]
+            (when (or (not (contains? opts :messages)) (seq (:messages opts)))
+              (rstatus/compute-wait-nudge-data mdb bdb ag evals (:now-ms opts))))}
+   {:roles :all    :key :seon.tail/viewport      :render rtails/render-viewport-tail
+    :data (fn [mdb _ ag _ opts]
+            (when-let [vp (:viewport-screenshot opts)]
+              (let [cfg? (and mdb ((db-schema mdb) :seon.config/viewport-screenshot?))
+                    en? (cond (:force-vision? opts) true
+                              cfg? (boolean (store/config-val mdb (:seon.agent/id ag) :seon.config/viewport-screenshot?))
+                              :else (boolean (:vision? opts true)))]
+                {:snapshot vp :enabled? en? :vision? (boolean (:vision? opts true))})))}
+   {:roles :router :key :seon.tail/chronicle     :render rtails/render-chronicle-tail
+    :data (fn [mdb _ _ _ _] (gather-chronicle-data mdb))}])
+
 (defn- assemble-unified-tail [main-db branch-db ag evals opts]
-  (let [aid (:seon.agent/id ag) router? (rdata/router-agent? ag)
-        vp (when (:viewport-screenshot opts)
-        (let [cfg? (and main-db ((db-schema main-db) :seon.config/viewport-screenshot?))
-              v-en? (cond (:force-vision? opts) true
-                          cfg? (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?))
-                          :else (boolean (:vision? opts true)))]
-          (rtails/render-viewport-tail {:seon.tail/viewport {:snapshot (:viewport-screenshot opts)
-                                                             :enabled? v-en?
-                                                             :vision? (boolean (:vision? opts true))}})))
-        act (rtails/render-activity-tail {:seon.tail/activity (gather-activity-data main-db branch-db ag)})
-        now-ms (long (or (:now-ms opts) (System/currentTimeMillis)))
-        wn (when (or (not (contains? opts :messages)) (seq (:messages opts)))
-             (when-let [wd (rstatus/compute-wait-nudge-data main-db branch-db ag evals now-ms)]
-               (rtails/render-wait-nudge-tail {:seon.tail/wait-nudge wd})))
-        raw (if router?
-              [(when main-db (rtails/render-system-health-tail {:seon.tail/system-health (sig/all-signals main-db)}))
-               act wn vp (gather-chronicle-tail main-db)]
-              (let [bs (gather-branch-status-data main-db branch-db ag)]
-                [(when bs (rtails/render-branch-status-tail {:seon.tail/branch-status bs}))
-                 (when-let [sh (gather-scoped-health-data main-db branch-db ag evals bs)]
-                   (rtails/render-scoped-health-tail {:seon.tail/scoped-health sh}))
-                 act wn vp]))
-        blocks (vec (keep tail-block-from-res raw))
-        ordered (vec (sort-by #(if (:image %) 1 0) blocks))]
-    {:blocks ordered :image (some :image ordered)}))
+  (let [role (if (rdata/router-agent? ag) :router :worker)
+        o (assoc opts
+                 :now-ms (long (or (:now-ms opts) (System/currentTimeMillis)))
+                 :branch-status (when (= role :worker) (gather-branch-status-data main-db branch-db ag)))
+        blocks (->> tail-specs
+                    (filter #(or (= :all (:roles %)) (= role (:roles %))))
+                    (keep (fn [{:keys [key render data]}]
+                            (when-let [v (data main-db branch-db ag evals o)]
+                              (let [rf (or (some-> (and main-db (first (fit/discover-renderers main-db [key]))) requiring-resolve)
+                                           render)]
+                                (tail-block-from-res (rf {key v}))))))
+                    (sort-by #(if (:image %) 1 0))
+                    vec)]
+    {:blocks blocks :image (some :image blocks)}))
 
 (defn render-agent-context
   "Renders the unified Upgrade-Ladder `<walk-context>` + Hiccup `<ephemeral-tail>` for any agent."
@@ -410,6 +411,23 @@
      (str "<walk-context>\n" walk-text "\n</walk-context>"
           (when-not (str/blank? ttext) (str "\n\n<ephemeral-tail>\n" ttext "\n</ephemeral-tail>"))))))
 
+(defn- live-rule-tail-blocks [main-db branch-db ag opts]
+  (let [tail-rs (filterv (fn [r]
+                           (let [as (:seon.rule/assert r)]
+                             (and (sequential? as) (seq as)
+                                  (every? #(or (not (map? %)) (= :ephemeral-tail (:zone %))) as)
+                                  (some #(and (map? %) (= :ephemeral-tail (:zone %))) as))))
+                         (ctx/load-context-rules main-db branch-db nil))]
+    (when (seq tail-rs)
+      (let [{:keys [candidates]} (ctx/gather-agent-candidates
+                                  main-db branch-db (:seon.agent/id ag)
+                                  {:agent ag :target :wire :rules tail-rs :minimal? true
+                                   :include-evals? false :include-ctx-snapshot? false})]
+        (when (seq candidates)
+          (:tail-tile-blocks (fit-wire-pool {:all-items (ensure-fallback-candidates main-db branch-db ag candidates)
+                                             :walk-db branch-db :rule-trace {}}
+                                            main-db opts)))))))
+
 (defn build-live-wire-request
   "ONE single source of truth for an agent's LLM context AND Context Lab:
    Datahike commit-id + `d/merge-base` KV-cache stability, ONE `seon.ctx/gather-agent-candidates`,
@@ -430,13 +448,16 @@
                 [])
                 branch (:seon.agent/branch ag :main)
                 anchor-turn (let [t (:seon.agent.eval/turn (first evals))] (if (and t (> t 1)) t 1))
-                {:keys [tile-projections walk-text walk-db tail-tile-blocks rule-trace fit-trace shown
+                {:keys [tile-projections walk-text walk-db walk-main-cid tail-tile-blocks rule-trace fit-trace shown
                         surface-stats explained candidates]}
                 (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn opts)
                 tail-res (assemble-unified-tail main-db branch-db ag evals
-                {:viewport-screenshot viewport-screenshot :vision? (boolean vision?)
-                 :now-ms (:now-ms opts) :messages msgs})
-                tail-blocks (vec (concat (:blocks tail-res) tail-tile-blocks))
+                           {:viewport-screenshot viewport-screenshot :vision? (boolean vision?)
+                            :now-ms (:now-ms opts) :messages msgs :unread unread})
+                live-tail (if (and (not explain?) (or (not= walk-main-cid (live-cid main-db)) (not= (live-cid walk-db) (live-cid branch-db))))
+                            (live-rule-tail-blocks main-db branch-db ag opts)
+                            tail-tile-blocks)
+                tail-blocks (vec (concat (:blocks tail-res) live-tail))
                 activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
                 wire (model/build-agent-wire-messages
                       {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
