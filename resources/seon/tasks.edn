@@ -86,11 +86,12 @@
   :seon.task/plan "seon.render.entities exceeds the 8,000-token :oversized-namespace budget. Extract a cohesive child namespace so both namespaces stay well under budget and all public entrypoints and tests remain green.",
   :seon.task/scope seon.render.entities,
   :seon.task/title "Split seon.render.entities below the 8k token namespace budget"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.render.entities/split-oversized-v2,
   :seon.task/owner :seon.render.entities/split-oversized-v2,
   :seon.task/plan "Split seon.render.entities cleanly below the 8k token namespace budget into cohesive child namespace(s), keeping all callers and tests green.",
   :seon.task/scope seon.render.entities,
+  :seon.task/summary "Pre-polish Cycle 3 trial; exposed reviewer :scope hijack, edited-form-eids :ident-ref-map bug, move-vars! :import/:promoted-privates gaps, and missing revert-ns! (all fixed in 55f9f6d30a).",
   :seon.task/title "Split seon.render.entities below the 8k token namespace budget"}
  {:seon.task/done? false,
   :seon.task/id :seon.render.entities/split-v3,
@@ -130,13 +131,13 @@
   :seon.task/plan "Automatically run declared :seon.task/tests and edited :malli/schema seed=42 generative checks at the end of an agent eval block (non-blocking, surfaced in the ephemeral tail), and add an ephemeral COW merge-preview delta test when :main moved since branch base.",
   :seon.task/scope seon.test,
   :seon.task/title "Run task proofs and edited Malli generative checks automatically after eval blocks"}
- {:seon.task/done? true,
+ {:seon.task/done? false,
   :seon.task/id :seon.transactor/split-oversized-namespace,
-  :seon.task/plan "seon.transactor is currently ~11.6k tokens. Extract Flow-native call/await/settle/cancel helpers into seon.transactor.calls so transactor-proc stays lean and under 8k tokens.",
+  :seon.task/plan "seon.transactor is currently over the 8,000 token namespace budget (:oversized-namespace). Split cohesive helper functions into a clean child namespace so seon.transactor and all children stay well under 8,000 tokens with all tests and health gates green.",
   :seon.task/scope seon.transactor,
   :seon.task/test-vars [{:db/id 25439654198383026}],
   :seon.task/tests #{seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test},
-  :seon.task/title "Split seon.transactor (< 8k tok) by extracting call-graph handlers"}
+  :seon.task/title "Split seon.transactor below the 8k token namespace budget"}
  {:seon.task/done? true,
   :seon.task/id :seon.wave-d/shrink-bench-cluster,
   :seon.task/owner :seon.wave-d/shrink-bench-cluster,
@@ -273,7 +274,7 @@
   :seon.task/scope seon,
   :seon.task/template? true,
   :seon.task/title "Discover existing code/data/history, refine task plan, prove & merge"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :template/review-and-improve,
   :seon.task/plan "1. Inspect `<session kind=\"review\">`, `(:seon.agent/target @ctx)`, and `(user/context-trace <target-id>)`.\n2. **NEVER implement target's task on your review branch.** Your job is strictly to audit target's session for loops, errors, or Seon platform root causes (data model, rule, renderer, helper, primer — consult `docs/rules-of-thumb.md`).\n3. **Healthy-target fast path (1-2 turns):** If target has 0 errors, no hunting loop, and no Seon bug, make NO code edits — optionally remove redundant evals or add 1 concise guidance line to `[:seon.agent/target :seon.agent/memory]` via `(swap! ctx ...)`, then immediately call `(user/ready!)` on YOUR session and reply with a 1-sentence prose summary.\n4. **Root-cause fix path:** If you found a Seon platform bug, fix it on your branch, add a crisp regression test + `:seon.fix/*` record, and verify `(user/run-tests!)` + `(user/health)`. Clean noisy/failed evals from `[:seon.agent/target :seon.agent.eval/_agent-ref]` (keeping `d/history` intact) and add 1-3 concise lines to `[:seon.agent/target :seon.agent/memory]`.\n5. Finish by calling `(user/ready!)` on YOUR session (NEVER set `:seon.agent/ready?` or `:seon.agent/paused?` on `:seon.agent/target`!) and writing a 1-3 sentence plain-prose summary — merging automatically syncs `:main` into target, delivers your summary as `:review-note`, and restarts target cleanly.",
   :seon.task/template? true,
