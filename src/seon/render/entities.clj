@@ -467,11 +467,18 @@
          (el :seon.agent/id id (str (or label id))) (badge scls slbl))))
 
 (defn render-agent-card
-  "Detail card (~440px) for `:seon.agent/entity`."
+  "Detail card (~440px) for `:seon.agent/entity`, surfacing attached 2-index tree refs (`:seon.agent.eval/_agent-ref`, `:seon.agent/tasks`, `:seon.agent/target`, `:seon.error/_agent-ref`) cleanly."
   {:malli/schema [:=> [:cat [:map [:seon.agent/entity :seon.agent/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
-   :cost/ticks 1200000}
-  [{{:seon.agent/keys [id label role branch scope task parent goal pinned memory] :as ag} :seon.agent/entity :as m}]
-  (let [[scls slbl] (agent-state-label ag) pins (seq-items pinned) mem (seq-items memory) br (or branch :main)]
+   :cost/ticks 1800000}
+  [{{:seon.agent/keys [id label role branch scope task tasks target parent goal pinned memory ready? waiting? paused?] :as ag} :seon.agent/entity :as m}]
+  (let [[scls slbl] (agent-state-label ag)
+        pins (seq-items pinned)
+        mem (seq-items memory)
+        br (or branch :main)
+        evs (seq-items (:seon.agent.eval/_agent-ref ag))
+        errs (seq-items (:seon.error/_agent-ref ag))
+        t-list (seq-items tasks)
+        target-lbl (when (map? target) (or (:seon.agent/id target) (:seon.task/id target) (:seon.code.var/name target) (:seon.code.ns/name target) (:db/id target)))]
     (box "ent-card" 440 "ent-agent"
          [(badge "blue" (kw-label role "worker")) (el :seon.agent/id id (str id)) (badge scls slbl)]
          (meta-link :seon.branch/name br)
@@ -480,8 +487,19 @@
                  ["branch" (el :seon.branch/name br)]
                  ["scope" (when scope (el :seon.code.ns/name scope))]
                  ["task" (when task (el :seon.task/id task))]
+                 ["target" (when target-lbl (str target-lbl (when-let [tevs (seq-items (:seon.agent.eval/_agent-ref target))] (str " (" (count tevs) " evals)"))))]
                  ["parent" (when parent (el :seon.agent/id parent))]
+                 ["flags" (str "ready?=" (boolean ready?) " · waiting?=" (boolean waiting?) (when paused? " · paused?=true"))]
+                 ["evals" (when evs (str (count evs) " attached on :seon.agent.eval/_agent-ref"))]
+                 ["errors" (when errs (str (count errs) " on :seon.error/_agent-ref"))]
                  ["memory" (when mem (str (count mem) " note(s)"))]])
+         (when t-list
+           (pill-list "tasks:" (vec (keep :seon.task/id t-list)) :seon.task/id 6))
+         (when (seq evs)
+           [:div {:class "stack-xs"}
+            (into [:div {:class "stack-xs"}]
+                  (for [ev (take-last 5 evs)]
+                    (:seon.ui/hiccup (render-eval-row {:seon.agent.eval/entity ev}))))])
          (when pins (pill-list "pinned:" pins :ref 10)))))
 
 ;; Rule (:seon.rule/entity)

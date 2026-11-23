@@ -222,12 +222,21 @@
         run-s #(fast-search-vars code-db (str (:seon.task/title t-ent)) 6)
         s-hits (when underspec?
                  (if cid (store/lru-get! effect-cache 64 [:search cid (:seon.task/title t-ent) 6] run-s) (run-s)))
-        s-items (for [{:keys [e tx score]} s-hits
-                      :let [recent? (and boot-tx (> (long tx) (long boot-tx)) (>= (double score) 0.25))]]
-                  {:entity e :tx tx :ctx.match/score score
-                   :priority (if recent? 91 74) :zone (if recent? :ephemeral-tail :workspace)
-                   :tags (if recent? #{:tag/recent :tag/search} #{:tag/search}) :rules [:seed/task-search]
-                   :params (if recent? {:seon.ui/expand-section :source :show-diff? true} {})})
+        sem-hits (when (and underspec? tid (contains? (db-schema main-db) :seon.vector/coarse))
+                    (vec/near main-db [:seon.task/id tid] 6 {:of :seon.code.var/name}))
+        sem-items (let [min-sc (double (or (store/config-val main-db aid :seon.config/semantic-min-score)
+                                (:seon.config/semantic-min-score store/default-config-values)))]
+                  (for [[e sc] sem-hits :when (>= (double sc) min-sc)]
+                    {:entity e :semantic (double sc) :priority 82 :zone :workspace
+                     :tags #{:tag/semantic} :rules [:seed/task-semantic]}))
+        s-items (concat
+                  (for [{:keys [e tx score]} s-hits
+                        :let [recent? (and boot-tx (> (long tx) (long boot-tx)) (>= (double score) 0.25))]]
+                    {:entity e :tx tx :ctx.match/score score
+                     :priority (if recent? 91 74) :zone (if recent? :ephemeral-tail :workspace)
+                     :tags (if recent? #{:tag/recent :tag/search} #{:tag/search}) :rules [:seed/task-search]
+                     :params (if recent? {:seon.ui/expand-section :source :show-diff? true} {})})
+                  sem-items)
         t-cur (for [ref (:seon.task/curated t-ent) :let [e (resolve-lookup-eid main-db code-db ref)] :when e]
                 {:entity e :priority 94 :zone :static-prefix :tags #{:tag/curated} :rules [:seed/curated]})
         has-peers? (boolean (or (and aid ((db-schema main-db) :seon.agent.call/caller)
