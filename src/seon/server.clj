@@ -401,3 +401,124 @@
          (catch Throwable ex
            (reply! reply-ch {:ok? false :error (.getMessage ex)})
            [st' {::flow/error [{:proc :server :op op :error (.getMessage ex)}]}]))))))
+
+(defn- ^:seon.flow/edge agent-context-reply!
+  "Replies to an `:agent-context` request with the rendered agent context, task/scope and unread inbox."
+  [st req reply-ch]
+  (let [main-db @(:conn st)
+        b (or (:branch req) :branch/mcp)
+        aid (or (:agent-id req) :agent/mcp)
+        branch-db (or (store/head (:conn st) b) main-db)
+        cur-ag (or (when (first (d/datoms branch-db :avet :seon.agent/id aid))
+                     (d/pull branch-db '[:seon.agent/task :seon.agent/scope] [:seon.agent/id aid]))
+                   (when (first (d/datoms main-db :avet :seon.agent/id aid))
+                     (d/pull main-db '[:seon.agent/task :seon.agent/scope] [:seon.agent/id aid])))
+        req-task (:task req)
+        req-scope (:scope req)
+        eff-task (or req-task
+                     (:seon.agent/task cur-ag)
+                     (tcalls/best-task-for-scope main-db (or req-scope (:seon.agent/scope cur-ag)))
+                     (when (first (d/datoms main-db :avet :seon.task/id :template/discover-and-plan))
+                       :template/discover-and-plan))
+        eff-scope (or req-scope
+                      (:seon.agent/scope cur-ag)
+                      (when (and eff-task (first (d/datoms main-db :avet :seon.task/id eff-task)))
+                        (:seon.task/scope (d/pull main-db '[:seon.task/scope] [:seon.task/id eff-task]))))
+        opts (cond-> {}
+               eff-task (assoc :task eff-task)
+               eff-scope (assoc :scope eff-scope)
+               (seq (:extra-namespaces req)) (assoc :extra-namespaces (:extra-namespaces req))
+               (contains? req :include-tail?) (assoc :include-tail? (boolean (:include-tail? req))))
+        seen (store/agent-seen-message-ids branch-db aid)
+        unread (->> (d/datoms main-db :avet :seon.agent.message/to aid)
+                    (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
+                                            :seon.agent.message/from :seon.agent.message/type
+                                            :seon.agent.message/body] (:e %)))
+                    (remove #(contains? seen (:seon.agent.message/id %)))
+                    (sort-by :seon.agent.message/seq)
+                    vec)
+        include-ctx? (if (contains? req :include-context?) (boolean (:include-context? req)) true)
+        ctx-text (when include-ctx?
+                   (rwire/render-agent-context main-db branch-db aid opts))]
+    (reply! reply-ch {:ok? true
+                      :branch b
+                      :agent-id aid
+                      :task eff-task
+                      :scope eff-scope
+                      :context-text ctx-text
+                      :unread unread})
+    nil))
+
+(defn- ^:seon.flow/edge eval-route
+  "Resolves the target branch for an `:eval` request and returns the `:eval` out-map."
+  [st req reply-ch]
+  (let [aid (:agent-id req)
+        raw-b (or (:branch req)
+                  (when aid
+                    (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id aid])))
+                  :branch/repl)
+        b (if (= raw-b :main) :branch/repl raw-b)]
+    {:eval [(assoc req :branch b :reply-ch reply-ch)]}))
+
+(defn- ^:seon.flow/edge import-file-op
+  "Handles an `:import-file` request: imports `path`/`text` into `b` and returns the routing out-map."
+  [st req reply-ch]
+  (let [{:keys [path branch text]} req
+        b (or branch :main)
+        repo (:repo-dir st)
+        f (when (and (nil? text) repo) (io/file repo path))
+        content (or text (when (and f (.isFile f)) (slurp f)))
+        exec? (boolean (and f (.canExecute f)))]
+    (if (nil? content)
+      (do (reply! reply-ch {:ok? false :error (str "File not found: " path)})
+          nil)
+      (if (= b :main)
+        {:tx [{:op :transact :tx-data (code/file-import-tx @(:conn st) path content exec?)
+              :reason [:import-file path] :reply-ch reply-ch}]}
+        (do
+          (store/branch! (:conn st) :main b)
+          (let [bconn (store/connect (:cfg st) b)]
+            (try
+              (let [tx (code/file-import-tx @bconn path content exec?)
+                    r (d/transact bconn {:tx-data tx})]
+                (reply! reply-ch {:ok? true :branch b :path path :tx (:max-tx (:db-after r))}))
+              (finally
+                (d/release bconn))))
+          (when (:repo-dir st) {:git [{:op :sync-branch :branch b}]}))))))
+
+(defn- ^:seon.flow/edge diff-op
+  "Replies to a `:diff` request with the three-way merge plan and exported git diff."
+  [st req reply-ch]
+  (let [b (:branch req)
+        plan (merge/three-way (:conn st) (:cfg st) b)
+        exported (when (:repo-dir st)
+                   (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) b plan))
+        git-diff (when exported
+                   (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported)))]
+    (reply! reply-ch {:ok? (:ok? plan)
+                      :branch b
+                      :touched-paths (:touched-paths plan)
+                      :entity-diffs (:entity-diffs plan)
+                      :conflicts (:conflicts plan)
+                      :git-ref (:ref exported)
+                      :diff git-diff})
+    nil))
+
+(defn- ^:seon.flow/edge start-bench-run-op
+  "Starts a live benchmark run and replies with its summary, returning a `::flow/report` out-map."
+  [st req reply-ch]
+  (let [opts (merge {:repo-dir (:repo-dir st)
+                     :seed-store (get-in st [:cfg :store :path])}
+                    (or (:opts req) {}))
+        start-fn (requiring-resolve 'seon.bench.cluster/start-bench-run-async!)
+        inst-op (requiring-resolve 'seon.bench.cluster/instance-op!)
+        in-ch (:in-ch st)
+        coord-url (str "http://127.0.0.1:" (or (:coordinator-port req) (System/getenv "SEON_PORT") 9998))
+        publish! (fn [ent]
+                   (let [tx-req {:op :transact :tx-data [ent] :reason [:bench-run (:seon.bench.run/id ent)]}]
+                     (if in-ch
+                       (a/put! in-ch {:req tx-req})
+                       (try (inst-op {:base-url coord-url} tx-req) (catch Throwable _ignore nil)))))
+        ans (start-fn opts publish!)]
+    (reply! reply-ch ans)
+    {:clojure.core.async.flow/report [(str "[:server] started live benchmark run " (:run-id ans) " (" (:total ans) " tasks)")]}))
