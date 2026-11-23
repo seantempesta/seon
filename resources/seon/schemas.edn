@@ -732,7 +732,7 @@
  [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-schema-detail, :description "First-class Malli schema entity stored in Datahike."} [:seon.schema/key :seon.schema/key] [:seon.schema/form :seon.schema/form] [:seon.schema/doc {:optional true} :seon.schema/doc] [:seon.schema/examples {:optional true} :seon.schema/examples] [:seon.schema/type {:optional true} :seon.schema/type] [:seon.schema/keys {:optional true} :seon.schema/keys] [:seon.schema/optional-keys {:optional true} :seon.schema/optional-keys] [:seon.schema/ref-targets {:optional true} :seon.schema/ref-targets]]
 
  :seon.schema/examples
- [:vector {:description "Explicit valid example values when custom host predicates have no built-in generator."} [:int {:min 0, :max 100}]]
+ [:vector {:max 4, :description "Explicit valid example values (real sampled attribute values or compact entity maps) for docs, context, and generators lacking a built-in gen."} :any]
 
  :seon.schema/form
  [:any {:seon.db/storable true, :description "Malli schema form stored natively as plain Clojure data (:db.type/data).", :gen/elements [:int :string [:vector :keyword] [:double {:min 0.0}]]}]
