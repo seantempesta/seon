@@ -273,6 +273,234 @@
                    (render/render-value eff-db parsed eff-opts))]
       (cap-eval-text (render/hiccup->text hiccup) cap h-str))))
 
+(defn- media-frame-map? [x]
+  (and (map? x)
+       (or (contains? x :seon.media/base64)
+           (and (contains? x :seon.media/width) (contains? x :seon.media/height))
+           (and (contains? x :seon.media/id) (contains? x :seon.media/label)))))
+
+(defn- dom-overflow-x? [dom]
+  (boolean (when (map? dom) (or (:overflow-x? dom) (:overflowX dom)))))
+
+(defn- format-media-frame-line [m]
+  (let [w (if (number? (:seon.media/width m)) (max 0 (long (:seon.media/width m))) 0)
+        h (if (number? (:seon.media/height m)) (max 0 (long (:seon.media/height m))) 0)
+        lbl (or (when (and (string? (:seon.media/label m)) (not (str/blank? (:seon.media/label m))))
+                  (str/trim (:seon.media/label m)))
+                (str w "px"))
+        ov-x? (dom-overflow-x? (:seon.media/dom m))
+        id (:seon.media/id m)]
+    (str "Image frame [" lbl "]: " w "×" h "px · overflow-x=" ov-x?
+         (when id (str " · [:seon.media/id " (pr-str id) "]")))))
+
+(defn- format-media-eval-value [parsed sch]
+  (cond
+    (and (map? parsed)
+         (or (= :seon.media/frames sch)
+             (and (contains? parsed :seon.media/frames) (sequential? (:seon.media/frames parsed)))))
+    (let [fs (:seon.media/frames parsed)
+          sum (when (and (string? (:summary parsed)) (not (str/blank? (:summary parsed))))
+                (:summary parsed))
+          lines (keep #(when (map? %) (format-media-frame-line %)) fs)]
+      (if (or sum (seq lines))
+        (str/join "\n" (concat (when sum [sum]) lines))
+        "Image frames: 0"))
+
+    (and (map? parsed) (or (= :seon.media/image sch) (media-frame-map? parsed)))
+    (format-media-frame-line parsed)
+
+    (and (sequential? parsed) (seq parsed) (every? media-frame-map? parsed))
+    (str/join "\n" (map format-media-frame-line parsed))
+
+    :else nil))
+
+(defn- strip-raw-base64-text [^String s]
+  (if (and (string? s) (str/includes? s ":seon.media/base64"))
+    (str/replace s #":seon\.media/base64\s+\"[^\"]*\"" ":seon.media/base64 \"<omitted>\"")
+    s))
+
+(defn- valid-db? [db]
+  (and db (instance? datahike.db.interface.ISearch db) (map? (:schema db))))
+
+(defn- pull-media-in-dbs [dbs ref]
+  (let [pat '[:seon.media/id :seon.media/mime :seon.media/base64 :seon.media/width
+              :seon.media/height :seon.media/label :seon.media/dom]
+        try-db (fn [db]
+                 (let [dh (:schema db)
+                       ent (cond
+                             (integer? ref) (d/pull db pat ref)
+                             (and (map? ref) (integer? (:db/id ref))) (d/pull db pat (:db/id ref))
+                             (and (vector? ref) (= 2 (count ref)) (= :seon.media/id (first ref)) (dh :seon.media/id))
+                             (when-let [e (:e (first (d/datoms db :avet :seon.media/id (second ref))))]
+                               (d/pull db pat e))
+                             (and (uuid? ref) (dh :seon.media/id))
+                             (when-let [e (:e (first (d/datoms db :avet :seon.media/id ref)))]
+                               (d/pull db pat e))
+                             :else nil)]
+                   (when (and (map? ent) (not (str/blank? (str (:seon.media/base64 ent)))))
+                     ent)))]
+    (some try-db dbs)))
+
+(defn- normalize-media-image [m]
+  (when (and (map? m) (not (str/blank? (str (:seon.media/base64 m)))))
+    (let [w (if (number? (:seon.media/width m)) (max 0 (long (:seon.media/width m))) 0)
+          h (if (number? (:seon.media/height m)) (max 0 (long (:seon.media/height m))) 0)
+          mime (or (when (and (string? (:seon.media/mime m)) (not (str/blank? (:seon.media/mime m))))
+                     (str/trim (:seon.media/mime m)))
+                   "image/jpeg")
+          lbl (or (when (and (string? (:seon.media/label m)) (not (str/blank? (:seon.media/label m))))
+                    (str/trim (:seon.media/label m)))
+                  (str w "px"))]
+      (cond-> {:mime mime
+               :base64 (str (:seon.media/base64 m))
+               :label lbl
+               :width w
+               :height h
+               :dom (if (map? (:seon.media/dom m)) (:seon.media/dom m) {})}
+        (:seon.media/id m) (assoc :id (:seon.media/id m))))))
+
+(defn- eval-entity-image-refs [dbs c]
+  (let [ev-id (or (:eval-id c) (:seon.agent.eval/id c))
+        hdl (:handle c)
+        cid (:id c)
+        code (:code c)]
+    (or (some (fn [db]
+                (let [dh (:schema db)]
+                  (when (dh :seon.agent.eval/images)
+                    (cond
+                      (and (uuid? ev-id) (dh :seon.agent.eval/id))
+                      (when-let [e (:e (first (d/datoms db :avet :seon.agent.eval/id ev-id)))]
+                        (seq (:seon.agent.eval/images (d/pull db '[:seon.agent.eval/images] e))))
+
+                      (and (qualified-symbol? hdl) (dh :seon.agent.eval/handle))
+                      (some (fn [dt]
+                              (let [p (d/pull db '[:seon.agent.eval/images :seon.agent.eval/call-id :seon.agent.eval/code] (:e dt))]
+                                (when (and (seq (:seon.agent.eval/images p))
+                                           (or (nil? cid) (= cid (:seon.agent.eval/call-id p)) (= code (:seon.agent.eval/code p))))
+                                  (:seon.agent.eval/images p))))
+                            (reverse (vec (d/datoms db :avet :seon.agent.eval/handle hdl))))
+                      :else nil))))
+              dbs)
+        [])))
+
+(defn- collect-media-candidates-from-val [v]
+  (let [parsed (cond
+                 (string? v)
+                 (if (and (< (count v) 2000000)
+                          (or (str/includes? v ":seon.media/")
+                              (str/includes? v "seon.media")))
+                   (let [r (safe-read-eval-edn edn-tag-val v)]
+                     (if (:ok? r) (:val r) v))
+                   nil)
+                 (coll? v) v
+                 :else nil)
+        from-tree (when (coll? parsed)
+                    (keep (fn [node]
+                            (cond
+                              (and (vector? node) (= 2 (count node)) (= :seon.media/id (first node)) (uuid? (second node)))
+                              node
+                              (and (map? node) (not (str/blank? (str (:seon.media/base64 node)))))
+                              node
+                              (and (map? node) (uuid? (:seon.media/id node)))
+                              [:seon.media/id (:seon.media/id node)]
+                              :else nil))
+                          (tree-seq coll? seq parsed)))
+        from-re (when (and (string? v) (str/includes? v ":seon.media/id"))
+                  (keep (fn [[_ us]]
+                          (try [:seon.media/id (java.util.UUID/fromString us)] (catch Throwable _ nil)))
+                        (re-seq #":seon\.media/id\s+#uuid\s+\"([0-9a-fA-F-]+)\"" v)))]
+    (concat from-tree from-re)))
+
+(defn extract-recent-eval-images
+  "Looks at the latest completed turn in `history` (via `:seon.agent.eval/images`, `:images`,
+   or `:seon.media/id` / inline media maps in `:value`), resolves up to `max-images` (default 4)
+   `:seon.media/image` entities from `eval-db` (and optional `fallback-dbs`), and returns
+   `[{:mime :base64 :label :width :height :dom ...}]`. Older turns automatically age out."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :any] [:vector :map]]
+                  [:=> [:cat [:maybe :seon.host/db] :any :int] [:vector :map]]
+                  [:=> [:cat [:maybe :seon.host/db] :any :int :any] [:vector :map]]]
+   :cost/ticks 10000000}
+  ([eval-db history] (extract-recent-eval-images eval-db history 4 nil))
+  ([eval-db history max-images] (extract-recent-eval-images eval-db history max-images nil))
+  ([eval-db history max-images fallback-dbs]
+   (let [cap (max 0 (long (or max-images 4)))
+         last-turn (when (sequential? history) (last history))
+         calls (when (map? last-turn) (:calls last-turn))]
+     (if (or (zero? cap) (empty? calls))
+       []
+       (let [dbs (vec (distinct (filter valid-db? (cons eval-db (when (sequential? fallback-dbs) fallback-dbs)))))
+             raw-refs (mapcat
+                       (fn [c]
+                         (when (map? c)
+                           (concat (when (coll? (:seon.agent.eval/images c)) (:seon.agent.eval/images c))
+                                   (when (coll? (:images c)) (:images c))
+                                   (eval-entity-image-refs dbs c)
+                                   (collect-media-candidates-from-val (:value c)))))
+                       calls)
+             resolve-one (fn [x]
+                           (cond
+                             (and (map? x) (not (str/blank? (str (:seon.media/base64 x)))))
+                             (normalize-media-image x)
+
+                             (and (map? x) (uuid? (:seon.media/id x)))
+                             (normalize-media-image (pull-media-in-dbs dbs [:seon.media/id (:seon.media/id x)]))
+
+                             :else
+                             (normalize-media-image (pull-media-in-dbs dbs x))))]
+         (loop [xs raw-refs seen #{} acc []]
+           (if (or (empty? xs) (>= (count acc) cap))
+             acc
+             (if-let [img (resolve-one (first xs))]
+               (let [dk (or (:id img) [(:label img) (:width img) (:height img) (hash (:base64 img))])]
+                 (if (contains? seen dk)
+                   (recur (rest xs) seen acc)
+                   (recur (rest xs) (conj seen dk) (conj acc img))))
+               (recur (rest xs) seen acc)))))))))
+
+(defn build-ephemeral-tail-msg
+  "Builds the trailing ephemeral OpenAI `user` message, attaching optional viewport screenshot and
+   native multimodal `image_url` blocks + captions for `eval-images` when `vision?` is true."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :map] [:maybe [:sequential :map]] :boolean] [:maybe :map]]
+   :cost/ticks 2000000}
+  [tail-text eff-img eval-images vision?]
+  (let [vp-b64 (when (and (map? eff-img) (not (str/blank? (str (:base64 eff-img)))))
+                 (str (:base64 eff-img)))
+        imgs (if (and vision? (sequential? eval-images))
+               (vec (filter #(and (map? %) (not (str/blank? (str (:base64 %))))) eval-images))
+               [])
+        has-text? (not (str/blank? (str tail-text)))]
+    (cond
+      (or vp-b64 (seq imgs))
+      (let [parts (cond-> []
+                    has-text? (conj {:type "text" :text (str tail-text)})
+                    (and (not has-text?) vp-b64) (conj {:type "text" :text "Current live viewport screenshot:"})
+                    vp-b64 (conj {:type "image_url"
+                                  :image_url {:url (str "data:" (or (not-empty (str (:mime eff-img ""))) "image/jpeg")
+                                                        ";base64," vp-b64)
+                                              :detail "auto"}}))
+            img-parts (mapcat
+                       (fn [{:keys [mime base64 label width height dom]}]
+                         (let [ov-x? (dom-overflow-x? dom)
+                               w (if (number? width) (max 0 (long width)) 0)
+                               h (if (number? height) (max 0 (long height)) 0)
+                               lbl (or (when (and (string? label) (not (str/blank? label))) (str/trim label))
+                                       (str w "px"))
+                               cap (str "Rendered Hiccup preview [" lbl " · " w "×" h
+                                        " · overflowX=" ov-x? "]:")]
+                           [{:type "text" :text cap}
+                            {:type "image_url"
+                             :image_url {:url (str "data:" (or (not-empty (str mime)) "image/jpeg")
+                                                   ";base64," base64)
+                                         :detail "auto"}}]))
+                       imgs)]
+        {:role "user" :content (into parts img-parts)})
+
+      has-text?
+      {:role "user" :content (str tail-text)}
+
+      :else nil)))
+
 (defn format-eval-output
   "Formats a single REPL eval outcome via `seon.render.fit/discover-renderers` +
    `seon.render/render-value -> seon.render/hiccup->text` (single Hiccup -> text pipeline).
@@ -318,10 +546,13 @@
                                        :budget (min 1200 (quot cap 4)) :mode :model}
                                 sch (assoc :schema sch)
                                 eff-db (assoc :render-root? true :main-db (or main-db eff-db)))
+                     media-txt (when parsed-ok? (format-media-eval-value parsed sch))
+                     safe-val-str (strip-raw-base64-text val-str)
                      val-body (cond
+                                media-txt (cap-eval-text media-txt cap h-str)
                                 parsed-ok? (render-eval-val-text eff-db parsed sch eff-opts cap h-str)
-                                (<= (count val-str) cap) val-str
-                                :else (render-eval-val-text eff-db val-str nil eff-opts cap h-str))
+                                (<= (count safe-val-str) cap) safe-val-str
+                                :else (render-eval-val-text eff-db safe-val-str nil eff-opts cap h-str))
                      crumb-s (when (and eff-db parsed-ok?)
                                (when-let [bh (render/render-schema-breadcrumbs eff-db sch parsed (assoc eff-opts :mode :model :main-db (or main-db eff-db) :fn-limit 5 :doc-limit 2))]
                                  (let [bt (render/hiccup->text bh)]
