@@ -1,5 +1,5 @@
 (ns seon.unified-surface-test
-  "End-to-end proofs for Wave 2A Unified Surface (`seon.render.surface`), Viewport-Adaptive
+  "End-to-end proofs for Holistic Unified Surface (`seon.render.surface`), Viewport-Adaptive
    Upgrade Ladder HTML, Unified AI Wire (`seon.render.wire` & `seon.model.wire`), Generic
    Entity `d/as-of` Time-Travel (`seon.render.data/view-history-txs`), Responsive Polish
    (Stage 5C), and `seed=42` Generative Checks."
@@ -27,18 +27,20 @@
   {:sig (str "(ns seon.signals)\n"
              "(defn render-signals-bar {:malli/schema [:=> [:cat [:map [:seon.signal/snapshot :seon.signal/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"bar\"]})\n"
              "(defn render-signals-panel {:malli/schema [:=> [:cat [:map [:seon.signal/snapshot :seon.signal/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:section \"panel\"]})\n")
-   :ent (str "(ns seon.render.entities)\n"
-             "(defn render-task-chip {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:span \"t\"]})\n"
-             "(defn render-task-card {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"t\"]})\n"
-             "(defn render-task-full {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:section \"t\"]})\n"
-             "(defn render-var-chip {:malli/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:span \"v\"]})\n"
-             "(defn render-var-sig {:malli/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"v\"]})\n"
-             "(defn render-var-full {:malli/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:section \"v\"]})\n"
-             "(defn render-error-badge {:malli/schema [:=> [:cat [:map [:seon.error/entity :seon.error/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:span \"e\"]})\n"
-             "(defn render-error-card {:malli/schema [:=> [:cat [:map [:seon.error/entity :seon.error/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"e\"]})\n"
-             "(defn render-error-with-fix {:malli/schema [:=> [:cat [:map [:seon.error/entity :seon.error/entity] [:seon.fix/entity :seon.fix/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:section \"ef\"]})\n"
-             "(defn render-doc-snippet {:malli/schema [:=> [:cat [:map [:seon.code.doc/entity :seon.code.doc/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"d\"]})\n"
-             "(defn render-doc-full {:malli/schema [:=> [:cat [:map [:seon.code.doc/entity :seon.code.doc/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:section \"d\"]})\n")})
+   :ent (let [f (fn [n k tag txt]
+                  (str "(defn " n " {:malli/schema [:=> [:cat [:map [" k " " k "]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:" tag " \"" txt "\"]})\n"))]
+          (str "(ns seon.render.entities)\n"
+               (f "render-task-chip" :seon.task/entity "span" "t")
+               (f "render-task-card" :seon.task/entity "div" "t")
+               (f "render-task-full" :seon.task/entity "section" "t")
+               (f "render-var-chip" :seon.code.var/entity "span" "v")
+               (f "render-var-sig" :seon.code.var/entity "div" "v")
+               (f "render-var-full" :seon.code.var/entity "section" "v")
+               (f "render-error-badge" :seon.error/entity "span" "e")
+               (f "render-error-card" :seon.error/entity "div" "e")
+               "(defn render-error-with-fix {:malli/schema [:=> [:cat [:map [:seon.error/entity :seon.error/entity] [:seon.fix/entity :seon.fix/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:section \"ef\"]})\n"
+               (f "render-doc-snippet" :seon.code.doc/entity "div" "d")
+               (f "render-doc-full" :seon.code.doc/entity "section" "d")))})
 
 (defn- seed-unified-world! [conn]
   (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/signals.clj" (:sig renderer-index-stubs) false)})
@@ -77,12 +79,12 @@
                                     [:seon.code.doc/id "docs/surface.md#intro"]]}
                {:seon.user/id :user/default
                 :seon.user/viewing [:seon.agent/id :agent/root]
-                :seon.user/view-mode :canvas
+                :seon.user/view-mode :session
                 :seon.user/sidebar-open? true}]}))]
     {:tx1 (reduce max 0 (map :tx t1))}))
 
 (deftest ^{:cost/ticks 90000000} unified-surface-modes-and-viewport-upgrade-ladder-test
-  (testing "ONE surface/render-surface renders :canvas, :workspace, :debug < 30 ms and adapts 1440x900 vs 430x900 via Upgrade Ladder"
+  (testing "ONE surface/render-surface renders :canvas/:session, :workspace/:system, :debug/:context < 30 ms and adapts 1440x900 vs 430x900 via Upgrade Ladder"
     (with-test-store [{:keys [conn]}]
       (seed-unified-world! conn)
       (d/transact conn {:tx-data [(serr/error-tx {:kind :eval/demo-boom :severity :error :source :eval
@@ -107,7 +109,6 @@
             cv-desk (timed {:view-mode :canvas :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
             cv-mob  (timed {:view-mode :canvas :viewport-w 430  :viewport-h 900 :sidebar-open? false})
             ws-desk (timed {:view-mode :workspace :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
-            ws-mob  (timed {:view-mode :workspace :viewport-w 430  :viewport-h 900 :sidebar-open? false})
             dbg     (timed {:view-mode :debug :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
             m-desk  (surface/build-surface-model db db {:conn conn :view-mode :canvas :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
             m-mob   (surface/build-surface-model db db {:conn conn :view-mode :canvas :viewport-w 430  :viewport-h 900 :sidebar-open? false})]
@@ -116,20 +117,23 @@
         (is (< (:ms ws-desk) 30.0) (str ":workspace took " (:ms ws-desk) " ms"))
         (is (< (:ms dbg) 30.0) (str ":debug took " (:ms dbg) " ms"))
 
-        ;; 2. All 3 modes mount #seon-view-unit with viewport & slot metadata
+        ;; 2. All 3 modes mount #seon-view-unit with backward-compatible data-view-mode & viewport metadata
         (doseq [[mode res] [[:canvas cv-desk] [:workspace ws-desk] [:debug dbg]]]
           (is (str/includes? (:html res) "id=\"seon-view-unit\""))
           (is (str/includes? (:html res) (str "data-view-mode=\"" (name mode) "\"")))
           (is (str/includes? (:html res) "data-viewport-w=\"1440\""))
           (is (str/includes? (:html res) "data-slot-avail-w=")))
 
-        ;; 3. Viewport-adaptive Upgrade Ladder in live HTML: 1440x900 vs 430x900
+        ;; 3. Viewport-adaptive Upgrade Ladder in live HTML: 1440x900 vs 430x900 (no duplicate sig-panel on Session!)
         (is (> (get-in m-desk [:slot-budget :avail-w]) (get-in m-mob [:slot-budget :avail-w])))
         (is (= 'seon.signals/render-signals-panel (get-in m-desk [:signals-fit :chosen-fn])))
         (is (= 'seon.signals/render-signals-bar   (get-in m-mob  [:signals-fit :chosen-fn])))
-        (is (str/includes? (:html cv-desk) "sig-panel"))
-        (is (str/includes? (:html cv-mob)  "sig-strip"))
-        (is (not (str/includes? (:html cv-mob) "sig-panel")))
+        (is (not (str/includes? (:html cv-desk) "sig-panel")) "Session must NOT duplicate signals panel")
+        (is (str/includes? (:html cv-desk) "workspace-grid"))
+        (is (not (str/includes? (:html cv-desk) "surface-stack")))
+        (is (str/includes? (:html cv-mob) "surface-stack"))
+        (is (str/includes? (:html cv-desk) "ws-left-unit"))
+        (is (str/includes? (:html cv-desk) "ws-right-head-unit"))
         (is (str/includes? (:html cv-desk) "seon.render.entities/render-task-full"))
         (is (not (str/includes? (:html cv-mob) "seon.render.entities/render-task-full")))
         (is (or (str/includes? (:html cv-mob) "seon.render.entities/render-task-card")
@@ -137,22 +141,20 @@
         (is (str/includes? (:html cv-desk) "seon.render.entities/render-var-full"))
         (is (not (str/includes? (:html cv-mob) "seon.render.entities/render-var-full")))
 
-        ;; 4. :workspace adapts layout cleanly between desktop 2-column and narrow single-column stack
-        (is (str/includes? (:html ws-desk) "workspace-grid"))
-        (is (not (str/includes? (:html ws-desk) "surface-stack")))
-        (is (str/includes? (:html ws-mob) "surface-stack"))
-        (is (str/includes? (:html ws-desk) "ws-left-unit"))
-        (is (str/includes? (:html ws-desk) "ws-right-head-unit"))
+        ;; 4. :workspace alias renders holistic System view with expanded clickable signal cards + swarm/tasks/vectors
+        (doseq [needle ["sys-signals-unit" "sig-cell-btn" "sys-vectors-unit" "sys-agents-unit" "sys-tasks-unit"]]
+          (is (str/includes? (:html ws-desk) needle) (str ":workspace/:system missing " needle)))
 
-        ;; 5. :debug renders exact wire request, ladder table, signals, rule trace, and dual versions
+        ;; 5. :debug alias renders holistic Context & Cache glass-box view with KV-cache, candidates, rules, wire & dual versions
         (doseq [needle ["Exact Wire Request" "Chosen Renderer" "Rule Firing Trace"
                         "Rendered Versions" "Human HTML (Browser)" "Model Text"
+                        "ctx-kv-cache-unit" "ctx-candidates-unit"
                         "dbg-wire-unit" "dbg-health-unit" "dbg-rule-trace" "dbg-ctx-unit"
                         "Demo boom fault"]]
           (is (str/includes? (:html dbg) needle) (str ":debug missing " needle)))))))
 
 (deftest ^{:cost/ticks 90000000} ui-polish-responsive-layout-signals-and-debug-scroll-test
-  (testing "Stage 5C live browser fixes: workspace timeline spanning, mobile <760px sidebar collapse & header dedup, .table-scroll wrapping, signal CSS, and <30ms :debug"
+  (testing "Responsive Session grid + timeline spanning, mobile <760px sidebar collapse & holistic header dedup, .table-scroll wrapping, signal CSS, and <30ms :debug"
     (with-test-store [{:keys [conn]}]
       (seed-unified-world! conn)
       (d/transact conn {:tx-data [(serr/error-tx {:kind :eval/demo-boom :severity :error :source :eval
@@ -174,6 +176,7 @@
             hdr-desk (render/hiccup->html (ui/header-unit db-desk {:boot-seq 1 :agent-states {}}))
             sb-desk  (render/hiccup->html (ui/sidebar-unit db-desk {:agent-states {}}))]
         (is (str/includes? hdr-desk "sig-strip"))
+        (is (str/includes? hdr-desk "Context &amp; Cache"))
         (is (not (str/includes? hdr-desk "is-narrow")))
         (is (str/includes? sb-desk "sidebar open"))
         (is (not (str/includes? sb-desk "sidebar-collapsed"))))
@@ -184,14 +187,14 @@
             sb-mob  (render/hiccup->html (ui/sidebar-unit db-mob {:agent-states {}}))]
         (is (str/includes? hdr-mob "is-narrow"))
         (is (not (str/includes? hdr-mob "sig-strip")) "Narrow header (<900px) must omit duplicate .sig-strip")
-        (is (str/includes? hdr-mob "Canvas"))
-        (is (str/includes? hdr-mob "Workspace"))
-        (is (str/includes? hdr-mob "Debug"))
+        (is (str/includes? hdr-mob "Session"))
+        (is (str/includes? hdr-mob "Context"))
+        (is (str/includes? hdr-mob "System"))
         (is (str/includes? sb-mob "sidebar closed sidebar-collapsed") "Sidebar must auto-collapse at viewport-w < 760 even when sidebar-open? is true"))
 
-      ;; 3. Workspace timeline spans full grid above ws-left & ws-right; :debug wraps EVERY .data-table in .table-scroll and renders < 30 ms
+      ;; 3. Session timeline spans full grid above ws-left & ws-right; :debug wraps EVERY .data-table in .table-scroll and renders < 30 ms
       (let [db @conn
-            ws-node (surface/render-surface db db {:conn conn :view-mode :workspace :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
+            ws-node (surface/render-surface db db {:conn conn :view-mode :session :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
             ws-children (vec (mapcat #(if (seq? %) % [%]) (drop 2 ws-node)))
             _ (surface/render-surface db db {:conn conn :view-mode :debug :viewport-w 1440 :viewport-h 900})
             _ (d/transact conn {:tx-data [{:seon.task/id :task/surface-demo :seon.task/summary "Phase 3 cold debug check"}]})
@@ -221,7 +224,6 @@
             w-tight (rwire/build-live-wire-request db1 db1 :agent/root {:conn conn :token-budget 220})
             ctx-txt (rwire/render-agent-context db1 db1 :agent/root {:token-budget 16000})
             roles (mapv :role (:messages w1))]
-        ;; 1. Least-volatile -> most-volatile message framing & expected keys preserved
         (is (= "system" (first roles)))
         (is (seq (:tiles w1)))
         (is (map? (:fit-trace w1)))
@@ -230,16 +232,13 @@
         (is (str/includes? ctx-txt "<walk-context>"))
         (is (str/includes? ctx-txt "Unified Surface Demo Task"))
 
-        ;; 2. Turn 2 with :already-shown repeats ZERO tokens for unchanged entities
         (is (= 0 (get-in w2 [:surface-stats :tokens])))
         (is (= (get-in w2 [:surface-stats :selected])
                (get-in w2 [:surface-stats :unchanged])))
 
-        ;; 3. Tight token budget shrinks total fitted tokens relative to generous budget
         (is (< (get-in w-tight [:surface-stats :tokens])
                (get-in w1 [:surface-stats :tokens])))
 
-        ;; 4. Mutating ONE entity bumps its native ?tx and re-warms ONLY that entity
         (d/transact conn {:tx-data [{:seon.task/id :task/surface-demo :seon.task/summary "Phase 2 mutated summary"}]})
         (let [db2 @conn
               task-eid (:e (first (d/datoms db2 :avet :seon.task/id :task/surface-demo)))
@@ -250,10 +249,8 @@
           (is (pos? (get-in w3 [:surface-stats :unchanged]))
               "Untouched entities must remain :unchanged (0 repeated tokens)"))
 
-        ;; 5. Every ephemeral tail block carries Hiccup from pure ns-map -> ns-map tail renderers
         (is (every? #(some? (:hiccup %)) (:tail-blocks w1)))
 
-        ;; 6. format-eval-output routes through discover-renderers + render-value -> hiccup->text
         (let [ev-vec (mwire/format-eval-output {:handle 'result/e1 :ok? true :value "[true true]"})
               ev-code (mwire/format-eval-output {:handle 'result/e2 :ok? true :value (pr-str "(defn f [x]\n  (inc x))")})
               ev-ref (mwire/format-eval-output {:handle 'result/e3 :ok? true :value "[:seon.task/id :task/surface-demo]" :db @conn})]
@@ -310,9 +307,8 @@
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))))
 
-
 (deftest ^{:cost/ticks 90000000} datastar-view-transitions-live-canvas-streaming-and-main-kv-stability-test
-  (testing "Datastar protocol, View Transitions, live Canvas multi-turn pending UX, and byte-identical :main-branch wire prefix"
+  (testing "Datastar protocol, View Transitions, honest Session active vs idle UX, and byte-identical :main-branch wire prefix"
     ;; 1. datastar-patch-event (1/3/4 arities) & datastar-patch-signals valid SSE JSON
     (let [ev-no-vt (render/datastar-patch-event "<div id=\"a\">hi</div>")
           ev-vt    (render/datastar-patch-event "<div id=\"a\">hi</div>" nil nil true)
@@ -358,7 +354,7 @@
         (is (str/includes? comp-h "evt.isComposing||evt.keyCode===229"))
         (is (str/includes? ch "evt.isComposing||evt.keyCode===229")))
 
-      ;; 4. Multi-turn pending Canvas UX stays on #cv-pending AFTER message is marked seen + renders live stream phase/prose/reasoning!
+      ;; 4. Active multi-turn Session stays on #cv-pending without snapping back; idle-after-evals renders honest #cv-work-summary (NEVER fake "In flight"!)
       (let [m1 (random-uuid)
             m2 (random-uuid)]
         (d/transact conn {:tx-data [{:seon.agent.message/id m1 :seon.agent.message/seq 1 :seon.agent.message/from :user
@@ -374,8 +370,10 @@
                                      :seon.agent.eval/code "(user/source 'demo.mod/compute)" :seon.agent.eval/value "(defn compute ...)"
                                      :seon.agent.eval/seen-messages #{m2}}]})
         (let [db1 @conn
-              ;; Even with agent-states idle/nil (between tool turns), Canvas MUST NOT snap back to "Old finished answer."!
-              html-between (render/hiccup->html (surface/render-surface db1 db1 {:conn conn :view-mode :canvas :agent-states {}}))
+              ;; Active agent between tool turns stays on #cv-pending and NEVER snaps back to "Old finished answer."
+              html-between (render/hiccup->html (surface/render-surface db1 db1 {:conn conn :view-mode :canvas :agent-states {:agent/root :active}}))
+              ;; Idle agent after evals without prose renders clean #cv-work-summary, NEVER fake "In flight"!
+              html-idle    (render/hiccup->html (surface/render-surface db1 db1 {:conn conn :view-mode :canvas :agent-states {}}))
               html-writing (render/hiccup->html
                             (surface/render-surface db1 db1
                                                     {:conn conn :view-mode :canvas :agent-states {:agent/root :active}
@@ -389,7 +387,10 @@
                                                                  :step-chars 0 :chars 400 :reasoning "Inspecting"}}))]
           (is (str/includes? html-between "id=\"cv-pending\""))
           (is (str/includes? html-between "Second multi-turn question"))
-          (is (not (str/includes? html-between "Old finished answer.")) "Canvas must NEVER snap back to old reply mid-run!")
+          (is (not (str/includes? html-between "Old finished answer.")) "Active Session must NEVER snap back to old reply mid-run!")
+          (is (str/includes? html-idle "id=\"cv-work-summary\""))
+          (is (not (str/includes? html-idle "id=\"cv-pending\"")) "Idle agent after evals must NOT show fake In flight banner")
+          (is (str/includes? html-idle "Second multi-turn question"))
           (is (str/includes? html-writing "dot pulsing"))
           (is (str/includes? html-writing "Writing…"))
           (is (str/includes? html-writing "50 tok/s"))
