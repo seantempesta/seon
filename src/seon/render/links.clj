@@ -44,9 +44,11 @@
   ([ref lbl cls]
    (if-let [r (rdata/normalize-inspect-ref ref)]
      [:button {:type "button"
-               :class (if cls (str "ent-link " cls) "ent-link")
-               :on-click (list 'seon.web/inspect-entity! r)}
-      (str lbl)]
+              :class (if cls (str "ent-link " cls) "ent-link")
+              :data-preview-ref (pr-str r)
+              :interestfor "seon-hovercard"
+              :on-click (list 'seon.web/inspect-entity! r)}
+     (str lbl)]
      [:span {:class (or cls "")} (str lbl)]))
   ([a v lbl cls]
    (if (and (qualified-keyword? a) (some? v))
