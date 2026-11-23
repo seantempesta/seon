@@ -56,7 +56,8 @@
                     [:div {:class (str "heat-fill " (lvl-cls lvl)) :style {:width (str (clamp-pct pct) "%")}}]])
                  [:div {:class "mono tiny muted"} (str summary)]])]
     (card "sys-signals-unit" "Operational Signals"
-          [(badge (case level :hot "red" :warm "amber" "green") (str (name (or branch :main)) " · " (name (or level :calm))))]
+          [(el [:seon.branch/name (or branch :main)] (str (or branch :main)) "pill mono tiny")
+           (badge (case level :hot "red" :warm "amber" "green") (name (or level :calm)))]
           [:div {:class "sig-grid"}
            (scard :flow "Flow" (:level flow) (:summary flow) nil (:pulse? flow) '(seon.web/inspect-entity! [:seon.signal/kind :flow]))
            (scard :pressure "Pressure" (:level pressure) (:summary pressure) p-pct false '(seon.web/inspect-entity! [:seon.signal/kind :pressure]))
@@ -82,9 +83,17 @@
                                          (str/starts-with? (str (namespace (:seon.agent/id %))) "example")))
                             (sort-by #(vector (if (:seon.agent/entry? %) 0 1) (str (:seon.agent/id %)))) vec)
                        [])
+             :delegation-calls (if (dh :seon.agent.call/id)
+                                 (->> (take-last 16 (d/datoms db :aevt :seon.agent.call/id))
+                                      (map #(d/pull db '[:seon.agent.call/id :seon.agent.call/caller
+                                                         :seon.agent.call/callee :seon.agent.call/status
+                                                         :seon.agent.call/prompt :seon.agent.call/result-schema] (:e %)))
+                                      (sort-by #(if (= :pending (:seon.agent.call/status %)) 0 1))
+                                      (take 10) vec)
+                                 [])
              :pending-calls (if (dh :seon.agent.call/status)
                               (->> (d/datoms db :avet :seon.agent.call/status :pending)
-                                   (map #(d/pull db '[:seon.agent.call/callee] (:e %)))
+                                   (map #(d/pull db '[:seon.agent.call/callee :seon.agent.call/caller :seon.agent.call/id] (:e %)))
                                    (group-by :seon.agent.call/callee))
                               {})
              :tasks (if (dh :seon.task/id)
@@ -96,9 +105,17 @@
                       [])
              :open-errs (if (dh :seon.error/status)
                           (mapv #(d/pull db '[:seon.error/id :seon.error/kind :seon.error/severity
-                                              :seon.error/message :seon.error/agent :seon.error/var] (:e %))
+                                              :seon.error/message :seon.error/agent :seon.error/var
+                                              :seon.error/branch :seon.error/eval] (:e %))
                                 (take 12 (d/datoms db :avet :seon.error/status :open)))
                           [])
+             :recent-tests (if (dh :seon.test/digest)
+                             (->> (take-last 24 (d/datoms db :aevt :seon.test/digest))
+                                  (map #(d/pull db '[:seon.test/digest :seon.test/var :seon.test/pass? :seon.test/ms] (:e %)))
+                                  (filter :seon.test/var)
+                                  (sort-by #(if (false? (:seon.test/pass? %)) 0 1))
+                                  (take 8) vec)
+                             [])
              :fixes (if (dh :seon.fix/id)
                       (mapv #(d/pull db '[:seon.fix/id :seon.fix/error-class :seon.fix/change-summary :seon.fix/regression-test] (:e %))
                             (take 10 (d/datoms db :aevt :seon.fix/id)))
@@ -147,7 +164,7 @@
                              pct (max 4.0 (min 100.0 (* 100.0 (max 0.0 sc))))]]
                    [:div {:class "ent-row"}
                     (badge "purple" (name (or (:kind hit) :entity)))
-                    (el (:ref hit) (:label hit) "mono tiny strong flex-1")
+                    (el (or (:ref hit) (when (integer? (:eid hit)) [:db/id (:eid hit)])) (:label hit) "mono tiny strong flex-1")
                     [:div {:class "cos-bar"} [:div {:class "cos-fill" :style {:width (str pct "%")}}]]
                     [:span {:class "mono tiny muted"} (str (/ (Math/round (* sc 1000.0)) 1000.0))]])]))))))
 
@@ -170,9 +187,14 @@
        [:div {:class "pill-row"}
         (when (pos? depth) [:span {:class "muted mono tiny"} "↳"])
         (el [:seon.agent/id aid] (rdata/agent-label ag aid) "mono tiny strong")
+        (when-let [p (:seon.agent/parent ag)]
+          (el [:seon.agent/id p] (str "↑" (name p)) "mono tiny muted"))
         (badge "blue" (name (or (:seon.agent/role ag) :worker)))
         (agent-status-badge ag active-set)
-        (when (pos? pend-c) (badge "amber" (str pend-c " call(s)")))]]
+        (when (pos? pend-c)
+          (if-let [cid (:seon.agent.call/id (first (get calls-by-callee aid)))]
+            (el [:seon.agent.call/id cid] (str pend-c " call(s)") "badge amber tiny mono")
+            (badge "amber" (str pend-c " call(s)"))))]]
       [:td (el [:seon.branch/name br] (str br) "mono tiny")]
       [:td (if-let [sc (:seon.agent/scope ag)] (el [:seon.code.ns/name sc] (str sc) "mono tiny") (mut "—"))]
       [:td (if-let [tk (:seon.agent/task ag)] (el [:seon.task/id tk] (str tk) "mono tiny") (mut "—"))]
@@ -195,7 +217,20 @@
             [:div {:class "table-scroll"}
              [:table {:class "data-table"}
               [:thead [:tr [:th "Agent"] [:th "Branch"] [:th "Scope"] [:th "Task"] [:th "Open"]]]
-              [:tbody (mapcat #(render-agent-rows kids active-set (:pending-calls snap) 0 %) roots)]]]))))
+              [:tbody (mapcat #(render-agent-rows kids active-set (:pending-calls snap) 0 %) roots)]]])
+          (when-let [calls (seq (:delegation-calls snap))]
+            [:div {:class "stack-xs"}
+             (kicker (str "Delegation Calls (" (count calls) ")"))
+             (for [c calls
+                   :let [st (or (:seon.agent.call/status c) :pending)
+                         cls (case st :resolved "green" :failed "red" :cancelled "muted" "amber")]]
+               [:div {:class "ent-row"}
+                (el [:seon.agent.call/id (:seon.agent.call/id c)] (name st) (str "badge " cls " tiny mono"))
+                (el [:seon.agent/id (:seon.agent.call/caller c)] (str (:seon.agent.call/caller c)) "mono tiny strong")
+                [:span {:class "muted tiny"} "→"]
+                (el [:seon.agent/id (:seon.agent.call/callee c)] (str (:seon.agent.call/callee c)) "mono tiny strong")
+                (when-let [rs (:seon.agent.call/result-schema c)]
+                  (el [:seon.schema/key rs] (str rs) "pill mono tiny"))])]))))
 
 (defn- render-tasks-section [snap]
   (let [all-t (:tasks snap)
@@ -210,7 +245,7 @@
                           [:tr
                            [:td [:div {:class "stack-xs"}
                                  (el [:seon.task/id (:seon.task/id t)] (or (:seon.task/title t) (str (:seon.task/id t))) "strong tiny")
-                                 (mut (str (:seon.task/id t)))]]
+                                 (el [:seon.task/id (:seon.task/id t)] (str (:seon.task/id t)) "mono tiny muted")]]
                            [:td (if-let [s (:seon.task/scope t)] (el [:seon.code.ns/name s] (str s) "mono tiny") (mut "—"))]
                            [:td (if-let [o (:seon.task/owner t)] (el [:seon.agent/id o] (str o) "mono tiny") (mut "—"))]
                            [:td [:div {:class "pill-row"}
@@ -232,7 +267,9 @@
   (let [brs (if conn (vec (take 20 (sort (d/branches conn)))) [:main])
         open-errs (:open-errs snap)
         fixes (:fixes snap)
+        fix-by-class (into {} (map (juxt :seon.fix/error-class identity)) fixes)
         core-schemas (:core-schemas snap)
+        recent-tests (:recent-tests snap)
         grid-c (if stack? "grid-2 is-stack" "grid-2")]
     (list
      [:div {:class grid-c}
@@ -249,10 +286,15 @@
             (if (empty? open-errs)
               [:p {:class "muted tiny mono"} "Zero open errors."]
               [:div {:class "stack-xs"}
-               (for [e open-errs]
+               (for [e open-errs
+                     :let [mf (get fix-by-class (:seon.error/kind e))]]
                  [:div {:class "notice red tiny mono row-between"}
                   (el [:seon.error/id (:seon.error/id e)] (str (:seon.error/kind e) " — " (:seon.error/message e)) "mono tiny")
-                  (when-let [ag (:seon.error/agent e)] (el [:seon.agent/id ag] (str ag) "mono tiny"))])])
+                  [:div {:class "pill-row"}
+                   (when-let [ag (:seon.error/agent e)] (el [:seon.agent/id ag] (str ag) "pill mono tiny"))
+                   (when-let [v (:seon.error/var e)] (el [:seon.code.var/name v] (name v) "pill mono tiny"))
+                   (when-let [br (:seon.error/branch e)] (el [:seon.branch/name br] (str br) "pill mono tiny"))
+                   (when mf (el [:seon.fix/id (:seon.fix/id mf)] (str "fix: " (:seon.fix/error-class mf)) "badge green tiny mono"))]])])
             (when (seq fixes)
               [:div {:class "stack-xs"}
                (kicker "Recorded Class Fixes")
@@ -265,8 +307,17 @@
            [:div {:class "pill-row"}
             (for [sk core-schemas] (el [:seon.schema/key sk] (str sk) "pill mono tiny"))])
      (card "dbg-tests-unit" "Verification & Test Proofs"
-           [(badge "blue mono" (str (count brs) " branches"))]
-           [:p {:class "muted tiny mono"} "Run reach-selected tests per branch above or inspect any test verdict from Context & Cache."])
+           [(badge "blue mono" (str (count brs) " branches"))
+            (el [:seon.signal/kind :proof] "Inspect Proof Signal →" "pill mono tiny")
+            (btn "nav-pill tiny" '(seon.web/set-view-mode! :context) "Context & Cache →")]
+           (if (seq recent-tests)
+             [:div {:class "pill-row"}
+              (for [tv recent-tests]
+                [:span {:class "ent-chip"}
+                 (el [:seon.test/digest (:seon.test/digest tv)] (if (:seon.test/pass? tv) "PASS" "FAIL")
+                     (str "badge " (if (:seon.test/pass? tv) "green" "red") " tiny mono"))
+                 (el [:seon.code.var/name (:seon.test/var tv)] (name (:seon.test/var tv)) "mono tiny")])]
+             [:p {:class "muted tiny mono"} "Run reach-selected tests per branch above or inspect Proof signal."]))
      [:details {:id "dbg-drill-unit" :class "card fold"}
       [:summary {:class "muted tiny mono"} "Diagnostics & Crash-Recovery Drill"]
       [:div {:class "pill-row" :style {:margin-top "8px"}}
