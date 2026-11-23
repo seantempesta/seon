@@ -1021,15 +1021,15 @@
     (let [src-out (mwire/format-eval-output {:handle 'result/e2 :ok? true :ms 2.0 :ticks 4000 :value (pr-str "(defn f [x]\n  (inc x))")})
           big-map (into {} (map (fn [i] [(keyword (str "k" i)) (apply str (repeat 250 "x"))]) (range 50)))
           map-out (mwire/format-eval-output {:handle 'result/e7 :ok? true :ms 5.0 :value (pr-str big-map)})
-          big-str (str/join "\n" (map #(str "line-" % "-" (apply str (repeat 90 "a"))) (range 120)))
+          big-str (str/join "\n" (map #(str "line-" % "-" (apply str (repeat 90 "a"))) (range 300)))
           str-out (mwire/format-eval-output {:handle 'result/e8 :ok? true :ms 3.0 :value (pr-str big-str)})]
       (is (str/includes? src-out "(defn f [x]\n  (inc x))"))
       (is (not (str/includes? src-out "\\n")) "Clojure string values must render unescaped without double pr-str!")
       (is (< (count map-out) 6500))
       (is (str/includes? map-out "Large map (50 keys"))
       (is (str/includes? map-out "result/e7"))
-      (is (< (count str-out) 8000))
-      (is (str/includes? str-out "Large string (120 lines"))
+      (is (< (count str-out) 24000))
+      (is (str/includes? str-out "Large string (300 lines"))
       (is (str/includes? str-out "result/e8")))))
 
 (deftest ^{:cost/ticks 60000000} ui-sidebar-ordering-datastar-morph-and-stream-walk-stability-test

@@ -19,7 +19,9 @@
             [seon.render.print :as sprint]
             [seon.schema :as schema]
             [seon.store :as store]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.code.parse :as parse]
+            [seon.fork.helpers :as fhelpers]))
 
 (deftest ^{:cost/ticks 60000000} string-no-20-line-clip-and-expand-out-test
   (testing "120-line strings <= 8000 chars render verbatim without 20-line clipping, >8000 summarizes, and expand! supports {:out? true}"
@@ -252,3 +254,31 @@
         (is (str/includes? (str pr) "variadic"))
         (is (empty? (hcontracts/broken-doc-refs db))))
       (is (= 110000000 (:cost/ticks (meta (requiring-resolve (quote seon.core-test/kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test)))))))))
+
+(deftest ^{:cost/ticks 90000000} wave2-trace-class-fixes-test
+  (testing "Wave E0: ex-data on bare :set schema error, ::alias/kw in add-fn!, 24k verbatim string, source opts map, and @(user/db) hint"
+    (with-test-store [{:keys [conn]}]
+      (binding [fcalls/*agent-ctx* {:conn conn :main-conn conn :branch :main :agent-id :ag/test-e0}]
+        (let [ns-res (edit/add-fn! (quote demo.e0) "(ns demo.e0 (:require [clojure.string :as s]))")
+              kw-res (edit/add-fn! (quote demo.e0) "(defn kw-fn [x] [::s/ok x])")
+              bad-sch (edit/set-meta! (quote demo.e0/kw-fn) {:malli/schema [:=> [:cat :set] :any]})
+              src-out (fhelpers/source (quote demo.e0/kw-fn) {:out? true})
+              src-slice (fhelpers/source (quote demo.e0/kw-fn) {:offset 0 :limit 1})]
+          (is (true? (:ok? ns-res)))
+          (is (true? (:ok? kw-res)) (str "add-fn! must read ::alias/kw in target ns: " (pr-str kw-res)))
+          (is (false? (:ok? bad-sch)))
+          (is (= :invalid-malli-schema (:error bad-sch)))
+          (is (some? (:ex-data bad-sch)))
+          (is (str/includes? (str (:hint bad-sch)) "Failing sub-schema: :set"))
+          (is (str/includes? (str (:hint bad-sch)) "[:set :any]"))
+          (is (string? src-out))
+          (is (str/includes? src-out "kw-fn"))
+          (is (= src-out src-slice)))))
+    (let [s16k (str/join "\n" (map #(str "line-" % " " (apply str (repeat 60 "a"))) (range 1 240)))
+          wired (mwire/format-eval-output {:handle (quote result/e20) :ok? true :value (pr-str s16k)})
+          hinted (parse/enrich-eval-error "@(user/db)" "class datahike.db.DB cannot be cast to class java.util.concurrent.Future" {})]
+      (is (> (count s16k) 15000))
+      (is (< (count s16k) 24000))
+      (is (str/includes? wired "line-239 ") "16k string must render verbatim under 24k default cap")
+      (is (not (str/includes? wired "Large string")))
+      (is (str/includes? hinted "do NOT deref")))))
