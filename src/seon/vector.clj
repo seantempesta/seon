@@ -10,6 +10,7 @@
   (:import [java.io InputStream OutputStream]
            [java.security MessageDigest]
            [java.util.concurrent TimeUnit]))
+{}
 
 (def default-coarse-dims 128)
 
