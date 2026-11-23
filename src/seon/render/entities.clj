@@ -3,7 +3,9 @@
    Hyperlinks entities & nested refs via semantic `<button type=\"button\" class=\"ent-link\">`
    and honors optional rule-emitted params (`:seon.ui/highlight-terms`, `:seon.ui/expand-section`,
    `:seon.ui/show-callers?`, `:seon.view/token-budget`)."
-  (:require [clojure.string :as str])
+  (:require [clojure.string :as str]
+            [seon.render.links :as rlinks]
+            [seon.render.tails :as rtails])
   (:import [java.util.regex Pattern]))
 
 (defn- clip [x n] (let [s (if (nil? x) "" (str x))] (if (> (count s) n) (str (subs s 0 (max 1 (dec n))) "…") s)))
@@ -45,24 +47,15 @@
       (if (= 1 (count out)) (first out) (into [:span] out)))))
 
 (defn- el
-  ([a v] (el a v (str v) "mono"))
-  ([a v lbl] (el a v lbl "mono strong"))
-  ([a v lbl cls]
-   (if (and (qualified-keyword? a) (some? v))
-     [:button {:type "button" :class (str "ent-link" (when cls (str " " cls)))
-               :title (str "Inspect " (pr-str [a v])) :on-click (list 'seon.web/inspect-entity! [a v])}
-      (str lbl)]
-     [:span {:class (or cls "")} (str lbl)])))
+  ([a v] (rlinks/ent-link a v (str v) "mono"))
+  ([a v lbl] (rlinks/ent-link a v lbl "mono strong"))
+  ([a v lbl cls] (rlinks/ent-link a v lbl cls)))
 
-(defn- ml [a v] (when (some? v) (el a v (str v) "muted tiny mono ent-meta")))
-(defn- badge [cls text] [:span {:class (str "badge " cls)} (str text)])
-(defn- pill [text] [:span {:class "pill mono"} (str text)])
-(defn- lp [a v lbl] (el a v lbl "pill mono"))
-
-(defn- kv-dl [pairs]
-  (let [rows (mapcat (fn [[k v]] (when (and (some? v) (or (vector? v) (not (str/blank? (str v)))))
-                                   [[:dt (str k)] [:dd (if (vector? v) v (str v))]])) pairs)]
-    (when (seq rows) (into [:dl {:class "kv-grid"}] rows))))
+(defn- ml [a v] (rlinks/meta-link a v))
+(defn- badge [cls text] (rlinks/badge cls text))
+(defn- lp [a v lbl] (rlinks/link-pill a v lbl))
+(defn- kv-dl [pairs] (rlinks/kv-dl pairs))
+(defn- pill-list [label xs attr limit] (rlinks/pill-list label xs attr limit))
 
 (defn- code-block
   ([txt] (code-block txt false))
@@ -72,11 +65,6 @@
 (defn- doc-box
   ([x n] (doc-box x n nil))
   ([x n terms] (when-let [s (nonblank x)] [:p {:class "doc-box sm-copy"} (hl (clip s n) terms)])))
-
-(defn- pill-list [label xs attr limit]
-  (when-let [items (seq-items xs)]
-    (into [:div {:class "pill-row"} (when label [:span {:class "muted tiny"} label])]
-          (map #(if attr (lp attr % (str %)) (pill (str %))) (take limit items)))))
 
 (defn- chip [min-w cls & xs]
   {:seon.ui/hiccup (into [:span {:class (str "ent-chip " cls) :data-min-width min-w}] (remove nil? xs))})
@@ -135,14 +123,18 @@
          [(var-badge v) (el :seon.code.var/name name (str name)) (when private? (badge "muted" "private"))]
          (ml :seon.code.ns/name ns)
          (doc-box doc (bl m 800) (hl-terms m))
-         (kv-dl [["arglists" (when (seq-items arglists) (fmt-pr arglists 140))] ["form" form] ["big-o" big-o]
+         (kv-dl [["ns" (when ns (el :seon.code.ns/name ns))]
+                 ["arglists" (when (seq-items arglists) (fmt-pr arglists 140))]
+                 ["form" (when form (el :seon.code.form/key form))]
+                 ["big-o" big-o]
                  ["ticks-budget" (fmt-num ticks-budget)] ["bytes-budget" (fmt-num bytes-budget)]
-                 ["refs" (when rs (str (count rs) " ref(s)"))] ["ops" (when os (str/join ", " (map str os)))]])
+                 ["ops" (when os (str/join ", " (map str os)))]])
+         (when rs (pill-list "refs:" rs :seon.code.var/name 12))
          (when cs (pill-list "callers:" cs :seon.code.var/name 12))
          (when (some? schema) (code-block (fmt-pr schema (bl m 600))))
          (when-let [s (nonblank src)] (code-block (clip s (bl m (if exp? 6000 4000))) exp?)))))
 
-;; Error (:seon.error/entity + optional :seon.fix/entity)
+;; Error (:seon.error/entity + optional :seon.fix/entity) & Fix (:seon.fix/entity)
 
 (defn- err-sev-cls [sev] (case sev :warning "amber" "red"))
 (defn- err-st-cls [st] (case st :resolved "green" :suppressed "muted" "amber"))
@@ -162,8 +154,10 @@
     [:div {:class (str "ent-nested" (when exp? " is-expanded"))}
      [:div {:class "pill-row"} (badge "green" "fix") (el :seon.fix/id id (str (or error-class id)) "mono tiny strong")]
      (when (some? root-cause) [:p {:class "sm-copy"} (hl (clip root-cause (if exp? 480 260)) terms)])
-     (kv-dl [["change" (clip change-summary (if exp? 480 260))]
-             ["regression-test" (when regression-test (el :seon.code.var/name regression-test))]
+     (kv-dl [["id" (when id (el :seon.fix/id id))]
+             ["error-class" (when error-class (if id (el :seon.fix/id id (str error-class)) (str error-class)))]
+             ["change" (clip change-summary (if exp? 480 260))]
+             ["regression-test" (when (qualified-symbol? regression-test) (el :seon.code.var/name regression-test))]
              ["before/after" (when (some? before-after) (clip before-after 180))]])]))
 
 (defn render-error-card
@@ -172,7 +166,7 @@
                              [:seon.fix/entity {:optional true} :seon.fix/entity]]]
                   [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1500000}
-  [{{:seon.error/keys [id kind severity source status message agent branch at var data]} :seon.error/entity
+  [{{:seon.error/keys [id kind severity source status message agent branch at var eval data]} :seon.error/entity
     fix :seon.fix/entity :as m}]
   (let [terms (hl-terms m) msg (clip message (bl m 600))]
     (box "ent-card" 440 "ent-error"
@@ -184,9 +178,39 @@
           (if (str/blank? msg) "(no message)" (hl msg terms))]
          (kv-dl [["agent" (when agent (el :seon.agent/id agent))]
                  ["branch" (when branch (el :seon.branch/name branch))]
-                 ["var" (when var (el :seon.code.var/name var))] ["at" (fmt-num at)] ["id" id]])
+                 ["var" (when var (el :seon.code.var/name var))]
+                 ["eval" (when eval (el :seon.agent.eval/id eval))]
+                 ["at" (fmt-num at)]
+                 ["id" (when id (el :seon.error/id id))]])
          (when (and (map? data) (seq data)) (code-block (fmt-pr data (bl m 400))))
          (render-nested-fix fix (= :fix (:seon.ui/expand-section m)) terms))))
+
+(defn render-fix-chip
+  "Compact chip (~180px) for `:seon.fix/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.fix/entity :seon.fix/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 500000}
+  [{{:seon.fix/keys [id error-class regression-test]} :seon.fix/entity}]
+  (chip 180 "ent-fix" (badge "green" "fix")
+        (el :seon.fix/id id (str (or error-class id)))
+        (when (qualified-symbol? regression-test) (el :seon.code.var/name regression-test (name regression-test) "muted tiny mono"))))
+
+(defn render-fix-card
+  "Detail card (~440px) for `:seon.fix/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.fix/entity :seon.fix/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 1200000}
+  [{{:seon.fix/keys [id error-class symptom root-cause change-summary regression-test before-after merge-tx]} :seon.fix/entity :as m}]
+  (let [terms (hl-terms m)]
+    (box "ent-card" 440 "ent-fix"
+         [(badge "green" "fix") (el :seon.fix/id id (str (or error-class id)))]
+         (when (qualified-symbol? regression-test) (ml :seon.code.var/name regression-test))
+         (doc-box symptom (bl m 360) terms)
+         (doc-box root-cause (bl m 480) terms)
+         (kv-dl [["id" (el :seon.fix/id id)]
+                 ["error-class" (el :seon.fix/id id (str error-class))]
+                 ["change" (clip change-summary (bl m 480))]
+                 ["regression-test" (when (qualified-symbol? regression-test) (el :seon.code.var/name regression-test))]
+                 ["before/after" (when (some? before-after) (clip before-after 240))]
+                 ["merge-tx" (fmt-num merge-tx)]]))))
 
 ;; Task (:seon.task/entity)
 
@@ -211,8 +235,9 @@
          (ml :seon.task/id id)
          [:div {:class "pill-row"}
           (when scope (lp :seon.code.ns/name scope (str "scope " scope)))
-          (when owner (lp :seon.agent/id owner (str "owner " owner)))
-          (when ns' (pill (str (count ns') " needs"))) (when ts' (pill (str (count ts') " tests")))]
+          (when owner (lp :seon.agent/id owner (str "owner " owner)))]
+         (when ns' (pill-list "needs:" ns' :seon.task/id 6))
+         (when ts' (pill-list "tests:" ts' :seon.code.var/name 6))
          (when snip [:p {:class "sm-copy"} (hl (one-line snip (bl m 200)) (hl-terms m))]))))
 
 (defn render-task-full
@@ -227,7 +252,7 @@
          (ml :seon.task/id id)
          (kv-dl [["id" (el :seon.task/id id)] ["scope" (when scope (el :seon.code.ns/name scope))]
                  ["owner" (when owner (el :seon.agent/id owner))]
-                 ["created-by" (when created-by (el :seon.agent/id created-by))]
+                 ["created-by" (when created-by (if (qualified-keyword? created-by) (el :seon.agent/id created-by) (str created-by)))]
                  ["template" (when template (el :seon.task/id template))] ["done?" (str (boolean done?))]])
          (doc-box plan (bl m (if exp? 2400 1200)) terms)
          (when-let [s (nonblank summary)] [:p {:class "sm-copy muted"} "Summary: " (hl (clip s (bl m 500)) terms)])
@@ -243,21 +268,30 @@
   [{{:seon.schema/keys [key type]} :seon.schema/entity}]
   (chip 180 "ent-schema" (badge "purple" (kw-label type "schema")) (el :seon.schema/key key (str key))))
 
+(defn- schema-form-renderer [form]
+  (when (and (vector? form) (map? (second form)))
+    (let [r (:seon.render/hiccup (second form))]
+      (when (qualified-symbol? r) r))))
+
 (defn render-schema-detail
   "Detail card (~460px) for `:seon.schema/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.schema/entity :seon.schema/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
   [{{:seon.schema/keys [key form doc render type keys optional-keys ref-targets]} :seon.schema/entity :as m}]
-  (let [ks (seq-items keys) oks (seq-items optional-keys) refs (seq-items ref-targets)]
+  (let [rsym (or (when (qualified-symbol? render) render) (schema-form-renderer form))
+        ks (or (seq-items (:seon.ui/schema-keys m)) (seq-items keys))
+        oks (or (seq-items (:seon.ui/schema-optional-keys m)) (seq-items optional-keys))
+        refs (or (seq-items (:seon.ui/schema-ref-targets m)) (seq-items ref-targets))
+        attr-for (fn [xs] (if (every? qualified-keyword? xs) :seon.schema/key :db/id))]
     (box "ent-card" 460 "ent-schema"
          [(badge "purple" (kw-label type "schema")) (el :seon.schema/key key (str key))]
-         (ml :seon.code.var/name render)
+         (ml :seon.code.var/name rsym)
          (doc-box doc (bl m 400) (hl-terms m))
          (kv-dl [["key" (el :seon.schema/key key)] ["type" type]
-                 ["keys" (when ks (str (count ks) " required"))]
-                 ["optional-keys" (when oks (str (count oks) " optional"))]
-                 ["ref-targets" (when refs (str (count refs) " target(s)"))]])
-         (when refs (pill-list "targets:" refs :seon.schema/key 8))
+                 ["renderer" (when rsym (el :seon.code.var/name rsym))]])
+         (when ks (pill-list "keys:" ks (attr-for ks) 14))
+         (when oks (pill-list "optional-keys:" oks (attr-for oks) 14))
+         (when refs (pill-list "ref-targets:" refs (attr-for refs) 10))
          (code-block (fmt-pr form (bl m 900))))))
 
 ;; Doc (:seon.code.doc/entity)
@@ -275,12 +309,18 @@
   {:malli/schema [:=> [:cat [:map [:seon.code.doc/entity :seon.code.doc/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
   [{{:seon.code.doc/keys [id path order heading body references]} :seon.code.doc/entity :as m}]
-  (let [refs (seq-items references)]
+  (let [drefs (seq-items (:seon.ui/doc-refs m))
+        raw-refs (seq-items references)]
     (box "ent-full" 520 "ent-doc"
          [(badge "amber" "doc") (el :seon.code.doc/id id (str (or heading id)) "strong")]
-         (str (or path id))
-         (kv-dl [["id" (el :seon.code.doc/id id)] ["path" path] ["order" (fmt-num order)]
-                 ["references" (when refs (str (count refs) " linked ref(s)"))]])
+         (el :seon.code.doc/id id (str (or path id)) "muted tiny mono ent-meta")
+         (kv-dl [["id" (el :seon.code.doc/id id)]
+                 ["path" (when path (el :seon.code.doc/id id path))]
+                 ["order" (fmt-num order)]])
+         (cond
+           drefs (pill-list "references:" drefs :ref-pair 12)
+           raw-refs (pill-list "references:" raw-refs :db/id 12)
+           :else nil)
          [:div {:class "doc-box sm-copy"} (hl (clip body (bl m 2400)) (hl-terms m))])))
 
 ;; Test Verdict (:seon.test/verdict)
@@ -327,8 +367,9 @@
   {:malli/schema [:=> [:cat [:map [:seon.agent.eval/entity :seon.agent.eval/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1500000}
   [{{:seon.agent.eval/keys [id agent turn handle result-schema intent code value out error ms ticks bytes
-                            prompt-tokens cache-hit-tokens]} :seon.agent.eval/entity :as m}]
-  (let [err (nonblank error)]
+                            prompt-tokens cache-hit-tokens touched]} :seon.agent.eval/entity :as m}]
+  (let [err (nonblank error)
+        t-refs (seq-items touched)]
     (box "ent-card" 480 "ent-eval"
          [(el :seon.agent.eval/id id (str (or handle (str "turn " turn))) (str "badge " (if err "red" "purple")))
           (el :seon.agent/id agent (str agent))
@@ -339,8 +380,47 @@
          (if err [:div {:class "notice red mono tiny"} (clip err 500)]
              (when-let [v (nonblank value)] (code-block (clip v (bl m 600)))))
          (when-let [o (nonblank out)] [:pre {:class "code-box tiny muted"} [:code (clip o 300)]])
-         (kv-dl [["turn" (fmt-num turn)] ["ticks" (fmt-num ticks)] ["bytes" (fmt-num bytes)]
-                 ["prompt-tokens" (fmt-num prompt-tokens)] ["cache-hit-tokens" (fmt-num cache-hit-tokens)]]))))
+         (kv-dl [["id" (el :seon.agent.eval/id id)]
+                 ["agent" (el :seon.agent/id agent)]
+                 ["result-schema" (when result-schema (el :seon.schema/key result-schema))]
+                 ["turn" (el :seon.agent.eval/id id (str "T" turn))]
+                 ["ticks" (fmt-num ticks)] ["bytes" (fmt-num bytes)]
+                 ["prompt-tokens" (fmt-num prompt-tokens)] ["cache-hit-tokens" (fmt-num cache-hit-tokens)]])
+         (when t-refs (pill-list "touched:" t-refs :ref 10)))))
+
+;; Delegation Call (:seon.agent.call/entity)
+
+(defn- call-st-cls [st] (case st :resolved "green" :failed "red" :cancelled "muted" "amber"))
+
+(defn render-call-row
+  "Compact row (~220px) for `:seon.agent.call/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.agent.call/entity :seon.agent.call/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 500000}
+  [{{:seon.agent.call/keys [id caller callee status prompt]} :seon.agent.call/entity}]
+  (row 220 "ent-call"
+       (el :seon.agent.call/id id (kw-label status "pending") (str "badge " (call-st-cls status)))
+       (el :seon.agent/id caller (str caller) "mono tiny strong")
+       [:span {:class "muted tiny"} "→"]
+       (el :seon.agent/id callee (str callee) "mono tiny strong")
+       [:span {:class "muted tiny"} (one-line prompt 60)]))
+
+(defn render-call-card
+  "Detail card (~440px) for `:seon.agent.call/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.agent.call/entity :seon.agent.call/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 1000000}
+  [{{:seon.agent.call/keys [id caller callee status prompt result-schema result error parent-call]} :seon.agent.call/entity :as m}]
+  (box "ent-card" 440 "ent-call"
+       [(el :seon.agent.call/id id (kw-label status "pending") (str "badge " (call-st-cls status)))
+        (el :seon.agent/id caller (str caller)) [:span {:class "muted"} "→"] (el :seon.agent/id callee (str callee))]
+       (when result-schema (ml :seon.schema/key result-schema))
+       (doc-box prompt (bl m 480) (hl-terms m))
+       (kv-dl [["id" (el :seon.agent.call/id id)]
+               ["caller" (el :seon.agent/id caller)]
+               ["callee" (el :seon.agent/id callee)]
+               ["result-schema" (when result-schema (el :seon.schema/key result-schema))]
+               ["parent-call" (when parent-call (el :seon.agent.call/id parent-call))]])
+       (when (some? result) (code-block (fmt-pr result (bl m 480))))
+       (when (some? error) [:div {:class "notice red mono tiny"} (fmt-pr error 320)])))
 
 ;; Namespace (:seon.code.ns/entity)
 
@@ -359,11 +439,11 @@
   (let [reqs (seq-items requires)]
     (box "ent-card" 400 "ent-ns"
          [(badge "blue" "ns") (el :seon.code.ns/name name (str name))]
-         (str (or path ""))
+         (when path (el :seon.code.ns/name name (str path) "muted tiny mono ent-meta"))
          (doc-box doc (bl m 500) (hl-terms m))
-         (kv-dl [["namespace" (el :seon.code.ns/name name)] ["path" path]
-                 ["requires" (when reqs (str (count reqs) " ns"))]])
-         (pill-list nil requires :seon.code.ns/name 14))))
+         (kv-dl [["namespace" (el :seon.code.ns/name name)]
+                 ["path" (when path (el :seon.code.ns/name name (str path)))]])
+         (when reqs (pill-list "requires:" reqs :seon.code.ns/name 14)))))
 
 ;; Agent (:seon.agent/entity)
 
@@ -390,12 +470,13 @@
          [(badge "blue" (kw-label role "worker")) (el :seon.agent/id id (str id)) (badge scls slbl)]
          (ml :seon.branch/name br)
          (when-let [g (nonblank goal)] [:p {:class "sm-copy"} (hl (clip g 360) (hl-terms m))])
-         (kv-dl [["label" label] ["branch" (el :seon.branch/name br)]
+         (kv-dl [["label" (when label (el :seon.agent/id id label))]
+                 ["branch" (el :seon.branch/name br)]
                  ["scope" (when scope (el :seon.code.ns/name scope))]
                  ["task" (when task (el :seon.task/id task))]
                  ["parent" (when parent (el :seon.agent/id parent))]
-                 ["pinned" (when pins (str (count pins) " ref(s)"))]
-                 ["memory" (when mem (str (count mem) " note(s)"))]]))))
+                 ["memory" (when mem (str (count mem) " note(s)"))]])
+         (when pins (pill-list "pinned:" pins :ref 10)))))
 
 ;; Rule (:seon.rule/entity)
 
@@ -411,132 +492,61 @@
   {:malli/schema [:=> [:cat [:map [:seon.rule/entity :seon.rule/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
   [{{:seon.rule/keys [id doc category stratum enabled? target query assert]} :seon.rule/entity :as m}]
-  (box "ent-card" 480 "ent-rule"
-       [(badge (if enabled? "green" "muted") (if enabled? "enabled" "disabled"))
-        (badge "amber" (str "stratum " stratum))
-        (when category (badge "blue" (kw-label category "rule")))
-        (el :seon.rule/id id (str id))]
-       (when target (str "target " target))
-       (doc-box doc (bl m 400) (hl-terms m))
-       (kv-dl [["id" (el :seon.rule/id id)] ["stratum" (fmt-num stratum)] ["category" category] ["target" target]])
-       (when (some? query) (code-block (fmt-pr query (bl m 700))))
-       (when (some? assert) (code-block (fmt-pr assert (bl m 500))))))
+  (let [r-schs (seq-items (:seon.ui/rule-schemas m))
+        r-fns (seq-items (:seon.ui/rule-fns m))]
+    (box "ent-card" 480 "ent-rule"
+         [(badge (if enabled? "green" "muted") (if enabled? "enabled" "disabled"))
+          (badge "amber" (str "stratum " stratum))
+          (when category (badge "blue" (kw-label category "rule")))
+          (el :seon.rule/id id (str id))]
+         (when target (str "target " target))
+         (doc-box doc (bl m 400) (hl-terms m))
+         (kv-dl [["id" (el :seon.rule/id id)] ["stratum" (fmt-num stratum)] ["category" category] ["target" target]])
+         (when r-schs (pill-list "schemas:" r-schs :seon.schema/key 10))
+         (when r-fns (pill-list "fns:" r-fns :seon.code.var/name 10))
+         (when (some? query) (code-block (fmt-pr query (bl m 700))))
+         (when (some? assert) (code-block (fmt-pr assert (bl m 500)))))))
 
-;; Ephemeral Tail Blocks (pure `ns-map -> ns-map` Hiccup renderers)
+;; Ephemeral Tail Blocks (delegating to `seon.render.tails`)
 
 (defn render-branch-status-tail
   "Pure `ns-map -> ns-map` Hiccup renderer for branch delta, turn budget, proofs, and branch errors."
   {:malli/schema [:=> [:cat [:map [:seon.tail/branch-status :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 500000}
-  [{{:keys [branch max-tx branch-edited main-drifted branch-errors last-proofs show-budget? turns-used max-turns rem-turns]}
-    :seon.tail/branch-status}]
-  (when (or (seq branch-edited) (seq branch-errors) last-proofs (seq main-drifted) show-budget?)
-    (let [n (count branch-edited)
-          ed-s (when (pos? n) (str " (" (str/join ", " (take 6 (sort branch-edited))) (when (> n 6) (str " +" (- n 6) " more")) ")"))
-          sync-s (if (empty? main-drifted) "up-to-date" (str (count main-drifted) " form(s) moved on :main"))]
-      {:tag "branch-status"
-       :seon.ui/hiccup
-       [:section {:class "tail-block" :data-min-width 240}
-        [:p (str "branch=" branch " @ tx " max-tx " | edited-forms=" n ed-s " | main-sync=" sync-s)]
-        (when show-budget? [:p (str "TURN BUDGET: turn " turns-used " / " max-turns " (" rem-turns " remaining).")])
-        (when (seq main-drifted) [:p (str "MAIN DRIFT: :main updated " (str/join ", " (take 5 (sort main-drifted))))])
-        (when last-proofs
-          [:p (str "AUTO-PROOFS (tx " (:tx last-proofs) "): " (if (:ok? last-proofs) "PASS" "FAIL")
-                   " (" (:passed last-proofs 0) "/" (:ran last-proofs 0) " in " (:ms last-proofs 0.0) " ms)")])
-        (when (seq branch-errors)
-          [:div [:p (str "MERGE-BLOCKING HEALTH ERRORS (" (count branch-errors) "):")]
-           (into [:ul] (for [e (take 5 branch-errors)]
-                         [:li (str "[:" (name (or (:class e) :error)) "] " (:subject e) " — " (:message e))]))])]})))
+  [m]
+  (rtails/render-branch-status-tail m))
 
 (defn render-scoped-health-tail
   "Pure `ns-map -> ns-map` Hiccup renderer for scope health alerts (nil when clean)."
   {:malli/schema [:=> [:cat [:map [:seon.tail/scoped-health :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 500000}
-  [{{:keys [scope problems]} :seon.tail/scoped-health}]
-  (when (seq problems)
-    {:tag "scoped-health"
-     :seon.ui/hiccup
-     [:section {:class "tail-block" :data-min-width 220}
-      [:p (str "Health & efficiency alerts for " scope ":")]
-      (into [:ul] (for [p (take 6 problems)]
-                    [:li (str "[" (name (or (:severity p) :warning)) " :" (name (or (:class p) :issue)) "] "
-                              (:subject p) " — " (:message p)
-                              (when (:fix p) " (auto-fixable via (user/autofix-health!))"))]))]}))
+  [m]
+  (rtails/render-scoped-health-tail m))
 
 (defn render-activity-tail
   "Pure `ns-map -> ns-map` Hiccup renderer for open calls, sub-agents, errors, and live records."
   {:malli/schema [:=> [:cat [:map [:seon.tail/activity :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 1000000}
-  [{{:keys [scope incoming outgoing open-errors samples]} :seon.tail/activity}]
-  (let [e-hs (keep #(when (and (map? %) (contains? % :seon.error/kind))
-                      (:seon.ui/hiccup (render-error-badge {:seon.error/entity %}))) (take 4 open-errors))]
-    (when (or (seq incoming) (seq outgoing) (seq e-hs) (seq samples))
-      {:tag "neighborhood-activity"
-       :seon.ui/hiccup
-       [:section {:class "tail-block" :data-min-width 240}
-        (when (seq incoming)
-          [:div [:p "Open incoming calls to answer via (user/answer! call-id val):"]
-           (into [:ul] (for [c incoming]
-                         [:li (str (pr-str (:seon.agent.call/id c)) " from " (:seon.agent.call/caller c)
-                                   (when (:seon.agent.call/result-schema c) (str " schema=" (:seon.agent.call/result-schema c)))
-                                   ": " (one-line (:seon.agent.call/prompt c) 100))]))])
-        (when (seq outgoing)
-          [:div [:p "Outgoing delegated calls:"]
-           (into [:ul] (for [c outgoing]
-                         [:li (str (:seon.agent.call/callee c) " [" (kw-label (:seon.agent.call/status c) "pending") "]: "
-                                   (one-line (:seon.agent.call/prompt c) 80))]))])
-        (when (seq e-hs) (into [:div [:p "Open errors:"]] e-hs))
-        (when (seq samples)
-          [:div [:p (str "Recent live data matching " scope " schemas:")]
-           (into [:ul] (for [{:keys [attr tx preview]} samples] [:li (str "tx " tx " (" attr "): " preview)]))])]})))
+  [m]
+  (rtails/render-activity-tail m render-error-badge))
 
 (defn render-inbox-tail
   "Pure `ns-map -> ns-map` Hiccup renderer for unread inbox messages."
   {:malli/schema [:=> [:cat [:map [:seon.tail/inbox :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 500000}
-  [{{:keys [unread]} :seon.tail/inbox}]
-  (when (seq unread)
-    {:tag "unread-inbox"
-     :seon.ui/hiccup
-     [:section {:class "tail-block" :data-min-width 200}
-      [:p (str "Unread inbox (" (count unread) "):")]
-      (into [:ul] (for [m (take 6 unread)]
-                    [:li (str (or (:seon.agent.message/from m) :user)
-                              " [" (kw-label (:seon.agent.message/type m) "chat") "]: "
-                              (one-line (:seon.agent.message/body m) 120))]))]}))
+  [m]
+  (rtails/render-inbox-tail m))
 
 (defn render-system-health-tail
   "Pure `ns-map -> ns-map` Hiccup renderer for ambient operational signals & system health."
   {:malli/schema [:=> [:cat [:map [:seon.tail/system-health :map]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
-  [{snap :seon.tail/system-health}]
-  (let [{:keys [level branch flow pressure context proof health]} snap]
-    {:tag "system-health"
-     :seon.ui/hiccup
-     [:section {:class "tail-block" :data-min-width 240}
-      [:p (str "System health (" (kw-label branch "main") "): " (if (:ok? health) "OK" "ERRORS")
-               " · level=" (kw-label level "calm") " · " (:summary health))]
-      [:ul [:li (str "Flow: " (:summary flow))] [:li (str "Pressure: " (:summary pressure))]
-       [:li (str "Context: " (:summary context))] [:li (str "Proof: " (:summary proof))]]]}))
+  [m]
+  (rtails/render-system-health-tail m))
 
 (defn render-viewport-tail
   "Pure `ns-map -> ns-map` Hiccup renderer for live WKWebView screenshot & DOM metadata."
   {:malli/schema [:=> [:cat [:map [:seon.tail/viewport :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 500000}
-  [{{:keys [snapshot enabled? vision?]} :seon.tail/viewport}]
-  (when (and (map? snapshot) enabled?)
-    (let [dom (:dom snapshot)
-          dom-s (when (map? dom)
-                  (not-empty (str/join " · " (remove nil? [(when-not (str/blank? (str (:viewing dom))) (str "viewing=" (:viewing dom)))
-                                                           (when-not (str/blank? (str (:mode dom))) (str "mode=" (:mode dom)))
-                                                           (when (:theme dom) (str "theme=" (:theme dom)))
-                                                           (when (some? (:overflowX dom)) (str "overflowX=" (:overflowX dom)))
-                                                           (when (some? (:svgCount dom)) (str "svgs=" (:svgCount dom)))]))))]
-      (cond-> {:tag "live-viewport"
-               :attrs {:route (:route snapshot "/") :size (str (:width snapshot 1280) "x" (:height snapshot 820))}
-               :seon.ui/hiccup
-               [:section {:class "tail-block" :data-min-width 220}
-                [:p "Current live WKWebView screenshot (ephemeral end-of-context frame)."]
-                (when dom-s [:p (str "DOM: " dom-s)])]}
-        (and vision? (:base64 snapshot))
-        (assoc :image {:mime (or (:mime snapshot) "image/jpeg") :base64 (:base64 snapshot) :raw snapshot})))))
+  [m]
+  (rtails/render-viewport-tail m))
