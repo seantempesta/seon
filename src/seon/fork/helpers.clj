@@ -531,4 +531,6 @@
       (when-let [ipr (try (requiring-resolve 'seon.render.print/install-user-helpers!) (catch Throwable _ nil))]
         (ipr u (fn [] *agent-ctx*)))
       (when-let [isb (try (requiring-resolve 'seon.signals.scoreboard/install-user-helpers!) (catch Throwable _ nil))]
-        (isb u (fn [] *agent-ctx*)))))))
+        (isb u (fn [] *agent-ctx*)))
+      (when-let [ist (try (requiring-resolve 'seon.render.status/install-user-helpers!) (catch Throwable _ nil))]
+        (ist u))))))
