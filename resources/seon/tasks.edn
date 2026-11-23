@@ -161,7 +161,7 @@
   :seon.task/plan "",
   :seon.task/scope seon.store,
   :seon.task/title "Centralize Datahike cache-key helpers in seon.store and fix cross-store cache keys"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :seon.wave-e2/shrink-code-monoliths,
   :seon.task/plan "",
   :seon.task/scope seon.code,
@@ -175,6 +175,7 @@
   :seon.task/id :seon.wave-e2/unify-hiccup-to-text,
   :seon.task/plan "",
   :seon.task/scope seon.render,
+  :seon.task/summary "Unified all Hiccup->text converters around ONE zero-dependency implementation: new leaf ns seon.render.text/hiccup->text (ent-link buttons keep plain text, UI chrome buttons dropped, raw-html nodes invisible, Markdown headings/lists/tables/code fences). seon.render/hiccup->text, seon.render.fit.measure/hiccup->text-fallback and seon.render.print.emit/hiccup->md are now thin delegates (removed the duplicate walker in fit.measure, the divergent inline-code/heading walker in print.emit and the dead print.emit/hiccup-children helper). Also attached missing :malli/schema contracts to 9 schemaless public fns in seon.render (esc, hiccup->html, raw-html, url-enc, sanitize-id, style-map->css, fn->qualified-sym, empty-walk, ensure-root-id) so the branch is health-clean. Added regression test seon.render-text-test/one-hiccup-to-text-single-source-test asserting all three entry points return byte-identical text.",
   :seon.task/title "Unify duplicate Hiccup-to-text converters around seon.render/hiccup->text"}
  {:seon.task/done? true,
   :seon.task/id :seon.web/split-oversized-namespace,
