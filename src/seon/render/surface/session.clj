@@ -3,15 +3,12 @@
    tight Active Context rail (capped to 8 high-signal entities by default via `project-entity-view`)."
   (:require [clojure.string :as str]
             [seon.render.data :as rdata]
-            [seon.render.links :as rlinks :refer [badge kicker]]
+            [seon.render.links :as rlinks :refer [badge btn ent-link feedback-banner kicker]]
             [seon.render.markdown :as rmd]
             [seon.store :as store]))
 
 (def ^:private enter-submit-js
   "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.isComposing||evt.keyCode===229)return;if(evt.target.value.trim()){evt.target.form.requestSubmit();}}")
-
-(defn- btn [cls oc lbl] [:button {:type "button" :class cls :on-click oc} lbl])
-(defn- el [ref lbl cls] (rlinks/ent-link ref lbl cls))
 
 (defn extract-conversation
   "Extracts interleaved user messages, REPL evals, honest pending/work-summary state, and latest prose."
@@ -104,16 +101,16 @@
                              :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
                        [:div {:class "ent-prov-bar"}
                         [:div {:class "pill-row"}
-                         (if (qualified-symbol? cfn) (el [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
+                         (if (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
                              [:span {:class "mono tiny muted"} (str (some-> cfn name))])
                          [:span {:class "mono tiny muted"} (str "· " (:tokens item 0) " tok")]
                          (for [r (take 2 (:rules item))]
-                           (if (rlinks/real-rule-id? r) (el [:seon.rule/id r] (name r) "pill mono tiny") [:span {:class "pill mono tiny"} (str r)]))
+                           (if (rlinks/real-rule-id? r) (ent-link [:seon.rule/id r] (name r) "pill mono tiny") [:span {:class "pill mono tiny"} (str r)]))
                          (when (number? sem) (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
-                        (when ref (el ref "Inspect variations →" "tiny mono"))]
+                        (when ref (ent-link ref "Inspect variations →" "tiny mono"))]
                        (or (:hiccup item)
                            [:div {:class "ent-row mono tiny"}
-                            (if ref (el ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong") (str (:entity item)))])]))]
+                            (if ref (ent-link ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong") (str (:entity item)))])]))]
       [:div {:class (if (< (long avail-w) 600) "surface-entities stack-sm" "surface-entities stack")
              :data-entity-count (str (count entities))}
        (for [[gk title] [[:tasks-edits "Tasks & Edits"] [:alerts-proofs "Alerts & Proofs"] [:pinned-rules "Pinned & Rules"]]
@@ -160,21 +157,19 @@
       [:div {:class "ws-head work-bar"}
        [:div {:class "stack-xs"}
         [:div {:class "pill-row"}
-         (el [:seon.agent/id viewing-id] label "mono strong")
+         (ent-link [:seon.agent/id viewing-id] label "mono strong")
          (badge "blue" (name (or (:seon.agent/role agent) :worker)))
          (honest-status-badge agent active?)]
         [:div {:class "pill-row tiny mono muted"}
-         (el [:seon.branch/name branch] (str branch " @ tx " (:max-tx branch-db)) "mono tiny muted")
-         (when parent (list "·" (el [:seon.agent/id parent] (str "↑" (name parent)) "mono tiny muted")))
-         (when scope (list "·" (el [:seon.code.ns/name scope] (str scope) "mono tiny")))
-         (when task (list "·" (el [:seon.task/id task] (str task) "mono tiny")))]]
+         (ent-link [:seon.branch/name branch] (str branch " @ tx " (:max-tx branch-db)) "mono tiny muted")
+         (when parent (list "·" (ent-link [:seon.agent/id parent] (str "↑" (name parent)) "mono tiny muted")))
+         (when scope (list "·" (ent-link [:seon.code.ns/name scope] (str scope) "mono tiny")))
+         (when task (list "·" (ent-link [:seon.task/id task] (str task) "mono tiny")))]]
        (when (not= branch :main)
          [:div {:class "pill-row"}
           (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
           (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")])]
-      (when branch-feedback
-        [:div {:class (str "notice row-between " (if (:ok? branch-feedback) "green" "red"))}
-         [:span (:text branch-feedback)] (btn "link-muted tiny" '(seon.web/dismiss-feedback!) "×")])
+      (feedback-banner branch-feedback)
       [:div {:class "ws-timeline" :data-agent (str viewing-id)}
        (when (and (seq earlier) (not pending-prompt))
          [:details {:id "session-earlier" :class "activity-fold"}
@@ -210,7 +205,7 @@
          :else
          [:header {:class "root-hero"}
           [:div {:class "root-kicker pill-row"}
-           (el [:seon.agent/id viewing-id] label "mono tiny") "·" (el [:seon.branch/name branch] (str branch) "mono tiny")]
+           (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·" (ent-link [:seon.branch/name branch] (str branch) "mono tiny")]
           [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
           (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])])]
       (when include-composer?
