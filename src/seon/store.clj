@@ -727,31 +727,39 @@
                (:seon.config/gc-keep-merged-branches default-config-values)))))
   ([conn keep-n]
    (let [mdb @conn
-         protected #{:db :main :branch/repl}
-         all-brs (set (d/branches mdb))
-         ags (mapv #(d/pull mdb '[:seon.agent/branch :seon.agent/merged-tx :seon.agent/archived?] (:e %))
-                   (d/datoms mdb :aevt :seon.agent/id))
-         active-brs (into #{} (keep (fn [ag]
-                                      (when (and (:seon.agent/branch ag)
-                                                 (nil? (:seon.agent/merged-tx ag))
-                                                 (not (:seon.agent/archived? ag)))
-                                        (:seon.agent/branch ag))))
-                          ags)
-         merged (->> ags
-                     (keep (fn [ag]
-                             (let [b (:seon.agent/branch ag)
-                                   mtx (:seon.agent/merged-tx ag)]
-                               (when (and b (all-brs b) (not (protected b)) (not (active-brs b)) mtx)
-                                 {:branch b :merged-tx (long mtx)}))))
-                     (group-by :branch)
-                     (map (fn [[b xs]] {:branch b :merged-tx (apply max (map :merged-tx xs))}))
-                     (sort-by :merged-tx >)
-                     vec)
-         to-del (mapv :branch (drop (long keep-n) merged))
-         deleted (volatile! 0)]
-     (doseq [b to-del]
-       (try (d/delete-branch! conn b) (vswap! deleted inc) (catch Throwable _ nil)))
-     {:ok? true :deleted @deleted :kept (min (count merged) (long keep-n))})))
+       protected #{:db :main :branch/repl}
+       all-brs (set (d/branches mdb))
+       ags (mapv #(d/pull mdb '[:db/id :seon.agent/branch :seon.agent/merged-tx :seon.agent/archived?] (:e %))
+                 (d/datoms mdb :aevt :seon.agent/id))
+       active-brs (into #{} (keep (fn [ag]
+                                    (when (and (:seon.agent/branch ag)
+                                               (nil? (:seon.agent/merged-tx ag))
+                                               (not (:seon.agent/archived? ag)))
+                                      (:seon.agent/branch ag))))
+                        ags)
+       merged (->> ags
+                   (keep (fn [ag]
+                           (let [b (:seon.agent/branch ag)
+                                 mtx (:seon.agent/merged-tx ag)]
+                             (when (and b (all-brs b) (not (protected b)) (not (active-brs b)) mtx)
+                               {:branch b :merged-tx (long mtx)}))))
+                   (group-by :branch)
+                   (map (fn [[b xs]] {:branch b :merged-tx (apply max (map :merged-tx xs))}))
+                   (sort-by :merged-tx >)
+                   vec)
+       to-del (mapv :branch (drop (long keep-n) merged))
+       to-del-set (set to-del)
+       archive-tx (vec (keep (fn [ag]
+                               (when (and (contains? to-del-set (:seon.agent/branch ag))
+                                          (not (:seon.agent/archived? ag)))
+                                 {:db/id (:db/id ag) :seon.agent/archived? true}))
+                             ags))
+       _ (when (seq archive-tx)
+           (d/transact conn archive-tx))
+       deleted (volatile! 0)]
+   (doseq [b to-del]
+     (try (d/delete-branch! conn b) (vswap! deleted inc) (catch Throwable _ nil)))
+   {:ok? true :deleted @deleted :archived (count archive-tx) :kept (min (count merged) (long keep-n))})))
 
 (defn ^:seon.flow/edge gc-store!
   "Prunes merged branches beyond `:seon.config/gc-keep-merged-branches` and runs `d/gc-storage` with cutoff `:seon.config/gc-history-hours` ago (preserving active branch merge-bases)."

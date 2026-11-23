@@ -263,3 +263,32 @@
         (let [fallback (touched-fn nil db :c1 :c2 nil)]
           (is (contains? fallback :a/active) "non-ancestor fallback must still return active agents")
           (is (contains? fallback :main)))))))
+
+(deftest ^{:cost/ticks 60000000} prune-merged-branches-archives-agents-and-reconciler-ignores-missing-branch-test
+  (testing "prune-merged-branches! archives agents before deleting their branch, and derive-agent-status returns nil when a non-main branch is absent from store"
+    (let [dir (str "/tmp/seon-prune-rec-" (random-uuid))
+        {:keys [conn] :as s} (store/open! dir)]
+    (try
+      (store/branch! conn :main :branch/old-w)
+      (store/branch! conn :main :branch/new-w)
+      (d/transact conn
+        [{:seon.agent/id :w/old :seon.agent/branch :branch/old-w :seon.agent/role :worker :seon.agent/merged-tx 100}
+         {:seon.agent/id :w/new :seon.agent/branch :branch/new-w :seon.agent/role :worker :seon.agent/merged-tx 200}
+         {:seon.agent/id :w/ghost :seon.agent/branch :branch/never-existed :seon.agent/role :worker}
+         {:seon.agent.message/id (random-uuid) :seon.agent.message/to :w/ghost :seon.agent.message/seq 1
+          :seon.agent.message/from :agent/root :seon.agent.message/type :chat :seon.agent.message/body "hi"}])
+      (let [res (store/prune-merged-branches! conn 1)
+            mdb @conn
+            old-ag (d/pull mdb [:seon.agent/archived?] [:seon.agent/id :w/old])
+            new-ag (d/pull mdb [:seon.agent/archived?] [:seon.agent/id :w/new])]
+        (is (= 1 (:deleted res)))
+        (is (= 1 (:archived res)))
+        (is (true? (:seon.agent/archived? old-ag)) "pruned branch agent must be archived")
+        (is (not (:seon.agent/archived? new-ag)) "kept branch agent stays unarchived")
+        (is (not (store/branch? mdb :branch/old-w)))
+        (is (store/branch? mdb :branch/new-w))
+        (is (nil? (rec/derive-agent-status mdb (:store mdb) {} #{} #{} :w/ghost))
+            "missing branch in real store must return nil rather than falling back to main-db and looping"))
+      (finally
+        (store/close! s)
+        (store/rm-rf! dir))))))

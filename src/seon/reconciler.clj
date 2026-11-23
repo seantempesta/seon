@@ -325,9 +325,12 @@
    (derive-agent-status main-db store live-map testing-set merging-set settling-set #{} agent-id))
   ([main-db store live-map testing-set merging-set settling-set gate-notified-set agent-id]
    (when-let [e (let [eid (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))]
-                  (when (and eid (not (and (contains? (:schema main-db) :seon.agent/archived?)
-                                           (:v (first (d/datoms main-db :eavt eid :seon.agent/archived?))))))
-                    eid))]
+                (when (and eid
+                           (not (and (contains? (:schema main-db) :seon.agent/archived?)
+                                     (:v (first (d/datoms main-db :eavt eid :seon.agent/archived?)))))
+                           (let [br (:v (first (d/datoms main-db :eavt eid :seon.agent/branch)))]
+                             (or (nil? store) (nil? br) (= br :main) (store/branch? store br))))
+                  eid))]
      (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
               :seon.agent/task :seon.agent/target :seon.agent/role :seon.agent/goal :seon.agent/paused?
               :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
