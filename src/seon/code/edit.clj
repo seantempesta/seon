@@ -31,99 +31,6 @@
           attr-map (when (map? (first after-doc)) (first after-doc))]
       (or (:malli/schema attr-map) (:malli/schema sym-meta)))))
 
-(defn- validate-defn-malli-schema
-  "Validates `:malli/schema` against the live DB registry and checks arity match against `form-obj`.\n       Returns nil when valid, or an actionable `{:ok? false :error ... :hint ...}` error map."
-  [db target key form-obj sch]
-  (try
-    (let [compiled (m/schema
-                     sch
-                     {:registry
-                      (:registry (schema/registry-for-db db))})
-          defn-arities (when (and
-                               (seq? form-obj)
-                               (contains?
-                                 #{'defn 'defn-}
-                                 (first form-obj)))
-                         (let [tail (drop-while
-                                      #(not (or (vector? %) (seq? %)))
-                                      (drop 2 form-obj))
-                               vecs (if
-                                      (vector? (first tail))
-                                      [(first tail)]
-                                      (keep
-                                        #(when (seq? %) (first %))
-                                        tail))]
-                           (into
-                             #{}
-                             (map
-                               (fn 
-                                 [v]
-                                 (if
-                                   (some #{'&} v)
-                                   :variadic
-                                   (count v))))
-                             vecs)))
-          sch-arities (let [t (m/type compiled)
-                            fn-schemas (cond
-                                         (= t :=>) [compiled]
-                                         (= t :function)
-                                         (m/children compiled)
-                                         :else nil)]
-                        (when (seq fn-schemas)
-                          (into
-                            #{}
-                            (keep
-                              (fn [fs]
-                                (let 
-                                  [in (first (m/children fs))
-                                   it (when in (m/type in))
-                                   ch (when in (m/children in))]
-                                  (when
-                                    (= it :cat)
-                                    (if
-                                      (some
-                                        #(contains?
-                                          #{:* :? :+}
-                                          (m/type %))
-                                        ch)
-                                      :variadic
-                                      (count ch))))))
-                            fn-schemas)))]
-      (if (and
-            (seq defn-arities)
-            (seq sch-arities)
-            (not (contains? defn-arities :variadic))
-            (not (contains? sch-arities :variadic))
-            (not-every? defn-arities sch-arities))
-        {:ok? false,
-         :error :malli-arity-mismatch,
-         :target target,
-         :key key,
-         :defn-arities defn-arities,
-         :schema-arities sch-arities,
-         :schema sch,
-         :hint
-         (str
-           "Schema arities "
-           sch-arities
-           " do not match defn arities "
-           defn-arities
-           ". Check (user/source '"
-           key
-           ").")}
-        nil))
-    (catch
-      Throwable
-      ex
-      {:ok? false,
-       :error :invalid-malli-schema,
-       :target target,
-       :key key,
-       :schema sch,
-       :message (or (.getMessage ex) (str ex)),
-       :hint
-       "Note: Malli predicates are symbols like number?, pos-int?, nat-int? (NOT :number). Built-ins: :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db."})))
-
 (defn- merged-ns-src [conn branch nsym]
   (let [bdb @conn
         mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
@@ -377,57 +284,6 @@
         :health-errors errs
         :diffs diffs}))))
 
-(defn set-meta!
-  "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)
-   into a `(defn ...)` / `(defn- ...)` attr-map, preserving formatting and compiler-analyzed edges.
-   Validates `:malli/schema` upfront against the live registry. Supports single target or batch map."
-  {:malli/schema [:function
-                  [:=> [:cat :any] :map]
-                  [:=> [:cat :any :map] [:maybe :map]]
-                  [:=> [:cat :any :map :map] [:maybe :map]]]}
-  ([target-or-batch]
-   (if (map? target-or-batch)
-     (let [results (into {} (map (fn [[t m]] [t (dissoc (set-meta! t m {}) :diff)])) target-or-batch)]
-       {:ok? (every? :ok? (vals results))
-        :updated (count (filter :ok? (vals results)))
-        :total (count results)
-        :results results})
-     {:ok? false :error :invalid-args
-      :hint "Call (user/set-meta! 'ns/fn {:malli/schema ...}) or (user/set-meta! {'ns/f1 {...} ...})."}))
-  ([target meta-map] (set-meta! target meta-map {}))
-  ([target meta-map {:keys [dry-run? eval?] :or {eval? true}}]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
-       (if (str/blank? (str src))
-         {:ok? false :error :form-not-found :target target :key key}
-         (let [sch-err (when (contains? meta-map :malli/schema)
-                         (validate-defn-malli-schema @conn target key
-                                                     (try (read-string src) (catch clojure.lang.ExceptionInfo _ nil))
-                                                     (:malli/schema meta-map)))]
-           (if sch-err
-             sch-err
-             (let [res (cst-ns/set-defn-meta-src src meta-map)]
-               (if-not (:ok? res)
-                 (assoc res :target target :key key)
-                 (let [new-fsrc (:src res)
-                       udiff (cst/unified-diff src new-fsrc key)]
-                   (if dry-run?
-                     {:ok? true :dry-run? true :target target :key key :action (:action res) :diff udiff}
-                     (let [ev-res (if eval?
-                                    (analyze/eval-form-with-account! @conn ns new-fsrc false)
-                                    {:account (analyze/analyze-form-account ns new-fsrc false) :error nil})
-                           eval-err (:error ev-res)
-                           tx (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res))
-                           tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
-                                    :seon.tx/branch branch
-                                    :seon.tx/reason (str "set-meta! " target)}
-                           r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))]
-                       (ctx/refresh-active! (:db-after r) (:tx-data r))
-                       (cond-> {:ok? (nil? eval-err)
-                                :target target :key key :action (:action res)
-                                :tx (:max-tx (:db-after r)) :diff udiff}
-                         eval-err (assoc :eval-error eval-err))))))))))))))
-
 (defn add-require!
   "Idempotently adds one or more `:require` specs to `nsym`, persists `#ns`, and live-requires."
   {:malli/schema [:function
@@ -510,9 +366,121 @@
                    :reordered (count tx),
                    :tx (:max-tx (:db-after r))}))))))
 
+(defn- fn-schema-arity [fs]
+  (let [in (first (m/children fs))
+        it (when in (m/type in))
+        ch (when in (m/children in))]
+    (when (= it :cat)
+      (if (some #(contains? #{:* :? :+} (m/type %)) ch) :variadic (count ch)))))
+
+(defn- check-examples-against-arities [exs arities target key sch]
+  (when (some? exs)
+    (if-not (and (coll? exs) (not (map? exs)))
+      {:ok? false :error :invalid-malli-examples :target target :key key :schema sch
+       :hint ":examples must be a vector of [[arg1 ...] expected-out] pairs."}
+      (some (fn [ex]
+              (cond
+                (not (and (vector? ex) (= 2 (count ex)) (vector? (first ex))))
+                {:ok? false :error :invalid-malli-examples :target target :key key :example ex :expected-arities arities
+                 :hint (str "Each :examples entry must be [[arg1 ...] expected-out] (e.g. [[] out] for 0-arg, [[x] out] for 1-arg). Got: " (pr-str ex))}
+
+                (and (seq arities) (not (contains? arities :variadic)) (not (contains? arities (count (first ex)))))
+                {:ok? false :error :malli-examples-arity-mismatch :target target :key key :example ex
+                 :example-arity (count (first ex)) :expected-arities arities
+                 :hint (str "Example args " (pr-str (first ex)) " has arity " (count (first ex))
+                            " but schema expects arity " arities
+                            " (for 0-arg use [[] expected-out], NOT [[[]] expected-out]).")}))
+            exs))))
+
+(defn- validate-defn-malli-schema
+  "Validates `:malli/schema` against the live DB registry, checks arity match against `form-obj`, and validates `:examples` `[[args] out]` arity."
+  [db target key form-obj sch]
+  (try
+    (let [compiled (m/schema sch {:registry (:registry (schema/registry-for-db db))})
+          defn-arities (when (and (seq? form-obj) (contains? #{'defn 'defn-} (first form-obj)))
+                         (let [tail (drop-while #(not (or (vector? %) (seq? %))) (drop 2 form-obj))
+                               vecs (if (vector? (first tail)) [(first tail)] (keep #(when (seq? %) (first %)) tail))]
+                           (into #{} (map #(if (some #{'&} %) :variadic (count %))) vecs)))
+          t (m/type compiled)
+          fn-schemas (cond (= t :=>) [compiled] (= t :function) (m/children compiled) :else nil)
+          sch-arities (when (seq fn-schemas) (into #{} (keep fn-schema-arity) fn-schemas))
+          ex-err (or (check-examples-against-arities (:examples (m/properties compiled)) (or sch-arities defn-arities) target key sch)
+                     (when (= t :function)
+                       (some (fn [fs]
+                               (when-let [exs (:examples (m/properties fs))]
+                                 (let [a (fn-schema-arity fs)]
+                                   (check-examples-against-arities exs (if a #{a} sch-arities) target key sch))))
+                             fn-schemas)))]
+      (cond
+        (and (seq defn-arities) (seq sch-arities)
+             (not (contains? defn-arities :variadic)) (not (contains? sch-arities :variadic))
+             (not-every? defn-arities sch-arities))
+        {:ok? false :error :malli-arity-mismatch :target target :key key
+         :defn-arities defn-arities :schema-arities sch-arities :schema sch
+         :hint (str "Schema arities " sch-arities " do not match defn arities " defn-arities ". Check (user/source '" key ").")}
+
+        ex-err ex-err
+        :else nil))
+    (catch Throwable ex
+      {:ok? false :error :invalid-malli-schema :target target :key key :schema sch
+       :message (or (.getMessage ex) (str ex))
+       :hint "Note: Malli predicates are symbols like number?, pos-int?, nat-int? (NOT :number). Built-ins: :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db."})))
+
+(defn set-meta!
+  "Structurally inserts or merges metadata (e.g. `{:malli/schema [...] :cost/ticks 500000}`)
+   into a `(defn ...)` / `(defn- ...)` attr-map, preserving formatting and compiler-analyzed edges.
+   Validates `:malli/schema` upfront against the live registry. Supports single target or batch map."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :map]
+                  [:=> [:cat :any :map] [:maybe :map]]
+                  [:=> [:cat :any :map :map] [:maybe :map]]]}
+  ([target-or-batch]
+   (if (map? target-or-batch)
+     (let [results (into {} (map (fn [[t m]] [t (dissoc (set-meta! t m {}) :diff)])) target-or-batch)]
+       {:ok? (every? :ok? (vals results))
+        :updated (count (filter :ok? (vals results)))
+        :total (count results)
+        :results results})
+     {:ok? false :error :invalid-args
+      :hint "Call (user/set-meta! 'ns/fn {:malli/schema ...}) or (user/set-meta! {'ns/f1 {...} ...})."}))
+  ([target meta-map] (set-meta! target meta-map {}))
+  ([target meta-map {:keys [dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
+       (if (str/blank? (str src))
+         {:ok? false :error :form-not-found :target target :key key}
+         (let [sch-err (when (contains? meta-map :malli/schema)
+                         (validate-defn-malli-schema @conn target key
+                                                     (try (read-string src) (catch clojure.lang.ExceptionInfo _ nil))
+                                                     (:malli/schema meta-map)))]
+           (if sch-err
+             sch-err
+             (let [res (cst-ns/set-defn-meta-src src meta-map)]
+               (if-not (:ok? res)
+                 (assoc res :target target :key key)
+                 (let [new-fsrc (:src res)
+                       udiff (cst/unified-diff src new-fsrc key)]
+                   (if dry-run?
+                     {:ok? true :dry-run? true :target target :key key :action (:action res) :diff udiff}
+                     (let [ev-res (if eval?
+                                    (analyze/eval-form-with-account! @conn ns new-fsrc false)
+                                    {:account (analyze/analyze-form-account ns new-fsrc false) :error nil})
+                           eval-err (:error ev-res)
+                           tx (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res))
+                           tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
+                                    :seon.tx/branch branch
+                                    :seon.tx/reason (str "set-meta! " target)}
+                           r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))]
+                       (ctx/refresh-active! (:db-after r) (:tx-data r))
+                       (cond-> {:ok? (nil? eval-err)
+                                :target target :key key :action (:action res)
+                                :tx (:max-tx (:db-after r)) :diff udiff}
+                         eval-err (assoc :eval-error eval-err))))))))))))))
+
 (defn add-fn!
   "Adds or replaces a top-level definition form inside `target-ns`, auto-formats 1-line minified
-   strings, persists with automatic topological ordering, and live-evals in `target-ns`."
+   strings, auto-seeds `(ns ... (:require [clojure.test :refer [deftest is testing]]))` for brand-new
+   `*-test` namespaces, persists with automatic topological ordering, and live-evals in `target-ns`."
   {:malli/schema [:function
                   [:=> [:cat :any :any] [:maybe :map]]
                   [:=> [:cat :any :any :map] [:maybe :map]]]
@@ -536,21 +504,30 @@
                fhead (when (and (seq? fv) (symbol? (first fv))) (symbol (name (first fv))))
                vname (when (and (seq? fv) (symbol? (second fv))) (symbol (name nsym) (name (second fv))))
                sch (extract-defn-malli-schema fv)
-               sch-err (when (some? sch) (validate-defn-malli-schema @conn (or vname nsym) (str (or vname nsym)) fv sch))]
+               db0 @conn
+               sch-err (when (some? sch) (validate-defn-malli-schema db0 (or vname nsym) (str (or vname nsym)) fv sch))]
            (if sch-err
              sch-err
-             (let [ev-res (when eval? (analyze/eval-form-with-account! @conn nsym src false))
-                 eval-err (:error ev-res)
-                 ir-map (if (and vname (:account ev-res)) {vname (:account ev-res)} {})
-                 tx (code/persist-forms-by-ns @conn {nsym [src]} ir-map)]
-             (if (empty? tx)
-               {:ok? false :error :nothing-to-persist :ns nsym}
-               (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
-                              :seon.tx/branch (or (:branch *agent-ctx*) :main)
-                              :seon.tx/reason (str "add-fn! " (or vname nsym))}
-                     r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
-                     reorder-res (reorder-ns-forms! nsym)
-                     db-now @conn]
-                 (ctx/refresh-active! db-now (:tx-data r))
-                 (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
-                   eval-err (assoc :eval-error eval-err))))))))))))
+             (let [existing-ns-src (:seon.code.form/src (d/pull db0 '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))
+                   seed-ns-src (when (and (str/ends-with? (name nsym) "-test") (not= fhead 'ns) (nil? existing-ns-src))
+                                 (str "(ns " nsym "\n  (:require [clojure.test :refer [deftest is testing]]))"))
+                   _ (when (and eval? (not= fhead 'ns) (nil? (find-ns nsym)))
+                       (when-let [ns-s (or seed-ns-src existing-ns-src)]
+                         (analyze/eval-form-with-account! db0 nsym ns-s true)))
+                   ev-res (when eval? (analyze/eval-form-with-account! db0 nsym src (= fhead 'ns)))
+                   eval-err (:error ev-res)
+                   ir-map (if (and vname (:account ev-res)) {vname (:account ev-res)} {})
+                   srcs (if seed-ns-src [seed-ns-src src] [src])
+                   tx (code/persist-forms-by-ns db0 {nsym srcs} ir-map)]
+               (if (empty? tx)
+                 {:ok? false :error :nothing-to-persist :ns nsym}
+                 (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
+                                :seon.tx/branch (or (:branch *agent-ctx*) :main)
+                                :seon.tx/reason (str "add-fn! " (or vname nsym))}
+                       r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
+                       _ (reorder-ns-forms! nsym)
+                       db-now @conn]
+                   (ctx/refresh-active! db-now (:tx-data r))
+                   (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
+                     seed-ns-src (assoc :seeded-ns? true)
+                     eval-err (assoc :eval-error eval-err))))))))))))
