@@ -668,6 +668,24 @@
  :seon.merge/plan
  [:map [:ok? :boolean] [:base-commit :uuid] [:ours-commit :uuid] [:theirs-commit :uuid] [:tx-data [:vector :any]] [:touched-paths [:set :string]] [:entity-diffs [:vector :seon.merge/entity-diff]] [:conflicts [:vector :map]] [:deleted-paths {:optional true} [:set :string]]]
 
+ :seon.route/doc
+ [:string {:seon.schema/doc "Human-readable description of what this route serves."}]
+
+ :seon.route/entity
+ [:map {:seon.db/attributes true, :seon.schema/doc "First-class data-driven Reitit route entity stored in Datahike."} [:seon.route/name :seon.route/name] [:seon.route/pattern :seon.route/pattern] [:seon.route/method :seon.route/method] [:seon.route/handler :seon.route/handler] [:seon.route/doc {:optional true} :seon.route/doc]]
+
+ :seon.route/handler
+ [:symbol {:seon.schema/doc "Qualified Clojure symbol naming the route handler var."}]
+
+ :seon.route/method
+ [:keyword {:seon.db/index true, :seon.schema/doc "HTTP method keyword (:get, :post, :put, :delete) for a route."}]
+
+ :seon.route/name
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique qualified keyword identifying a data-driven Reitit route."} :qualified-keyword]
+
+ :seon.route/pattern
+ [:string {:min 1, :seon.schema/doc "Reitit URL path pattern (e.g. \"/var/{ns}/{name}\" or \"/doc/{*id}\")."}]
+
  :seon.rule/assert
  [:vector {:gen/elements [[[?e :view/layout :compact-row]]], :seon.schema/doc "Declarative EAV fact templates asserted when :seon.rule/when matches."} :any]
 
@@ -951,10 +969,13 @@
  :int
 
  :seon.user/entity
- [:map {:seon.db/attributes true, :description "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar, expanded tree, theme, live viewport dimensions, inspector ref/trail, lab prefs & Datahike time-travel tx.", :gen/elements [{:seon.user/id :user/default, :seon.user/view-mode :canvas, :seon.user/sidebar-open? false, :seon.user/theme :auto, :seon.user/viewport-w 1280, :seon.user/viewport-h 820, :seon.user/inspect-ref [:seon.code.var/name seon.main/start-flow-instance!], :seon.user/inspect-trail [], :seon.user/lab-prefs {}}]} [:seon.user/id :seon.user/id] [:seon.user/viewing {:optional true} :seon.user/viewing] [:seon.user/view-mode {:optional true} :seon.user/view-mode] [:seon.user/sidebar-open? {:optional true} :seon.user/sidebar-open?] [:seon.user/expanded-agents {:optional true} :seon.user/expanded-agents] [:seon.user/selected-branch {:optional true} :seon.user/selected-branch] [:seon.user/as-of-tx {:optional true} :seon.user/as-of-tx] [:seon.user/theme {:optional true} :seon.user/theme] [:seon.user/viewport-w {:optional true} :seon.user/viewport-w] [:seon.user/viewport-h {:optional true} :seon.user/viewport-h] [:seon.user/inspect-ref {:optional true} :seon.user/inspect-ref] [:seon.user/inspect-trail {:optional true} :seon.user/inspect-trail] [:seon.user/lab-prefs {:optional true} :seon.user/lab-prefs]]
+ [:map {:seon.db/attributes true, :description "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar, expanded tree, theme, live viewport dimensions, inspector ref/trail, lab prefs & Datahike time-travel tx.", :gen/elements [{:seon.user/id :user/default, :seon.user/view-mode :canvas, :seon.user/sidebar-open? false, :seon.user/theme :auto, :seon.user/viewport-w 1280, :seon.user/viewport-h 820, :seon.user/inspect-ref [:seon.code.var/name seon.main/start-flow-instance!], :seon.user/inspect-trail [], :seon.user/lab-prefs {}}]} [:seon.user/id :seon.user/id] [:seon.user/viewing {:optional true} :seon.user/viewing] [:seon.user/view-mode {:optional true} :seon.user/view-mode] [:seon.user/sidebar-open? {:optional true} :seon.user/sidebar-open?] [:seon.user/expanded-agents {:optional true} :seon.user/expanded-agents] [:seon.user/selected-branch {:optional true} :seon.user/selected-branch] [:seon.user/as-of-tx {:optional true} :seon.user/as-of-tx] [:seon.user/theme {:optional true} :seon.user/theme] [:seon.user/viewport-w {:optional true} :seon.user/viewport-w] [:seon.user/viewport-h {:optional true} :seon.user/viewport-h] [:seon.user/inspect-ref {:optional true} :seon.user/inspect-ref] [:seon.user/inspect-trail {:optional true} :seon.user/inspect-trail] [:seon.user/lab-prefs {:optional true} :seon.user/lab-prefs] [:seon.user/expert-mode? {:optional true} :seon.user/expert-mode?]]
 
  :seon.user/expanded-agents
  [:set :keyword]
+
+ :seon.user/expert-mode?
+ [:boolean {:seon.schema/doc "When true, reveals full Expert telemetry (5-signal strip and technical internals) in the UI."}]
 
  :seon.user/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :keyword]
