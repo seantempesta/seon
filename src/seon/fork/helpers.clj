@@ -149,6 +149,38 @@
          {:ok? true :query q :target target :hits hits :results (vflow/describe-hits db hits)})
        (vflow/remote-embed-search! (str q) kk o)))))
 
+(defn- resolve-explore-ref [db target]
+  (let [dh (if db (or (:schema db) (d/schema db) {}) {})]
+    (cond
+      (or (= target :system) (= target :root)) [:seon.system/id :root]
+      (integer? target) [:db/id target]
+      (and (vector? target) (= 2 (count target)) (qualified-keyword? (first target))) target
+      (and (symbol? target) (namespace target)) [:seon.code.var/name target]
+      (symbol? target) [:seon.code.ns/name target]
+      (and (string? target) (str/includes? target "#")) [:seon.code.doc/id target]
+      (qualified-keyword? target)
+      (or (some (fn [a] (when (and db (contains? dh a) (first (d/datoms db :avet a target))) [a target]))
+                [:seon.agent/id :seon.task/id :seon.rule/id :seon.schema/key :seon.system/id])
+          [:seon.schema/key target])
+      :else [:seon.system/id :root])))
+
+(defn ^:seon.flow/edge explore!
+  "Explores ANY entity through `seon.render.surface/project-entity-view` (`:target :wire`),
+   returning crisp Upgrade-Ladder structured text under `:token-budget` (default 2400).
+   Accepts lookup refs, qualified symbols, ns symbols, keywords, doc IDs, or `:system`/`:root`."
+  {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat :any [:maybe :map]] :any]]
+   :cost/ticks 45000000}
+  ([ref] (explore! ref {}))
+  ([ref opts]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [bdb @conn
+           mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
+           o (if (map? opts) opts {})
+           fref (resolve-explore-ref (or bdb mdb) ref)
+           proj-fn (requiring-resolve 'seon.render.surface/project-entity-view)
+           res (proj-fn mdb bdb fref (merge {:target :wire :token-budget 2400} o))]
+       (if (:raw? o) res (:text res))))))
+
 (defn install-agent-helpers!
   {:malli/schema [:=> [:cat] :any], :seon.flow/edge true}
   []
@@ -165,6 +197,7 @@
               (fn [] (when-let [c (:conn *agent-ctx*)] @c)))
       (intern u 'source (fn [& args] (apply #'source args)))
       (intern u 'similar (fn [& args] (apply #'similar args)))
+      (intern u 'explore! (fn [& args] (apply #'explore! args)))
       (intern u 'as-of
               (fn [tx]
                 (when-let [{:keys [conn]} *agent-ctx*]
