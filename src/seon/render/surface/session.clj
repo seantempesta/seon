@@ -5,7 +5,8 @@
             [seon.render.data :as rdata]
             [seon.render.links :as rlinks :refer [badge btn ent-link feedback-banner kicker]]
             [seon.render.markdown :as rmd]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.status :as rstatus]))
 
 (def ^:private enter-submit-js
   "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.isComposing||evt.keyCode===229)return;if(evt.target.value.trim()){evt.target.form.requestSubmit();}}")
@@ -82,13 +83,14 @@
     (if (str/blank? s) "x" (subs s 0 (min 36 (count s))))))
 
 (def ^:private group-tasks-edits #{:seon.task/entity :seon.code.var/entity :seon.code.ns/entity :seon.code.doc/entity})
+
 (def ^:private group-alerts-proofs #{:seon.error/entity :seon.fix/entity :seon.test/verdict :seon.agent.eval/entity})
 
 (defn- entity-group-key [it]
   (let [sk (or (first (:schemas it)) (:schema it))]
     (cond (group-tasks-edits sk) :tasks-edits (group-alerts-proofs sk) :alerts-proofs :else :pinned-rules)))
 
-(defn- render-grouped-entities [entities avail-w]
+(defn- render-grouped-entities [entities avail-w expert-mode?]
   (when (seq entities)
     (let [by-g (group-by entity-group-key entities) counts (volatile! {})
           mk-item (fn [item]
@@ -96,21 +98,30 @@
                           occ (long (get @counts slug 0)) _ (vswap! counts assoc slug (inc occ))
                           vt (str "ent-" occ "-" slug)
                           ref (or (rdata/entity-lookup-ref (:data item)) (when (integer? (:entity item)) [:db/id (:entity item)]))
-                          cfn (:chosen-fn item) sem (:semantic item)]
-                      [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
-                             :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
-                       [:div {:class "ent-prov-bar"}
-                        [:div {:class "pill-row"}
-                         (if (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
-                             [:span {:class "mono tiny muted"} (str (some-> cfn name))])
-                         [:span {:class "mono tiny muted"} (str "· " (:tokens item 0) " tok")]
-                         (for [r (take 2 (:rules item))]
-                           (if (rlinks/real-rule-id? r) (ent-link [:seon.rule/id r] (name r) "pill mono tiny") [:span {:class "pill mono tiny"} (str r)]))
-                         (when (number? sem) (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
-                        (when ref (ent-link ref "Inspect variations →" "tiny mono"))]
-                       (or (:hiccup item)
-                           [:div {:class "ent-row mono tiny"}
-                            (if ref (ent-link ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong") (str (:entity item)))])]))]
+                          cfn (:chosen-fn item) sem (:semantic item)
+                          prov-bar [:div {:class "ent-prov-bar"}
+                                    [:div {:class "pill-row"}
+                                     (if (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
+                                         [:span {:class "mono tiny muted"} (str (some-> cfn name))])
+                                     [:span {:class "mono tiny muted"} (str "· " (:tokens item 0) " tok")]
+                                     (for [r (take 2 (:rules item))]
+                                       (if (rlinks/real-rule-id? r) (ent-link [:seon.rule/id r] (name r) "pill mono tiny") [:span {:class "pill mono tiny"} (str r)]))
+                                     (when (number? sem) (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
+                                    (when ref (ent-link ref "Inspect variations →" "tiny mono"))]
+                          card-node (or (:hiccup item)
+                                        [:div {:class "ent-row mono tiny"}
+                                         (if ref (ent-link ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong") (str (:entity item)))])]
+                      (if expert-mode?
+                        [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
+                               :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
+                         prov-bar
+                         card-node]
+                        [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
+                               :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
+                         card-node
+                         [:details {:class "expert-drawer ent-prov-drawer"}
+                          [:summary {:class "mono tiny muted" :style {:cursor "pointer" :opacity "0.55" :font-size "10px" :margin-top "2px"}} "···"]
+                          prov-bar]])))]
       [:div {:class (if (< (long avail-w) 600) "surface-entities stack-sm" "surface-entities stack")
              :data-entity-count (str (count entities))}
        (for [[gk title] [[:tasks-edits "Tasks & Edits"] [:alerts-proofs "Alerts & Proofs"] [:pinned-rules "Pinned & Rules"]]
@@ -141,36 +152,57 @@
         (:seon.agent/ready? ag) (badge "green" "ready") (:seon.agent/paused? ag) (badge "muted" "paused")
         (:seon.agent/waiting? ag) (badge "blue" "waiting") :else (badge "muted" "idle")))
 
+(defn- render-work-bar [agent viewing-id label branch tx-num active? expert-mode?]
+  (let [scope (:seon.agent/scope agent) task (:seon.agent/task agent) parent (:seon.agent/parent agent)
+        role-b (badge "blue" (name (or (:seon.agent/role agent) :worker)))
+        meta-row [:div {:class "pill-row tiny mono muted"}
+                  (ent-link [:seon.branch/name branch] (str branch (when tx-num (str " @ tx " tx-num))) "mono tiny muted")
+                  (when parent (list "·" (ent-link [:seon.agent/id parent] (str "↑" (name parent)) "mono tiny muted")))
+                  (when scope (list "·" (ent-link [:seon.code.ns/name scope] (str scope) "mono tiny")))
+                  (when task (list "·" (ent-link [:seon.task/id task] (str task) "mono tiny")))]
+        br-acts (when (not= branch :main)
+                  [:div {:class "pill-row"}
+                   (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
+                   (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")])]
+    (if expert-mode?
+      [:div {:class "ws-head work-bar"}
+       [:div {:class "stack-xs"}
+        [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") role-b (honest-status-badge agent active?)]
+        meta-row]
+       br-acts]
+      [:div {:class "ws-head work-bar"}
+       [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") (honest-status-badge agent active?)]
+       [:details {:class "expert-drawer"}
+        [:summary {:class "mono tiny muted" :style {:cursor "pointer"}} "Details"]
+        [:div {:class "stack-xs" :style {:margin-top "6px"}}
+         [:div {:class "pill-row"} role-b meta-row]
+         br-acts]]])))
+
 (defn render-session-body
-  "Renders the focused Agent Session view: ultra-clean work bar, honest conversation, and tight
-   Active Context rail (capped to 8 high-signal entities with Explain selection link)."
+  "Renders the focused Agent Session view: calm Everyday mode by default (clean conversation,
+   live visual status card, collapsed expert drawers) or full Expert mode with provenance bars
+   and direct branch/test/merge actions."
   {:malli/schema [:=> [:cat :map :boolean] :any] :cost/ticks 20000000}
-  [{:keys [agent viewing-id branch branch-db entities pool-count exchanges pending-prompt latest-prose
-           reply-prompt latest-actions work-summary live-stream branch-feedback slot-budget active?]}
+  [{:keys [agent viewing-id branch main-db branch-db as-of-tx entities pool-count exchanges pending-prompt
+           latest-prose reply-prompt latest-actions work-summary live-stream branch-feedback slot-budget
+           active? expert-mode? agent-status]}
    include-composer?]
   (let [label (rdata/agent-label agent viewing-id)
         prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
         earlier (when (> (count exchanges) 1) (pop exchanges))
-        scope (:seon.agent/scope agent) task (:seon.agent/task agent) parent (:seon.agent/parent agent)]
+        tx-num (or as-of-tx (:max-tx branch-db) (:max-tx main-db))
+        exp? (boolean expert-mode?)
+        pin-form [:form {:class "row-form" :on-submit (list 'seon.web/pin-ref-form! viewing-id)}
+                  [:input {:class "inp sm mono flex-1" :name "ref" :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
+                  [:button {:type "submit" :class "btn sm"} "+ Pin"]]]
     (list
      [:section {:id "ws-left-unit" :class "ws-left"}
-      [:div {:class "ws-head work-bar"}
-       [:div {:class "stack-xs"}
-        [:div {:class "pill-row"}
-         (ent-link [:seon.agent/id viewing-id] label "mono strong")
-         (badge "blue" (name (or (:seon.agent/role agent) :worker)))
-         (honest-status-badge agent active?)]
-        [:div {:class "pill-row tiny mono muted"}
-         (ent-link [:seon.branch/name branch] (str branch " @ tx " (:max-tx branch-db)) "mono tiny muted")
-         (when parent (list "·" (ent-link [:seon.agent/id parent] (str "↑" (name parent)) "mono tiny muted")))
-         (when scope (list "·" (ent-link [:seon.code.ns/name scope] (str scope) "mono tiny")))
-         (when task (list "·" (ent-link [:seon.task/id task] (str task) "mono tiny")))]]
-       (when (not= branch :main)
-         [:div {:class "pill-row"}
-          (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
-          (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")])]
+      (render-work-bar agent viewing-id label branch tx-num active? exp?)
       (feedback-banner branch-feedback)
       [:div {:class "ws-timeline" :data-agent (str viewing-id)}
+       (when (and (map? agent-status) (:seon.ui.status/label agent-status))
+         [:div {:id "cv-live-status" :class "session-live-status"}
+          (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
        (when (and (seq earlier) (not pending-prompt))
          [:details {:id "session-earlier" :class "activity-fold"}
           [:summary {:class "mono tiny"} (str "Earlier exchanges (" (count earlier) ")")]
@@ -222,9 +254,11 @@
              (if (pos? (long (or pool-count 0)))
                (str "Explain selection (" pool-count " in pool) →")
                "Explain selection →"))]
-       [:form {:class "row-form" :on-submit (list 'seon.web/pin-ref-form! viewing-id)}
-        [:input {:class "inp sm mono flex-1" :name "ref" :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
-        [:button {:type "submit" :class "btn sm"} "+ Pin"]]]
+       (if exp?
+         pin-form
+         [:details {:class "expert-drawer" :style {:margin-top "4px"}}
+          [:summary {:class "mono tiny muted" :style {:cursor "pointer"}} "+ Pin"]
+          pin-form])]
       [:div {:class "tiles-scroll"}
-       (or (render-grouped-entities entities (:avail-w slot-budget))
+       (or (render-grouped-entities entities (:avail-w slot-budget) exp?)
            [:div {:id "ws-tiles-empty" :class "card muted sm-copy"} "No active context entities yet."])]])))
