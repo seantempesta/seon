@@ -86,6 +86,12 @@
   :seon.task/plan "seon.render.entities exceeds the 8,000-token :oversized-namespace budget. Extract a cohesive child namespace so both namespaces stay well under budget and all public entrypoints and tests remain green.",
   :seon.task/scope seon.render.entities,
   :seon.task/title "Split seon.render.entities below the 8k token namespace budget"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.render.entities/split-oversized-v2,
+  :seon.task/owner :seon.render.entities/split-oversized-v2,
+  :seon.task/plan "Split seon.render.entities cleanly below the 8k token namespace budget into cohesive child namespace(s), keeping all callers and tests green.",
+  :seon.task/scope seon.render.entities,
+  :seon.task/title "Split seon.render.entities below the 8k token namespace budget"}
  {:seon.task/done? true,
   :seon.task/id :seon.render.markdown/split-activity-fold,
   :seon.task/plan "render-activity-fold currently triggers a :large-function health warning. Extract clean pure helpers so the warning disappears while preserving exact rendered output and passing all tests.",
