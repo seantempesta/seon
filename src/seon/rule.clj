@@ -413,17 +413,41 @@
    fixtures inherit the branch's live `:seon.rule/*` entities before merge writes `resources/seon/rules.edn` to disk."
   nil)
 
+(defn- run-clears-verdict? [db dh tx fdgs]
+  (when (and (dh :seon.test.run/branch) (dh :seon.test.run/pass?))
+    (let [br (or (get-in db [:config :branch]) (get-in (:origin-db db) [:config :branch]) :main)
+          be (:e (first (d/datoms db :avet :seon.test.run/branch br)))
+          re (or be (when (not= br :main) (:e (first (d/datoms db :avet :seon.test.run/branch :main)))))]
+      (when (and re (true? (:v (first (d/datoms db :eavt re :seon.test.run/pass?)))))
+        (let [rtx (if be Long/MAX_VALUE (reduce max 0 (map #(long (:tx % 0)) (d/datoms db :eavt re))))
+              fset (when (dh :seon.test.run/failed-digests)
+                     (into #{} (map :v) (d/datoms db :eavt re :seon.test.run/failed-digests)))]
+          (and (>= rtx tx) (or (empty? fset) (not-any? fset fdgs))))))))
+
 (defn verdict-latest-for-var?
-  "True when no newer passing `:seon.test/verdict` exists for test var EID `var-eid` after `tx`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :int :int] :boolean]
-   :cost/ticks 200000}
-  [db var-eid tx]
-  (if-not (and db (contains? (:schema db) :seon.test/var-ref))
-    true
-    (not-any? (fn [dt]
-                (let [pdt (first (d/datoms db :eavt (:e dt) :seon.test/pass?))]
-                  (and pdt (true? (:v pdt)) (> (long (:tx pdt 0)) (long tx)))))
-              (d/datoms db :avet :seon.test/var-ref var-eid))))
+  "True when no passing verdict exists for `var-eid` at `(>= (:tx pdt) tx)` and no passing branch run clears it."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :int :int] :boolean]
+                  [:=> [:cat [:maybe :seon.host/db] :int :int [:maybe :string]] :boolean]]
+   :cost/ticks 300000}
+  ([db var-eid tx] (verdict-latest-for-var? db var-eid tx nil))
+  ([db var-eid tx digest]
+   (let [dh (:schema db)]
+     (if-not (and db (dh :seon.test/var-ref))
+       true
+       (let [txl (long tx)
+             pass? (volatile! false)
+             fdgs (volatile! (if (string? digest) #{digest} #{}))]
+         (doseq [dt (d/datoms db :avet :seon.test/var-ref var-eid)
+                 :let [pdt (first (d/datoms db :eavt (:e dt) :seon.test/pass?))]
+                 :when pdt
+                 :let [ptx (long (:tx pdt 0))]]
+           (cond
+             (and (true? (:v pdt)) (>= ptx txl)) (vreset! pass? true)
+             (and (false? (:v pdt)) (= ptx txl) (nil? digest))
+             (when-let [dg (:v (first (d/datoms db :eavt (:e dt) :seon.test/digest)))]
+               (vswap! fdgs conj dg))))
+         (and (not @pass?) (not (run-clears-verdict? db dh txl @fdgs))))))))
 
 (defonce ^:private ^:seon.flow/edge query-meta-cache (store/lru-cache 256))
 
