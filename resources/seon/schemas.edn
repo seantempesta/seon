@@ -77,6 +77,9 @@
  :seon.agent.eval/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
 
+ :seon.agent.eval/images
+ [:vector {:seon.schema/doc "Ordered refs to :seon.media/image entities produced by this eval."} :seon.store/ref]
+
  :seon.agent.eval/intent
  :string
 
@@ -223,6 +226,9 @@
 
  :seon.agent/system-prompt
  :string
+
+ :seon.agent/target
+ [:and {:seon.db/index true, :seon.schema/doc "Optional focal entity ref that this agent was spawned to work on."} :seon.store/ref]
 
  :seon.agent/task
  :qualified-keyword
@@ -628,6 +634,33 @@
 
  :seon.health/report
  [:map {:seon.render/hiccup seon.render.tiles/health-panel, :description "System health snapshot: derived structural violations, global failing tests, and open proc faults."} [:ok? :boolean] [:branch :keyword] [:counts [:map-of :keyword :int]] [:problems [:vector :seon.health/problem]]]
+
+ :seon.media/base64
+ :string
+
+ :seon.media/dom
+ :map
+
+ :seon.media/frames
+ [:map {:seon.schema/doc "Compact multi-width Hiccup preview summary returned by user/render-preview!."} [:seon.media/frames [:vector :map]] [:summary :string]]
+
+ :seon.media/height
+ :int
+
+ :seon.media/id
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique UUID identifying a stored :seon.media/image entity."} :uuid]
+
+ :seon.media/image
+ [:map {:seon.db/attributes true, :seon.schema/doc "Stored rendered image frame with dimensions, MIME, base64 payload, and optional DOM telemetry."} [:seon.media/mime :seon.media/mime] [:seon.media/base64 :seon.media/base64] [:seon.media/width :seon.media/width] [:seon.media/height :seon.media/height] [:seon.media/id {:optional true} :seon.media/id] [:seon.media/label {:optional true} :seon.media/label] [:seon.media/dom {:optional true} :seon.media/dom]]
+
+ :seon.media/label
+ :string
+
+ :seon.media/mime
+ :string
+
+ :seon.media/width
+ :int
 
  :seon.merge/entity-diff
  [:map [:entity [:tuple :qualified-keyword :any]] [:status [:enum :added :modified :deleted :conflict]] [:path {:optional true} [:or :string :nil]]]
