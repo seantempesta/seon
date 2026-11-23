@@ -19,7 +19,8 @@
             [seon.web.actions :as actions]
             [seon.render.data :as rdata]
             [seon.render.walk :as rwalk]
-            [seon.render.surface.entity :as sentity]))
+            [seon.render.surface.entity :as sentity]
+            [seon.web.router :as router]))
 
 (defn parse-deep-link
   "Translates optional browser URL deep-links into `:show-user` ops so Datahike stays the sole truth."
