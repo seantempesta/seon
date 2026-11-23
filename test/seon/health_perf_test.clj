@@ -7,7 +7,13 @@
             [seon.health :as health]
             [seon.health.efficiency :as eff]
             [seon.health.static :as hs]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [clojure.java.io :as io]
+            [seon.git :as git]
+            [seon.health.contracts :as contracts]
+            [seon.merge :as merge]
+            [seon.schema :as schema]
+            [seon.store :as store]))
 
 (defn- bulk-perf-txs [db run-id n-nss]
   (let [pad (apply str (repeat 650 " "))]
@@ -164,3 +170,81 @@
             (is (= (str ns-c "/bad-swallow") (:subject (first catch-warns)))))
           (finally
             (remove-ns ns-c)))))))
+
+(deftest ^{:cost/ticks 120000000} merge-three-way-ignores-main-drift-and-conflicts-accurately-test
+  (testing "three-way produces exact merge/conflict plans without scanning ours-ds and export-branch-ref! reuses precomputed plan"
+    (with-test-store [{:keys [conn cfg]}]
+      (let [src-v0 "(ns seon.mperf.app)\n\n(defn alpha {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))\n\n(defn beta {:malli/schema [:=> [:cat :int] :int]} [x] (* x 2))\n"
+            _ (d/transact conn {:tx-data (code/file-import-tx nil "src/seon/mperf/app.clj" src-v0 false)})
+            _ (store/branch! conn :main :branch/feat)
+            bconn (store/connect cfg :branch/feat)
+            repo (io/file (str "/tmp/seon-git-plan-test-" (System/nanoTime)))]
+        (try
+          (doseq [b (range 15)]
+            (d/transact conn {:tx-data (vec (for [i (range 10)]
+                                              {:seon.task/id (keyword "seon.mperf" (str "t-" b "-" i))
+                                               :seon.task/title (str "Unrelated main task " b "-" i)
+                                               :seon.task/done? false}))}))
+          (d/transact conn {:tx-data [{:seon.code.form/key "seon.mperf.app/alpha"
+                                       :seon.code.form/src "(defn alpha {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 10))"
+                                       :seon.code.form/hash "1111111111111111"}]})
+          (d/transact bconn {:tx-data [{:seon.code.form/key "seon.mperf.app/beta"
+                                        :seon.code.form/src "(defn beta {:malli/schema [:=> [:cat :int] :int]} [x] (* x 99))"
+                                        :seon.code.form/hash "2222222222222222"}]})
+          (let [plan (merge/three-way conn cfg :branch/feat)]
+            (is (:ok? plan))
+            (is (empty? (:conflicts plan)))
+            (is (= #{"src/seon/mperf/app.clj"} (:touched-paths plan)))
+            (is (= [[:seon.code.form/key "seon.mperf.app/beta"]] (mapv :entity (:entity-diffs plan))))
+            (.mkdirs repo)
+            (git/git! (.getPath repo) "init" "-q" "-b" "main")
+            (spit (io/file repo "README.md") "init\n")
+            (git/git! (.getPath repo) "add" "README.md")
+            (git/git! (.getPath repo) "-c" "user.name=Seon" "-c" "user.email=seon@local" "commit" "-q" "-m" "init")
+            (let [exp (with-redefs [merge/three-way (fn [& _] (throw (ex-info "three-way called twice!" {})))]
+                        (git/export-branch-ref! conn cfg (.getPath repo) :branch/feat plan))
+                  subj (str/trim (git/git! (.getPath repo) "log" "-1" "--format=%s" (:ref exp)))]
+              (is (= "refs/heads/seon/feat" (:ref exp)))
+              (is (= #{"src/seon/mperf/app.clj"} (:touched-paths exp)))
+              (is (<= (count subj) 72))
+              (is (not (str/starts-with? subj "seon :branch/"))))
+            (d/transact conn {:tx-data (:tx-data plan)})
+            (let [rendered (code/render-path @conn "src/seon/mperf/app.clj")]
+              (is (str/includes? rendered "(+ x 10)"))
+              (is (str/includes? rendered "(* x 99)"))))
+          (d/transact bconn {:tx-data [{:seon.code.form/key "seon.mperf.app/alpha"
+                                        :seon.code.form/src "(defn alpha {:malli/schema [:=> [:cat :int] :int]} [x] (- x 5))"
+                                        :seon.code.form/hash "3333333333333333"}]})
+          (let [cplan (merge/three-way conn cfg :branch/feat)]
+            (is (false? (:ok? cplan)))
+            (is (some #(= [:seon.code.form/key "seon.mperf.app/alpha"] (:entity %)) (:conflicts cplan))))
+          (finally
+            (d/release bconn)
+            (when (.exists repo) (store/rm-rf! repo))))))))
+
+(deftest ^{:cost/ticks 60000000} caused-by-branch-short-circuit-and-empty-touched-nss-test
+  (testing "caused-by-branch and missing-contract-violations short-circuit cleanly with zero full scans on empty touched-nss"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (code/file-import-tx nil "src/seon/sc/base.clj"
+                                                      "(ns seon.sc.base)\n(defn nocontract [x] x)\n" false)})
+      (store/branch! conn :main :branch/sc)
+      (let [bconn (store/connect cfg :branch/sc)]
+        (try
+          (d/transact bconn {:tx-data (code/file-import-tx @bconn "src/seon/sc/base.clj"
+                                                           "(ns seon.sc.base)\n(defn nocontract [x] (inc x))\n" false)})
+          (let [[m-set r-set] (reads/with-reads #(contracts/missing-contract-violations @conn @bconn #{}))
+                [m-vec r-vec] (reads/with-reads #(contracts/missing-contract-violations @conn @bconn []))
+                [c-set rc-set] (reads/with-reads #(health/caused-by-branch @conn @bconn {} #{}))
+                [c-vec rc-vec] (reads/with-reads #(health/caused-by-branch @conn @bconn {} []))
+                c-hit (health/caused-by-branch @conn @bconn {} ['seon.sc.base])]
+            (is (= [] m-set))
+            (is (= [] m-vec))
+            (is (empty? r-set) "Empty #{} touched-nss must execute zero DB reads")
+            (is (empty? r-vec) "Empty [] touched-nss must execute zero DB reads")
+            (is (= [] c-set))
+            (is (= [] c-vec))
+            (is (empty? rc-set) "caused-by-branch on {} #{} must short-circuit with zero DB reads")
+            (is (empty? rc-vec) "caused-by-branch on {} [] must short-circuit with zero DB reads")
+            (is (some #(= :missing-contract (:class %)) c-hit)
+                "Non-empty touched-nss still catches missing contracts via shared var-snapshot"))
+          (finally (d/release bconn)))))))
