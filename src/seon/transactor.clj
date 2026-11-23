@@ -31,6 +31,158 @@
 (defn- ^:seon.flow/edge sync-store-best-effort! [cfg]
   (try (store/sync! cfg) (catch Throwable _ nil)))
 
+(defn- normalize-ref [r]
+  (when (and (vector? r) (= 2 (count r)) (qualified-keyword? (first r)) (some? (second r)))
+    (let [v (second r)]
+      [(first r) (if (and (seq? v) (= 'quote (first v))) (second v) v)])))
+
+(defn- cap-stack [xs]
+  (let [v (vec (remove nil? xs))]
+    (if (> (count v) 16) (subvec v (- (count v) 16)) v)))
+
+(defn- resolve-inspect-state
+  "Pure navigation stack transition for `:seon.user/inspect-ref`, `:seon.user/inspect-trail`,
+   and `:seon.user/lab-prefs` (`:inspect-forward`, `:disabled-rules`, hyperparameter overrides)."
+  [cur msg clear-on-nav?]
+  (let [cur-ref (normalize-ref (:seon.user/inspect-ref cur))
+        cur-trail (vec (keep normalize-ref (:seon.user/inspect-trail cur)))
+        cur-lp (if (map? (:seon.user/lab-prefs cur)) (:seon.user/lab-prefs cur) {})
+        cur-fwd (vec (keep normalize-ref (:inspect-forward cur-lp)))
+        push-r (normalize-ref (:push-inspect msg))
+        direct-r (normalize-ref (:inspect-ref msg))
+        has-direct? (contains? msg :inspect-ref)
+        [nxt-ref nxt-trail nxt-fwd retract-ref?]
+        (cond
+          (:clear-inspect msg)
+          [nil [] [] (some? cur-ref)]
+
+          push-r
+          (if (= push-r cur-ref)
+            [cur-ref cur-trail cur-fwd false]
+            [push-r (if cur-ref (cap-stack (conj cur-trail cur-ref)) cur-trail) [] false])
+
+          (:pop-inspect msg)
+          (if (seq cur-trail)
+            [(peek cur-trail) (pop cur-trail)
+             (if cur-ref (cap-stack (conj cur-fwd cur-ref)) cur-fwd) false]
+            [nil [] [] (some? cur-ref)])
+
+          (:forward-inspect msg)
+          (if (seq cur-fwd)
+            [(peek cur-fwd) (if cur-ref (cap-stack (conj cur-trail cur-ref)) cur-trail)
+             (pop cur-fwd) false]
+            [cur-ref cur-trail cur-fwd false])
+
+          (integer? (:jump-trail msg))
+          (let [idx (long (:jump-trail msg))]
+            (if (and (>= idx 0) (< idx (count cur-trail)))
+              (let [target (nth cur-trail idx)
+                    kept-trail (subvec cur-trail 0 idx)
+                    skipped (concat (subvec cur-trail (inc idx)) (when cur-ref [cur-ref]))
+                    nxt-f (cap-stack (concat cur-fwd (reverse skipped)))]
+                [target kept-trail nxt-f false])
+              [cur-ref cur-trail cur-fwd false]))
+
+          has-direct?
+          (if direct-r
+            [direct-r cur-trail [] false]
+            [nil [] [] (some? cur-ref)])
+
+          clear-on-nav?
+          [nil [] [] (some? cur-ref)]
+
+          :else
+          [cur-ref cur-trail cur-fwd false])
+        lp1 (cond
+              (:reset-lab-prefs msg)
+              (if (seq nxt-fwd) {:inspect-forward nxt-fwd} {})
+
+              (map? (:lab-prefs msg))
+              (let [merged (if (:replace-lab-prefs? msg)
+                             (:lab-prefs msg)
+                             (merge cur-lp (:lab-prefs msg)))]
+                (into {} (remove #(nil? (val %))) merged))
+
+              :else cur-lp)
+        lp2 (if-let [rid (when (qualified-keyword? (:toggle-lab-rule msg)) (:toggle-lab-rule msg))]
+              (let [s (set (:disabled-rules lp1))
+                    s' (if (contains? s rid) (disj s rid) (conj s rid))]
+                (if (seq s') (assoc lp1 :disabled-rules (vec (sort s'))) (dissoc lp1 :disabled-rules)))
+              lp1)
+        lp3 (if (seq nxt-fwd)
+              (assoc lp2 :inspect-forward nxt-fwd)
+              (dissoc lp2 :inspect-forward))]
+    {:ref nxt-ref :trail nxt-trail :lab-prefs lp3
+     :retract-ref? retract-ref?
+     :cur-ref (:seon.user/inspect-ref cur)
+     :ref-changed? (not= nxt-ref cur-ref)
+     :trail-changed? (not= nxt-trail cur-trail)
+     :lp-changed? (not= lp3 cur-lp)}))
+
+(defn- build-show-user-tx [db msg]
+  (let [{:keys [user-id viewing mode sidebar? toggle-sidebar? toggle-expand expand selected-branch
+                as-of-tx theme toggle-theme? keep-inspect?]} msg
+        uid (or user-id :user/default)
+        dh (or (:schema db) {})
+        has-insp? (and (contains? dh :seon.user/inspect-ref)
+                       (contains? dh :seon.user/inspect-trail)
+                       (contains? dh :seon.user/lab-prefs))
+        pull-pat (cond-> '[:seon.user/id :seon.user/sidebar-open? :seon.user/expanded-agents
+                           :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
+                   has-insp? (into [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs]))
+        cur (if (first (d/datoms db :avet :seon.user/id uid))
+              (d/pull db pull-pat [:seon.user/id uid])
+              {})
+        cur-viewing (get-in cur [:seon.user/viewing :seon.agent/id])
+        viewing-ref (when viewing
+                      (let [aid (cond
+                                  (= viewing :entry)
+                                  (or (when (contains? dh :seon.agent/entry?)
+                                        (some-> (first (d/datoms db :avet :seon.agent/entry? true))
+                                                :e
+                                                (#(:seon.agent/id (d/pull db '[:seon.agent/id] %)))))
+                                      :agent/root)
+                                  (vector? viewing) (second viewing)
+                                  :else viewing)]
+                        (when (first (d/datoms db :avet :seon.agent/id aid))
+                          [:seon.agent/id aid])))
+        switching-agent? (and viewing-ref (not= (second viewing-ref) cur-viewing))
+        has-as-of-key? (contains? msg :as-of-tx)
+        clear-as-of? (and (:seon.user/as-of-tx cur)
+                          (or (and has-as-of-key? (or (nil? as-of-tx) (= :live as-of-tx)))
+                              (and switching-agent? (not has-as-of-key?))))
+        clear-on-nav? (and (not keep-inspect?)
+                           (or (and mode (not= mode :inspect)) switching-agent?))
+        insp (when has-insp? (resolve-inspect-state cur msg clear-on-nav?))
+        retract-ops (cond-> []
+                      (and toggle-expand (contains? (set (:seon.user/expanded-agents cur)) toggle-expand))
+                      (conj [:db/retract [:seon.user/id uid] :seon.user/expanded-agents toggle-expand])
+                      clear-as-of?
+                      (conj [:db/retract [:seon.user/id uid] :seon.user/as-of-tx (:seon.user/as-of-tx cur)])
+                      (and insp (:retract-ref? insp) (some? (:cur-ref insp)))
+                      (conj [:db/retract [:seon.user/id uid] :seon.user/inspect-ref (:cur-ref insp)]))
+        add-exp (cond-> #{}
+                  (and toggle-expand (not (contains? (set (:seon.user/expanded-agents cur)) toggle-expand)))
+                  (conj toggle-expand)
+                  (seq expand) (into expand))
+        nxt-theme (cond
+                    (contains? #{:auto :dark :light} theme) theme
+                    toggle-theme? (if (= :light (:seon.user/theme cur)) :dark :light)
+                    :else nil)
+        ent (cond-> {:seon.user/id uid}
+              viewing-ref (assoc :seon.user/viewing viewing-ref)
+              mode (assoc :seon.user/view-mode mode)
+              (some? sidebar?) (assoc :seon.user/sidebar-open? (boolean sidebar?))
+              toggle-sidebar? (assoc :seon.user/sidebar-open? (not (boolean (:seon.user/sidebar-open? cur))))
+              (seq add-exp) (assoc :seon.user/expanded-agents add-exp)
+              selected-branch (assoc :seon.user/selected-branch selected-branch)
+              (integer? as-of-tx) (assoc :seon.user/as-of-tx (long as-of-tx))
+              nxt-theme (assoc :seon.user/theme nxt-theme)
+              (and insp (:ref insp) (:ref-changed? insp)) (assoc :seon.user/inspect-ref (:ref insp))
+              (and insp (:trail-changed? insp)) (assoc :seon.user/inspect-trail (:trail insp))
+              (and insp (:lp-changed? insp)) (assoc :seon.user/lab-prefs (:lab-prefs insp)))]
+    {:uid uid :tx-data (vec (concat retract-ops [ent]))}))
+
 (defn transactor-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
   ([] {:params {:conn "Datahike :main connection"
@@ -291,54 +443,7 @@
            (tcalls/handle-call-op! st msg prev-cid {:reply! reply! :db-notice db-notice :focus-tx focus-tx})
 
            :show-user
-           (let [{:keys [user-id viewing mode sidebar? toggle-sidebar? toggle-expand expand selected-branch as-of-tx theme toggle-theme?]} msg
-                 uid (or user-id :user/default)
-                 cur (if (first (d/datoms @conn :avet :seon.user/id uid))
-                       (d/pull @conn '[:seon.user/id :seon.user/sidebar-open? :seon.user/expanded-agents
-                                       :seon.user/as-of-tx :seon.user/theme {:seon.user/viewing [:seon.agent/id]}]
-                               [:seon.user/id uid])
-                       {})
-                 cur-viewing (get-in cur [:seon.user/viewing :seon.agent/id])
-                 viewing-ref (when viewing
-                               (let [aid (cond
-                                           (= viewing :entry)
-                                           (or (when (contains? (:schema @conn) :seon.agent/entry?)
-                                                 (some-> (first (d/datoms @conn :avet :seon.agent/entry? true))
-                                                         :e
-                                                         (#(:seon.agent/id (d/pull @conn '[:seon.agent/id] %)))))
-                                               :agent/root)
-                                           (vector? viewing) (second viewing)
-                                           :else viewing)]
-                                 (when (first (d/datoms @conn :avet :seon.agent/id aid))
-                                   [:seon.agent/id aid])))
-                 switching-agent? (and viewing-ref (not= (second viewing-ref) cur-viewing))
-                 has-as-of-key? (contains? msg :as-of-tx)
-                 clear-as-of? (and (:seon.user/as-of-tx cur)
-                                   (or (and has-as-of-key? (or (nil? as-of-tx) (= :live as-of-tx)))
-                                       (and switching-agent? (not has-as-of-key?))))
-                 retract-ops (cond-> []
-                               (and toggle-expand (contains? (set (:seon.user/expanded-agents cur)) toggle-expand))
-                               (conj [:db/retract [:seon.user/id uid] :seon.user/expanded-agents toggle-expand])
-                               clear-as-of?
-                               (conj [:db/retract [:seon.user/id uid] :seon.user/as-of-tx (:seon.user/as-of-tx cur)]))
-                 add-exp (cond-> #{}
-                           (and toggle-expand (not (contains? (set (:seon.user/expanded-agents cur)) toggle-expand)))
-                           (conj toggle-expand)
-                           (seq expand) (into expand))
-                 nxt-theme (cond
-                             (contains? #{:auto :dark :light} theme) theme
-                             toggle-theme? (if (= :light (:seon.user/theme cur)) :dark :light)
-                             :else nil)
-                 ent (cond-> {:seon.user/id uid}
-                       viewing-ref (assoc :seon.user/viewing viewing-ref)
-                       mode (assoc :seon.user/view-mode mode)
-                       (some? sidebar?) (assoc :seon.user/sidebar-open? (boolean sidebar?))
-                       toggle-sidebar? (assoc :seon.user/sidebar-open? (not (boolean (:seon.user/sidebar-open? cur))))
-                       (seq add-exp) (assoc :seon.user/expanded-agents add-exp)
-                       selected-branch (assoc :seon.user/selected-branch selected-branch)
-                       (integer? as-of-tx) (assoc :seon.user/as-of-tx (long as-of-tx))
-                       nxt-theme (assoc :seon.user/theme nxt-theme))
-                 tx-data (vec (concat retract-ops [ent]))
+           (let [{:keys [uid tx-data]} (build-show-user-tx @conn msg)
                  r (d/transact conn {:tx-data tx-data})
                  db (:db-after r)
                  cid (d/commit-id db)]
