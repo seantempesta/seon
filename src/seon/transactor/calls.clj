@@ -176,6 +176,78 @@
 
       :else nil)))
 
+(defn- call-subtask-id [db call]
+  (let [cid (:seon.agent.call/id call)
+        callee (:seon.agent.call/callee call)]
+    (or (when (and (contains? (:schema db) :seon.agent.call/task)
+                   (qualified-keyword? (:seon.agent.call/task call)))
+          (:seon.agent.call/task call))
+        (when (and cid callee (contains? (:schema db) :seon.task/id))
+          (let [cand (keyword (str "subtask." (name callee)) (str "c-" (subs (str cid) 0 8)))]
+            (when (first (d/datoms db :avet :seon.task/id cand))
+              cand))))))
+
+(defn- ^:seon.flow/edge branch-has-code-edits? [conn branch]
+  (if (or (nil? branch) (= branch :main))
+    false
+    (try
+      (let [bdb (store/head conn branch)
+            base-cid (when bdb (d/merge-base conn :main branch))]
+        (if-not (and bdb base-cid)
+          false
+          (let [bcid (d/commit-id bdb)]
+            (if (= base-cid bcid)
+              false
+              (let [ds (d/changes conn base-cid bcid)
+                    code-kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+                              :seon.code.var/name :seon.code.ns/name :seon.code.doc/id
+                              :seon.code.file/path :seon.schema/key]
+                    code-attrs (into (set code-kws) (keep #(get-in bdb [:ident-ref-map %])) code-kws)]
+                (boolean (some #(contains? code-attrs (:a %)) ds)))))))
+      (catch Throwable _ false))))
+
+(defn- summarize-call-result [result]
+  (let [raw (cond
+              (string? result) result
+              (and (map? result) (string? (:summary result))) (:summary result)
+              (and (map? result) (string? (:answer result))) (:answer result)
+              :else (pr-str result))
+        s (-> (str (or raw "")) (str/replace #"\s+" " ") str/trim)]
+    (if (> (count s) 240) (str (subs s 0 237) "…") s)))
+
+(defn- auto-close-subtask-op [conn db0 call result]
+  (when-let [tid (call-subtask-id db0 call)]
+    (let [t (d/pull db0 '[:seon.task/id :seon.task/done? :seon.task/tests :seon.task/test-vars]
+                    [:seon.task/id tid])
+          callee (:seon.agent.call/callee call)
+          callee-branch (when callee (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] [:seon.agent/id callee])))]
+      (when (and (:seon.task/id t)
+                 (not (:seon.task/done? t))
+                 (empty? (:seon.task/tests t))
+                 (empty? (:seon.task/test-vars t))
+                 (not (branch-has-code-edits? conn callee-branch)))
+        (let [sum (summarize-call-result result)]
+          (cond-> {:seon.task/id tid :seon.task/done? true}
+            (and (contains? (:schema db0) :seon.task/summary) (not (str/blank? sum)))
+            (assoc :seon.task/summary sum)))))))
+
+(defn- ^:seon.flow/edge mirror-callee-task-to-branch! [conn cfg callee-branch subtask-tx callee subtask-id]
+  (when (and cfg callee-branch (not= callee-branch :main) callee subtask-id)
+    (try
+      (when (store/head conn callee-branch)
+        (let [task-ents (filterv #(and (map? %) (= subtask-id (:seon.task/id %))) subtask-tx)
+              bconn (store/connect cfg callee-branch)]
+          (try
+            (let [bdb @bconn
+                  tx (cond-> (vec task-ents)
+                       (first (d/datoms bdb :avet :seon.agent/id callee))
+                       (conj {:seon.agent/id callee :seon.agent/task subtask-id}))]
+              (when (seq tx)
+                (d/transact bconn {:tx-data tx}))
+              true)
+            (finally (d/release bconn)))))
+      (catch Throwable _ false))))
+
 (defn handle-call-op!
   "Dispatches `:create-call`, `:await-calls`, `:answer-call`, `:fail-call`, `:cancel-call`,
    and `:settle-calls` for `:transactor`. Returns `[st' outputs]`."
@@ -257,7 +329,10 @@
                                 {:seon.agent/id caller :seon.agent/awaiting call-id})
                     tx-data (vec (concat ns-tx (:tx subtask) (remove nil? [spawn-ent callee-task-ent call-ent msg-ent await-ent])))
                     r (d/transact conn {:tx-data tx-data})
-                    _ (when spawn-branch (store/branch! conn :main spawn-branch))
+                    _ (if spawn-branch
+                      (store/branch! conn :main spawn-branch)
+                      (when (and callee-exists? subtask-id)
+                        (mirror-callee-task-to-branch! conn (:cfg st) (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] callee-e)) (:tx subtask) callee subtask-id)))
                     db (:db-after r)
                     cid (d/commit-id db)]
                 (reply! msg (cond-> {:ok? true
@@ -340,16 +415,20 @@
                                        :explain (:explain check)
                                        :message (str "Result failed Malli schema " rsch ": " (pr-str (:explain check)))}})
                   [st nil])
-              (let [r (d/transact conn {:tx-data [{:seon.agent.call/id call-id
-                                                   :seon.agent.call/status :resolved
-                                                   :seon.agent.call/result result
-                                                   :seon.agent.call/settled-tx (long (:max-tx db0))}]})
-                    db (:db-after r)
-                    cid (d/commit-id db)]
-                (reply! msg {:ok? true :call-id call-id :status :resolved :tx (:max-tx db)})
-                [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-                 {:db [(db-notice prev-cid db (:tx-data r) [:answer-call call-id])]
-                  ::flow/report [(str "[:transactor] call " call-id " RESOLVED by " (:seon.agent.call/callee c))]}])))))
+              (let [close-op (auto-close-subtask-op conn db0 c result)
+                  tx-data (cond-> [{:seon.agent.call/id call-id
+                                    :seon.agent.call/status :resolved
+                                    :seon.agent.call/result result
+                                    :seon.agent.call/settled-tx (long (:max-tx db0))}]
+                            close-op (conj close-op))
+                  r (d/transact conn {:tx-data tx-data})
+                  db (:db-after r)
+                  cid (d/commit-id db)]
+              (reply! msg (cond-> {:ok? true :call-id call-id :status :resolved :tx (:max-tx db)}
+                            close-op (assoc :closed-subtask (:seon.task/id close-op))))
+              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+               {:db [(db-notice prev-cid db (:tx-data r) [:answer-call call-id])]
+                ::flow/report [(str "[:transactor] call " call-id " RESOLVED by " (:seon.agent.call/callee c))]}])))))
 
       :fail-call
       (let [{:keys [call-id error]} msg

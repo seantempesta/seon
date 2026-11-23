@@ -42,203 +42,40 @@
                                :low (str/lower-case src)}))
            @out))))))
 
-(defn grep-src
-  "Fast cached single- or multi-pattern substring/regex grep across all form sources in Datahike.
-   Pass a string, regex, or collection of patterns `[\"p1\" \"p2\"]` to scan in a single pass.
-   Each hit includes `:sym` (symbol), `:key` (string), `:ns`, `:line`, and `:text`."
-  {:malli/schema [:function
-                  [:=> [:cat :any] [:maybe [:vector :map]]]
-                  [:=> [:cat :any :map] [:maybe [:vector :map]]]]}
-  ([pattern] (grep-src pattern {}))
-  ([pattern {:keys [ns limit] :or {limit 30}}]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [bdb @conn
-           ns-pref (when ns (if (string? ns) ns (name ns)))
-           multi? (and (coll? pattern) (not (map? pattern)))
-           pats (if multi? (vec pattern) [pattern])
-           compiled (mapv (fn [p]
-                            (if (instance? java.util.regex.Pattern p)
-                              {:raw (str p) :re? true :re p}
-                              {:raw (str p) :re? false :low (str/lower-case (str p))}))
-                          pats)
-           match-low? (fn [{:keys [re? re low]} ^String src ^String low-src]
-                        (if re? (boolean (re-find re src)) (str/includes? low-src low)))
-           match-line? (fn [{:keys [re? re low]} ^String line]
-                         (if re? (boolean (re-find re line)) (str/includes? (str/lower-case line) low)))
-           entries (cached-form-index bdb)
-           hits (volatile! [])]
-       (doseq [{:keys [key sym src low] :as entry} entries
-               :while (< (count @hits) limit)
-               :let [ens (:ns entry)]
-               :when (or (nil? ns-pref)
-                         (= ens ns-pref)
-                         (str/starts-with? (str ens) (str ns-pref ".")))
-               :let [matched-pats (filterv #(match-low? % src low) compiled)]
-               :when (seq matched-pats)]
-         (doseq [[i line] (map-indexed vector (str/split-lines src))
-                 :while (< (count @hits) limit)
-                 :let [hit-p (some #(when (match-line? % line) (:raw %)) matched-pats)]
-                 :when hit-p]
-           (let [t (str/trim line)]
-             (vswap! hits conj
-                     (cond-> {:key key
-                              :sym sym
-                              :ns ens
-                              :line (inc i)
-                              :text (if (> (count t) 120) (str (subs t 0 120) "…") t)}
-                       multi? (assoc :pattern hit-p))))))
-       @hits))))
-
-(defn run-tests!
-  "Runs the exact reach-selected `deftest`s for your branch (or one/more explicit target test vars/namespaces)\n   live in the REPL. Variadic: `(user/run-tests!)`, `(user/run-tests! 'ns-test)`, or `(user/run-tests! 't1 't2)`.\n   Carries `:seon.eval/budget-override` so variable-size test suites run without tripping the 268 MB REPL cap."
-  {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]],
-   :seon.eval/budget-override {:ticks 2000000000, :bytes 4294967296}}
-  ([] (run-tests! nil))
-  ([target & more]
-    (when-let [{:keys [conn branch]} *agent-ctx*]
-      (let [t0 (System/nanoTime)
-            bdb @conn
-            base-cid (when (not= branch :main)
-                       (try
-                         (d/merge-base conn :main branch)
-                         (catch Throwable _ nil)))
-            ops (when base-cid
-                  (code/changed-form-ops
-                    conn
-                    base-cid
-                    (d/commit-id bdb)))
-            _ (when (seq (:upserts ops))
-                (wsup/apply-form-overlay!
-                  bdb
-                  {:upserts (:upserts ops),
-                   :retracted-keys (:retracted-keys ops)}))
-            raw-targets (if (seq more) (cons target more) [target])
-            target-list (->>
-                          raw-targets
-                          (mapcat
-                            (fn [x]
-                              (cond
-                                (nil? x) nil
-                                (or (vector? x) (set? x) (seq? x)) x
-                                :else [x])))
-                          vec)
-            test-syms (if (seq target-list)
-                        (->>
-                          target-list
-                          (mapcat
-                            (fn [x]
-                              (let [s (if (string? x) (symbol x) x)]
-                                (cond
-                                  (namespace s) [s]
-                                  (str/ends-with? (name s) "-test")
-                                  (->>
-                                    (d/datoms
-                                      bdb
-                                      :avet
-                                      :seon.code.var/ns
-                                      s)
-                                    (keep
-                                      #(let
-                                        [v
-                                         (d/pull
-                                           bdb
-                                           '[:seon.code.var/name
-                                             :seon.code.var/test?]
-                                           (:e %))]
-                                        (when
-                                          (:seon.code.var/test? v)
-                                          (:seon.code.var/name v)))))
-                                  :else (code/reaching-tests bdb s)))))
-                          distinct
-                          sort
-                          vec)
-                        (let [changed-nss (distinct
-                                            (keep
-                                              :seon.code.form/ns
-                                              (:upserts ops)))]
-                          (->>
-                            changed-nss
-                            (mapcat #(code/reaching-tests bdb %))
-                            distinct
-                            sort
-                            vec)))
-            results (mapv
-                      #(wsup/run-single-test-var % (str "local:" %))
-                      test-syms)
-            failures (filterv #(not (:seon.test/pass? %)) results)
-            ms (/
-                 (Math/round
-                   (/ (double (- (System/nanoTime) t0)) 10000.0))
-                 100.0)]
-        {:ok? (empty? failures),
-         :ran (count results),
-         :passed (- (count results) (count failures)),
-         :failed (count failures),
-         :ms ms,
-         :failures
-         (mapv
-           #(select-keys
-             %
-             [:seon.test/var :seon.test/report :seon.test/ms])
-           failures),
-         :results
-         (mapv
-           #(select-keys
-             %
-             [:seon.test/var :seon.test/pass? :seon.test/ms])
-           results)}))))
-
 (def ^:private user-helper-docs
-  '{edit-fn!        {:arglists ([target old-subform new-subform] [target old-subform new-subform opts])
-                     :doc "Structurally replace old-subform with new-subform in 'ns/fn or 'ns (ignores whitespace/tabs/comments, preserves formatting, persists & live-evals). Opts: {:occurrence N :dry-run? true :eval? true}."}
-    add-require!    {:arglists ([nsym spec-or-specs] [nsym spec-or-specs opts])
-                     :doc "Idempotently add one or more :require specs (e.g. '[seon.store :as store] or '[[a :as a] [b :as b]]) to nsym, persist #ns, and live-require immediately."}
-    set-meta!       {:arglists ([batch-map] [target meta-map] [target meta-map opts])
-                     :doc "Insert/merge attr-map (e.g. {:malli/schema [...] :cost/ticks 500000}) onto a defn/defn- right after name + docstring, preserving formatting. Accepts a single 'ns/fn or a batch map {'ns/f1 {...} 'ns/f2 {...}}."}
-    ns-requires     {:arglists ([nsym])
-                     :doc "Return parsed :require specs of namespace nsym cleanly in ~1 ms without dumping the whole file."}
-    grep-src        {:arglists ([pattern] [pattern {:keys [ns limit]}])
-                     :doc "Fast linear/scoped grep across all form sources in Datahike (string or regex)."}
-    unused-requires {:arglists ([nsym])
-                     :doc "AST-accurate analysis of used vs unused :require specs in nsym (skips strings/docstrings/comments)."}
-    prune-requires! {:arglists ([nsym] [nsym {:keys [dry-run?]}])
-                     :doc "AST-accurately remove unused :require specs from nsym and persist cleanly."}
-    run-tests!      {:arglists ([] [target-or-targets])
-                     :doc "Run branch-local clojure.test deftest(s) live in-turn. No args = all tests reaching your branch changes; or pass 'ns-test/var, 'ns-test, or 'ns."}
-    diff            {:arglists ([] [target])
-                     :doc "Return branch upserts, retractions, schemas, health errors, and unified line diffs vs merge-base."}
-    context         {:arglists ([] [scope-or-task-or-opts] [target opts])
-                     :doc "Render the exact same <walk-context> tiles (ctx-tile, task-tile, ns-tile) + ephemeral tail that internal Seon agents receive. Pass 'ns, :seon.ns/task-id, or {:task :... :scope '... :extra-namespaces [...]}."}
-    help            {:arglists ([] [sym])
-                     :doc "List all user/* REPL helpers with signatures and docs, or inspect one helper (e.g. (user/help 'edit-fn!))."}
-    source          {:arglists ([target-or-vec] [target {:keys [lines]}])
-                     :doc "Read source of 'ns/fn, 'ns, 'ns#ns, :seon.schema/key, \"docs/f.md#sec\", 'user/<helper>, or a vector of targets ['a/b 'c/d]. Optional {:lines [start end]} slices a String result."}
-    ns-outline      {:arglists ([nsym])
-                     :doc "List all forms in nsym with token counts, local deps, and external callers."}
-    move-vars!      {:arglists ([{:keys [from to alias doc vars include-deps?]}])
-                     :doc "Losslessly split vars from :from into child ns :to, adding :as/:refer and hot-reloading both."}
-    register-schema! {:arglists ([schema-key form] [schema-key form opts])
-                      :doc "Register/update a Malli schema -> derived Datahike attribute, persisted to resources/seon/schemas.edn on merge."}
-    remove-var!     {:arglists ([sym] [sym {:keys [force?]}])
-                     :doc "Safely retract a var & form (refuses if callers exist unless {:force? true})."}
-    add-fn!         {:arglists ([target-ns form-src] [target-ns form-src opts])
-                     :doc "Add or replace a top-level (defn ...)/(def ...) form in target-ns, persist to Datahike, and live-eval."}
-    callers         {:arglists ([sym]) :doc "List ALL references to sym (code callers and :seon.render/hiccup schema renderers)."}
+  '{edit-fn!        {:arglists ([target old new] [target old new opts]) :doc "CST-replace subform(s) in 'ns/fn or 'ns, persist & eval."}
+    add-require!    {:arglists ([nsym spec-or-specs] [nsym spec-or-specs opts]) :doc "Idempotently add :require spec(s) to nsym."}
+    set-meta!       {:arglists ([batch-map] [target meta-map] [target meta-map opts]) :doc "Insert/merge attr-map on defn/defn- with upfront Malli check."}
+    ns-requires     {:arglists ([nsym]) :doc "Return parsed :require specs of nsym."}
+    grep-src        {:arglists ([pattern] [pattern {:keys [ns limit]}]) :doc "Cached grep across forms (falls back to :seon.schema/* for seon.*)."}
+    unused-requires {:arglists ([nsym]) :doc "AST-accurate used vs unused :require analysis for nsym."}
+    prune-requires! {:arglists ([nsym] [nsym {:keys [dry-run?]}]) :doc "Remove unused :require specs from nsym."}
+    run-tests!      {:arglists ([] [target-or-targets]) :doc "Run reach/explicit deftests live with :main-pass? and :failure-lines."}
+    diff            {:arglists ([] [target]) :doc "Branch upserts, retractions, schemas, and unified diffs vs merge-base."}
+    context         {:arglists ([] [target] [target opts]) :doc "Render <walk-context> + ephemeral tail for scope/task/opts."}
+    help            {:arglists ([] [sym]) :doc "List all user/* helpers or inspect one helper."}
+    source          {:arglists ([target-or-vec] [target {:keys [lines]}]) :doc "Read source of 'ns/fn, 'ns, :seon.schema/k, doc#sec, or vector."}
+    ns-outline      {:arglists ([nsym]) :doc "List forms in nsym with tokens, deps, and external callers."}
+    move-vars!      {:arglists ([{:keys [from to alias doc vars include-deps?]}]) :doc "Split vars from :from into child ns :to."}
+    register-schema! {:arglists ([key form] [key form opts]) :doc "Register Malli schema -> Datahike attribute."}
+    remove-var!     {:arglists ([sym] [sym {:keys [force?]}]) :doc "Retract var & form (refuses if callers exist unless {:force? true})."}
+    add-fn!         {:arglists ([target-ns form-src] [target-ns form-src opts]) :doc "Idempotently add/overwrite form in target-ns (auto-seeds new *-test ns)."}
+    callers         {:arglists ([sym]) :doc "List code callers and :seon.render/hiccup renderers of sym."}
     callees         {:arglists ([sym]) :doc "List :refs, :input, :optional-input, :output, and :keywords of sym."}
     tests-for       {:arglists ([sym-or-ns]) :doc "List all tests reaching sym-or-ns."}
-    search          {:arglists ([query]) :doc "Search vars, schemas, and docs by substring."}
-    health          {:arglists ([]) :doc "Compute live :seon.health/report on your branch."}
-    past-evals      {:arglists ([] [limit-or-opts]) :doc "Query historical evals via Datahike d/history (pass int limit, grep string, or map)."}
-    autofix-health! {:arglists ([] [{:keys [ns class dry-run?]}]) :doc "Execute programmatic :fix actions from (user/health) (e.g. prune unused requires) across your branch."}
-    inspect-branch  {:arglists ([branch-or-agent-id]) :doc "Inspect a worker's branch diff, health errors, latest auto-proofs, and recent evals in 1 call."}
-    save-example!   {:arglists ([agent-id example-id] [agent-id example-id opts]) :doc "Snapshot a real completed agent session into :example/<name> for resources/seon/agents/examples.edn."}
-    create-task!    {:arglists ([{:keys [id from-template scope title plan needs tests parent assign? spawn-agent?]}]) :doc "Create a linked task on :main (inheriting :from-template & parent chain) and persist to resources/seon/tasks.edn."}
-    update-task!    {:arglists ([{:keys [id title plan scope needs tests summary done?]}]) :doc "Refine your active task's plan, tests, or summary on :main (persisted to resources/seon/tasks.edn)."}
-    assign-task!    {:arglists ([task-id]) :doc "Attach a :seon.task/id to your agent entity so @seon.ctx/ctx and <walk-context> pull its full task chain and history."}
-    metrics         {:arglists ([] [window]) :doc "Sliding-window task completion, effective turns/merged, and top frustrating tools scorecard."}
-    chat!           {:arglists ([msg] [agent-id msg]) :doc "Start or continue a live chat with the entry agent (or any agent-id), resetting Canvas to :live identically to browser chat."}
-    monitor         {:arglists ([] [agent-id]) :doc "Inspect any agent's live perspective: parent request, own merge-gate progress, recursive children work tree, recent eval intents, and latest reply."}
-    ready!          {:arglists ([]) :doc "Mark branch ready for automated test + 3-way merge + Git write-back (returns map)."}})
+    search          {:arglists ([query]) :doc "Search vars (name/doc), schemas (key/doc/form), and docs."}
+    health          {:arglists ([] [which]) :doc "Fast scoped branch health (<15 MB); pass :all or :main for full DB."}
+    past-evals      {:arglists ([] [limit-or-opts]) :doc "Query historical evals via Datahike d/history."}
+    autofix-health! {:arglists ([] [{:keys [ns class dry-run?]}]) :doc "Execute programmatic :fix actions from health report."}
+    inspect-branch  {:arglists ([branch-or-agent-id]) :doc "Inspect branch diff, health errors, proofs, and recent evals."}
+    save-example!   {:arglists ([agent-id example-id] [agent-id example-id opts]) :doc "Snapshot agent session into :example/<name>."}
+    create-task!    {:arglists ([{:keys [id from-template scope title plan needs tests parent assign? spawn-agent?]}]) :doc "Create linked task on :main."}
+    update-task!    {:arglists ([{:keys [id title plan scope needs tests summary done?]}]) :doc "Update active task on :main."}
+    assign-task!    {:arglists ([task-id]) :doc "Attach :seon.task/id to your agent entity."}
+    metrics         {:arglists ([] [window]) :doc "Sliding-window task completion and tool-frustration scorecard."}
+    chat!           {:arglists ([msg] [agent-id msg]) :doc "Send live chat message to entry agent or target agent-id."}
+    monitor         {:arglists ([] [agent-id]) :doc "Inspect agent live perspective, merge-gate progress, and children tree."}
+    ready!          {:arglists ([]) :doc "Mark branch ready for automated test + 3-way merge + Git write-back."}})
 
 (defn- intern-doc! [u sym f]
   (let [target (if (var? f) (fn [& args] (apply @f args)) f)
@@ -482,9 +319,247 @@
      (let [mdb (or (try (store/head conn :main) (catch Throwable _ nil)) @conn)]
        (hmetrics/agent-learning-metrics conn mdb {:window window})))))
 
+(defn resolve-explore-ref
+  "Resolves `target` into a Datahike lookup ref `[attr val]`, or `{:error :entity-not-found :ref target}`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] :any] :cost/ticks 200000}
+  [db target]
+  (let [dh (if db (or (:schema db) (d/schema db) {}) {})
+        exists? (fn [[a v]]
+                  (or (= a :seon.system/id) (= a :seon.signal/kind) (= a :seon.branch/name)
+                      (and (= a :db/id) (integer? v) db (boolean (seq (d/datoms db :eavt v))))
+                      (and db (contains? dh a) (boolean (first (d/datoms db :avet a v))))))
+        cand (cond
+               (or (= target :system) (= target :root)) [:seon.system/id :root]
+               (integer? target) [:db/id target]
+               (and (vector? target) (= 2 (count target)) (qualified-keyword? (first target))) target
+               (and (symbol? target) (namespace target)) [:seon.code.var/name target]
+               (symbol? target) [:seon.code.ns/name target]
+               (and (string? target) (str/includes? target "#")) [:seon.code.doc/id target]
+               (qualified-keyword? target)
+               (some (fn [a] (when (and db (contains? dh a) (first (d/datoms db :avet a target))) [a target]))
+                     [:seon.agent/id :seon.task/id :seon.rule/id :seon.schema/key :seon.system/id])
+               :else nil)]
+    (if (and cand (exists? cand))
+      cand
+      {:error :entity-not-found :ref target})))
+
+(defn- grep-schema-hits [bdb ns-pref compiled multi? match-low? rem-lim]
+  (if-not (and (pos? rem-lim)
+               (contains? (:schema bdb) :seon.schema/key)
+               (some #(str/includes? (str/lower-case (:raw %)) "seon.") compiled))
+    []
+    (let [by-eid (volatile! {})]
+      (doseq [dt (d/datoms bdb :aevt :seon.schema/key)]
+        (vswap! by-eid assoc (:e dt) {:key (:v dt)}))
+      (when (contains? (:schema bdb) :seon.schema/form)
+        (doseq [dt (d/datoms bdb :aevt :seon.schema/form)]
+          (when (contains? @by-eid (:e dt))
+            (vswap! by-eid assoc-in [(:e dt) :form] (pr-str (:v dt))))))
+      (when (contains? (:schema bdb) :seon.schema/doc)
+        (doseq [dt (d/datoms bdb :aevt :seon.schema/doc)]
+          (when (contains? @by-eid (:e dt))
+            (vswap! by-eid assoc-in [(:e dt) :doc] (str (:v dt))))))
+      (let [out (volatile! [])]
+        (doseq [{:keys [key form doc]} (sort-by #(str (:key %)) (vals @by-eid))
+                :while (< (count @out) rem-lim)
+                :let [kns (when (qualified-keyword? key) (namespace key))]
+                :when (or (nil? ns-pref) (= kns ns-pref) (and kns (str/starts-with? kns (str ns-pref "."))))
+                :let [txt (str key " " (or form "") (when (and doc (not (str/blank? doc))) (str " — " doc)))
+                      low (str/lower-case txt)
+                      hit-p (some #(when (match-low? % txt low) (:raw %)) compiled)]
+                :when hit-p]
+          (vswap! out conj
+                  (cond-> {:key (str key) :schema key :ns "seon.schema" :line 1
+                           :text (if (> (count txt) 140) (str (subs txt 0 140) "…") txt)}
+                    multi? (assoc :pattern hit-p))))
+        @out))))
+
+(defn grep-src
+  "Fast cached single- or multi-pattern substring/regex grep across all form sources in Datahike
+   (falling back to `:seon.schema/*` when patterns mention `seon.` or `:seon.`)."
+  {:malli/schema [:function [:=> [:cat :any] [:maybe [:vector :map]]] [:=> [:cat :any :map] [:maybe [:vector :map]]]]}
+  ([pattern] (grep-src pattern {}))
+  ([pattern {:keys [ns limit] :or {limit 30}}]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [bdb @conn
+           ns-pref (when ns (if (string? ns) ns (name ns)))
+           multi? (and (coll? pattern) (not (map? pattern)))
+           pats (if multi? (vec pattern) [pattern])
+           compiled (mapv (fn [p] (if (instance? java.util.regex.Pattern p)
+                                    {:raw (str p) :re? true :re p}
+                                    {:raw (str p) :re? false :low (str/lower-case (str p))})) pats)
+           match-low? (fn [{:keys [re? re low]} ^String s ^String ls] (if re? (boolean (re-find re s)) (str/includes? ls low)))
+           match-line? (fn [{:keys [re? re low]} ^String l] (if re? (boolean (re-find re l)) (str/includes? (str/lower-case l) low)))
+           hits (volatile! [])]
+       (doseq [{:keys [key sym src low] :as entry} (cached-form-index bdb)
+               :while (< (count @hits) limit)
+               :let [ens (:ns entry)]
+               :when (or (nil? ns-pref) (= ens ns-pref) (str/starts-with? (str ens) (str ns-pref ".")))
+               :let [matched-pats (filterv #(match-low? % src low) compiled)]
+               :when (seq matched-pats)]
+         (doseq [[i line] (map-indexed vector (str/split-lines src))
+                 :while (< (count @hits) limit)
+                 :let [hit-p (some #(when (match-line? % line) (:raw %)) matched-pats)]
+                 :when hit-p]
+           (let [t (str/trim line)]
+             (vswap! hits conj (cond-> {:key key :sym sym :ns ens :line (inc i)
+                                        :text (if (> (count t) 120) (str (subs t 0 120) "…") t)}
+                                 multi? (assoc :pattern hit-p))))))
+       (let [rem (- (long limit) (count @hits))]
+         (into @hits (grep-schema-hits bdb ns-pref compiled multi? match-low? rem)))))))
+
+(defn- search-db-hits [db q]
+  (let [sm (:schema db)
+        vars (volatile! [])
+        schemas (volatile! [])
+        docs (volatile! [])
+        hit? #(str/includes? (str/lower-case (str %)) q)]
+    (when (:seon.code.var/name sm)
+      (doseq [dt (d/datoms db :aevt :seon.code.var/name)]
+        (when (hit? (:v dt)) (vswap! vars conj (:v dt)))))
+    (when (:seon.code.var/doc sm)
+      (doseq [dt (d/datoms db :aevt :seon.code.var/doc)]
+        (when (hit? (:v dt))
+          (when-let [vn (:v (first (d/datoms db :eavt (:e dt) :seon.code.var/name)))]
+            (vswap! vars conj vn)))))
+    (when (:seon.schema/key sm)
+      (doseq [dt (d/datoms db :aevt :seon.schema/key)]
+        (when (hit? (:v dt)) (vswap! schemas conj (:v dt)))))
+    (when (:seon.schema/doc sm)
+      (doseq [dt (d/datoms db :aevt :seon.schema/doc)]
+        (when (hit? (:v dt))
+          (when-let [sk (:v (first (d/datoms db :eavt (:e dt) :seon.schema/key)))]
+            (vswap! schemas conj sk)))))
+    (when (:seon.schema/form sm)
+      (doseq [dt (d/datoms db :aevt :seon.schema/form)]
+        (when (hit? (pr-str (:v dt)))
+          (when-let [sk (:v (first (d/datoms db :eavt (:e dt) :seon.schema/key)))]
+            (vswap! schemas conj sk)))))
+    (when (:seon.code.doc/id sm)
+      (doseq [dt (d/datoms db :aevt :seon.code.doc/id)]
+        (when (hit? (:v dt)) (vswap! docs conj (:v dt)))))
+    {:vars @vars :schemas @schemas :docs @docs}))
+
+(defn search
+  "Searches vars (name + doc), schemas (key + doc + form), and docs by case-insensitive substring."
+  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [substr]
+  (when-let [{:keys [conn branch]} *agent-ctx*]
+    (let [bdb @conn
+          mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
+          q (str/lower-case (str substr))
+          h1 (search-db-hits mdb q)
+          h2 (when (not= (d/commit-id bdb) (d/commit-id mdb)) (search-db-hits bdb q))]
+      {:vars (->> (concat (:vars h1) (:vars h2)) distinct sort (take 25) vec)
+       :schemas (->> (concat (:schemas h1) (:schemas h2)) distinct sort (take 20) vec)
+       :docs (->> (concat (:docs h1) (:docs h2)) distinct sort (take 20) vec)})))
+
+(defn- scoped-branch-health [conn mdb bdb branch agent-id explicit-scope]
+  (let [base-cid (try (d/merge-base conn :main branch) (catch Throwable _ nil))
+        ops (if base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)) {:upserts [] :schema-keys #{}})
+        touched-nss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
+        ag-scope (when agent-id (:seon.agent/scope (d/pull bdb '[:seon.agent/scope] [:seon.agent/id agent-id])))
+        eff-scope (or explicit-scope ag-scope (first touched-nss))
+        alerts (health/fast-scoped-alerts mdb bdb (or eff-scope 'seon) agent-id nil
+                                          {:branch-edited (map :seon.code.form/key (:upserts ops))})
+        sch-forms (into {} (keep (fn [k] (when-let [f (:seon.schema/form (d/pull bdb '[:seon.schema/form] [:seon.schema/key k]))] [k f]))) (:schema-keys ops))
+        sch-errs (if (seq sch-forms) (health/schema-violations mdb sch-forms) [])
+        ctr-errs (if (seq touched-nss) (health/missing-contract-violations mdb bdb touched-nss) [])
+        ubd-errs (if (seq touched-nss)
+                   (let [base (into #{} (map :subject) (health/used-before-defined mdb touched-nss))]
+                     (remove #(contains? base (:subject %)) (health/used-before-defined bdb touched-nss)))
+                   [])
+        mns-errs (if (seq touched-nss)
+                   (let [base (into #{} (map :subject) (health/missing-ns-forms mdb touched-nss))]
+                     (remove #(contains? base (:subject %)) (health/missing-ns-forms bdb touched-nss)))
+                   [])
+        s-scopes (vec (distinct (concat touched-nss (when (and eff-scope (not= eff-scope 'seon)) [eff-scope]))))
+        s-warns (mapcat #(health/static-efficiency-warnings bdb %) s-scopes)
+        probs (vec (distinct (concat sch-errs ctr-errs ubd-errs mns-errs alerts s-warns)))
+        counts (frequencies (map :class probs))]
+    (with-meta {:ok? (not (some #(= :error (:severity %)) probs))
+                :branch branch :scoped? true :scope eff-scope :touched-nss touched-nss
+                :counts counts :problems probs
+                :note "Fast scoped branch health (<15 MB). Pass :all or :main for full DB health."}
+               {:seon/schema :seon.health/report})))
+
+(defn health
+  "Returns fast scoped/branch health (< 15 MB) by default on non-`:main` branches, or full
+   `seon.health/report` when passed `:all`/`:main` (or when on `:main`). Pass `'ns` to scope explicitly."
+  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]]}
+  ([] (health nil))
+  ([which]
+   (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
+     (let [bdb @conn
+           mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))]
+       (cond
+         (= which :main) (health/report mdb)
+         (or (= which :all) (and (nil? which) (= branch :main))) (health/report bdb)
+         :else (scoped-branch-health conn mdb bdb branch agent-id (when (symbol? which) which)))))))
+
+(defn- main-test-pass? [mdb vsym]
+  (when (and mdb vsym (contains? (:schema mdb) :seon.test/var) (contains? (:schema mdb) :seon.test/pass?))
+    (some-> (->> (d/datoms mdb :avet :seon.test/var vsym)
+                 (keep (fn [dt]
+                         (when-let [pdt (first (d/datoms mdb :eavt (:e dt) :seon.test/pass?))]
+                           {:tx (long (or (:tx pdt) (:tx dt) 0)) :e (:e dt) :pass? (boolean (:v pdt))})))
+                 (sort-by (fn [{:keys [tx e]}] [(- tx) (- e)]))
+                 first)
+            :pass?)))
+
+(defn- concise-failure-line [f main-pass?]
+  (let [ls (->> (str/split-lines (str (:seon.test/report f))) (map str/trim) (remove str/blank?) (take 3))
+        snip (let [s (str/join " | " ls)] (if (> (count s) 220) (str (subs s 0 217) "…") s))]
+    (str (:seon.test/var f) (when (false? main-pass?) " [PRE-EXISTING FAIL ON :main]")
+         ": " (if (str/blank? snip) "FAIL" snip))))
+
+(defn run-tests!
+  "Runs reach-selected `deftest`s for your branch (or explicit test vars/namespaces) live in the REPL,
+   surfacing `:main-pass?` and concise `:failure-lines` on failures."
+  {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]],
+   :seon.eval/budget-override {:ticks 2000000000, :bytes 4294967296}}
+  ([] (run-tests! nil))
+  ([target & more]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [t0 (System/nanoTime)
+           bdb @conn
+           mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
+           base-cid (when (not= branch :main) (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+           ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
+           _ (when (seq (:upserts ops))
+               (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
+           raw-targets (if (seq more) (cons target more) [target])
+           target-list (vec (mapcat #(cond (nil? %) nil (or (vector? %) (set? %) (seq? %)) % :else [%]) raw-targets))
+           test-syms (if (seq target-list)
+                       (->> target-list
+                            (mapcat (fn [x]
+                                      (let [s (if (string? x) (symbol x) x)]
+                                        (cond
+                                          (namespace s) [s]
+                                          (str/ends-with? (name s) "-test")
+                                          (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))]
+                                                   (when (:seon.code.var/test? v) (:seon.code.var/name v)))
+                                                (d/datoms bdb :avet :seon.code.var/ns s))
+                                          :else (code/reaching-tests bdb s)))))
+                            distinct sort vec)
+                       (->> (distinct (keep :seon.code.form/ns (:upserts ops)))
+                            (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
+           results (mapv #(wsup/run-single-test-var % (str "local:" %)) test-syms)
+           raw-fails (filterv #(not (:seon.test/pass? %)) results)
+           fails (mapv (fn [f]
+                         (let [mp (main-test-pass? mdb (:seon.test/var f))]
+                           (assoc (select-keys f [:seon.test/var :seon.test/report :seon.test/ms])
+                                  :main-pass? mp
+                                  :summary (concise-failure-line f mp))))
+                       raw-fails)
+           ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 10000.0)) 100.0)]
+       (cond-> {:ok? (empty? fails) :ran (count results) :passed (- (count results) (count fails))
+                :failed (count fails) :ms ms :failures fails
+                :results (mapv #(select-keys % [:seon.test/var :seon.test/pass? :seon.test/ms]) results)}
+         (seq fails) (assoc :failure-lines (mapv :summary fails)))))))
+
 (defn install-repl-helpers!
-  "Interns all `user/*` code-editing, inspection, test, and task helpers into `u` via live var
-   delegation (preserving `:doc`, `:arglists`, and `:seon.eval/budget-override` across hot-reloads)."
+  "Interns all `user/*` code-editing, inspection, test, health, search, and task helpers into `u` via live var delegation."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
   (intern-doc! u 'add-fn! #'edit/add-fn!)
@@ -497,6 +572,8 @@
   (intern-doc! u 'diff #'edit/diff)
   (intern-doc! u 'grep-src #'grep-src)
   (intern-doc! u 'run-tests! #'run-tests!)
+  (intern-doc! u 'health #'health)
+  (intern-doc! u 'search #'search)
   (intern-doc! u 'help #'help)
   (intern-doc! u 'autofix-health! #'autofix-health!)
   (intern-doc! u 'inspect-branch #'inspect-branch)
