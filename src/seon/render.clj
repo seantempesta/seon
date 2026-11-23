@@ -21,9 +21,12 @@
             [seon.render.fit :as fit]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.render.print.schema :as pschema]))
+            [seon.render.print.schema :as pschema]
+            [seon.render.text :as rtext]))
 
-(defn esc [s]
+(defn esc
+  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 20000}
+  [s]
   (let [^String s (str s)
         n (.length s)]
     (loop [i 0]
@@ -46,7 +49,9 @@
                 (recur (inc j))))))
         :else (recur (inc i))))))
 
-(defn url-enc [^String s]
+(defn url-enc
+  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 20000}
+  [^String s]
   (java.net.URLEncoder/encode (str s) "UTF-8"))
 
 (defn raw-html [s] {::raw (str s)})
@@ -54,6 +59,7 @@
 (defn fn->qualified-sym
   "Extracts the qualified Clojure symbol of a named top-level function or Var (no quote needed!).
    Returns nil for anonymous closures (`#(...)` / `(fn [...] ...)`)."
+  {:malli/schema [:=> [:cat :any] [:maybe :symbol]], :cost/ticks 20000}
   [f]
   (cond
     (var? f) (symbol f)
@@ -147,6 +153,7 @@
 
 (defn style-map->css
   "Converts a Clojure `:style` map (e.g. `{:color \"red\" :font-size \"20px\"}`) into a valid CSS declaration string."
+  {:malli/schema [:=> [:cat :map] :string], :cost/ticks 50000}
   [m]
   (str/join ";"
             (keep (fn [[k v]]
@@ -233,7 +240,9 @@
      {:html (.toString sb)
       :handlers @handlers})))
 
-(defn hiccup->html [node]
+(defn hiccup->html
+  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 200000}
+  [node]
   (:html (hiccup->html-with-handlers node "root")))
 
 (defn hiccup->text
@@ -398,7 +407,9 @@
                  [:p (str/join " · " (remove nil? [(when (seq docs) (str "Docs: " (str/join ", " (map :id docs))))
                                                    (when drill (str "Drill: " drill))]))])])))))))
 
-(defn sanitize-id [s]
+(defn sanitize-id
+  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 20000}
+  [s]
   (-> (str s)
       (str/replace #"[^A-Za-z0-9_-]+" "-")
       (str/replace #"^-+|-+$" "")))
@@ -406,6 +417,7 @@
 (defn ensure-root-id
   "Auto-injects deterministic `:id` onto the root Hiccup element if the component author omitted `:id`
    so Datastar Idiomorph always morphs stably without manual `:id` boilerplate."
+  {:malli/schema [:=> [:cat :any :any] :any], :cost/ticks 20000}
   [node id]
   (if (and id (vector? node) (keyword? (first node)))
     (let [[tag & more] node
@@ -478,6 +490,7 @@
 
 (defn empty-walk
   "Initial empty incremental render walk value (held inside `:web` Flow proc state — zero atoms!)."
+  {:malli/schema [:=> [:cat] :map], :cost/ticks 1000}
   []
   {:units {} :handlers {} :order []})
 
