@@ -10,24 +10,36 @@
             [seon.render.data :as rdata]
             [seon.render.ui :as ui]
             [seon.store :as store]
-            [seon.model.wire :as mwire]))
+            [seon.model.wire :as mwire]
+            [seon.web.router :as router]))
 
-(defn parse-kw-input [^String s default-kw]
+(defn parse-kw-input
+  "Parses a keyword string (with or without leading `:`) falling back to `default-kw`."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :keyword]] [:maybe :keyword]] :cost/ticks 100000}
+  [^String s default-kw]
   (let [t (str/trim (str s))]
     (cond (str/blank? t) default-kw
-          (str/starts-with? t ":") (edn/read-string t)
+          (str/starts-with? t ":") (or (try (let [k (edn/read-string t)] (when (keyword? k) k)) (catch Throwable _ nil)) default-kw)
           :else (keyword t))))
 
-(defn async-action [st req slot format-fn]
+(defn async-action
+  {:malli/schema [:=> [:cat :map :map :any :any] :map]}
+  [st req slot format-fn]
   {:st st :async {:req req :slot slot :format-fn format-fn}})
 
-(defn ^:seon/callable toggle-sidebar! [st]
+(defn ^:seon/callable toggle-sidebar!
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
   (async-action st {:op :show-user :toggle-sidebar? true} nil nil))
 
-(defn ^:seon/callable toggle-theme! [st]
+(defn ^:seon/callable toggle-theme!
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
   (async-action st {:op :show-user :toggle-theme? true} nil nil))
 
-(defn ^:seon/callable toggle-expand! [st agent-id]
+(defn ^:seon/callable toggle-expand!
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st agent-id]
   (async-action st {:op :show-user :toggle-expand agent-id} nil nil))
 
 (defn ^:seon/callable view-agent!
@@ -44,7 +56,9 @@
                 {:op :show-user :mode mode :clear-inspect true}
                 nil nil))
 
-(defn ^:seon/callable select-branch! [st branch]
+(defn ^:seon/callable select-branch!
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st branch]
   (async-action (assoc st :branch-feedback nil)
                 {:op :show-user :selected-branch branch}
                 nil nil))
@@ -53,8 +67,6 @@
   {:malli/schema [:=> [:cat :map :keyword] :map]}
   [st tab]
   (set-view-mode! st (case tab (:schemas :health :branches) :system :agents :system :context)))
-
-;; Holistic Fractal Inspector & Context Lab Callable Actions
 
 (defn ^:seon/callable inspect-entity!
   "Navigates the fractal entity-rooted surface to `lookup-ref`, pushing current ref onto back trail."
@@ -145,11 +157,15 @@
   [st]
   (async-action st {:op :vector-status} :vector-status identity))
 
-(defn ^:seon/callable power-loss-reboot! [st]
+(defn ^:seon/callable power-loss-reboot!
+  {:malli/schema [:=> [:cat [:map [:conn {:optional true} :seon.host/conn]]] :map]}
+  [st]
   (when-let [pl (:on-power-loss st)] (a/thread (pl)))
   {:st st})
 
-(defn ^:seon/callable run-tests! [st branch]
+(defn ^:seon/callable run-tests!
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [st branch]
   (async-action
    (assoc st :branch-feedback {:ok? true :text (str "Running reach tests on " branch "...")})
    {:op :test :branch branch}
@@ -166,27 +182,26 @@
   (let [srv (:server-in-ch st) ev-ch (or (:ui-ch st) (:event-ch st))]
     (when (and srv ev-ch)
       (a/go
-        (let [t-ans (let [rc (a/chan 1)]
-                      (a/>! srv {:req {:op :test :branch branch} :reply-ch rc})
-                      (let [[v _] (a/alts! [rc (a/timeout 30000)])] (or v {:ok? false :error :timeout})))]
+        (let [ask! (fn [req]
+                     (let [rc (a/chan 1)]
+                       (a/>! srv {:req req :reply-ch rc})
+                       (or (first (a/alts! [rc (a/timeout 30000)])) {:ok? false :error :timeout})))
+              t-ans (ask! {:op :test :branch branch})]
           (if-not (:ok? t-ans)
             (a/>! ev-ch {:ev :action-done :slot :branch-feedback
-                         :val {:ok? false
-                               :text (str "Merge blocked on " branch ": tests failed ("
-                                          (or (:error t-ans)
-                                              (str (:ran t-ans 0) " ran, " (count (remove :seon.test/pass? (:results t-ans))) " failed")) ")")}})
-            (let [m-ans (let [rc (a/chan 1)]
-                          (a/>! srv {:req {:op :merge :branch branch} :reply-ch rc})
-                          (let [[v _] (a/alts! [rc (a/timeout 30000)])] (or v {:ok? false :error :timeout})))]
+                         :val {:ok? false :text (str "Merge blocked on " branch ": tests failed ("
+                                                     (or (:error t-ans) (str (:ran t-ans 0) " ran, " (count (remove :seon.test/pass? (:results t-ans))) " failed")) ")")}})
+            (let [m-ans (ask! {:op :merge :branch branch})]
               (a/>! ev-ch {:ev :action-done :slot :branch-feedback
                            :val {:ok? (:ok? m-ans)
                                  :text (if (:ok? m-ans)
-                                         (str "Tested & merged " branch " -> :main @ tx " (:tx m-ans)
-                                              " (" (count (:touched-paths m-ans)) " files)")
+                                         (str "Tested & merged " branch " -> :main @ tx " (:tx m-ans) " (" (count (:touched-paths m-ans)) " files)")
                                          (str "Blocked / Conflict: " (pr-str (or (:conflicts m-ans) (:error m-ans)))))}}))))))
     (assoc st :branch-feedback {:ok? true :text (str "Running reach tests before merging " branch " -> :main...")})))
 
-(defn ^:seon/callable assign-health-fix! [st cls subject message]
+(defn ^:seon/callable assign-health-fix!
+  {:malli/schema [:=> [:cat :map :keyword :any :any] :map]}
+  [st cls subject message]
   (let [tid (keyword "seon.health" (str "fix-" (mod (System/currentTimeMillis) 100000)))
         scope-ns (try (let [s (str subject)] (if (str/includes? s "/") (symbol (first (str/split s #"/" 2))) 'seon)) (catch Throwable _ 'seon))]
     (async-action
@@ -196,6 +211,7 @@
      nil nil)))
 
 (defn ^:seon/callable spawn-agent-form!
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :map] :map] [:=> [:cat [:map [:conn {:optional true} :seon.host/conn]] :any :map] :map]]}
   ([st form] (spawn-agent-form! st (ui/entry-agent-id @(:conn st)) form))
   ([st parent-id form]
    (let [aid (parse-kw-input (:agent_id form) (keyword "agent" (str "w" (mod (System/currentTimeMillis) 10000))))
@@ -208,7 +224,9 @@
         scope (assoc :scope scope))
       nil nil))))
 
-(defn ^:seon/callable register-schema-form! [st form]
+(defn ^:seon/callable register-schema-form!
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [st form]
   (let [k (parse-kw-input (:key form) :seon.custom/item)]
     (async-action
      (assoc st :branch-feedback {:ok? true :text (str "Validating & deriving " k "...")})
@@ -223,80 +241,15 @@
                      " — seed=42 sample: " (:sample ans))
                 (str "Rejected: " (:error ans)))}))))
 
-(defn ^:seon/callable step-canvas-history!
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :int] :map]}
-  [st delta]
-  (let [db @(:conn st)
-        {:keys [viewing-id as-of-tx]} (ui/user-view-state db)
-        branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
-        bdb (or (try (store/head (:conn st) branch) (catch Throwable _ nil)) db)
-        txs (ui/canvas-history-txs bdb db viewing-id)
-        n (count txs)]
-    (if (< n 2)
-      {:st st}
-      (let [cur-idx (if as-of-tx (or (first (keep-indexed #(when (= %2 as-of-tx) %1) txs)) (dec n)) (dec n))
-            nxt-idx (max 0 (min (dec n) (+ cur-idx (long delta))))
-            target (if (= nxt-idx (dec n)) :live (nth txs nxt-idx))]
-        (async-action st {:op :show-user :as-of-tx target} nil nil)))))
-
-(defn ^:seon/callable jump-canvas-tx!
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] [:maybe :int]] :map]}
-  [st tx]
-  (let [db @(:conn st)
-        {:keys [viewing-id]} (ui/user-view-state db)
-        branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
-        bdb (or (try (store/head (:conn st) branch) (catch Throwable _ nil)) db)
-        txs (ui/canvas-history-txs bdb db viewing-id)
-        target (if (or (nil? tx) (= tx (last txs))) :live (long tx))]
-    (async-action st {:op :show-user :as-of-tx target} nil nil)))
-
-(defn ^:seon/callable jump-canvas-live! [st]
+(defn ^:seon/callable jump-canvas-live!
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
   (async-action st {:op :show-user :as-of-tx :live} nil nil))
 
-(defn ^:seon/callable dismiss-feedback! [st]
+(defn ^:seon/callable dismiss-feedback!
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
   {:st (assoc st :branch-feedback nil)})
-
-(defn ^:seon/callable chat-agent-form!
-  {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map [:maybe :keyword] :map] :map]]}
-  ([st form] (chat-agent-form! st (ui/entry-agent-id @(:conn st)) form))
-  ([st agent-id form]
-   (let [db @(:conn st)
-         txt (str/trim (str (or (:text form) (:code form) "")))
-         aid (or agent-id (ui/entry-agent-id db))
-         br (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id aid])) :branch/repl)]
-     (cond
-       (str/blank? txt) {:st st}
-       (or (boolean (re-find #"^[\(\[\{'#@]" txt))
-           (and (str/starts-with? txt ":") (not (str/includes? txt " "))))
-       (async-action (assoc st :branch-feedback nil)
-                     {:op :eval :branch br :agent-id aid :code txt :keep-warm? true}
-                     :branch-feedback
-                     (fn [ans] (when-not (:ok? ans) {:ok? false :text (str "Eval error: " (:error ans))})))
-       :else
-       (do (when (:as-of-tx (ui/user-view-state db))
-             (a/put! (:server-in-ch st) {:req {:op :show-user :as-of-tx :live}}))
-           (async-action (assoc st :branch-feedback nil)
-                         {:op :send-message :from :user :to aid :type :chat :body txt}
-                         nil nil))))))
-
-(defn ^:seon/callable chat-root-form!
-  ([st form] (chat-agent-form! st form))
-  ([st agent-id form] (chat-agent-form! st agent-id form)))
-
-(defn ^:seon/callable eval-agent-form! [st agent-id branch form]
-  (let [code-str (str/trim (str (:code form "")))]
-    (cond
-      (str/blank? code-str) {:st st}
-      (or (boolean (re-find #"^[\(\[\{'#@]" code-str))
-          (and (str/starts-with? code-str ":") (not (str/includes? code-str " "))))
-      (async-action (assoc st :branch-feedback nil)
-                    {:op :eval :branch branch :agent-id agent-id :code code-str :keep-warm? true}
-                    :branch-feedback
-                    (fn [ans] (when-not (:ok? ans) {:ok? false :text (str "Error: " (:error ans))})))
-      :else
-      (async-action (assoc st :branch-feedback nil)
-                    {:op :send-message :from :user :to agent-id :type :chat :body code-str}
-                    nil nil))))
 
 (defn ^:seon/callable pin-ref-form!
   {:malli/schema [:=> [:cat :map :keyword :map] :map]}
@@ -311,13 +264,16 @@
                       {:op :transact :tx-data [{:seon.agent/id agent-id :seon.agent/pinned nxt}]}
                       nil nil)))))
 
-(defn ^:seon/callable unpin-tile! [st agent-id ref-val]
+(defn ^:seon/callable unpin-tile!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :keyword :any] :map]}
+  [st agent-id ref-val]
   (let [cur (vec (or (:seon.agent/pinned (d/pull @(:conn st) '[:seon.agent/pinned] [:seon.agent/id agent-id])) []))
         nxt (vec (remove #(= % ref-val) cur))]
     (async-action st {:op :transact :tx-data [{:seon.agent/id agent-id :seon.agent/pinned nxt}]} nil nil)))
 
 (defn invoke-call!
   "Dispatches either a registered Reagent closure (`?h=...`) OR a stateless `^:seon/callable` Clojure call form."
+  {:malli/schema [:=> [:cat [:map [:conn {:optional true} :seon.host/conn]] :map] :map]}
   [st {:keys [hkey call-form form-fields]}]
   (try
     (cond
@@ -355,7 +311,9 @@
     :inputSchema {:type "object" :properties {:branch {:type "string"} :message {:type "string"}} :required ["branch"]}}
    {:name "seon_status" :description "Read system status snapshot." :inputSchema {:type "object" :properties {}}}])
 
-(defn ^:seon.flow/edge call-server-edge! [server-in-ch req timeout-ms]
+(defn ^:seon.flow/edge call-server-edge!
+  {:malli/schema [:=> [:cat :seon.host/chan :map :int] :map]}
+  [server-in-ch req timeout-ms]
   (let [rch (a/chan 1)]
     (a/put! server-in-ch {:req req :reply-ch rch})
     (let [[ans _] (a/alts!! [rch (a/timeout timeout-ms)])] (or ans {:ok? false :error :timeout}))))
@@ -531,3 +489,79 @@
           (when-not (:ok? ans)
             {:ok? false :text (str "Spawn failed: " (or (:error ans) "unknown error"))}))))
      {:st (assoc st :branch-feedback {:ok? false :text "Cannot spawn agent: invalid entity reference."})})))
+
+(defn ^:seon/callable navigate-url!
+  "Navigates to bookmarkable URL `path` via `seon.web.router/path->show-user-op`."
+  {:malli/schema [:=> [:cat :map :string] :map] :cost/ticks 500000}
+  [st path]
+  (if-let [op (router/path->show-user-op (when-let [c (:conn st)] @c) path)]
+    (async-action (assoc st :branch-feedback nil) op nil nil)
+    {:st st}))
+
+(defn ^:seon/callable toggle-expert-mode!
+  "Toggles `:seon.user/expert-mode?` on `:user/default` between Everyday and Expert modes."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map] :cost/ticks 200000}
+  [st]
+  (let [cur (boolean (:expert-mode? (ui/user-view-state @(:conn st))))]
+    (async-action st {:op :transact :reason [:toggle-expert-mode (not cur)]
+                      :tx-data [{:seon.user/id :user/default :seon.user/expert-mode? (not cur)}]}
+                  nil nil)))
+
+(defn- viewing-history-txs [conn]
+  (let [db @conn {:keys [viewing-id as-of-tx]} (ui/user-view-state db)
+        branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
+        bdb (or (try (store/head conn branch) (catch Throwable _ nil)) db)]
+    {:as-of-tx as-of-tx :txs (ui/canvas-history-txs bdb db viewing-id)}))
+
+(defn ^:seon/callable jump-canvas-tx!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] [:maybe :int]] :map]}
+  [st tx]
+  (let [{:keys [txs]} (viewing-history-txs (:conn st))]
+    (async-action st {:op :show-user :as-of-tx (if (or (nil? tx) (= tx (last txs))) :live (long tx))} nil nil)))
+
+(defn ^:seon/callable step-canvas-history!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :int] :map]}
+  [st delta]
+  (let [{:keys [as-of-tx txs]} (viewing-history-txs (:conn st)) n (count txs)]
+    (if (< n 2)
+      {:st st}
+      (let [cur-idx (if as-of-tx (or (first (keep-indexed #(when (= %2 as-of-tx) %1) txs)) (dec n)) (dec n))
+            nxt-idx (max 0 (min (dec n) (+ cur-idx (long delta))))]
+        (async-action st {:op :show-user :as-of-tx (if (= nxt-idx (dec n)) :live (nth txs nxt-idx))} nil nil)))))
+
+(defn- clj-expr? [s]
+  (or (boolean (re-find #"^[\(\[\{'#@]" s))
+      (and (str/starts-with? s ":") (not (str/includes? s " ")))))
+
+(defn ^:seon/callable eval-agent-form!
+  {:malli/schema [:=> [:cat :map :any :any :map] :map]}
+  [st agent-id branch form]
+  (let [s (str/trim (str (:code form "")))]
+    (cond
+      (str/blank? s) {:st st}
+      (clj-expr? s)
+      (async-action (assoc st :branch-feedback nil) {:op :eval :branch branch :agent-id agent-id :code s :keep-warm? true}
+                    :branch-feedback #(when-not (:ok? %) {:ok? false :text (str "Error: " (:error %))}))
+      :else
+      (async-action (assoc st :branch-feedback nil) {:op :send-message :from :user :to agent-id :type :chat :body s} nil nil))))
+
+(defn ^:seon/callable chat-agent-form!
+  {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map [:maybe :keyword] :map] :map]]}
+  ([st form] (chat-agent-form! st (ui/entry-agent-id @(:conn st)) form))
+  ([st agent-id form]
+   (let [db @(:conn st) txt (str/trim (str (or (:text form) (:code form) "")))
+         aid (or agent-id (ui/entry-agent-id db))
+         br (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id aid])) :branch/repl)]
+     (cond
+       (str/blank? txt) {:st st}
+       (clj-expr? txt)
+       (async-action (assoc st :branch-feedback nil) {:op :eval :branch br :agent-id aid :code txt :keep-warm? true}
+                     :branch-feedback #(when-not (:ok? %) {:ok? false :text (str "Eval error: " (:error %))}))
+       :else
+       (do (when (:as-of-tx (ui/user-view-state db)) (a/put! (:server-in-ch st) {:req {:op :show-user :as-of-tx :live}}))
+           (async-action (assoc st :branch-feedback nil) {:op :send-message :from :user :to aid :type :chat :body txt} nil nil))))))
+
+(defn ^:seon/callable chat-root-form!
+  {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :map] :map] [:=> [:cat [:map [:conn :seon.host/conn]] :any :map] :map]]}
+  ([st form] (chat-agent-form! st form))
+  ([st agent-id form] (chat-agent-form! st agent-id form)))
