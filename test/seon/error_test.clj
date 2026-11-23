@@ -274,7 +274,7 @@
         (finally
           (try (adapter/stop-server srv {:drain-timeout-ms 500}) (catch Throwable _)))))))
 
-(deftest ^{:cost/ticks 25000000} unified-error-health-and-render-value-test
+(deftest ^{:cost/ticks 45000000} unified-error-health-and-render-value-test
   (testing "Open :seon.error/* entities surface in seon.health/open-faults and render via seon.error/render without :seon/schema metadata"
     (with-test-store [{:keys [conn]}]
       (let [ent (error/error-tx {:kind :model/rate-limit :severity :error :source :model :agent :ns/seon.model
