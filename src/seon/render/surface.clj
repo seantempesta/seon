@@ -1,5 +1,7 @@
 (ns seon.render.surface
-  "ONE unified rule-projected surface pipeline for `:session`, `:context`, `:system`, and `:inspect`."
+  "ONE unified rule-projected surface pipeline for `:session`, `:context` (Explain),
+   `:system` (`[:seon.system/id :root]`), and `:inspect` (Entity Full View) — powered by
+   `project-entity-view` for both human HTML (`:target :html`) and AI Wire (`:target :wire`)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.ctx :as ctx]
@@ -9,6 +11,7 @@
             [seon.render.links :as rlinks :refer [badge db-schema kicker]]
             [seon.render.markdown :as rmd]
             [seon.render.surface.context-lab :as clab]
+            [seon.render.surface.entity :as sentity]
             [seon.render.surface.inspector :as sinsp]
             [seon.render.surface.system :as ssys]
             [seon.render.wire :as rwire]
@@ -31,6 +34,16 @@
 (defn- safe-as-of {:seon.flow/edge true} [db tx]
   (if (and db (integer? tx)) (try (d/as-of db tx) (catch Throwable _ db)) db))
 
+(defn project-entity-view
+  "ONE general entity-surface engine for BOTH humans (`:target :html`) and agents (`:target :wire`).
+   Works identically for `[:seon.agent/id aid]`, `[:seon.system/id :root]`, and ANY entity lookup ref."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any [:maybe :map]] :map]]
+   :cost/ticks 45000000}
+  ([main-db branch-db focus-ref] (sentity/project-entity-view main-db branch-db focus-ref nil))
+  ([main-db branch-db focus-ref opts] (sentity/project-entity-view main-db branch-db focus-ref opts)))
+
 (defn- pull-ctx-rules [db]
   (let [dh (db-schema db)]
     (when (and db (dh :seon.rule/category) (dh :seon.rule/id))
@@ -49,7 +62,7 @@
                                                  (into {} (map (juxt :seon.rule/id identity)) br))))
                                (vec mr))]
                   (if (seq merged) merged
-                      (filterv (fn [r] (and (= :context (:seon.rule/category r)) (not (false? (:seon.rule/enabled? r)))))
+                      (filterv #(and (= :context (:seon.rule/category %)) (not (false? (:seon.rule/enabled? %))))
                                (rseed/starter-rules)))))]
     (if (and ms bs) (store/lru-get! surface-rules-cache 16 [ms bs] load*) (load*))))
 
@@ -70,7 +83,7 @@
         errs? (or (open-errors? mdb) (and (not= mdb bdb) (open-errors? bdb)))
         evs? (boolean (and ((db-schema bdb) :seon.agent.eval/agent)
                            (first (d/datoms bdb :avet :seon.agent.eval/agent aid))))
-        skip (cond-> #{}
+        skip (cond-> #{:rule.ctx/system-overview}
                (or (branch-green? bdb br same?) (not (any-tests? bdb))) (conj :rule.ctx/failing-reach-tests)
                (not errs?) (conj :rule.ctx/fault-with-recommended-fix)
                same? (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
@@ -92,8 +105,7 @@
         world (proj/agent-world-datoms mdb bdb aid)
         ru-ps (:seon.ctx/projections ru)
         seen (into #{} (keep :entity) ru-ps)
-        pins (:pinned world)
-        aeid (:agent-eid world)
+        pins (:pinned world) aeid (:agent-eid world)
         extra (into [] (comp (remove #(or (= (key %) aeid) (seen (key %))))
                              (take 8)
                              (map (fn [[e tx]]
@@ -127,22 +139,18 @@
         latest-prompt (some-> lum :data :seon.agent.message/body str not-empty)
         done-ag? (boolean (or (:seon.agent/ready? ag) (:seon.agent/paused? ag)
                               (pos? (long (or (:seon.agent/merged-tx ag) 0)))))
-        ;; NEVER show fake "IN FLIGHT" when agent already ran evals and is idle/ready/merged!
         pending (when (and (nil? as-of)
-                           (or active?
-                               (and latest-prompt (empty? ex-evals) (not done-ag?))))
+                           (or active? (and latest-prompt (empty? ex-evals) (not done-ag?))))
                   (or latest-prompt "Working…"))
         latest-p (ex-prose latest)
         has-work? (and (nil? pending) (empty? latest-p) (seq ex-evals))
         last-intent (some #(not-empty (str/trim (str (or (:seon.agent.eval/intent %) "")))) (reverse ex-evals))
         work-sum (when has-work?
-                   {:prompt latest-prompt
-                    :eval-count (count ex-evals)
+                   {:prompt latest-prompt :eval-count (count ex-evals)
                     :latest-intent (or last-intent (str (count ex-evals) " REPL step(s) completed"))
                     :status-label (cond (pos? (long (or (:seon.agent/merged-tx ag) 0))) "Merged"
                                         (:seon.agent/ready? ag) "Ready"
-                                        (:seon.agent/paused? ag) "Paused"
-                                        :else "Completed")})
+                                        (:seon.agent/paused? ag) "Paused" :else "Completed")})
         sidx (last (keep-indexed #(when (seq (ex-prose %2)) %1) exs))
         disp (cond pending latest has-work? latest (some? sidx) (nth exs sidx) :else latest)]
     {:evals evals :msgs msgs :exchanges exs :pending-prompt pending :work-summary work-sum
@@ -152,27 +160,32 @@
                                    (not (str/blank? (str (:seon.agent.eval/reasoning %)))))
                               (map :data (filter #(= :eval (:kind %)) disp)))}))
 
-(defn- build-mode-payload [canon inspecting? emdb ebdb aid ag vm br gather-fn fopts lp o]
+(defn- build-mode-payload [canon explaining? inspecting? insp-ref emdb ebdb aid ag br gather-fn fopts lp o]
   (cond
-    (or inspecting? (= canon :system))
-    {:wire nil :fitted {:selected [] :tokens 0 :budget 16000} :ctx-trace nil}
+    (and explaining? insp-ref (not= :seon.agent/id (first insp-ref)))
+    {:wire nil :fitted {:selected [] :tokens 0 :budget 16000} :ctx-trace nil :pool-count 0}
 
-    (= canon :context)
+    explaining?
     (let [w (clab/build-context-lab-wire emdb ebdb aid ag br gather-fn (assoc o :lab-prefs lp))]
-      {:wire w :ctx-trace (:rule-trace w)
+      {:wire w :ctx-trace (:rule-trace w) :pool-count (count (get-in w [:explained :items]))
        :fitted {:selected (or (get-in w [:fit-trace :items]) [])
                 :tokens (get-in w [:fit-trace :tokens] 0)
                 :budget (get-in w [:fit-trace :budget] 16000)}})
 
+    (or inspecting? (= canon :system))
+    {:wire nil :fitted {:selected [] :tokens 0 :budget 16000} :ctx-trace nil :pool-count 0}
+
     :else
-    (let [{:keys [candidates ctx-trace]} (gather-fn)
-          with-sem (clab/attach-semantic-scores emdb ebdb ag candidates)]
+    (let [proj (sentity/project-entity-view
+                emdb ebdb [:seon.agent/id aid]
+                (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) 8))))]
       {:wire (when (:include-wire? o)
                (rwire/build-live-wire-request
                 emdb ebdb aid
                 (select-keys o [:conn :viewport-screenshot :vision? :already-shown :token-budget :strategy])))
-       :fitted (fit/fit-projections ebdb with-sem fopts)
-       :ctx-trace ctx-trace})))
+       :fitted (:fitted proj)
+       :pool-count (:pool-count proj 0)
+       :ctx-trace (:ctx-trace proj)})))
 
 (defn build-surface-model
   "Pure unified surface model builder over `main-db`, `branch-db`, and `opts`."
@@ -188,7 +201,11 @@
          vm (or (:view-mode o) (:view-mode vs) :session)
          canon (rdata/canonical-view-mode vm)
          insp-ref (if (contains? o :inspect-ref) (rdata/normalize-inspect-ref (:inspect-ref o)) (:inspect-ref vs))
-         inspecting? (boolean (or insp-ref (= vm :inspect)))
+         explaining? (and (= canon :context)
+                          (or (nil? insp-ref)
+                              (= :context (rdata/canonical-view-mode (:view-mode o)))
+                              (not (contains? o :inspect-ref))))
+         inspecting? (boolean (and (not explaining?) (or insp-ref (= vm :inspect))))
          vw (long (or (:viewport-w o) (:viewport-w vs) 1280))
          vh (long (or (:viewport-h o) (:viewport-h vs) 820))
          sb? (and (if (boolean? (:sidebar-open? o)) (:sidebar-open? o) (boolean (:sidebar-open? vs))) (>= vw 760))
@@ -202,30 +219,31 @@
          emdb (if as-of (safe-as-of main-db as-of) main-db)
          ebdb (if as-of (safe-as-of hbdb as-of) hbdb)
          ag (rdata/pull-agent-entity emdb ebdb aid)
-         sigs (when-not inspecting? (sig/all-signals emdb))
+         sigs (when (or (not inspecting?) (= :seon.system/id (first insp-ref))) (sig/all-signals emdb))
          lp (or (:lab-prefs o) (:lab-prefs vs) {})
          fopts (merge {:target target :viewport-w vw :viewport-h vh :sidebar-open? sb? :slot slot
                        :avail-w (:avail-w slot-b) :area-budget (:area-budget slot-b) :main-db emdb
                        :fallback-renderers rwire/fallback-entity-renderers}
                       (select-keys o [:token-budget :already-shown :strategy]))
-         sfit (when (and sigs (not= canon :system))
+         sfit (when (and sigs (not= canon :system) (not inspecting?))
                 (first (:selected (fit/fit-projections emdb [{:entity :signals/live :schema :seon.signal/snapshot :data sigs :priority 100}] fopts))))
          gather-fn #(gather-surface-candidates emdb ebdb aid ag vm br)
-         {:keys [wire fitted ctx-trace]} (build-mode-payload canon inspecting? emdb ebdb aid ag vm br gather-fn fopts lp o)
+         {:keys [wire fitted ctx-trace pool-count]} (build-mode-payload canon explaining? inspecting? insp-ref emdb ebdb aid ag br gather-fn fopts lp o)
          peids (vec (keep #(when (integer? (:entity %)) (:entity %)) (:selected fitted)))
-         htxs (if (or inspecting? (= canon :system)) [] (or (rdata/view-history-txs hbdb main-db aid peids) []))
+         htxs (if (or inspecting? (= canon :system) (and explaining? insp-ref)) [] (or (rdata/view-history-txs hbdb main-db aid peids) []))
          sidx (when (seq htxs)
                 (if as-of (or (first (keep-indexed #(when (= %2 as-of) %1) htxs))
                               (last (keep-indexed #(when (<= %2 as-of) %1) htxs)) 0)
                     (dec (count htxs))))
          active? (or (= :active (get (:agent-states o) aid)) (map? (:live-stream o)))
-         conv (if (and (= canon :session) (not inspecting?)) (extract-conversation emdb ebdb aid ag active? as-of) {})
-         errs (when (and (= canon :context) ((db-schema emdb) :seon.error/status))
+         conv (if (and (= canon :session) (not inspecting?) (not explaining?)) (extract-conversation emdb ebdb aid ag active? as-of) {})
+         errs (when (and explaining? (or (nil? insp-ref) (= :seon.agent/id (first insp-ref))) ((db-schema emdb) :seon.error/status))
                 (mapv #(d/pull emdb '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message
                                       :seon.error/agent :seon.error/var :seon.error/branch] (:e %))
                       (take 8 (d/datoms emdb :avet :seon.error/status :open))))]
      (merge conv
-            {:agent ag :viewing-id aid :branch br :view-mode vm :canon-mode canon :inspect-ref insp-ref :inspecting? inspecting?
+            {:agent ag :viewing-id aid :branch br :view-mode vm :canon-mode canon :explaining? explaining?
+             :inspect-ref insp-ref :inspecting? inspecting? :pool-count (long (or pool-count 0))
              :inspect-trail (or (:inspect-trail o) (:inspect-trail vs) [])
              :inspect-forward (or (:inspect-forward o) (:inspect-forward vs) []) :lab-prefs lp
              :viewport {:w vw :h vh :sidebar-open? sb?} :slot-budget slot-b :signals sigs :signals-fit sfit
@@ -248,11 +266,9 @@
 
 (defn render-surface-timeline
   "Generic Datahike `d/as-of` time-travel bar shared across views."
-  {:malli/schema [:=> [:cat [:maybe [:sequential :int]] [:maybe :int] [:maybe :int]] :any]
-   :cost/ticks 500000}
+  {:malli/schema [:=> [:cat [:maybe [:sequential :int]] [:maybe :int] [:maybe :int]] :any] :cost/ticks 500000}
   [hist-txs cur-idx as-of-tx]
-  (let [txs (vec (filter integer? (or hist-txs [])))
-        n (count txs)
+  (let [txs (vec (filter integer? (or hist-txs []))) n (count txs)
         in-h? (boolean (and as-of-tx (some #(= (long %) (long as-of-tx)) txs)))
         past? (boolean (and as-of-tx (or (<= n 1) (not in-h?) (< (long (or cur-idx (dec n))) (dec n)))))]
     (when (or (> n 1) past?)
@@ -273,15 +289,13 @@
            (kicker (str "Snapshot · tx " as-of-tx)))
          [:div {:class "tl-meta"}
           [:span (cond (and past? (not in-h?)) (str "Time-travel · tx " as-of-tx)
-                       past? (str "Time-travel · " (inc idx) " / " n)
-                       :else (str "History · " (inc idx) " / " n))]
+                       past? (str "Time-travel · " (inc idx) " / " n) :else (str "History · " (inc idx) " / " n))]
           (when past? (btn "step-live" '(seon.web/jump-canvas-live!) "Live"))]]))))
 
 (defn- feedback-banner [fb]
   (when fb
     [:div {:class (str "notice row-between " (if (:ok? fb) "green" "red"))}
-     [:span (:text fb)]
-     (btn "link-muted tiny" '(seon.web/dismiss-feedback!) "×")]))
+     [:span (:text fb)] (btn "link-muted tiny" '(seon.web/dismiss-feedback!) "×")]))
 
 (defn- composer-form [cls action field-name placeholder]
   [:form {:class cls :on-submit action}
@@ -298,41 +312,31 @@
 
 (defn- entity-group-key [it]
   (let [sk (or (first (:schemas it)) (:schema it))]
-    (cond (group-tasks-edits sk) :tasks-edits
-          (group-alerts-proofs sk) :alerts-proofs
-          :else :pinned-rules)))
+    (cond (group-tasks-edits sk) :tasks-edits (group-alerts-proofs sk) :alerts-proofs :else :pinned-rules)))
 
 (defn- render-grouped-entities [entities avail-w]
   (when (seq entities)
-    (let [by-g (group-by entity-group-key entities)
-          counts (volatile! {})
+    (let [by-g (group-by entity-group-key entities) counts (volatile! {})
           mk-item (fn [item]
                     (let [slug (entity-vt-slug (:entity item))
-                          occ (long (get @counts slug 0))
-                          _ (vswap! counts assoc slug (inc occ))
+                          occ (long (get @counts slug 0)) _ (vswap! counts assoc slug (inc occ))
                           vt (str "ent-" occ "-" slug)
                           ref (or (rdata/entity-lookup-ref (:data item)) (when (integer? (:entity item)) [:db/id (:entity item)]))
-                          cfn (:chosen-fn item)
-                          sem (:semantic item)]
+                          cfn (:chosen-fn item) sem (:semantic item)]
                       [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
-                             :data-entity (str (:entity item)) :data-chosen-fn (str cfn)
-                             :data-min-width (str (:min-width item 0))}
+                             :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
                        [:div {:class "ent-prov-bar"}
                         [:div {:class "pill-row"}
-                         (if (qualified-symbol? cfn)
-                           (el [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
-                           [:span {:class "mono tiny muted"} (str (some-> cfn name))])
+                         (if (qualified-symbol? cfn) (el [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
+                             [:span {:class "mono tiny muted"} (str (some-> cfn name))])
                          [:span {:class "mono tiny muted"} (str "· " (:tokens item 0) " tok")]
                          (for [r (take 2 (:rules item))]
-                           (if (rlinks/real-rule-id? r)
-                             (el [:seon.rule/id r] (name r) "pill mono tiny")
-                             [:span {:class "pill mono tiny"} (str r)]))
+                           (if (rlinks/real-rule-id? r) (el [:seon.rule/id r] (name r) "pill mono tiny") [:span {:class "pill mono tiny"} (str r)]))
                          (when (number? sem) (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
                         (when ref (el ref "Inspect variations →" "tiny mono"))]
                        (or (:hiccup item)
                            [:div {:class "ent-row mono tiny"}
-                            (if ref (el ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong")
-                                (str (:entity item)))])]))]
+                            (if ref (el ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong") (str (:entity item)))])]))]
       [:div {:class (if (< (long avail-w) 600) "surface-entities stack-sm" "surface-entities stack")
              :data-entity-count (str (count entities))}
        (for [[gk title] [[:tasks-edits "Tasks & Edits"] [:alerts-proofs "Alerts & Proofs"] [:pinned-rules "Pinned & Rules"]]
@@ -387,22 +391,17 @@
           [:div {:id (str prefix "-" idx "-p-" pi) :class "chat-body"} (rmd/render-markdown-blocks p)])])]))
 
 (defn- honest-status-badge [ag active?]
-  (cond active? (badge "amber" "live")
-        (pos? (long (or (:seon.agent/merged-tx ag) 0))) (badge "green" "merged")
-        (:seon.agent/ready? ag) (badge "green" "ready")
-        (:seon.agent/paused? ag) (badge "muted" "paused")
-        (:seon.agent/waiting? ag) (badge "blue" "waiting")
-        :else (badge "muted" "idle")))
+  (cond active? (badge "amber" "live") (pos? (long (or (:seon.agent/merged-tx ag) 0))) (badge "green" "merged")
+        (:seon.agent/ready? ag) (badge "green" "ready") (:seon.agent/paused? ag) (badge "muted" "paused")
+        (:seon.agent/waiting? ag) (badge "blue" "waiting") :else (badge "muted" "idle")))
 
-(defn- render-session-body [{:keys [agent viewing-id branch branch-db entities exchanges
+(defn- render-session-body [{:keys [agent viewing-id branch branch-db entities pool-count exchanges
                                     pending-prompt latest-prose reply-prompt latest-actions work-summary
                                     live-stream branch-feedback slot-budget active?]} include-composer?]
   (let [label (rdata/agent-label agent viewing-id)
         prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
         earlier (when (> (count exchanges) 1) (pop exchanges))
-        scope (:seon.agent/scope agent)
-        task (:seon.agent/task agent)
-        parent (:seon.agent/parent agent)]
+        scope (:seon.agent/scope agent) task (:seon.agent/task agent) parent (:seon.agent/parent agent)]
     (list
      [:section {:id "ws-left-unit" :class "ws-left"}
       [:div {:class "ws-head work-bar"}
@@ -416,10 +415,10 @@
          (when parent (list "·" (el [:seon.agent/id parent] (str "↑" (name parent)) "mono tiny muted")))
          (when scope (list "·" (el [:seon.code.ns/name scope] (str scope) "mono tiny")))
          (when task (list "·" (el [:seon.task/id task] (str task) "mono tiny")))]]
-       [:div {:class "pill-row"}
-        (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
-        (when (not= branch :main) (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main"))
-        (btn "nav-pill tiny" '(seon.web/set-view-mode! :context) "Context & Cache →")]]
+       (when (not= branch :main)
+         [:div {:class "pill-row"}
+          (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
+          (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")])]
       (feedback-banner branch-feedback)
       [:div {:class "ws-timeline" :data-agent (str viewing-id)}
        (when (and (seq earlier) (not pending-prompt))
@@ -456,8 +455,7 @@
          :else
          [:header {:class "root-hero"}
           [:div {:class "root-kicker pill-row"}
-           (el [:seon.agent/id viewing-id] label "mono tiny") "·"
-           (el [:seon.branch/name branch] (str branch) "mono tiny")]
+           (el [:seon.agent/id viewing-id] label "mono tiny") "·" (el [:seon.branch/name branch] (str branch) "mono tiny")]
           [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
           (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])])]
       (when include-composer?
@@ -466,7 +464,10 @@
       [:div {:id "ws-right-head-unit"}
        [:div {:class "ws-head"}
         [:h2 (str "Active Context (" (count entities) ")")]
-        (btn "nav-pill tiny" '(seon.web/set-view-mode! :context) "Context & Cache →")]
+        (btn "nav-pill tiny" '(seon.web/set-explain-lens! true nil)
+             (if (pos? (long (or pool-count 0)))
+               (str "Explain selection (" pool-count " in pool) →")
+               "Explain selection →"))]
        [:form {:class "row-form" :on-submit (list 'seon.web/pin-ref-form! viewing-id)}
         [:input {:class "inp sm mono flex-1" :name "ref" :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
         [:button {:type "submit" :class "btn sm"} "+ Pin"]]]
@@ -475,7 +476,7 @@
            [:div {:id "ws-tiles-empty" :class "card muted sm-copy"} "No active context entities yet."])]])))
 
 (defn render-surface
-  "ONE unified Hiccup renderer for `:session`, `:context`, `:system`, and `:inspect`."
+  "ONE unified Hiccup renderer for `:session`, `:context` (Explain), `:system`, and `:inspect`."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db [:maybe :map]] [:vector :any]]
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:maybe :map]] [:vector :any]]]
@@ -484,15 +485,16 @@
   ([main-db branch-db opts]
    (let [o (if (map? opts) opts {})
          m (build-surface-model main-db branch-db o)
-         {:keys [viewing-id view-mode canon-mode inspecting? inspect-ref viewport slot-budget
+         {:keys [viewing-id view-mode canon-mode explaining? inspecting? inspect-ref viewport slot-budget
                  history-txs step-idx as-of-tx]} m
          comp? (if (contains? o :include-composer?) (boolean (:include-composer? o)) true)
-         tl (when-not inspecting? (render-surface-timeline history-txs step-idx as-of-tx))
-         cls (cond inspecting? "debug-wrap"
-                   (= canon-mode :session) (if (>= (long (:avail-w slot-budget 1000)) 860) "workspace-grid" "workspace-grid surface-stack")
-                   :else "debug-wrap")
-         body (cond inspecting? (sinsp/render-inspector-body m)
-                    (= canon-mode :context) (clab/render-context-lab-body m)
+         tl (when (and (not inspecting?) (not= canon-mode :system) (not (and explaining? inspect-ref)))
+              (render-surface-timeline history-txs step-idx as-of-tx))
+         cls (cond (or explaining? inspecting? (= canon-mode :system)) "debug-wrap"
+                   :else (if (>= (long (:avail-w slot-budget 1000)) 860) "workspace-grid" "workspace-grid surface-stack"))
+         body (cond explaining? (clab/render-context-lab-body m)
+                    (and inspecting? (= :seon.system/id (first inspect-ref))) (sentity/render-system-entity-body m)
+                    inspecting? (sinsp/render-inspector-body m)
                     (= canon-mode :system) (ssys/render-system-body m)
                     :else (render-session-body m comp?))]
      [:div (cond-> {:id "seon-view-unit" :class cls :data-agent (str viewing-id)
