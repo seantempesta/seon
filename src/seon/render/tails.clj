@@ -204,3 +204,30 @@
                 (when dom-s [:p (str "DOM: " dom-s)])]}
         (and vision? (:base64 snapshot))
         (assoc :image {:mime (or (:mime snapshot) "image/jpeg") :base64 (:base64 snapshot) :raw snapshot})))))
+
+(defn render-wait-nudge-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer reminding an agent working on an unanswered user
+   message to reply directly or update live progress via `user/set-status!`."
+  {:malli/schema [:=> {:examples [[[{:seon.tail/wait-nudge {:elapsed-s 12 :eval-count 3 :prompt "How are tests?"}}]
+                                   {:tag "user-waiting"
+                                    :seon.ui/hiccup [:section {:class "tail-block" :data-min-width 220}
+                                                     [:p "User has been waiting 12s (3 eval(s)) for a reply to: How are tests?"]
+                                                     [:p "If you have the answer, reply directly in plain prose with NO tool calls. If still working, update live progress via (user/set-status! {:label \"...\" :detail \"...\" :pct 50 :stage :researching :svg \"<svg ...>...</svg>\"}) so the user sees a visual card."]]}]]}
+                  [:cat [:map [:seon.tail/wait-nudge
+                               [:map
+                                [:elapsed-s [:int {:min 0}]]
+                                [:eval-count [:int {:min 0}]]
+                                [:prompt {:optional true} [:maybe :string]]
+                                [:has-status? {:optional true} :boolean]]]]]
+                  [:maybe [:map [:tag :string] [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 500000 :cost/bytes 131072}
+  [{{:keys [elapsed-s eval-count prompt]} :seon.tail/wait-nudge}]
+  (when (or (>= (long (or eval-count 0)) 2) (>= (long (or elapsed-s 0)) 5))
+    (let [es (max 0 (long (or elapsed-s 0)))
+          ec (max 0 (long (or eval-count 0)))
+          ps (when (and (string? prompt) (not (str/blank? prompt))) (one-line prompt 100))]
+      {:tag "user-waiting"
+       :seon.ui/hiccup
+       [:section {:class "tail-block" :data-min-width 220}
+        [:p (str "User has been waiting " es "s (" ec " eval(s)) for a reply" (when ps (str " to: " ps)))]
+        [:p "If you have the answer, reply directly in plain prose with NO tool calls. If still working, update live progress via (user/set-status! {:label \"...\" :detail \"...\" :pct 50 :stage :researching :svg \"<svg ...>...</svg>\"}) so the user sees a visual card."]]})))
