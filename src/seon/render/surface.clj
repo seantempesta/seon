@@ -14,7 +14,8 @@
             [seon.render.surface.session :as ssess]
             [seon.render.surface.system :as ssys]
             [seon.render.wire :as rwire]
-            [seon.signals :as sig]))
+            [seon.signals :as sig]
+            [seon.render.status :as rstatus]))
 
 (defn project-entity-view
   "ONE general entity-surface engine for BOTH humans (`:target :html`) and agents (`:target :wire`).
@@ -112,6 +113,14 @@
                               (last (keep-indexed #(when (<= %2 as-of) %1) htxs)) 0)
                     (dec (count htxs))))
          active? (or (= :active (get (:agent-states o) aid)) (map? (:live-stream o)))
+         expert-mode? (if (contains? o :expert-mode?)
+                        (boolean (:expert-mode? o))
+                        (boolean (when (and ((db-schema main-db) :seon.user/expert-mode?)
+                                            (first (d/datoms main-db :avet :seon.user/id :user/default)))
+                                   (:seon.user/expert-mode?
+                                    (d/pull main-db '[:seon.user/expert-mode?] [:seon.user/id :user/default])))))
+         agent-status (when (and (= canon :session) (not inspecting?) (not explaining?))
+                        (rstatus/latest-agent-status emdb ebdb aid))
          conv (if (and (= canon :session) (not inspecting?) (not explaining?)) (ssess/extract-conversation emdb ebdb aid ag active? as-of) {})
          errs (when (and explaining? (or (nil? insp-ref) (= :seon.agent/id (first insp-ref))) ((db-schema emdb) :seon.error/status))
                 (mapv #(d/pull emdb '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message
@@ -125,6 +134,7 @@
              :viewport {:w vw :h vh :sidebar-open? sb?} :slot-budget slot-b :signals sigs :signals-fit sfit
              :fitted fitted :entities (:selected fitted) :history-txs htxs :step-idx sidx :as-of-tx as-of
              :ctx-trace ctx-trace :wire wire :open-errors errs :main-db emdb :branch-db ebdb :active? active?
+             :expert-mode? expert-mode? :agent-status agent-status
              :agent-states (:agent-states o) :live-stream (:live-stream o) :branch-feedback (:branch-feedback o)
              :walk-summary (:walk-summary o) :vector-status (:vector-status o) :semantic-search (:semantic-search o) :conn (:conn o)
              :ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)}))))
@@ -187,8 +197,6 @@
                     inspecting? (sinsp/render-inspector-body m)
                     (= canon-mode :system) (ssys/render-system-body m)
                     :else (ssess/render-session-body m comp?))]
-     [:div (cond-> {:id "seon-view-unit" :class cls :data-agent (str viewing-id)
-                    :data-view-mode (name view-mode) :data-viewport-w (str (:w viewport))
-                    :data-slot-avail-w (str (:avail-w slot-budget))}
+     [:div (cond-> {:id "seon-view-unit" :class cls :data-agent (str viewing-id) :data-view-mode (name view-mode) :data-viewport-w (str (:w viewport)) :data-slot-avail-w (str (:avail-w slot-budget)) :data-expert-mode (str (boolean (:expert-mode? m)))}
              inspect-ref (assoc :data-inspect-ref (pr-str inspect-ref)))
       tl body])))
