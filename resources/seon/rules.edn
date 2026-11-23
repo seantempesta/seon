@@ -382,11 +382,33 @@
                        [?agent ?sc]
                        (and [$branch ?ag :seon.agent/id ?agent] [$branch ?ag :seon.agent/scope ?sc])
                        (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/scope ?sc]))
+                      (or-join
+                       [?agent ?tctx]
+                       (and
+                        [$branch ?ag :seon.agent/id ?agent]
+                        [$branch ?ag :seon.agent/task ?tid]
+                        [$branch ?tk :seon.task/id ?tid]
+                        [$branch ?tk :seon.task/title ?tctx])
+                       (and
+                        [$main ?ag :seon.agent/id ?agent]
+                        [$main ?ag :seon.agent/task ?tid]
+                        [$main ?tk :seon.task/id ?tid]
+                        [$main ?tk :seon.task/title ?tctx])
+                       (and
+                        (not-join
+                         [?agent]
+                         [$branch ?ag1 :seon.agent/id ?agent]
+                         [$branch ?ag1 :seon.agent/task _])
+                        (not-join
+                         [?agent]
+                         [$main ?ag2 :seon.agent/id ?agent]
+                         [$main ?ag2 :seon.agent/task _])
+                        [(ground "") ?tctx]))
                       [$main ?e :seon.fix/id _ ?tx]
                       [(get-else $main ?e :seon.fix/error-class :seon.rule/nil) ?cls]
                       [(get-else $main ?e :seon.fix/change-summary "") ?chg]
                       [(get-else $main ?e :seon.fix/regression-test :seon.rule/nil) ?rt]
-                      [(seon.ctx.project/fix-matches-scope? ?sc ?cls ?chg ?rt)]
+                      [(seon.ctx.project/fix-matches-scope? ?sc ?cls ?chg ?rt ?tctx)]
                       [(ground 76) ?pri])
                      (and
                       [$main ?ag :seon.agent/id ?agent]
@@ -418,7 +440,7 @@
                       :zone :static-prefix,
                       :priority ?pri,
                       :tx ?tx}],
-  :seon.rule/doc "Project completed historical tasks in scope, proactive scope :seon.fix/* lessons, and starter task templates for unassigned coordinators/routers.",
+  :seon.rule/doc "Project completed historical tasks in scope, matching :seon.fix/* lessons, and starter task templates for unassigned coordinators/routers.",
   :seon.rule/stratum 17,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/scope-task-history-and-fixes}
@@ -610,6 +632,59 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/edited-var-on-branch}
  {:seon.rule/query [:find
+                    ?e
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    (or-join
+                     [?agent ?e ?tx]
+                     (and
+                      [$branch ?ev :seon.agent.eval/agent ?agent]
+                      [$branch ?ev :seon.agent.eval/error ?emsg ?tx]
+                      [$branch ?ev :seon.agent.eval/turn ?turn]
+                      (not-join
+                       [?agent ?turn]
+                       [$branch ?ev2 :seon.agent.eval/agent ?agent]
+                       [$branch ?ev2 :seon.agent.eval/turn ?t2]
+                       [(> ?t2 ?turn)])
+                      [(get-else $branch ?ev :seon.agent.eval/code "") ?code]
+                      [(seon.ctx.ground/error-referenced-eids $branch ?emsg ?code) [?e ...]])
+                     (and
+                      [$branch ?err :seon.error/var ?vsym]
+                      [$branch ?err :seon.error/status :open ?tx]
+                      [$branch ?err :seon.error/agent ?agent]
+                      [$branch ?e :seon.code.var/name ?vsym])
+                     (and
+                      [$main ?err :seon.error/var ?vsym]
+                      [$main ?err :seon.error/status :open ?tx]
+                      [$main ?err :seon.error/agent ?agent]
+                      [$branch ?e :seon.code.var/name ?vsym]))],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e,
+                      :pull [:seon.code.var/name
+                             :seon.code.var/ns
+                             :seon.code.var/doc
+                             :seon.code.var/arglists
+                             :seon.code.var/schema
+                             :seon.schema/key
+                             :seon.schema/doc
+                             :seon.schema/form
+                             :seon.code.ns/name
+                             :seon.code.ns/doc],
+                      :zone :ephemeral-tail,
+                      :priority 97,
+                      :rank/boost 0.2,
+                      :params {:show-source? true, :rank/boost 0.2},
+                      :tx ?tx}],
+  :seon.rule/doc "Auto zoom-in on vars, schemas, or namespaces referenced by the agent's latest eval error or open :seon.error/var.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/error-neighborhood}
+ {:seon.rule/query [:find
                     ?t
                     ?need
                     :in
@@ -686,11 +761,53 @@
                     ?form
                     ?tx
                     :in
+                    $main
                     $branch
+                    ?agent
                     :where
-                    [$branch ?tv :seon.test/pass? false ?tx]
-                    [$branch ?tv :seon.test/var-ref ?var]
-                    [(seon.rule/verdict-latest-for-var? $branch ?var ?tx)]
+                    (or-join
+                     [?agent ?dg]
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ag :seon.agent/branch ?br]
+                      [$main ?tr :seon.test.run/branch ?br]
+                      [$main ?tr :seon.test.run/pass? false]
+                      [$main ?tr :seon.test.run/failed-digests ?dg])
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ag :seon.agent/branch ?br]
+                      [$branch ?tr :seon.test.run/branch ?br]
+                      [$branch ?tr :seon.test.run/pass? false]
+                      [$branch ?tr :seon.test.run/failed-digests ?dg])
+                     (and
+                      [(identity ?agent) ?agent]
+                      [$main ?tr :seon.test.run/branch :main]
+                      [$main ?tr :seon.test.run/pass? false]
+                      [$main ?tr :seon.test.run/failed-digests ?dg]
+                      (not-join
+                       [?agent]
+                       [$branch ?ag2 :seon.agent/id ?agent]
+                       [$branch ?ag2 :seon.agent/branch ?br2]
+                       [$main ?tr2 :seon.test.run/branch ?br2]
+                       [$main ?tr2 :seon.test.run/pass? true])
+                      (not-join
+                       [?agent]
+                       [$branch ?ag3 :seon.agent/id ?agent]
+                       [$branch ?ag3 :seon.agent/branch ?br3]
+                       [$branch ?tr3 :seon.test.run/branch ?br3]
+                       [$branch ?tr3 :seon.test.run/pass? true]))
+                     (and
+                      [(identity ?agent) ?agent]
+                      [(seon.ctx.ground/legacy-failing-digests $main $branch) [?dg ...]]))
+                    (or-join
+                     [?dg ?tv ?var ?tx]
+                     (and
+                      [$branch ?tv :seon.test/digest ?dg ?tx]
+                      [$branch ?tv :seon.test/var-ref ?var])
+                     (and
+                      (not-join [?dg] [$branch ?t2 :seon.test/digest ?dg])
+                      [$main ?tv :seon.test/digest ?dg ?tx]
+                      [$main ?tv :seon.test/var-ref ?var]))
                     (or-join
                      [?var ?form]
                      (and
@@ -720,7 +837,7 @@
                       :zone :ephemeral-tail,
                       :priority 96,
                       :tx ?tx}],
-  :seon.rule/doc "Project failing test verdicts (:seon.test/pass? false) linked via :seon.test/var-ref with report and test source.",
+  :seon.rule/doc "Project active failing test verdicts from latest :seon.test.run/failed-digests via flat native indexed :avet lookups.",
   :seon.rule/stratum 21,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/failing-reach-tests}
