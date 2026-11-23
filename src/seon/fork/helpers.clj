@@ -6,7 +6,6 @@
             [seon.code :as code]
             [seon.ctx :as ctx]
             [seon.fork.calls :as fcalls :refer [*agent-ctx*]]
-            [seon.health :as health]
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.repl :as repl]
@@ -151,19 +150,7 @@
        (vflow/remote-embed-search! (str q) kk o)))))
 
 (defn- resolve-explore-ref [db target]
-  (let [dh (if db (or (:schema db) (d/schema db) {}) {})]
-    (cond
-      (or (= target :system) (= target :root)) [:seon.system/id :root]
-      (integer? target) [:db/id target]
-      (and (vector? target) (= 2 (count target)) (qualified-keyword? (first target))) target
-      (and (symbol? target) (namespace target)) [:seon.code.var/name target]
-      (symbol? target) [:seon.code.ns/name target]
-      (and (string? target) (str/includes? target "#")) [:seon.code.doc/id target]
-      (qualified-keyword? target)
-      (or (some (fn [a] (when (and db (contains? dh a) (first (d/datoms db :avet a target))) [a target]))
-                [:seon.agent/id :seon.task/id :seon.rule/id :seon.schema/key :seon.system/id])
-          [:seon.schema/key target])
-      :else [:seon.system/id :root])))
+  (repl/resolve-explore-ref db target))
 
 (defn ^:seon.flow/edge explore!
   "Explores ANY entity through `seon.render.surface/project-entity-view` (`:target :wire`),
@@ -177,10 +164,15 @@
      (let [bdb @conn
            mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
            o (if (map? opts) opts {})
-           fref (resolve-explore-ref (or bdb mdb) ref)
-           proj-fn (requiring-resolve 'seon.render.surface/project-entity-view)
-           res (proj-fn mdb bdb fref (merge {:target :wire :token-budget 2400} o))]
-       (if (:raw? o) res (:text res))))))
+           r0 (resolve-explore-ref bdb ref)
+           fref (if (and (map? r0) (:error r0) (not= (d/commit-id bdb) (d/commit-id mdb)))
+                  (resolve-explore-ref mdb ref)
+                  r0)]
+       (if (and (map? fref) (:error fref))
+         fref
+         (let [proj-fn (requiring-resolve 'seon.render.surface/project-entity-view)
+               res (proj-fn mdb bdb fref (merge {:target :wire :token-budget 2400} o))]
+           (if (:raw? o) res (or (:text res) {:error :entity-not-found :ref ref}))))))))
 
 (defn ^:seon.flow/edge render-preview!
   "Renders Hiccup or a uniform renderer across display widths (default `[360 640 1100]`, `:dark`),
@@ -449,18 +441,7 @@
       (intern u 'main-db
               (fn [] (when-let [{:keys [conn]} *agent-ctx*]
                        (store/head conn :main))))
-      (intern u 'health
-              (fn
-                ([]
-                 (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
-                   (let [role (:seon.agent/role (d/pull @conn '[:seon.agent/role] [:seon.agent/id agent-id]))
-                         target-db (if (or (= branch :main) (= role :coordinator))
-                                     (store/head conn :main)
-                                     @conn)]
-                     (health/report target-db))))
-                ([which]
-                 (when-let [{:keys [conn]} *agent-ctx*]
-                   (health/report (if (= which :main) (store/head conn :main) @conn))))))
+      (intern u 'health (fn [& args] (apply #'repl/health args)))
       (intern u 'config
               (fn
                 ([] (when-let [{:keys [conn agent-id]} *agent-ctx*]
@@ -478,20 +459,7 @@
                   (let [r (d/transact conn {:tx-data (vec (concat retract-ops [entity]))})]
                     (ctx/refresh-active! (:db-after r) (:tx-data r)))
                   {:registered key :sample sample :derived-attributes (mapv :db/ident dh-decls)}))))
-      (intern u 'search
-              (fn [substr]
-                (when-let [{:keys [conn branch]} *agent-ctx*]
-                  (let [bdb @conn
-                        mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
-                        q (str/lower-case (str substr))
-                        find-vals (fn [attr lim]
-                                    (->> (concat (d/datoms mdb :aevt attr)
-                                                 (when (not= bdb mdb) (d/datoms bdb :aevt attr)))
-                                         (keep #(when (str/includes? (str/lower-case (str (:v %))) q) (:v %)))
-                                         distinct sort (take lim) vec))]
-                    {:vars (find-vals :seon.code.var/name 25)
-                     :schemas (find-vals :seon.schema/key 20)
-                     :docs (find-vals :seon.code.doc/id 20)}))))
+      (intern u 'search (fn [substr] (repl/search substr)))
       (intern u 'context
               (fn
                 ([] ((resolve 'user/context) {}))
