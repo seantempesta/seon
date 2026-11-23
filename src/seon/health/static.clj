@@ -221,8 +221,18 @@
             deps-hm (java.util.HashMap. (if (> miss-n 25) 1400 (* 16 miss-n)))]
         (when has-deps?
           (if (> miss-n 25)
+            (let [e->ns-s (java.util.HashMap. 1400)]
+            (doseq [[nsym _ raw-forms] @pending
+                    :let [ns-s (name nsym)]
+                    {:keys [e]} raw-forms]
+              (.put e->ns-s e ns-s))
             (doseq [dt (d/datoms db :aevt :seon.code.form/deps)]
-              (let [e (:e dt)] (.put deps-hm e (conj (or (.get deps-hm e) #{}) (:v dt)))))
+              (let [e (:e dt)
+                    ns-s (.get e->ns-s e)]
+                (when (and ns-s (= ns-s (namespace (:v dt))))
+                  (let [^java.util.ArrayList al (or (.get deps-hm e)
+                                                    (let [a (java.util.ArrayList. 4)] (.put deps-hm e a) a))]
+                    (.add al (:v dt)))))))
             (doseq [[_ _ raw-forms] @pending
                     {:keys [e]} raw-forms]
               (let [ds (into #{} (map :v) (d/datoms db :eavt e :seon.code.form/deps))]
@@ -430,9 +440,18 @@
            (doseq [dt (d/datoms db :aevt :seon.code.var/arglists)]
              (.put eid->args (:e dt) (:v dt))))
          (when (contains? schema-map :seon.code.var/refs)
+         (let [raw-refs (java.util.HashMap. 1200)]
            (doseq [dt (d/datoms db :aevt :seon.code.var/refs)]
-             (let [e (:e dt)]
-               (.put eid->refs e (conj (or (.get eid->refs e) #{}) (:v dt))))))
+             (let [e (:e dt)
+                   ^java.util.ArrayList al (or (.get raw-refs e)
+                                               (let [a (java.util.ArrayList. 8)] (.put raw-refs e a) a))]
+               (.add al (:v dt))))
+           (let [rit (.iterator (.entrySet raw-refs))]
+             (loop []
+               (when (.hasNext rit)
+                 (let [en ^java.util.Map$Entry (.next rit)]
+                   (.put eid->refs (.getKey en) (set ^java.util.ArrayList (.getValue en)))
+                   (recur)))))))
          (let [vmap (transient {})
                edge-vars (transient #{})
                it (.iterator (.entrySet eid->name))]
