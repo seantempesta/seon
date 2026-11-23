@@ -536,17 +536,27 @@
                       seon.render.links/pill
                       seon.render.links/mut
                       seon.render.links/kicker
+                      seon.render.links/btn
+                      seon.render.links/feedback-banner
                       seon.render.entities/render-fix-chip
                       seon.render.entities/render-fix-card
                       seon.render.entities/render-call-row
                       seon.render.entities/render-call-card
+                      seon.render.entities.work/render-ns-full
+                      seon.render.entities.work/render-ctx-chip
+                      seon.render.entities.work/render-ctx-snapshot
+                      seon.render.entities.work/render-summary-chip
+                      seon.render.entities.work/render-summary-card
+                      seon.render.entities.work/render-bench-run-card
+                      seon.render.entities.work/render-health-report
+                      seon.render.entities.work/render-task-lineage
                       seon.render.tails/render-branch-status-tail
                       seon.render.tails/render-scoped-health-tail
                       seon.render.tails/render-activity-tail
                       seon.render.tails/render-inbox-tail
                       seon.render.tails/render-system-health-tail
                       seon.render.tails/render-viewport-tail
-                      seon.render.surface.kv-cache/render-kv-cache-section
+                      seon.render.surface.context-lab/render-kv-cache-section
                       seon.web.actions/parse-form-body]]
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))))
