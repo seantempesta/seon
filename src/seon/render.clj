@@ -17,7 +17,6 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.reads :as reads]
-            [seon.rule.context :as rctx]
             [seon.render.print :as sprint]
             [seon.render.fit :as fit]
             [seon.schema :as schema]
@@ -421,8 +420,8 @@
 (defn render-value
   "Renders any Clojure value `v`:
    1. If `v`'s `:seon/schema` metadata names a schema with `:seon.render/hiccup` (in `db` or registry),
-      calls that Reagent component `[rfn {:db db} v]`.
-   2. Otherwise renders cleanly as structure (`<table>`, `<dl>`, `<pre><code>`, pills)."
+      dispatches via `pschema/invoke-sub-renderer` (1-arg `ns-map -> ns-map` or 2-arg `[opts val]`).
+   2. Otherwise renders cleanly as structure via 4-stage `seon.render.print/format-value-hiccup`."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :any] :any] [:=> [:cat [:maybe :seon.host/db] :any :map] :any]], :cost/ticks 10000000}
   ([db v] (render-value db v {}))
   ([db v opts]
@@ -436,30 +435,17 @@
      (let [sk (:seon/schema (meta v))
            rsym (or (schema-render-sym db sk)
                     (when-let [mdb (:main-db opts)] (schema-render-sym mdb sk)))
-           rfn (when rsym
-                 (or (try (resolve rsym) (catch Throwable _ nil))
-                     (try (requiring-resolve rsym) (catch Throwable _ nil))))]
-       (if rfn
-         (try (rfn (assoc opts :db db :schema sk) v)
-              (catch Throwable ex
-                [:div {:class "card notice red"}
-                 [:strong (str "Render fault in " rsym ": ")]
-                 [:span {:class "mono"} (or (.getMessage ex) (str ex))]]))
-         (sprint/format-value-hiccup db v opts)))
+           res (when rsym (pschema/invoke-sub-renderer db sk rsym opts v))]
+       (cond
+         (:ok? res) (:hiccup res)
+         (and res (false? (:ok? res)))
+         [:div {:class "card notice red"}
+          [:strong (str "Render fault in " rsym ": ")]
+          [:span {:class "mono"} (:error res)]]
+         :else (sprint/format-value-hiccup db v opts)))
 
      :else
      (sprint/format-value-hiccup db v opts))))
-
-(defn discover-renderable-tiles
-"Single source of truth for BOTH Workspace live tiles AND the agent's model context.
- Delegates 100% to the datom-native rule engine (`seon.rule.context/discover-tiles`)."
-{:malli/schema [:function
-                [:=> [:cat :seon.host/db :seon.host/db :map :any :any] [:vector :map]]
-                [:=> [:cat :seon.host/db :seon.host/db :map :any :any :map] [:vector :map]]]}
-([main-db branch-db agent-ent evals health-fn]
- (rctx/discover-tiles main-db branch-db agent-ent evals health-fn {}))
-([main-db branch-db agent-ent evals health-fn opts]
- (rctx/discover-tiles main-db branch-db agent-ent evals health-fn opts)))
 
 (defn datastar-patch-event
   "Formats a Datastar v1 `datastar-patch-elements` SSE event with optional selector, mode, and `useViewTransition`."
@@ -567,50 +553,8 @@
       :skipped 0}
      unit-specs))))
 
-(defn compose-keyframe
-  "Composes the full cached HTML of all mounted units in `walk` without re-running any component!"
-  [walk]
-  (apply str (keep #(get-in walk [:units % :html]) (:order walk))))
-
-(defn render-tile-node
-  "Renders a rule-projected tile node (honoring `:view-fn`, `:layout`, `:params`, `:tags`, `:why`, and
-   recursively rendering `:children` attached via `:view/parent`) for both `:mode :human` and `:mode :agent`."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map] :any]
-   :cost/ticks 10000000}
-  [db tile opts]
-  (let [eff-opts (merge opts
-                      (select-keys tile [:layout :params :tags :why :badges :fired-rules :zone :priority :source :eid]))
-      vsym (:view-fn tile)
-      sk (:schema tile)
-      rfn (pschema/resolve-sym vsym)
-      main-h (if rfn
-               (try (rfn (assoc eff-opts :db db :schema sk) (:val tile))
-                    (catch Throwable ex
-                      [:div {:class "card notice red"}
-                       [:strong (str "Render fault in " vsym ": ")]
-                       [:span {:class "mono"} (or (.getMessage ex) (str ex))]]))
-               (render-value db (:val tile) eff-opts))
-      crumb-h (when (and (get-in tile [:params :show-breadcrumbs?])
-                         (qualified-keyword? sk)
-                         (not (contains? #{:seon.ctx/snapshot :seon.task/lineage} sk)))
-                (render-schema-breadcrumbs db sk (:val tile)
-                                                  (assoc eff-opts :main-db (:main-db opts)
-                                                         :lookup-ref (:ref tile)
-                                                         :suppress-pin? (= :pinned (:source tile)))))
-      body-h (if crumb-h
-               [:div {:class "tile-with-crumbs stack-xs"} main-h crumb-h]
-               main-h)
-      kids (:children tile)]
-  (if (seq kids)
-    [:div {:class "tile-tree-node" :data-eid (str (:eid tile))}
-     body-h
-     [:div {:class "tile-tree-children" :style "margin-left:14px;padding-left:10px;border-left:2px solid var(--border-subtle)"}
-      (for [k kids]
-        (render-tile-node db k opts))]]
-    body-h)))
-
 (defn render-entity-value
-  "Universal fallback tile renderer for any schema without a custom `:seon.render/hiccup` component.
+  "Universal fallback renderer for any schema without a custom `:seon.render/hiccup` component.
    Delegates directly to `render-value` -> 4-stage zero-clipping schema self-printer."
   {:malli/schema [:=> [:cat [:map [:db {:optional true} [:maybe :seon.host/db]] [:main-db {:optional true} [:maybe :seon.host/db]]] :any] :any], :cost/ticks 10000000}
   [opts val]

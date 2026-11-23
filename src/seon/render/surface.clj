@@ -1,13 +1,12 @@
 (ns seon.render.surface
   "ONE unified rule-projected surface pipeline for `:session`, `:context` (Explain),
    `:system` (`[:seon.system/id :root]`), and `:inspect` (Entity Full View) — powered by
-   `project-entity-view` for both human HTML (`:target :html`) and AI Wire (`:target :wire`)."
+   ONE `seon.ctx/gather-agent-candidates`, `project-entity-view`, and `seon.render.wire/build-live-wire-request`."
   (:require [datahike.api :as d]
             [seon.ctx :as ctx]
-            [seon.ctx.project :as proj]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
-            [seon.render.links :as rlinks :refer [db-schema kicker]]
+            [seon.render.links :as rlinks :refer [db-schema kicker safe-as-of]]
             [seon.render.markdown :as rmd]
             [seon.render.surface.context-lab :as clab]
             [seon.render.surface.entity :as sentity]
@@ -15,21 +14,7 @@
             [seon.render.surface.session :as ssess]
             [seon.render.surface.system :as ssys]
             [seon.render.wire :as rwire]
-            [seon.rule :as rules]
-            [seon.rule.seed :as rseed]
-            [seon.signals :as sig]
-            [seon.store :as store]))
-
-(defonce ^:private ^:seon.flow/edge surface-ru-cache (store/lru-cache 16))
-(defonce ^:private ^:seon.flow/edge surface-rules-cache (store/lru-cache 16))
-
-(def ^:private ctx-rule-pull
-  '[:seon.rule/id :seon.rule/category :seon.rule/stratum :seon.rule/query
-    :seon.rule/assert :seon.rule/target :seon.rule/enabled? :seon.rule/doc])
-
-(defn- live-cid [db] (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
-(defn- safe-as-of {:seon.flow/edge true} [db tx]
-  (if (and db (integer? tx)) (try (d/as-of db tx) (catch Throwable _ db)) db))
+            [seon.signals :as sig]))
 
 (defn project-entity-view
   "ONE general entity-surface engine for BOTH humans (`:target :html`) and agents (`:target :wire`).
@@ -50,94 +35,13 @@
   [live-stream]
   (ssess/canvas-live-progress live-stream))
 
-(defn- pull-ctx-rules [db]
-  (let [dh (db-schema db)]
-    (when (and db (dh :seon.rule/category) (dh :seon.rule/id))
-      (vec (keep #(let [r (d/pull db ctx-rule-pull (:e %))]
-                    (when (and (:seon.rule/id r) (not (false? (:seon.rule/enabled? r)))) r))
-                 (d/datoms db :avet :seon.rule/category :context))))))
-
-(defn- load-surface-ctx-rules [mdb bdb]
-  (let [ms (rules/rules-db-sig mdb)
-        bs (if (= mdb bdb) ms (rules/rules-db-sig bdb))
-        load* (fn []
-                (let [mr (pull-ctx-rules mdb)
-                      br (if (= ms bs) mr (pull-ctx-rules bdb))
-                      merged (if (seq br)
-                               (vec (vals (merge (into {} (map (juxt :seon.rule/id identity)) mr)
-                                                 (into {} (map (juxt :seon.rule/id identity)) br))))
-                               (vec mr))]
-                  (if (seq merged) merged
-                      (filterv #(and (= :context (:seon.rule/category %)) (not (false? (:seon.rule/enabled? %))))
-                               (rseed/starter-rules)))))]
-    (if (and ms bs) (store/lru-get! surface-rules-cache 16 [ms bs] load*) (load*))))
-
-(defn- branch-green? [db br same?]
-  (let [dh (db-schema db)]
-    (boolean (and db (dh :seon.test.run/branch) (dh :seon.test.run/pass?)
-                  (when-let [e (or (when br (:e (first (d/datoms db :avet :seon.test.run/branch br))))
-                                   (when same? (:e (first (d/datoms db :avet :seon.test.run/branch :main)))))]
-                    (true? (:v (first (d/datoms db :eavt e :seon.test.run/pass?)))))))))
-
-(defn- open-errors? [db] (boolean (and db ((db-schema db) :seon.error/status) (first (d/datoms db :avet :seon.error/status :open)))))
-(defn- any-tests? [db] (boolean (and db ((db-schema db) :seon.test/digest) (first (d/datoms db :aevt :seon.test/digest)))))
-
-(defn- cached-related-updates [mdb bdb aid ag target br]
-  (let [mc (live-cid mdb) bc (live-cid bdb)
-        all-rs (load-surface-ctx-rules mdb bdb)
-        same? (and mc bc (= mc bc))
-        errs? (or (open-errors? mdb) (and (not= mdb bdb) (open-errors? bdb)))
-        evs? (boolean (and ((db-schema bdb) :seon.agent.eval/agent)
-                           (first (d/datoms bdb :avet :seon.agent.eval/agent aid))))
-        skip (cond-> #{:rule.ctx/system-overview}
-               (or (branch-green? bdb br same?) (not (any-tests? bdb))) (conj :rule.ctx/failing-reach-tests)
-               (not errs?) (conj :rule.ctx/fault-with-recommended-fix)
-               same? (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
-               (and (nil? (:seon.agent/task ag)) (empty? (:seon.agent/tasks ag))) (conj :rule.ctx/active-task-and-lineage)
-               (not evs?) (conj :rule.ctx/recent-eval-results :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))
-        rs (when (seq all-rs) (filterv #(not (skip (:seon.rule/id %))) all-rs))
-        eff-t (if (and rs (every? #(or (nil? (:seon.rule/target %)) (= :any (:seon.rule/target %))) rs)) :any target)
-        req (cond-> {:seon.db/main mdb :seon.db/branch bdb :seon.agent/id aid :seon.view/target target}
-              (some? rs) (assoc :seon.ctx/rules rs))
-        ck (when (and mc bc)
-             [(get-in mdb [:config :store :id]) mc (:max-tx mdb) bc (:max-tx bdb) aid eff-t (count rs)])
-        run #(let [res (ctx/related-updates req)]
-               (if (seq all-rs) (assoc-in res [:seon.ctx/trace :rules-total] (count all-rs)) res))]
-    (if ck (store/lru-get! surface-ru-cache 16 ck run) (run))))
-
-(defn- gather-surface-candidates [mdb bdb aid ag vm br]
-  (let [t (case (rdata/canonical-view-mode vm) :context :debug :system :workspace :canvas)
-        ru (cached-related-updates mdb bdb aid ag t br)
-        world (proj/agent-world-datoms mdb bdb aid)
-        ru-ps (:seon.ctx/projections ru)
-        seen (into #{} (keep :entity) ru-ps)
-        pins (:pinned world) aeid (:agent-eid world)
-        extra (into [] (comp (remove #(or (= (key %) aeid) (seen (key %))))
-                             (take 8)
-                             (map (fn [[e tx]]
-                                    {:entity e :tx tx :priority (if (pins e) 88 60)
-                                     :pinned? (boolean (pins e)) :zone :workspace :rules [:seed/world]})))
-                    (sort-by (comp - val) (:connected world)))
-        raw (into (mapv #(dissoc % :candidates :data) ru-ps) extra)]
-    {:candidates
-     (vec (keep (fn [item]
-                  (when-let [eid (when (integer? (:entity item)) (:entity item))]
-                    (let [b (d/pull bdb '[*] eid)
-                          from-b? (boolean (seq (dissoc b :db/id)))
-                          ent (if from-b? b (d/pull mdb '[*] eid))
-                          ep (when (map? ent) (rlinks/enrich-entity-params (if from-b? bdb mdb) ent false))]
-                      (when (and (map? ent) (seq (dissoc ent :db/id)))
-                        (cond-> (assoc item :data ent) (seq ep) (update :params merge ep))))))
-                raw))
-     :ctx-trace (:seon.ctx/trace ru)}))
-
-(defn- build-mode-payload [canon explaining? inspecting? insp-ref emdb ebdb aid ag br gather-fn fopts lp o]
+(defn- build-mode-payload [canon explaining? inspecting? insp-ref emdb ebdb aid ag br fopts lp o]
   (cond
     (and explaining? insp-ref (not= :seon.agent/id (first insp-ref)))
     {:wire nil :fitted {:selected [] :tokens 0 :budget 16000} :ctx-trace nil :pool-count 0}
 
     explaining?
-    (let [w (clab/build-context-lab-wire emdb ebdb aid ag br gather-fn (assoc o :lab-prefs lp))]
+    (let [w (clab/build-context-lab-model emdb ebdb aid ag br (assoc o :lab-prefs lp))]
       {:wire w :ctx-trace (:rule-trace w) :pool-count (count (get-in w [:explained :items]))
        :fitted {:selected (or (get-in w [:fit-trace :items]) [])
                 :tokens (get-in w [:fit-trace :tokens] 0)
@@ -147,7 +51,9 @@
     {:wire nil :fitted {:selected [] :tokens 0 :budget 16000} :ctx-trace nil :pool-count 0}
 
     :else
-    (let [proj (sentity/project-entity-view
+    (let [t (case canon :context :debug :system :workspace :canvas)
+          gather-fn #(ctx/gather-agent-candidates emdb ebdb aid {:agent ag :target t :semantic? true :enrich? true :situational? false})
+          proj (sentity/project-entity-view
                 emdb ebdb [:seon.agent/id aid]
                 (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) 8))))]
       {:wire (when (:include-wire? o)
@@ -198,8 +104,7 @@
                       (select-keys o [:token-budget :already-shown :strategy]))
          sfit (when (and sigs (not= canon :system) (not inspecting?))
                 (first (:selected (fit/fit-projections emdb [{:entity :signals/live :schema :seon.signal/snapshot :data sigs :priority 100}] fopts))))
-         gather-fn #(gather-surface-candidates emdb ebdb aid ag vm br)
-         {:keys [wire fitted ctx-trace pool-count]} (build-mode-payload canon explaining? inspecting? insp-ref emdb ebdb aid ag br gather-fn fopts lp o)
+         {:keys [wire fitted ctx-trace pool-count]} (build-mode-payload canon explaining? inspecting? insp-ref emdb ebdb aid ag br fopts lp o)
          peids (vec (keep #(when (integer? (:entity %)) (:entity %)) (:selected fitted)))
          htxs (if (or inspecting? (= canon :system) (and explaining? insp-ref)) [] (or (rdata/view-history-txs hbdb main-db aid peids) []))
          sidx (when (seq htxs)
