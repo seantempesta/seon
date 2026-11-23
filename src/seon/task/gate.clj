@@ -222,3 +222,58 @@
     (alter-meta! v1 merge {:arglists '([task-ids] [t1 t2 & more]) :doc "Assign 1..N :seon.task/id refs."})
     (alter-meta! v2 merge {:arglists '([] [agent-id] [agent-id opts]) :doc "Inspect :rule.gate/* proof gating."})
     [v1 v2]))
+
+(defn compute-review-ops
+  "Pure rule-driven review trigger & target auto-resume ops derived from `:seon.rule/*` entities asserting `:agent/needs-review` and `:seon.agent/target`."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :map] [:vector :map]]
+   :cost/ticks 15000000}
+  [main-db branch-db ma {:keys [agent-eid active? raw-ready? waiting? merged? tool-streak head-tx]}]
+  (let [aid (:seon.agent/id ma)
+        b (:seon.agent/branch ma :main)
+        target (:seon.agent/target ma)
+        dh (or (:schema main-db) {})]
+    (cond
+      ;; 1. If a reviewer finished/merged and its target agent is still paused, resume target on top of the merged fix!
+      (and merged? target (contains? dh :seon.agent/id))
+      (let [teid (if (map? target) (:db/id target) target)
+            ta (when (integer? teid) (d/pull main-db '[:seon.agent/id :seon.agent/paused?] teid))]
+        (if (and (:seon.agent/id ta) (:seon.agent/paused? ta))
+          [{:op :transact :tx-data [{:seon.agent/id (:seon.agent/id ta) :seon.agent/paused? false}]
+            :reason [:review-resume (:seon.agent/id ta)]}]
+          []))
+
+      ;; 2. For active non-main worker agents with :seon.config/review-every-turns > 0 (and not already under review), evaluate :agent/needs-review rules!
+      (and active? (not= b :main) (not raw-ready?) (not waiting?) (nil? target)
+           (contains? dh :seon.config/review-every-turns)
+           (pos? (long (or (seon.store/config-val main-db aid :seon.config/review-every-turns) 0))))
+      (let [rev-every (long (seon.store/config-val main-db aid :seon.config/review-every-turns))
+            has-active-rev?
+            (boolean
+             (and (integer? agent-eid) (contains? dh :seon.agent/target)
+                  (some (fn [dt]
+                          (let [ra (d/pull main-db '[:seon.agent/archived? :seon.agent/merged-tx] (:e dt))]
+                            (and (not (:seon.agent/archived? ra)) (nil? (:seon.agent/merged-tx ra)))))
+                        (d/datoms main-db :avet :seon.agent/target agent-eid))))]
+        (if has-active-rev?
+          []
+          (let [all-rs (rules/load-rules (or branch-db main-db) nil)
+                rev-rs (filterv (fn [r]
+                                  (and (:seon.rule/enabled? r true)
+                                       (some #(and (vector? %) (= :agent/needs-review (second %))) (:seon.rule/assert r))))
+                                all-rs)
+                wm (when (seq rev-rs)
+                     (:wm (rules/step-rules nil {:main main-db :branch branch-db :code branch-db :task main-db}
+                                            {:agent-id aid} rev-rs nil :wire)))
+                rule-reasons (when wm (vec (sort-by pr-str (rules/wm-vals wm aid :agent/needs-review))))
+                reasons (cond-> (vec rule-reasons)
+                          (and (empty? rule-reasons) (>= (long (or tool-streak 0)) rev-every))
+                          (conj [:periodic-review (long tool-streak)]))]
+            (if (seq reasons)
+              (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))]
+                [{:op :transact :tx-data [{:seon.agent/id aid :seon.agent/paused? true}] :reason [:review-pause aid]}
+                 {:op :spawn-agent :id rid :parent aid :target [:seon.agent/id aid]
+                  :task :template/review-and-improve :auto-merge? true
+                  :goal (str "Review session " aid " (triggered by " (pr-str reasons) "). Clean hunting/error evals via @ctx on :seon.agent/target, fix any Seon root cause on your branch, and resume target.")}])
+              []))))
+
+      :else [])))
