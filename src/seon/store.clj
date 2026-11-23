@@ -48,26 +48,32 @@
 (def ^:private MDB_SAFENOSYNC 0x8000)
 
 (def default-config-values
-  {:seon.config/eval-ticks          100000000
-   :seon.config/eval-bytes 268435456
-   :seon.config/gen-samples         100
-   :seon.config/gen-seed            42
-   :seon.config/max-os-procs        6
-   :seon.config/max-test-workers    4
-   :seon.config/max-model-slots     4
-   :seon.config/child-cache-mb      16
-   :seon.config/gc-generations      6
-   :seon.config/auto-sync-git?      true
-   :seon.config/auto-merge?         true
-   :seon.config/auto-switch-over?   true
-   :seon.config/fast-test-ms        150
-   :seon.config/ai-model            "deepseek-flash"
-   :seon.config/ai-base-url         "https://api.deepseek.com"
-   :seon.config/ai-api-key-env      "DEEPSEEK_API_KEY"
-   :seon.config/ai-thinking         :enabled
-   :seon.config/ai-reasoning-effort :low
-   :seon.config/max-tool-turns      32
-   :seon.config/viewport-screenshot? false})
+  {:seon.config/eval-ticks               100000000
+   :seon.config/eval-bytes               268435456
+   :seon.config/gen-samples              100
+   :seon.config/gen-seed                 42
+   :seon.config/max-os-procs             6
+   :seon.config/max-test-workers         4
+   :seon.config/max-model-slots          4
+   :seon.config/child-cache-mb           16
+   :seon.config/gc-generations           6
+   :seon.config/store-map-bytes          1099511627776
+   :seon.config/gc-keep-merged-branches  16
+   :seon.config/gc-history-hours         168
+   :seon.config/review-every-turns       0
+   :seon.config/unwritten-review-turns   8
+   :seon.config/semantic-min-score       0.45
+   :seon.config/auto-sync-git?           true
+   :seon.config/auto-merge?              true
+   :seon.config/auto-switch-over?        true
+   :seon.config/fast-test-ms             150
+   :seon.config/ai-model                 "deepseek-flash"
+   :seon.config/ai-base-url              "https://api.deepseek.com"
+   :seon.config/ai-api-key-env           "DEEPSEEK_API_KEY"
+   :seon.config/ai-thinking              :enabled
+   :seon.config/ai-reasoning-effort      :low
+   :seon.config/max-tool-turns           32
+   :seon.config/viewport-screenshot?     false})
 
 (defn read-aero-config-tx
   "Reads an Aero EDN config file once at bootstrap and returns the `:seon.config/root` entity map.
@@ -138,7 +144,7 @@
   "Pure EDN Datahike config for an LMDB store at `path`."
   ([path] (store-cfg path {}))
   ([path {:keys [map-bytes cache-bytes]
-          :or {map-bytes (* 4 1024 1024 1024)
+          :or {map-bytes (long (:seon.config/store-map-bytes default-config-values))
                cache-bytes (* 64 1024 1024)}}]
    (let [cfg {:store {:backend :lmdb
                       :path path
@@ -165,7 +171,9 @@
   (let [min-mb (long (get default-config-values :seon.config/child-cache-mb 16))]
   (assoc cfg :store-cache-bytes (* (max min-mb (long (or mb min-mb))) 1024 1024))))
 
-(defn attach-ids! [conn]
+(defn attach-ids!
+  {:malli/schema [:=> [:cat :seon.host/conn] :seon.host/conn]}
+  [conn]
   (let [db @conn
         {:keys [path id]} (get-in db [:config :store])
         ids-path (str path "/ids")
@@ -225,6 +233,7 @@
   "Returns the set of `:seon.agent.message/id` UUIDs ever seen by `agent-id` on `branch-db`,
    reading Datahike's native `(d/history branch-db)` so retracted/compacted evals never replay
    already-processed inbox messages. Respects `d/as-of` time points automatically."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:set :any]]}
   [branch-db agent-id]
   (if (and branch-db agent-id
            (contains? (:schema branch-db) :seon.agent.eval/agent)
@@ -244,6 +253,7 @@
 (defn agent-eval-history-stats
   "Returns `{:eval-count n :max-turn t}` across Datahike's full `(d/history branch-db)` for
    `agent-id`, keeping turn numbers and `result/e<n>` handles strictly monotonic across compactions."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :map]}
   [branch-db agent-id]
   (if (and branch-db agent-id (contains? (:schema branch-db) :seon.agent.eval/agent))
     (let [hdb (d/history branch-db)
@@ -263,6 +273,7 @@
   "Reconstructs every eval ever recorded for `agent-id` on `branch-db` via `(d/history branch-db)`,
    tagging `:seon.agent.eval/tx` (creation tx, usable with `d/as-of`) and `:seon.agent.eval/retracted-tx`
    (non-nil when retracted by session compaction)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:vector :map]]}
   [branch-db agent-id]
   (if (and branch-db agent-id (contains? (:schema branch-db) :seon.agent.eval/agent))
     (let [hdb (d/history branch-db)
@@ -293,7 +304,9 @@
            vec))
     []))
 
-(defn after-fork! [cfg]
+(defn after-fork!
+  {:malli/schema [:=> [:cat :map] :any]}
+  [cfg]
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
   (datahike.connections/after-fork!))
 
@@ -681,3 +694,62 @@
   :cost/ticks 50000}
  ([db] (db-cache-sig db))
  ([db extra] (when-let [s (db-cache-sig db)] (into s extra))))
+
+(defn ^:seon.flow/edge prune-merged-branches!
+  "Deletes already-merged, non-protected, non-active branches beyond `:seon.config/gc-keep-merged-branches` so old branches never pin LMDB storage indefinitely."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/conn] :map]
+                  [:=> [:cat :seon.host/conn nat-int?] :map]]
+   :cost/ticks 15000000}
+  ([conn]
+   (prune-merged-branches! conn
+     (long (or (config-val @conn nil :seon.config/gc-keep-merged-branches)
+               (:seon.config/gc-keep-merged-branches default-config-values)))))
+  ([conn keep-n]
+   (let [mdb @conn
+         protected #{:db :main :branch/repl}
+         all-brs (set (d/branches mdb))
+         ags (mapv #(d/pull mdb '[:seon.agent/branch :seon.agent/merged-tx :seon.agent/archived?] (:e %))
+                   (d/datoms mdb :aevt :seon.agent/id))
+         active-brs (into #{} (keep (fn [ag]
+                                      (when (and (:seon.agent/branch ag)
+                                                 (nil? (:seon.agent/merged-tx ag))
+                                                 (not (:seon.agent/archived? ag)))
+                                        (:seon.agent/branch ag))))
+                          ags)
+         merged (->> ags
+                     (keep (fn [ag]
+                             (let [b (:seon.agent/branch ag)
+                                   mtx (:seon.agent/merged-tx ag)]
+                               (when (and b (all-brs b) (not (protected b)) (not (active-brs b)) mtx)
+                                 {:branch b :merged-tx (long mtx)}))))
+                     (group-by :branch)
+                     (map (fn [[b xs]] {:branch b :merged-tx (apply max (map :merged-tx xs))}))
+                     (sort-by :merged-tx >)
+                     vec)
+         to-del (mapv :branch (drop (long keep-n) merged))
+         deleted (volatile! 0)]
+     (doseq [b to-del]
+       (try (d/delete-branch! conn b) (vswap! deleted inc) (catch Throwable _ nil)))
+     {:ok? true :deleted @deleted :kept (min (count merged) (long keep-n))})))
+
+(defn ^:seon.flow/edge gc-store!
+  "Prunes merged branches beyond `:seon.config/gc-keep-merged-branches` and runs `d/gc-storage` with cutoff `:seon.config/gc-history-hours` ago (preserving active branch merge-bases)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/conn] :map]
+                  [:=> [:cat :seon.host/conn [:maybe :map]] :map]]
+   :cost/ticks 25000000}
+  ([conn] (gc-store! conn nil))
+  ([conn opts]
+   (let [mdb @conn
+         keep-n (long (or (:keep opts)
+                          (config-val mdb nil :seon.config/gc-keep-merged-branches)
+                          (:seon.config/gc-keep-merged-branches default-config-values)))
+         hrs (long (or (:history-hours opts)
+                       (config-val mdb nil :seon.config/gc-history-hours)
+                       (:seon.config/gc-history-hours default-config-values)))
+         pruned (prune-merged-branches! conn keep-n)
+         cutoff (java.util.Date. (- (System/currentTimeMillis) (* hrs 3600 1000)))
+         swept @(d/gc-storage conn cutoff)
+         n-swept (if (coll? swept) (count swept) swept)]
+     {:ok? true :pruned pruned :swept n-swept :history-hours hrs})))

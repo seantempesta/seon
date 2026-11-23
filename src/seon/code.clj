@@ -30,12 +30,15 @@
 
 (defn alloc-bytes
   "Returns cumulative heap bytes allocated on the current thread."
+  {:malli/schema [:=> [:cat] :int]}
   []
   (long (alloc-fn)))
 
 (def ^:private mono-fn  (scm/eval-string "(lambda () (jolt-monotonic-ns))"))
 
-(defn measure-call [thunk]
+(defn measure-call
+  {:malli/schema [:=> [:cat :any] :map]}
+  [thunk]
   (let [t0 (mono-fn)
         k0 (ticks-fn)
         b0 (alloc-fn)
@@ -55,7 +58,9 @@
 
 (def ^:private persistable-repl-heads parse/persistable-repl-heads)
 
-(defn ir-unit-refs [& args] (apply parse/ir-unit-refs args))
+(defn ir-unit-refs
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& args] (apply parse/ir-unit-refs args))
 
 (defn clean-edn-for-hash [& args] (apply parse/clean-edn-for-hash args))
 
@@ -65,7 +70,9 @@
 
 (defn md-path? [& args] (apply parse/md-path? args))
 
-(defn schema-file-path? [^String path] (files/schema-file-path? path))
+(defn schema-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path] (files/schema-file-path? path))
 
 (defn doc-sections [& args] (apply cio/doc-sections args))
 
@@ -77,7 +84,9 @@
 
 (defn- retract-stale-many-ops [& args] (apply cio/retract-stale-many-ops args))
 
-(defn file-import-tx [& args] (apply cio/file-import-tx args))
+(defn file-import-tx
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& args] (apply cio/file-import-tx args))
 
 (defn render-path [& args] (apply cio/render-path args))
 
@@ -147,9 +156,13 @@
    [(long base-ticks) (long base-bytes)]
    (tree-seq coll? seq form-val)))
 
-(defn task-file-path? [^String path] (files/task-file-path? path))
+(defn task-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path] (files/task-file-path? path))
 
-(defn agent-file-path? [^String path] (files/agent-file-path? path))
+(defn agent-file-path?
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String path] (files/agent-file-path? path))
 
 (defn rule-file-path?
   "Delegates to `seon.code.files/rule-file-path?`."
@@ -441,9 +454,13 @@
 (defn- build-eval-entity
   "Assembles the `:seon.agent.eval/entity` tx-map from the caller context and outcome."
   [db ctx out-str eid res-handle res-schema res-schema-eids touched-eids code-str dk dbytes dms ok? value error]
-  (let [{:keys [agent-id turn call-index call-id seen-messages thought reasoning intent usage prefix-hash]} ctx]
+  (let [{:keys [agent-id turn call-index call-id seen-messages thought reasoning intent usage prefix-hash]} ctx
+        aid (or agent-id :repl)
+        ag-eid (when (and (contains? (:schema db) :seon.agent.eval/agent-ref)
+                          (contains? (:schema db) :seon.agent/id))
+                 (:e (first (d/datoms db :avet :seon.agent/id aid))))]
     (cond-> {:seon.agent.eval/id eid
-             :seon.agent.eval/agent (or agent-id :repl)
+             :seon.agent.eval/agent aid
              :seon.agent.eval/turn (long (or turn 1))
              :seon.agent.eval/handle res-handle
              :seon.agent.eval/code code-str
@@ -451,6 +468,7 @@
              :seon.agent.eval/ticks (long dk)
              :seon.agent.eval/bytes (long dbytes)
              :seon.agent.eval/ms (double dms)}
+      ag-eid     (assoc :seon.agent.eval/agent-ref ag-eid)
       call-index (assoc :seon.agent.eval/call-index (long call-index))
       call-id    (assoc :seon.agent.eval/call-id (str call-id))
       res-schema (assoc :seon.agent.eval/result-schema res-schema)
@@ -467,6 +485,9 @@
       ok?        (assoc :seon.agent.eval/value (pr-str value))
       (and (contains? (:schema db) :seon.agent.eval/touched) (seq touched-eids))
       (assoc :seon.agent.eval/touched touched-eids)
+      (and (contains? (:schema db) :seon.agent.eval/touched-refs) (seq touched-eids))
+      (as-> m (let [refs (into #{} (filter #(and (integer? %) (not= % ag-eid) (first (d/datoms db :eavt %)))) touched-eids)]
+                (if (seq refs) (assoc m :seon.agent.eval/touched-refs refs) m)))
       error      (assoc :seon.agent.eval/error error))))
 
 (defn eval-forms
