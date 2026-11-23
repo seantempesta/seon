@@ -3,257 +3,11 @@
   (:require [clojure.string :as str]
             [clojure.tools.reader.reader-types :as rt]
             [edamame.core :as eda]
-            [hasch.core :as hasch]
             [jolt.analyzer]
             [jolt.host]
             [jolt.ir :as ir]
             [seon.schema :as schema]
             [seon.code.reach :as reach]))
-
-(defn parent-ns-sym
-  "Returns the parent namespace symbol for `nsym` (e.g. `'seon.schema.datahike` -> `'seon.schema`), or nil."
-  {:malli/schema [:=> [:cat :symbol] [:maybe :symbol]]
-   :cost/ticks 50000
-   :cost/bytes 65536}
-  [nsym]
-  (let [s (name nsym)
-        idx (.lastIndexOf s ".")]
-    (when (pos? idx)
-      (symbol (subs s 0 idx)))))
-
-(defn ns-parent-chain-tx
-  "Builds Datahike entity maps linking `nsym` up to its root namespace via `:seon.code.ns/parent`
-   using `:db/id` tempids `(str \"ns/\" sym)` so Datahike upserts existing namespaces AND links
-   brand-new parent chains atomically in a single transaction!"
-  {:malli/schema [:=> [:cat :symbol] [:vector :map]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [nsym]
-  (loop [cur nsym
-         acc []]
-    (let [tid (str "ns/" cur)]
-      (if-let [p (parent-ns-sym cur)]
-        (recur p (conj acc {:db/id tid :seon.code.ns/name cur :seon.code.ns/parent (str "ns/" p)}))
-        (vec (rseq (conj acc {:db/id tid :seon.code.ns/name cur})))))))
-
-(def boot-root-keys reach/boot-root-keys)
-
-(defn line-offsets
-  {:malli/schema [:=> [:cat :string] [:vector :int]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [^String s]
-  (let [n (.length s)]
-    (loop [i 0, acc [0]]
-      (if (>= i n)
-        acc
-        (recur (inc i)
-               (if (= (.charAt s i) \newline) (conj acc (inc i)) acc))))))
-
-(defn pos->idx
-  {:malli/schema [:=> [:cat [:vector :int] :string [:int {:min 1}] [:int {:min 1}]] :int], :cost/ticks 3000000, :cost/bytes 3000000}
-  [offsets ^String s row col]
-  (min (.length s)
-       (+ (nth offsets (dec row) 0) (dec col))))
-
-(defn lead-end
-  {:malli/schema [:function [:=> [:cat :string [:int {:min 0}] [:int {:min 0}]] :int]]}
-  [^String text i end]
-  (loop [i (int i)]
-    (if (>= i end)
-      end
-      (let [c (.charAt text i)]
-        (cond
-          (or (Character/isWhitespace c) (= c \,))
-          (recur (inc i))
-
-          (= c \;)
-          (let [nl (.indexOf text "\n" i)]
-            (recur (int (if (or (neg? nl) (> nl end)) end (inc nl)))))
-
-          :else i)))))
-
-(defn parse-ns-decl
-  {:malli/schema [:=> [:cat :any] [:maybe :map]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [form]
-  (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
-    (let [nsym (second form)
-          more (drop 2 form)
-          doc (when (string? (first more)) (first more))
-          clauses (filter seq? more)
-          req-specs (mapcat rest (filter #(= :require (first %)) clauses))]
-      (reduce
-       (fn [acc spec]
-         (let [s (cond (symbol? spec) [spec] (vector? spec) spec :else nil)]
-           (if-not s
-             acc
-             (let [target (first s)
-                   opts (apply hash-map (rest s))
-                   as-sym (:as opts)
-                   refer-syms (when (sequential? (:refer opts)) (:refer opts))]
-               (cond-> (update acc :requires conj target)
-                 as-sym (assoc-in [:aliases as-sym] target)
-                 (seq refer-syms) (update :refers merge (zipmap refer-syms (repeat target))))))))
-       {:ns nsym :doc doc :aliases {} :refers {} :requires #{}}
-       req-specs))))
-
-(def def-heads
-  '#{def defn defn- defmacro defonce defmulti defprotocol deftest})
-
-(def persistable-repl-heads
-  "Top-level defining/declaration heads that interactive REPL evals persist into `:seon.code.form/*`.
-   Scratch REPL queries (`(let ...)`, `(clojure.test/test-vars ...)`, `(slurp ...)`, `(require ...)`, etc.)
-   still evaluate and record into `:seon.agent.eval/*` without polluting source files as `#expr#` forms."
-  (into def-heads '#{ns defmethod defrecord deftype extend-type extend-protocol declare}))
-
-(defn sanitize-arglists
-  {:malli/schema [:=> [:cat [:vector :any]] [:vector [:vector :symbol]]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [als]
-  (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) als))
-
-(defn collect-keywords
-  "Collects all multi-segment qualified keywords (e.g. `:seon.agent/task`, `:seon.user/viewing`)
-   referenced anywhere in `form` so Datahike automatically indexes Code <-> Schema edges in O(1)!"
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] :any] [:set :qualified-keyword]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [acc x]
-  (cond
-    (qualified-keyword? x)
-    (let [ns-s (namespace x)]
-      (if (and ns-s (str/includes? ns-s ".") (not= ns-s "db"))
-        (conj acc x)
-        acc))
-    (map? x) (reduce-kv (fn [a k v] (collect-keywords (collect-keywords a k) v)) acc x)
-    (coll? x) (reduce collect-keywords acc x)
-    :else acc))
-
-(defn extract-var-facts
-  "Extracts a structured `:seon.code.var/*` entity map from a top-level defining form,
-   storing `:arglists` and `:schema` natively as plain Clojure data (`:db.type/data`)!"
-  {:malli/schema [:=> [:cat :symbol :string [:set :symbol] :any] [:maybe :map]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [nsym form-key deps form]
-  (when (and (seq? form) (symbol? (first form)))
-    (let [hd (symbol (name (first form)))
-          sym (second form)]
-      (when (and (contains? def-heads hd) (symbol? sym))
-        (let [vsym (symbol (name nsym) (name sym))
-              sym-meta (meta sym)
-              tail (drop 2 form)
-              doc (or (when (string? (first tail)) (first tail))
-                      (:doc sym-meta))
-              after-doc (if (string? (first tail)) (rest tail) tail)
-              attr-map (when (and (map? (first after-doc)) (seq (rest after-doc)))
-                         (first after-doc))
-              after-attr (if attr-map (rest after-doc) after-doc)
-              merged-meta (merge sym-meta attr-map)
-              raw-als (cond
-                        (#{'defn 'defn- 'defmacro} hd)
-                        (cond
-                          (vector? (first after-attr)) [(first after-attr)]
-                          (seq? (first after-attr)) (vec (keep #(when (seq? %) (first %)) after-attr))
-                          :else nil)
-                        (= 'deftest hd) [[]]
-                        :else nil)
-              arglists (when (seq raw-als) (sanitize-arglists raw-als))
-              malli-sch (:malli/schema merged-meta)
-              kw-refs  (collect-keywords #{} form)
-              var-refs (set (remove #(= "#ns" (name %)) deps))
-              is-test? (= 'deftest hd)
-              plat-test? (and is-test?
-                              (boolean (some #(contains? boot-root-keys (str %)) var-refs)))
-              ticks-b (or (:cost/ticks merged-meta) (get-in merged-meta [:seon.test/estimate :ticks]))
-              bytes-b (or (:cost/bytes merged-meta) (get-in merged-meta [:seon.test/estimate :bytes]))
-              big-o   (:cost/big-o merged-meta)]
-          (cond-> {:seon.code.var/name vsym
-                   :seon.code.var/ns nsym
-                   :seon.code.var/ns-ref (str "ns/" nsym)
-                   :seon.code.var/form form-key
-                   :seon.code.var/private? (boolean (or (= 'defn- hd) (:private merged-meta)))
-                   :seon.code.var/macro? (= 'defmacro hd)
-                   :seon.code.var/test? is-test?
-                   :seon.code.var/platform-test? plat-test?
-                   :seon.code.var/flow-edge? (boolean (:seon.flow/edge merged-meta))}
-            doc               (assoc :seon.code.var/doc doc)
-            (seq arglists)    (assoc :seon.code.var/arglists arglists)
-            malli-sch         (assoc :seon.code.var/schema malli-sch)
-            (seq kw-refs)     (assoc :seon.code.var/keywords kw-refs)
-            (seq var-refs)    (assoc :seon.code.var/refs var-refs)
-            (number? ticks-b) (assoc :seon.code.var/ticks-budget (long ticks-b))
-            (number? bytes-b) (assoc :seon.code.var/bytes-budget (long bytes-b))
-            (string? big-o)   (assoc :seon.code.var/big-o big-o)))))))
-
-(defn ir-unit-refs
-  {:malli/schema [:function [:=> [:cat :any] [:map [:refs [:set :symbol]] [:keywords [:set :qualified-keyword]]]]]}
-  [node]
-  (let [acc (volatile! {:refs #{} :keywords #{}})]
-    ((fn walk [n]
-       (case (:op n)
-         (:var :the-var)
-         (let [vs (symbol (str (:ns n)) (str (:name n)))]
-           (when-not (str/starts-with? (namespace vs) "clojure.")
-             (vswap! acc update :refs conj vs)))
-
-         (:const :quote)
-         (let [v (if (= :const (:op n)) (:val n) (:form n))]
-           (cond
-             (qualified-keyword? v) (vswap! acc update :keywords conj v)
-             (coll? v) (vswap! acc update :keywords into
-                               (filter qualified-keyword?) (tree-seq coll? seq v))))
-         nil)
-       (ir/reduce-ir-children (fn [_ c] (walk c)) nil n))
-     node)
-    @acc))
-
-(defn strip-docstring
-  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 3000000, :cost/bytes 3000000}
-  [form]
-  (if-not (and (seq? form) (symbol? (first form)))
-    form
-    (let [hd (symbol (name (first form)))]
-      (cond
-        (= 'ns hd)
-        (let [[op nsym & more] form]
-          (if (string? (first more)) (apply list op nsym (rest more)) form))
-
-        (and (contains? def-heads hd) (>= (count form) 4) (string? (nth form 2)))
-        (let [[op sym _doc & more] form]
-          (apply list op sym more))
-
-        :else form))))
-
-(defn clean-edn-for-hash
-  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 3000000, :cost/bytes 3000000}
-  [& args] (apply reach/clean-edn-for-hash args))
-
-(defn semantic-hash
-  {:malli/schema [:=> [:cat :symbol :any] [:string {:min 16, :max 16}]], :cost/ticks 3000000, :cost/bytes 3000000}
-  [nsym form]
-  (-> (str (hasch/uuid [nsym (clean-edn-for-hash (strip-docstring form))]))
-      (str/replace "-" "")
-      (subs 0 16)))
-
-(defn form-identity
-  {:malli/schema [:=> [:cat :symbol :any :string] :map], :cost/ticks 3000000, :cost/bytes 3000000}
-  [nsym form src]
-  (if (and (seq? form) (symbol? (first form)))
-    (let [hd (symbol (name (first form)))
-          arg1 (second form)]
-      (cond
-        (= 'ns hd)
-        {:key (str nsym "#ns") :def-sym nil :test? false}
-
-        (and (contains? def-heads hd) (symbol? arg1))
-        {:key (str nsym "/" (name arg1))
-         :def-sym arg1
-         :test? (= 'deftest hd)}
-
-        (and (= 'defmethod hd) (symbol? arg1))
-        {:key (str nsym "/" (name arg1) "#method#" (pr-str (nth form 2 nil)))
-         :def-sym nil
-         :test? false}
-
-        :else
-        {:key (str nsym "#expr#" (subs (str/replace (str (hasch/uuid src)) "-" "") 0 10))
-         :def-sym nil
-         :test? false}))
-    {:key (str nsym "#expr#" (subs (str/replace (str (hasch/uuid src)) "-" "") 0 10))
-     :def-sym nil
-     :test? false}))
 
 (defn collect-symbols
   {:malli/schema [:=> [:cat [:set :symbol] :any] [:set :symbol]], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -276,6 +30,17 @@
     (coll? x) (reduce collect-symbols acc x)
     :else acc))
 
+(defn parent-ns-sym
+  "Returns the parent namespace symbol for `nsym` (e.g. `'seon.schema.datahike` -> `'seon.schema`), or nil."
+  {:malli/schema [:=> [:cat :symbol] [:maybe :symbol]]
+   :cost/ticks 50000
+   :cost/bytes 65536}
+  [nsym]
+  (let [s (name nsym)
+        idx (.lastIndexOf s ".")]
+    (when (pos? idx)
+      (symbol (subs s 0 idx)))))
+
 (def watched-runtime-syms
   "Blocking & ad-hoc state symbols kept in `:seon.code.var/refs` so `seon.health` detects
    blocking Flow steps and state-outside-Flow in O(|Δ|) straight from the DB index!"
@@ -291,6 +56,21 @@
 
 (def core-state-syms
   #{'atom 'volatile! 'promise 'agent})
+
+(defn ns-parent-chain-tx
+  "Builds Datahike entity maps linking `nsym` up to its root namespace via `:seon.code.ns/parent`
+   using `:db/id` tempids `(str \"ns/\" sym)` so Datahike upserts existing namespaces AND links
+   brand-new parent chains atomically in a single transaction!"
+  {:malli/schema [:=> [:cat :symbol] [:vector :map]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [nsym]
+  (loop [cur nsym
+         acc []]
+    (let [tid (str "ns/" cur)]
+      (if-let [p (parent-ns-sym cur)]
+        (recur p (conj acc {:db/id tid :seon.code.ns/name cur :seon.code.ns/parent (str "ns/" p)}))
+        (vec (rseq (conj acc {:db/id tid :seon.code.ns/name cur})))))))
+
+(def boot-root-keys reach/boot-root-keys)
 
 (defn resolve-deps
   {:malli/schema [:=> [:cat :symbol [:map] [:set :symbol] [:maybe :symbol] :any] [:set :symbol]], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -314,71 +94,15 @@
                       :else nil))))
           syms)))
 
-(defn read-clj
-  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
-  ([path ^String text] (read-clj path text nil))
-  ([path ^String text extra-local-defs]
-   (let [offsets (line-offsets text)
-         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
-         reader (rt/indexing-push-back-reader text)
-         opts (eda/normalize-opts
-               {:all true
-                :read-eval false
-                :read-cond :allow
-                :features #{:clj}
-                :auto-resolve (fn [alias-kw]
-                                (if (= :current alias-kw)
-                                  (:ns @ns-ctx)
-                                  (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
-                :readers (fn [_tag] identity)})]
-     (loop [prev-end 0, raw-forms []]
-       (let [form (eda/parse-next reader opts)]
-         (if (= ::eda/eof form)
-           (let [ns-info @ns-ctx
-                 nsym (:ns ns-info)
-                 with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
-                 local-defs (into (set extra-local-defs) (keep :def-sym) with-ids)
-                 ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
-                 [_ final-forms final-vars]
-                 (reduce
-                  (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
-                    (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
-                          deps (resolve-deps nsym ns-info local-defs def-sym form)
-                          var-ent (extract-var-facts nsym ukey deps form)
-                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
-                                            (schema/schema-refs-in-form (:seon.code.var/schema var-ent)))
-                          full-deps (if (= ukey (str nsym "#ns"))
-                                      ns-deps
-                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
-                      [(conj seen-keys ukey)
-                       (conj facc {:seon.code.form/key ukey
-                                   :seon.code.form/ns nsym
-                                   :seon.code.form/order (long order)
-                                   :seon.code.form/lead lead
-                                   :seon.code.form/src src
-                                   :seon.code.form/hash (semantic-hash nsym form)
-                                   :seon.code.form/deps (set full-deps)
-                                   :seon.code.form/test? (boolean test?)})
-                       (cond-> vacc var-ent (conj var-ent))]))
-                  [#{} [] []]
-                  (map-indexed vector with-ids))]
-             {:ns nsym
-              :doc (:doc ns-info)
-              :requires (set (:requires ns-info))
-              :path path
-              :tail (subs text prev-end)
-              :forms final-forms
-              :vars final-vars})
-           (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
-                 start (lead-end text prev-end end)]
-             (when-let [parsed-ns (parse-ns-decl form)]
-               (vreset! ns-ctx
-                        (assoc parsed-ns :kw-aliases
-                               (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
-             (recur end
-                    (conj raw-forms {:form form
-                                     :lead (subs text prev-end start)
-                                     :src (subs text start end)})))))))))
+(defn line-offsets
+  {:malli/schema [:=> [:cat :string] [:vector :int]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [^String s]
+  (let [n (.length s)]
+    (loop [i 0, acc [0]]
+      (if (>= i n)
+        acc
+        (recur (inc i)
+               (if (= (.charAt s i) \newline) (conj acc (inc i)) acc))))))
 
 (defn md-path?
   {:malli/schema [:=> [:cat :string] :boolean], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -396,6 +120,29 @@
                   (str/replace #"[^a-z0-9]+" "-")
                   (str/replace #"^-+|-+$" ""))]
     (if (str/blank? clean) (str "sec-" idx) clean)))
+
+(defn pos->idx
+  {:malli/schema [:=> [:cat [:vector :int] :string [:int {:min 1}] [:int {:min 1}]] :int], :cost/ticks 3000000, :cost/bytes 3000000}
+  [offsets ^String s row col]
+  (min (.length s)
+       (+ (nth offsets (dec row) 0) (dec col))))
+
+(defn lead-end
+  {:malli/schema [:function [:=> [:cat :string [:int {:min 0}] [:int {:min 0}]] :int]]}
+  [^String text i end]
+  (loop [i (int i)]
+    (if (>= i end)
+      end
+      (let [c (.charAt text i)]
+        (cond
+          (or (Character/isWhitespace c) (= c \,))
+          (recur (inc i))
+
+          (= c \;)
+          (let [nl (.indexOf text "\n" i)]
+            (recur (int (if (or (neg? nl) (> nl end)) end (inc nl)))))
+
+          :else i)))))
 
 (defn parse-md-sections
   {:malli/schema [:=> [:cat :string :string] [:vector :map]], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -443,6 +190,33 @@
            (str/starts-with? path "test/"))
        (or (str/ends-with? path ".clj")
            (str/ends-with? path ".cljc"))))
+
+(defn parse-ns-decl
+  {:malli/schema [:=> [:cat :any] [:maybe :map]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [form]
+  (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+    (let [nsym (second form)
+          more (drop 2 form)
+          doc (when (string? (first more)) (first more))
+          clauses (filter seq? more)
+          req-specs (mapcat rest (filter #(= :require (first %)) clauses))]
+      (reduce
+       (fn [acc spec]
+         (let [s (cond (symbol? spec) [spec] (vector? spec) spec :else nil)]
+           (if-not s
+             acc
+             (let [target (first s)
+                   opts (apply hash-map (rest s))
+                   as-sym (:as opts)
+                   refer-syms (when (sequential? (:refer opts)) (:refer opts))]
+               (cond-> (update acc :requires conj target)
+                 as-sym (assoc-in [:aliases as-sym] target)
+                 (seq refer-syms) (update :refers merge (zipmap refer-syms (repeat target))))))))
+       {:ns nsym :doc doc :aliases {} :refers {} :requires #{}}
+       req-specs))))
+
+(def def-heads
+  '#{def defn defn- defmacro defonce defmulti defprotocol deftest})
 
 (defn ns->default-path
   {:malli/schema [:=> [:cat :symbol] :string], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -556,3 +330,236 @@
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
+
+(def persistable-repl-heads
+  "Top-level defining/declaration heads that interactive REPL evals persist into `:seon.code.form/*`.
+   Scratch REPL queries (`(let ...)`, `(clojure.test/test-vars ...)`, `(slurp ...)`, `(require ...)`, etc.)
+   still evaluate and record into `:seon.agent.eval/*` without polluting source files as `#expr#` forms."
+  (into def-heads '#{ns defmethod defrecord deftype extend-type extend-protocol declare}))
+
+(defn sanitize-arglists
+  {:malli/schema [:=> [:cat [:vector :any]] [:vector [:vector :symbol]]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [als]
+  (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) als))
+
+(defn- sha256-hex16 [^String s]
+  (let [md (java.security.MessageDigest/getInstance "SHA-256")
+        bs (.digest md (.getBytes (or s "") "UTF-8"))
+        sb (StringBuilder. 16)]
+    (dotimes [i 8]
+      (let [b (bit-and (aget bs i) 0xff)]
+        (when (< b 16) (.append sb \0))
+        (.append sb (Integer/toHexString b))))
+    (.toString sb)))
+
+(defn collect-keywords
+  "Collects all multi-segment qualified keywords (e.g. `:seon.agent/task`, `:seon.user/viewing`)
+   referenced anywhere in `form` so Datahike automatically indexes Code <-> Schema edges in O(1)!"
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] :any] [:set :qualified-keyword]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [acc x]
+  (cond
+    (qualified-keyword? x)
+    (let [ns-s (namespace x)]
+      (if (and ns-s (str/includes? ns-s ".") (not= ns-s "db"))
+        (conj acc x)
+        acc))
+    (map? x) (reduce-kv (fn [a k v] (collect-keywords (collect-keywords a k) v)) acc x)
+    (coll? x) (reduce collect-keywords acc x)
+    :else acc))
+
+(defn semantic-hash
+  {:malli/schema [:=> [:cat :symbol :any] [:string {:min 16, :max 16}]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [nsym form]
+  (sha256-hex16 (pr-str [nsym (clean-edn-for-hash (strip-docstring form))])))
+
+(defn extract-var-facts
+  "Extracts a structured `:seon.code.var/*` entity map from a top-level defining form,
+   storing `:arglists` and `:schema` natively as plain Clojure data (`:db.type/data`)!"
+  {:malli/schema [:=> [:cat :symbol :string [:set :symbol] :any] [:maybe :map]], :cost/ticks 3000000, :cost/bytes 3000000}
+  [nsym form-key deps form]
+  (when (and (seq? form) (symbol? (first form)))
+    (let [hd (symbol (name (first form)))
+          sym (second form)]
+      (when (and (contains? def-heads hd) (symbol? sym))
+        (let [vsym (symbol (name nsym) (name sym))
+              sym-meta (meta sym)
+              tail (drop 2 form)
+              doc (or (when (string? (first tail)) (first tail))
+                      (:doc sym-meta))
+              after-doc (if (string? (first tail)) (rest tail) tail)
+              attr-map (when (and (map? (first after-doc)) (seq (rest after-doc)))
+                         (first after-doc))
+              after-attr (if attr-map (rest after-doc) after-doc)
+              merged-meta (merge sym-meta attr-map)
+              raw-als (cond
+                        (#{'defn 'defn- 'defmacro} hd)
+                        (cond
+                          (vector? (first after-attr)) [(first after-attr)]
+                          (seq? (first after-attr)) (vec (keep #(when (seq? %) (first %)) after-attr))
+                          :else nil)
+                        (= 'deftest hd) [[]]
+                        :else nil)
+              arglists (when (seq raw-als) (sanitize-arglists raw-als))
+              malli-sch (:malli/schema merged-meta)
+              kw-refs  (collect-keywords #{} form)
+              var-refs (set (remove #(= "#ns" (name %)) deps))
+              is-test? (= 'deftest hd)
+              plat-test? (and is-test?
+                              (boolean (some #(contains? boot-root-keys (str %)) var-refs)))
+              ticks-b (or (:cost/ticks merged-meta) (get-in merged-meta [:seon.test/estimate :ticks]))
+              bytes-b (or (:cost/bytes merged-meta) (get-in merged-meta [:seon.test/estimate :bytes]))
+              big-o   (:cost/big-o merged-meta)]
+          (cond-> {:seon.code.var/name vsym
+                   :seon.code.var/ns nsym
+                   :seon.code.var/ns-ref (str "ns/" nsym)
+                   :seon.code.var/form form-key
+                   :seon.code.var/private? (boolean (or (= 'defn- hd) (:private merged-meta)))
+                   :seon.code.var/macro? (= 'defmacro hd)
+                   :seon.code.var/test? is-test?
+                   :seon.code.var/platform-test? plat-test?
+                   :seon.code.var/flow-edge? (boolean (:seon.flow/edge merged-meta))}
+            doc               (assoc :seon.code.var/doc doc)
+            (seq arglists)    (assoc :seon.code.var/arglists arglists)
+            malli-sch         (assoc :seon.code.var/schema malli-sch)
+            (seq kw-refs)     (assoc :seon.code.var/keywords kw-refs)
+            (seq var-refs)    (assoc :seon.code.var/refs var-refs)
+            (number? ticks-b) (assoc :seon.code.var/ticks-budget (long ticks-b))
+            (number? bytes-b) (assoc :seon.code.var/bytes-budget (long bytes-b))
+            (string? big-o)   (assoc :seon.code.var/big-o big-o)))))))
+
+(defn form-identity
+{:malli/schema [:=> [:cat :symbol :any :string] :map], :cost/ticks 3000000, :cost/bytes 3000000}
+[nsym form src]
+(if (and (seq? form) (symbol? (first form)))
+  (let [hd (symbol (name (first form)))
+        arg1 (second form)]
+    (cond
+      (= 'ns hd)
+      {:key (str nsym "#ns") :def-sym nil :test? false}
+
+      (and (contains? def-heads hd) (symbol? arg1))
+      {:key (str nsym "/" (name arg1))
+       :def-sym arg1
+       :test? (= 'deftest hd)}
+
+      (and (= 'defmethod hd) (symbol? arg1))
+      {:key (str nsym "/" (name arg1) "#method#" (pr-str (nth form 2 nil)))
+       :def-sym nil
+       :test? false}
+
+      :else
+      {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10))
+       :def-sym nil
+       :test? false}))
+  {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10))
+   :def-sym nil
+   :test? false}))
+
+(defn ir-unit-refs
+  {:malli/schema [:function [:=> [:cat :any] [:map [:refs [:set :symbol]] [:keywords [:set :qualified-keyword]]]]]}
+  [node]
+  (let [acc (volatile! {:refs #{} :keywords #{}})]
+    ((fn walk [n]
+       (case (:op n)
+         (:var :the-var)
+         (let [vs (symbol (str (:ns n)) (str (:name n)))]
+           (when-not (str/starts-with? (namespace vs) "clojure.")
+             (vswap! acc update :refs conj vs)))
+
+         (:const :quote)
+         (let [v (if (= :const (:op n)) (:val n) (:form n))]
+           (cond
+             (qualified-keyword? v) (vswap! acc update :keywords conj v)
+             (coll? v) (vswap! acc update :keywords into
+                               (filter qualified-keyword?) (tree-seq coll? seq v))))
+         nil)
+       (ir/reduce-ir-children (fn [_ c] (walk c)) nil n))
+     node)
+    @acc))
+
+(defn read-clj
+  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
+  ([path ^String text] (read-clj path text nil))
+  ([path ^String text extra-local-defs]
+   (let [offsets (line-offsets text)
+         ns-ctx (volatile! {:ns 'user :doc nil :aliases {} :refers {} :requires #{} :kw-aliases {}})
+         reader (rt/indexing-push-back-reader text)
+         opts (eda/normalize-opts
+               {:all true
+                :read-eval false
+                :read-cond :allow
+                :features #{:clj}
+                :auto-resolve (fn [alias-kw]
+                                (if (= :current alias-kw)
+                                  (:ns @ns-ctx)
+                                  (get (:kw-aliases @ns-ctx) alias-kw (symbol (name alias-kw)))))
+                :readers (fn [_tag] identity)})]
+     (loop [prev-end 0, raw-forms []]
+       (let [form (eda/parse-next reader opts)]
+         (if (= ::eda/eof form)
+           (let [ns-info @ns-ctx
+                 nsym (:ns ns-info)
+                 with-ids (mapv #(merge % (form-identity nsym (:form %) (:src %))) raw-forms)
+                 local-defs (into (set extra-local-defs) (keep :def-sym) with-ids)
+                 ns-deps (into #{} (map #(symbol (name %) "#ns")) (:requires ns-info))
+                 [_ final-forms final-vars]
+                 (reduce
+                  (fn [[seen-keys facc vacc] [order {:keys [form lead src key def-sym test?]}]]
+                    (let [ukey (if (contains? seen-keys key) (str key "#" order) key)
+                          deps (resolve-deps nsym ns-info local-defs def-sym form)
+                          var-ent (extract-var-facts nsym ukey deps form)
+                          sch-dep-syms (map #(symbol "schema" (str (namespace %) "__" (name %)))
+                                            (schema/schema-refs-in-form (:seon.code.var/schema var-ent)))
+                          full-deps (if (= ukey (str nsym "#ns"))
+                                      ns-deps
+                                      (into (conj deps (symbol (name nsym) "#ns")) sch-dep-syms))]
+                      [(conj seen-keys ukey)
+                       (conj facc {:seon.code.form/key ukey
+                                   :seon.code.form/ns nsym
+                                   :seon.code.form/order (long order)
+                                   :seon.code.form/lead lead
+                                   :seon.code.form/src src
+                                   :seon.code.form/hash (semantic-hash nsym form)
+                                   :seon.code.form/deps (set full-deps)
+                                   :seon.code.form/test? (boolean test?)})
+                       (cond-> vacc var-ent (conj var-ent))]))
+                  [#{} [] []]
+                  (map-indexed vector with-ids))]
+             {:ns nsym
+              :doc (:doc ns-info)
+              :requires (set (:requires ns-info))
+              :path path
+              :tail (subs text prev-end)
+              :forms final-forms
+              :vars final-vars})
+           (let [end (pos->idx offsets text (rt/get-line-number reader) (rt/get-column-number reader))
+                 start (lead-end text prev-end end)]
+             (when-let [parsed-ns (parse-ns-decl form)]
+               (vreset! ns-ctx
+                        (assoc parsed-ns :kw-aliases
+                               (into {} (map (fn [[k v]] [(keyword (name k)) v])) (:aliases parsed-ns)))))
+             (recur end
+                    (conj raw-forms {:form form
+                                     :lead (subs text prev-end start)
+                                     :src (subs text start end)})))))))))
+
+(defn strip-docstring
+  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 3000000, :cost/bytes 3000000}
+  [form]
+  (if-not (and (seq? form) (symbol? (first form)))
+    form
+    (let [hd (symbol (name (first form)))]
+      (cond
+        (= 'ns hd)
+        (let [[op nsym & more] form]
+          (if (string? (first more)) (apply list op nsym (rest more)) form))
+
+        (and (contains? def-heads hd) (>= (count form) 4) (string? (nth form 2)))
+        (let [[op sym _doc & more] form]
+          (apply list op sym more))
+
+        :else form))))
+
+(defn clean-edn-for-hash
+  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 3000000, :cost/bytes 3000000}
+  [& args] (apply reach/clean-edn-for-hash args))
