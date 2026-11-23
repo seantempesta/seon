@@ -1,7 +1,7 @@
 (ns seon.signals.touches
-  "Pure eval touch & manual-lookup extractor plus live candidate-pool builder for Seon's scoreboard.
-   Separates general entity/var/schema usage from manual lookups (`source`, `grep-src`, `d/pull`,
-   `ns-outline`, `search`, `callers`, `callees`) per eval turn."
+  "Pure eval touch, reasoning-mention & manual-lookup extractor plus live candidate-pool builder
+   for Seon's scoreboard. Separates general usage + reasoning mentions from manual code lookups
+   (`source`, `grep-src`, `d/pull`, `ns-outline`, `search`, `callers`, `callees`) per eval turn."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -10,18 +10,26 @@
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
             [seon.render.wire :as rwire]
-            [seon.schema :as schema]
-            [seon.schema.index :as six]))
+            [seon.rule :as rules]
+            [seon.rule.seed :as rseed]
+            [seon.schema.index :as six]
+            [seon.store :as store]))
 
 (def ^:private ignored-nss
   #{"clojure.core" "clojure.string" "clojure.set" "clojure.edn" "clojure.java.io" "clojure.test"
-    "datahike.api" "d" "str" "set" "io" "edn" "user" "result" "Math" "System" "Double" "Long" "String"})
+    "datahike.api" "d" "str" "set" "io" "edn" "user" "result" "Math" "System" "Double" "Long" "String"
+    "http" "https" "file"})
 
 (def ^:private ignored-kws
   #{:db/id :db/add :db/retract :db/retractEntity :db/ident :db/valueType :db/cardinality :db/unique :db/index})
 
+(def ^:private ignored-dotted-exts
+  #{"clj" "cljc" "cljs" "edn" "md" "txt" "json" "js" "css" "html" "py" "sh" "c" "h" "dylib" "mdb" "log"})
+
 (def ^:private lookup-op-re
   #"\(\s*(?:(?:user|seon\.fork\.helpers|seon\.repl|datahike\.api|d)/)?(source|grep-src|ns-outline|search|pull|callers|callees)\b")
+
+(defonce ^:private ^:seon.flow/edge var-index-cache (store/lru-cache 16))
 
 (def ref-attrs
   "Canonical identity attributes resolved between EIDs and lookup refs."
@@ -46,6 +54,45 @@
     (number? x) (let [v (double x)] (if (and (== v v) (>= v 0.0) (<= v 9.0e18)) (long v) 0))
     :else 0))
 
+(defn- db-cache-sig [db]
+  (cond
+    (instance? datahike.db.DB db)
+    [(get-in db [:config :store :id]) (get-in db [:config :branch] :main)
+     (d/commit-id db) (:max-tx db) nil]
+
+    (instance? datahike.db.AsOfDB db)
+    (when-let [orig (:origin-db db)]
+      [(get-in orig [:config :store :id]) (get-in orig [:config :branch] :main)
+       (when (instance? datahike.db.DB orig) (d/commit-id orig))
+       (:max-tx orig) (:time-point db)])
+
+    :else nil))
+
+(defn- build-var-index [db]
+  (let [dh (db-schema db)
+        vars (when (dh :seon.code.var/name)
+               (mapv (fn [dt] [(:e dt) (:v dt) (str/lower-case (str (:v dt)))])
+                     (d/datoms db :aevt :seon.code.var/name)))
+        by-simple (reduce (fn [acc [e sym _]]
+                            (if (symbol? sym)
+                              (update acc (name sym) (fnil conj []) [e sym])
+                              acc))
+                          {} vars)
+        ns-by-name (if (dh :seon.code.ns/name)
+                     (reduce (fn [acc dt]
+                               (let [v (:v dt)]
+                                 (if (symbol? v) (assoc acc (name v) [(:e dt) v]) acc)))
+                             {} (d/datoms db :aevt :seon.code.ns/name))
+                     {})]
+    {:var-entries (or vars []) :by-simple-name by-simple :ns-by-name ns-by-name}))
+
+(defn- cached-var-index [db]
+  (if-not (and db (seq (db-schema db)))
+    {:var-entries [] :by-simple-name {} :ns-by-name {}}
+    (if-let [sig (db-cache-sig db)]
+      (store/lru-get! var-index-cache 16 sig #(build-var-index db))
+      (build-var-index db))))
+
 (defn- balanced-form [^String s start-idx]
   (let [n (min (count s) (+ start-idx 1200))]
     (loop [i (long start-idx) depth 0 in-str? false esc? false]
@@ -64,7 +111,11 @@
     (let [[a b] (str/split tok #"/" 2)]
       (cond
         (and b (not (str/blank? a)) (not (str/blank? b)) (not (ignored-nss a))) (symbol a b)
-        (and (nil? b) (str/includes? tok ".") (not (str/starts-with? tok "."))) (symbol tok)))))
+        (and (nil? b) (str/includes? tok ".") (not (str/starts-with? tok "."))
+             (not (str/ends-with? tok ".")))
+        (let [ext (last (str/split tok #"\."))]
+          (when-not (ignored-dotted-exts (str/lower-case (str ext)))
+            (symbol tok)))))))
 
 (defn- parse-kw [^String tok]
   (when (and (string? tok) (str/starts-with? tok ":") (str/includes? tok "/"))
@@ -104,6 +155,42 @@
      :schemas (if (= op :pull) (into #{} (keep #(when (= :seon.schema/key (first %)) (second %))) lrefs) (set kws))
      :refs (set/union lrefs drefs) :eids peids :queries qs}))
 
+(defn- reasoning-refs [db ^String text]
+  (if (or (not (string? text)) (str/blank? text))
+    {:syms #{} :schemas #{} :refs #{} :eids #{} :queries #{}}
+    (let [base (snippet-refs text nil)
+          vix (when db (cached-var-index db))
+          by-s (:by-simple-name vix)
+          ns-m (:ns-by-name vix)
+          ;; Keep only dotted qualified symbols or symbols matching known namespaces/vars (avoid prose "a/b")
+          clean-qsyms (into #{}
+                            (filter (fn [sym]
+                                      (let [n (namespace sym)]
+                                        (or (nil? n) (str/includes? n ".")
+                                            (and ns-m (contains? ns-m n))))))
+                            (:syms base))
+          dotted-toks (map second (re-seq #"(?:^|[^a-zA-Z0-9._:/-])([a-zA-Z][a-zA-Z0-9_-]*(?:\.[a-zA-Z0-9_-]+)+)" text))
+          dotted-nss (into #{}
+                           (keep (fn [tok]
+                                   (when-let [sym (parse-sym tok)]
+                                     (cond
+                                       (and ns-m (contains? ns-m tok)) sym
+                                       (and (nil? db) (str/includes? tok ".")) sym
+                                       :else nil))))
+                           dotted-toks)
+          hyphen-toks (when (seq by-s)
+                        (distinct (map second (re-seq #"(?:^|[^a-zA-Z0-9._:/-])([a-z][a-z0-9]*(?:-[a-z0-9]+)+[?!]?)" text))))
+          bare-hits (when (seq hyphen-toks)
+                      (mapcat (fn [tok]
+                                (let [ms (get by-s tok)]
+                                  (when (and (seq ms) (<= (count ms) 3)) ms)))
+                              hyphen-toks))]
+      {:syms (into (set/union clean-qsyms dotted-nss) (map second) bare-hits)
+       :schemas (:schemas base)
+       :refs (:refs base)
+       :eids (into (:eids base) (map first) bare-hits)
+       :queries #{}})))
+
 (defn- manual-lookups [^String code-str]
   (if (or (not (string? code-str)) (str/blank? code-str))
     {:calls [] :syms #{} :schemas #{} :refs #{} :eids #{} :queries #{}}
@@ -124,14 +211,13 @@
 (defn- resolve-db-ids [db {:keys [eids syms schemas refs queries]}]
   (let [dh (db-schema db)]
     (if-not (and db (seq dh))
-      {:eids eids :syms syms :schemas schemas :refs refs}
+      {:eids (set eids) :syms (set syms) :schemas (set schemas) :refs (set refs)}
       (let [avet-e (fn [a v] (when (dh a) (:e (first (d/datoms db :avet a v)))))
             ql (vec (keep #(when (and (string? %) (>= (count %) 4)) (str/lower-case %)) queries))
-            qhits (when (and (seq ql) (dh :seon.code.var/name))
-                    (for [dt (d/datoms db :aevt :seon.code.var/name)
-                          :let [vs (:v dt) sl (when (symbol? vs) (str/lower-case (str vs)))]
-                          :when (and sl (some #(str/includes? sl %) ql))]
-                      [(:e dt) vs]))
+            qhits (when (seq ql)
+                    (for [[e vs sl] (:var-entries (cached-var-index db))
+                          :when (some #(str/includes? sl %) ql)]
+                      [e vs]))
             eids1 (into (set eids)
                         (concat (keep #(when (symbol? %) (avet-e (if (namespace %) :seon.code.var/name :seon.code.ns/name) %)) syms)
                                 (keep #(when (qualified-keyword? %) (avet-e :seon.schema/key %)) schemas)
@@ -145,40 +231,51 @@
          :schemas (into (set schemas) (keep :seon.schema/key) pulled)
          :refs (into (set refs) (for [p pulled, a ref-attrs, :let [v (get p a)] :when (some? v)] [a v]))}))))
 
-(defn- extract-one-eval [db ev]
+(defn- extract-one-eval [db ev include-reasoning?]
   (let [code-s (when (string? (:seon.agent.eval/code ev)) (:seon.agent.eval/code ev))
+        reas-s (when (string? (:seon.agent.eval/reasoning ev)) (:seon.agent.eval/reasoning ev))
         all-r (if code-s (snippet-refs code-s nil) {:syms #{} :schemas #{} :refs #{} :eids #{}})
         man-r (manual-lookups code-s)
+        reas-r (reasoning-refs db reas-s)
         traw (let [t (:seon.agent.eval/touched ev)] (if (coll? t) t []))
         trefs (into #{} (filter #(and (vector? %) (= 2 (count %)) (qualified-keyword? (first %)))) traw)
         rsraw (let [rs (:seon.agent.eval/result-schemas ev)] (if (coll? rs) rs []))
         man-res (resolve-db-ids db man-r)
+        reas-res (if (or (seq (:syms reas-r)) (seq (:schemas reas-r)) (seq (:refs reas-r)) (seq (:eids reas-r)))
+                   (resolve-db-ids db reas-r)
+                   {:eids #{} :syms #{} :schemas #{} :refs #{}})
         all-res (resolve-db-ids
                  db
                  {:eids (set/union (:eids all-r) (:eids man-res)
+                                   (when include-reasoning? (:eids reas-res))
                                    (into #{} (filter integer?) traw)
                                    (into #{} (keep #(when (integer? (second %)) (second %))) trefs)
                                    (into #{} (keep #(if (integer? %) % (when (and (map? %) (integer? (:db/id %))) (:db/id %)))) rsraw))
                   :syms (set/union (:syms all-r) (:syms man-res)
+                                   (when include-reasoning? (:syms reas-res))
                                    (into #{} (keep (fn [[a v]] (when (and (#{:seon.code.var/name :seon.code.ns/name} a) (symbol? v)) v))) trefs))
                   :schemas (set/union (:schemas all-r) (:schemas man-res)
+                                      (when include-reasoning? (:schemas reas-res))
                                       (into #{} (keep (fn [[a v]] (when (and (= :seon.schema/key a) (qualified-keyword? v)) v))) trefs)
                                       (into (if (qualified-keyword? (:seon.agent.eval/result-schema ev)) #{(:seon.agent.eval/result-schema ev)} #{})
                                             (filter qualified-keyword?) rsraw))
-                  :refs (set/union (:refs all-r) trefs (:refs man-res))
+                  :refs (set/union (:refs all-r) trefs (:refs man-res)
+                                   (when include-reasoning? (:refs reas-res)))
                   :queries (:queries man-r)})
         turn (nonneg-long (:seon.agent.eval/turn ev))
         handle (:seon.agent.eval/handle ev)]
     {:turn turn :handle handle :tx (nonneg-long (or (:_tx ev) (:tx ev) (:seon.agent.eval/tx ev)))
      :touched-eids (:eids all-res) :touched-syms (:syms all-res)
      :touched-schemas (:schemas all-res) :touched-refs (:refs all-res)
+     :reasoning-eids (:eids reas-res) :reasoning-syms (:syms reas-res)
+     :reasoning-schemas (:schemas reas-res) :reasoning-refs (:refs reas-res)
      :manual-lookup-eids (:eids man-res) :manual-lookup-syms (:syms man-res)
      :manual-lookup-schemas (:schemas man-res) :manual-lookup-refs (:refs man-res)
      :manual-lookup-queries (:queries man-r)
      :manual-lookup-calls (mapv #(assoc % :turn turn :handle handle) (:calls man-r))}))
 
 (defn pull-agent-evals
-  "Pulls an agent's `:seon.agent.eval/*` records with native datom `:_tx`, sorted chronologically."
+  "Pulls an agent's `:seon.agent.eval/*` records (including `:reasoning`) with native datom `:_tx`, sorted chronologically."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :qualified-keyword] [:vector :map]]
    :cost/ticks 10000000}
   [db agent-id]
@@ -186,7 +283,7 @@
     []
     (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
          (map #(assoc (d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/handle
-                                   :seon.agent.eval/code :seon.agent.eval/touched
+                                   :seon.agent.eval/code :seon.agent.eval/reasoning :seon.agent.eval/touched
                                    :seon.agent.eval/result-schema :seon.agent.eval/result-schemas]
                               (:e %))
                       :_tx (long (:tx % 0))))
@@ -194,14 +291,16 @@
          vec)))
 
 (defn extract-eval-touches
-  "Extracts touched EIDs, symbols, schemas, and refs per eval turn, separating general usage
-   from manual lookups (`source`, `grep-src`, `d/pull`, `ns-outline`, `search`, `callers`, `callees`)."
+  "Extracts touched EIDs, symbols, schemas, and refs per eval turn, including `:reasoning-*`
+   mentions (folded into `:touched-*` when `:include-reasoning?` is true — default `true`),
+   while keeping `:manual-lookup-*` strictly from `:code`."
   {:malli/schema [:=> [:cat :any [:? :any] [:? :any]] :map]
    :cost/ticks 25000000}
   ([evals] (extract-eval-touches nil evals nil))
   ([db evals-or-agent] (extract-eval-touches db evals-or-agent nil))
   ([db evals-or-agent opts]
    (let [o (if (map? opts) opts {})
+         inc-r? (if (contains? o :include-reasoning?) (boolean (:include-reasoning? o)) true)
          edb (when (seq (db-schema db)) db)
          raw (cond (and edb (qualified-keyword? evals-or-agent)) (pull-agent-evals edb evals-or-agent)
                    (sequential? evals-or-agent) (filterv map? evals-or-agent)
@@ -213,13 +312,16 @@
                          (integer? (:upto-tx o)) (filter #(<= (ev-tx %) (long (:upto-tx o))))
                          (integer? (:after-turn o)) (filter #(> (nonneg-long (:seon.agent.eval/turn %)) (long (:after-turn o))))
                          (integer? (:upto-turn o)) (filter #(<= (nonneg-long (:seon.agent.eval/turn %)) (long (:upto-turn o))))))
-         per-turn (mapv #(extract-one-eval edb %) filtered)
-         ks [:touched-eids :touched-syms :touched-schemas :touched-refs :manual-lookup-eids
-             :manual-lookup-syms :manual-lookup-schemas :manual-lookup-refs :manual-lookup-queries]]
+         per-turn (mapv #(extract-one-eval edb % inc-r?) filtered)
+         ks [:touched-eids :touched-syms :touched-schemas :touched-refs
+             :reasoning-eids :reasoning-syms :reasoning-schemas :reasoning-refs
+             :manual-lookup-eids :manual-lookup-syms :manual-lookup-schemas :manual-lookup-refs
+             :manual-lookup-queries]]
      (reduce (fn [acc t]
                (-> (reduce #(update %1 %2 into (get t %2)) acc ks)
                    (update :manual-lookup-calls into (:manual-lookup-calls t))))
-             (assoc (zipmap ks (repeat #{})) :manual-lookup-calls [] :by-turn per-turn :eval-count (count per-turn))
+             (assoc (zipmap ks (repeat #{})) :manual-lookup-calls [] :by-turn per-turn
+                    :eval-count (count per-turn) :include-reasoning? inc-r?)
              per-turn))))
 
 (defn- scope-neighbors [db ag]
@@ -253,10 +355,24 @@
           (cond-> (assoc it :entity eid :data ent :tx etx :touches (long (get-in prior [:counts eid] 0)))
             sk (assoc :schema sk) sym (assoc :sym sym)))))))
 
+(defn- active-ctx-rules-excluding [main-db branch-db disabled]
+  (let [fb (rseed/starter-rules)
+        m-rs (rules/load-rules main-db fb)
+        all (if (or (nil? branch-db) (= main-db branch-db)
+                    (= (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)))
+              m-rs
+              (rules/load-rules branch-db m-rs))]
+    (filterv (fn [r]
+               (and (or (= :context (:seon.rule/category r))
+                        (some map? (:seon.rule/assert r)))
+                    (not (contains? disabled (:seon.rule/id r)))))
+             all)))
+
 (defn build-candidate-pool
   "Builds the bounded candidate entity pool for `agent-id` at `(main-db, branch-db)` with prior
    eval touch counts/txs and pre-measured multi-level Hiccup render candidates.
-   Optional `opts` supports `:upto-turn` for merged-branch single-tx turn splitting."
+   Optional `opts` supports `:upto-turn`, `:disabled-rules`, `:include-reasoning?`, `:weights`,
+   `:token-budget`, and `:strategy`."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] [:vector :map]]
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword [:maybe :map]] [:vector :map]]]
@@ -266,36 +382,50 @@
   ([main-db branch-db agent-id opts]
    (let [o (if (map? opts) opts {})
          edb (or branch-db main-db)
+         disabled (if (coll? (:disabled-rules o)) (set (:disabled-rules o)) #{})
          ag (or (rdata/pull-agent-entity main-db edb agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
-         ru-ps (:seon.ctx/projections (ctx/related-updates {:seon.db/main main-db :seon.db/branch edb :seon.agent/id agent-id
-                                                            :seon.view/target :wire :seon.view/token-budget 100000}))
+         ru-req (cond-> {:seon.db/main main-db :seon.db/branch edb :seon.agent/id agent-id
+                         :seon.view/target :wire :seon.view/token-budget (long (or (:token-budget o) 100000))}
+                  (seq disabled) (assoc :seon.ctx/rules (active-ctx-rules-excluding main-db edb disabled)))
+         ru-ps (:seon.ctx/projections (ctx/related-updates ru-req))
          world (proj/agent-world-datoms main-db edb agent-id)
          seen (into #{} (keep :entity) ru-ps)
          pins (:pinned world)
-         w-extra (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen (key %)))) (take 12)
-                                (map (fn [[e tx]] {:entity e :tx tx :priority (if (pins e) 88 60)
-                                                   :pinned? (boolean (pins e)) :zone :workspace :rules [:seed/world]})))
-                       (sort-by (comp - val) (:connected world)))
+         w-extra (if (contains? disabled :seed/world)
+                   []
+                   (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen (key %)))) (take 12)
+                                  (map (fn [[e tx]] {:entity e :tx tx :priority (if (pins e) 88 60)
+                                                     :pinned? (boolean (pins e)) :zone :workspace :rules [:seed/world]})))
+                         (sort-by (comp - val) (:connected world))))
          ut (when (integer? (:upto-turn o)) (long (:upto-turn o)))
-         prior-evs (extract-eval-touches edb (pull-agent-evals edb agent-id) (when ut {:upto-turn ut}))
+         inc-r? (if (contains? o :include-reasoning?) (boolean (:include-reasoning? o)) true)
+         prior-evs (extract-eval-touches edb (pull-agent-evals edb agent-id)
+                                         (cond-> {:include-reasoning? inc-r?} ut (assoc :upto-turn ut)))
          prior (reduce (fn [acc t]
                          (let [t-ord (if ut (+ (long (:tx t 0)) (long (:turn t 0))) (long (:tx t 0)))]
                            (reduce (fn [a e] (-> a (update-in [:counts e] (fnil inc 0))
                                                  (update-in [:max-tx e] #(max (long (or % 0)) t-ord))))
                                    acc (:touched-eids t))))
                        {:counts {} :max-tx {}} (:by-turn prior-evs))
-        seen2 (into seen (map :entity) w-extra)
-        p-extra (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen2 (key %)))) (take 14)
-                               (map (fn [[e tx]] {:entity e :tx tx :priority 66 :zone :workspace :rules [:rule.ctx/eval-frontier]})))
-                      (sort-by (comp - val) (:max-tx prior)))
-        seen3 (into seen2 (map :entity) p-extra)
-        raw (concat (map #(dissoc % :candidates :data) ru-ps) w-extra p-extra
+         seen2 (into seen (map :entity) w-extra)
+         p-extra (if (contains? disabled :rule.ctx/eval-frontier)
+                   []
+                   (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen2 (key %)))) (take 14)
+                                  (map (fn [[e tx]] {:entity e :tx tx :priority 66 :zone :workspace :rules [:rule.ctx/eval-frontier]})))
+                         (sort-by (comp - val) (:max-tx prior))))
+         seen3 (into seen2 (map :entity) p-extra)
+         sc-extra (if (contains? disabled :rule.scope/neighbor)
+                    []
                     (remove #(seen3 (:entity %)) (scope-neighbors edb ag)))
-        enriched (vec (keep #(enrich-candidate main-db edb (schema/entity-index edb) prior %) raw))
-        by-e (into {} (map (juxt :entity identity))
-                   (:selected (fit/fit-projections edb enriched {:target :wire :token-budget 1000000
-                                                                 :fallback-renderers rwire/fallback-entity-renderers})))]
-    (mapv #(if-let [m (get by-e (:entity %))]
-             (assoc % :candidates (or (:candidates m) []) :tokens (long (or (:measured-tokens m) (:tokens m) 0)))
-             %)
-          enriched))))
+         raw (concat (map #(dissoc % :candidates :data) ru-ps) w-extra p-extra sc-extra)
+         ix (:entity-index (fit/cached-registry-info edb))
+         enriched (vec (keep #(enrich-candidate main-db edb ix prior %) raw))
+         fit-opts (cond-> {:target :wire :token-budget 1000000
+                           :fallback-renderers rwire/fallback-entity-renderers}
+                    (:weights o) (assoc :weights (:weights o))
+                    (:strategy o) (assoc :strategy (:strategy o)))
+         by-e (into {} (map (juxt :entity identity)) (:selected (fit/fit-projections edb enriched fit-opts)))]
+     (mapv #(if-let [m (get by-e (:entity %))]
+              (assoc % :candidates (or (:candidates m) []) :tokens (long (or (:measured-tokens m) (:tokens m) 0)))
+              %)
+           enriched))))
