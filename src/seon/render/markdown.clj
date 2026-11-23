@@ -397,3 +397,116 @@
    [:path {:d "M6.6 6.6A2 2 0 0 0 9.4 9.4"}]
    [:path {:d "M4.1 4.4C2.6 5.5 1.5 8 1.5 8s2.4 4.25 6.5 4.25c1.3 0 2.4-.35 3.4-.9"}]
    [:path {:d "M6.5 3.9c.5-.1 1-.15 1.5-.15 4.1 0 6.5 4.25 6.5 4.25s-.8 1.4-2.1 2.5"}]])
+
+(defn- activity-step-facts
+  "Pure derivation of a single activity step's display facts (code/narration split, ids,
+   title, right-meta). Extracted so step rendering stays small and testable."
+  [e id-prefix idx]
+  (let [code-str (str (or (:seon.agent.eval/code e) ""))
+        has-code? (not (str/blank? code-str))
+        intent-raw (not-empty (str/trim (str (or (:seon.agent.eval/intent e) ""))))
+        narration (when has-code? (not-empty (str/trim (str (or (:seon.agent.eval/thought e) "")))))
+        reasoning (not-empty (str/trim (str (or (:seon.agent.eval/reasoning e) ""))))
+        out-str (not-empty (str/trim (str (or (:seon.agent.eval/out e) ""))))
+        val-str (not-empty (str (or (:seon.agent.eval/value e) "")))
+        err-str (not-empty (str (or (:seon.agent.eval/error e) "")))
+        ms-val (:seon.agent.eval/ms e)
+        step-id (str id-prefix "-step-" idx)
+        step-title (lead-snippet
+                    (or intent-raw
+                        narration
+                        (when has-code? (first (str/split-lines code-str)))
+                        (when reasoning "Final reasoning")
+                        "Step")
+                    112)
+        show-note? (and narration (not= narration intent-raw))
+        code-lines (when has-code? (count (str/split-lines code-str)))
+        right-meta (cond
+                     (and has-code? (some? ms-val)) (str ms-val " ms")
+                     reasoning (compact-chars-label (count reasoning))
+                     :else nil)]
+    {:code-str code-str :has-code? has-code? :narration narration :reasoning reasoning
+     :out-str out-str :val-str val-str :err-str err-str :step-id step-id :step-title step-title
+     :show-note? show-note? :code-lines code-lines :right-meta right-meta}))
+
+(defn- activity-step-subs
+  "Renders the connected sub-drawer list (meta row + Thinking/Note/Code/Output/Error/Result)
+   for one activity step from its precomputed facts."
+  [e {:keys [step-id reasoning narration show-note? has-code? code-str code-lines out-str err-str val-str]}]
+  [:div {:class "step-subs"}
+   (step-meta-row e err-str)
+   (when reasoning
+     (activity-sub-drawer (str step-id "-reason") "Thinking"
+                          (lead-snippet reasoning 96)
+                          (compact-chars-label (count reasoning))
+                          [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} reasoning]))
+   (when show-note?
+     (activity-sub-drawer (str step-id "-note") "Note"
+                          (lead-snippet narration 96)
+                          (compact-chars-label (count narration))
+                          [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} narration]))
+   (when has-code?
+     (activity-sub-drawer (str step-id "-code") "Code"
+                          (lead-snippet (first (str/split-lines code-str)) 84)
+                          (if (> code-lines 1)
+                            (str code-lines " lines")
+                            (compact-chars-label (count code-str)))
+                          (render-bounded-payload code-str
+                                                  {:id (str step-id "-code-full") :label "code"
+                                                   :max-chars 520 :max-lines 12})))
+   (when out-str
+     (activity-sub-drawer (str step-id "-out") "Output"
+                          (lead-snippet out-str 84)
+                          (compact-chars-label (count out-str))
+                          (render-bounded-payload out-str
+                                                  {:id (str step-id "-out-full") :label "output"
+                                                   :max-chars 420 :max-lines 10})))
+   (when err-str
+     (activity-sub-drawer (str step-id "-err") "Error"
+                          (lead-snippet err-str 90)
+                          (compact-chars-label (count err-str))
+                          (if (<= (count err-str) 600)
+                            [:div {:class "notice red mono tiny"} err-str]
+                            (render-bounded-payload err-str {:id (str step-id "-err-full") :label "error"
+                                                             :max-chars 520 :max-lines 10 :extra-class "red-text"}))
+                          {:extra-class "is-error"}))
+   (when (and val-str (not err-str))
+     (activity-sub-drawer (str step-id "-val") "Result"
+                          (str "=> " (lead-snippet val-str 84))
+                          (compact-chars-label (count val-str))
+                          (render-bounded-payload val-str
+                                                  {:id (str step-id "-val-full") :label "result"
+                                                   :max-chars 460 :max-lines 10
+                                                   :extra-class "green-text" :prefix "=> "})
+                          {:extra-class "is-result"}))])
+
+(defn- render-activity-step
+  "Renders one collapsible activity step: summary row plus an expanded drawer that is either a
+   bare reasoning block (thought-only step) or the connected sub-drawer list."
+  [e id-prefix idx]
+  (let [f (activity-step-facts e id-prefix idx)
+        {:keys [step-id step-title has-code? reasoning err-str right-meta]} f]
+    [:details {:id step-id :class (str "step-row" (when err-str " has-error") (when (not has-code?) " is-thought"))}
+     [:summary {:class "step-summary"}
+      [:span {:class "step-title"} step-title]
+      (when err-str
+        [:span {:class "step-err-tag"} "error"])
+      (when right-meta
+        [:span {:class "step-ms"} right-meta])]
+     [:div {:class "step-drawer"}
+      (if (and (not has-code?) reasoning)
+        [:pre {:class "code-box tiny bounded-box" :style "white-space:pre-wrap"} reasoning]
+        (activity-step-subs e f))]]))
+
+(defn- activity-fold-summary-text
+  "Builds the collapsed pill label: step count, latest intent/thought teaser, and total ms."
+  [action-evals]
+  (let [total-ms (Math/round (double (reduce + 0.0 (map #(or (:seon.agent.eval/ms %) 0.0) action-evals))))
+        n (count action-evals)
+        last-e (peek (vec action-evals))
+        last-msg (or (not-empty (str/trim (str (or (:seon.agent.eval/intent last-e) ""))))
+                     (not-empty (str/trim (str (or (:seon.agent.eval/thought last-e) "")))))
+        short-msg (when last-msg (lead-snippet last-msg 76))]
+    (str "Thinking & actions · " n " step" (when (not= 1 n) "s")
+         (when short-msg (str " · " short-msg))
+         (when (pos? total-ms) (str " · " total-ms " ms")))))
