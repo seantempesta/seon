@@ -59,8 +59,21 @@
             [:p "MAIN DRIFT: " (rlinks/ent-link [:seon.branch/name :main] ":main" "mono") " updated "
              (interpose ", " (map form-key-link (take 5 dr-v)))])
           (when (map? last-proofs)
-            [:p (str "AUTO-PROOFS (tx " (:tx last-proofs) "): " (if (:ok? last-proofs) "PASS" "FAIL")
-                     " (" (:passed last-proofs 0) "/" (:ran last-proofs 0) " in " (:ms last-proofs 0.0) " ms)")])
+          (let [fails (when (and (not (:ok? last-proofs))
+                                 (coll? (:failures last-proofs))
+                                 (not (map? (:failures last-proofs))))
+                        (seq (take 3 (:failures last-proofs))))]
+            [:div
+             [:p (str "AUTO-PROOFS (tx " (:tx last-proofs) "): " (if (:ok? last-proofs) "PASS" "FAIL")
+                      " (" (:passed last-proofs 0) "/" (:ran last-proofs 0) " in " (:ms last-proofs 0.0) " ms)")]
+             (when fails
+               (into [:ul]
+                     (for [f fails]
+                       [:li (one-line (if (map? f)
+                                        (str (or (:var f) (:seon.test/var f) "failure") ": "
+                                             (or (:reason f) (:seon.test/report f) (:message f) (pr-str f)))
+                                        (str f))
+                                      200)])))]))
           (when be-v
             [:div [:p (str "MERGE-BLOCKING HEALTH ERRORS (" (count be-v) "):")]
              (into [:ul] (for [e (take 5 be-v) :when (map? e)]
