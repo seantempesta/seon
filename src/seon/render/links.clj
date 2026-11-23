@@ -458,7 +458,7 @@
         docs (when (and (not router?) nsym) (fast-linked-docs db nsym (assoc ns-ent :db/id nid)))
         wschs (when (and (not router?) nsym) (ns-working-schemas db nsym 12))
         feids (when (and (not router?) nsym (dh :seon.code.form/ns)) (mapv :e (d/datoms db :avet :seon.code.form/ns nsym)))
-        est-tok (when (seq feids) (quot (reduce + 0 (map #(count (str (:v (first (d/datoms db :eavt % :seon.code.form/src))))) feids)) 4))
+        est-tok (when (seq feids) (quot (reduce + 0 (map #(let [c (:v (first (d/datoms db :eavt % :seon.code.form/chars)))] (if (number? c) (long c) (count (str (:v (first (d/datoms db :eavt % :seon.code.form/src))))))) feids)) 4))
         scope-match? (and agent (= nsym (:seon.agent/scope agent)) (not (rdata/router-agent? agent)))
         alerts (when (and scope-match? nsym)
                (if (and (empty? vars) (<= (count kids) 8) (str/includes? (name nsym) "."))
