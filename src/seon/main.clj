@@ -344,6 +344,16 @@
                :let [b (:v dt)]
                :when (and (keyword? b) (not= b :main))]
          (store/branch! conn :main b))
+       (let [dh (or (:schema db) (d/schema db) {})]
+         (when (and (contains? dh :seon.system/id)
+                    (not (first (d/datoms db :avet :seon.system/id :root))))
+           (call! sys {:op :transact
+                       :tx-data [(cond-> {:seon.system/id :root
+                                          :seon.system/title "Seon Runtime"
+                                          :seon.system/description "Self-hosting agent OS — COW branches, Datahike graph, Flow runtime, EmbeddingGemma-2 vectors."}
+                                   (and (contains? dh :seon.config/key)
+                                        (first (d/datoms db :avet :seon.config/key :seon.config/root)))
+                                   (assoc :seon.system/config [:seon.config/key :seon.config/root]))]})))
        (when-not (first (d/datoms db :avet :seon.user/id :user/default))
          (when-let [entry-id (ui/entry-agent-id db)]
            (call! sys {:op :transact
