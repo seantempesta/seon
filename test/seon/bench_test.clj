@@ -12,7 +12,7 @@
             [seon.model :as model]
             [seon.schema :as schema]
             [seon.fork.container :as fcontainer]
-            [seon.render.tiles :as tiles]
+            [seon.render.entities.work :as rwork]
             [seon.bench.helpers]))
 
 (defn- http-get! [url]
@@ -180,12 +180,13 @@
       (is (= {:ok? true, :path "/app/x", :replacements 1} (fcontainer/fs-patch "/app/x" "he" "yo"))))
       (finally (adapter/stop-server srv)))))
   (testing
-    "ctx-tile renders compact Container Workspace tools in :mode :container"
-    (let [h (tiles/ctx-tile
-              {:mode :agent}
-              {:seon.agent/id :bench/harbor,
-               :seon.agent/branch :branch/harbor,
-               :seon.agent/context-prefs {:mode :container}})
+    "render-ctx-snapshot renders compact Container Workspace tools in :mode :container"
+    (let [h (:seon.ui/hiccup
+             (rwork/render-ctx-snapshot
+              {:seon.ctx/snapshot
+               {:seon.agent/id :bench/harbor,
+                :seon.agent/branch :branch/harbor,
+                :seon.agent/context-prefs {:mode :container}}}))
           s (pr-str h)]
       (is (str/includes? s "user/sh!"))
       (is (str/includes? s "user/fs-patch"))
