@@ -227,7 +227,7 @@
            :spawn-agent
            (let [{:keys [id parent scope branch role goal task config auto-merge?]} msg
                  db0 @conn
-                 b (or branch (keyword "branch" (str (or (namespace id) "agent") "." (name id))))
+                 b (if (and branch (not= :main branch)) branch (keyword "branch" (str (or (namespace id) "agent") "." (name id))))
                  mseq (inc (:msg-seq st))
                  ns-tx (when scope (focus-tx scope))
                  matched-task (or task (tcalls/best-task-for-scope db0 scope))
