@@ -52,8 +52,6 @@
                  (first parts))]
       (keyword "ns" top2))))
 
-(defn- src-var-map [& args] (apply static/src-var-map args))
-
 (defn ^:seon.flow/edge blocking-in-flow-procs [& args] (apply static/blocking-in-flow-procs args))
 
 (defn ^:seon.flow/edge state-outside-flow [& args] (apply static/state-outside-flow args))
@@ -104,9 +102,6 @@
 (defonce ^:private ^:seon.flow/edge report-cache
 (store/lru-cache 12))
 
-(def ^:private report-tracked-attrs
-  [:seon.code.var/name :seon.code.form/src :seon.test/digest :seon.error/id :seon.error/status :seon.schema/key])
-
 (defn- attr-sig [db a]
   (if (contains? (:schema db) a)
     (let [cnt (volatile! 0)
@@ -119,24 +114,6 @@
     [0 0]))
 
 (defn broken-symbol-refs [& args] (apply contracts/broken-symbol-refs args))
-
-(defn- report-cache-key [db]
-  (when (and db
-             (not (instance? datahike.db.AsOfDB db))
-             (not (instance? datahike.db.HistoricalDB db)))
-    [(get-in db [:config :store :id])
-     (get-in db [:config :branch] :main)
-     (count (:schema db))
-     (attr-sig db :seon.code.form/hash)
-     (attr-sig db :seon.code.form/order)
-     (attr-sig db :seon.code.var/name)
-     (attr-sig db :seon.schema/key)
-     (attr-sig db :seon.test/digest)
-     (attr-sig db :seon.test.run/pass?)
-     (attr-sig db :seon.test.run/failed-digests)
-     (attr-sig db :seon.agent/archived?)
-     (attr-sig db :seon.error/id)
-     (attr-sig db :seon.error/status)]))
 
 (defn broken-doc-refs [& args] (apply contracts/broken-doc-refs args))
 
@@ -238,8 +215,8 @@
                                   (remove :archived?)
                                   (mapv :id))]
                      (for [dg (sort (:seon.test.run/failed-digests run))
-                           :let [v (d/pull db '[:db/id :seon.test/var :seon.test/kind :seon.test/ms :seon.test/report]
-                                           [:seon.test/digest dg])]
+                           :let [v (d/pull db '[:db/id :seon.test/var :seon.test/kind :seon.test/ms :seon.test/report :seon.test/pass?]
+                                   [:seon.test/digest dg])]
                            :when (:seon.test/var v)
                            :let [vsym (:seon.test/var v)]
                            :when (not (superseded-digest? vsym (:db/id v) supersession))]
@@ -250,49 +227,6 @@
                                               "] " (:seon.test/report v))}
                          (namespace vsym) (assoc :ns (symbol (namespace vsym))))))))
                 vec)))))))
-
-(defn- cached-live-main-problems [main-db]
-  (let [sk (db-snapshot-key main-db)
-        compute (fn []
-                  (vec (concat (failing-tests main-db)
-                               (test-efficiency-warnings main-db)
-                               (open-faults main-db))))]
-    (if sk
-      (store/lru-get! live-main-cache 16 sk compute)
-      (compute))))
-
-(defn live-problems-for-scope
-  "Returns dynamic runtime, test, perf-outlier, and eval-efficiency alerts for `scope` + `agent-id`.
-   Caches global `:main` live problems per DB commit-id and accepts optional `prefetched-evals`."
-  {:malli/schema [:function
-                  [:=> [:cat :any :any :any :any] [:vector :map]]
-                  [:=> [:cat :any :any :any :any :any] [:vector :map]]]}
-  ([main-db branch-db scope agent-id]
-   (live-problems-for-scope main-db branch-db scope agent-id nil))
-  ([main-db branch-db scope agent-id prefetched-evals]
-   (let [live-main (cached-live-main-problems main-db)
-         eval-warns (eff/eval-efficiency-warnings branch-db agent-id prefetched-evals)]
-     (if (= scope 'seon)
-       (vec (concat live-main eval-warns))
-       (let [owned? (fn [p]
-                      (or (= agent-id (:agent p))
-                          (ns-in-scope? scope (:ns p))
-                          (when-let [v (:var p)]
-                            (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
-         (vec (concat (filter owned? live-main) eval-warns)))))))
-
-(def ^:private static-global-cache (store/lru-cache 16))
-
-(defn- cached-global-static-problems [db]
-  (let [dkey (db-snapshot-key db)
-        compute (fn []
-                  (let [vmap (src-var-map db)]
-                    (vec (concat (blocking-in-flow-procs db vmap)
-                                 (state-outside-flow db vmap)
-                                 (broken-symbol-refs db)))))]
-    (if dkey
-      (store/lru-get! static-global-cache 16 dkey compute)
-      (compute))))
 
 (defn silent-catch-warnings
   "Delegates to `seon.health.static/silent-catch-warnings`."
@@ -342,33 +276,6 @@
         (store/lru-get! static-scope-cache 32 sk compute)
         (compute)))))
 
-(defn- test-snapshot [db]
-  (if-not (and db (contains? (:schema db) :seon.test/var))
-    {:var-by-eid (java.util.HashMap.) :pass-eids (java.util.HashSet.)
-     :supersession {:var->green-tx {} :eid->pass-tx {}}}
-    (let [var-by-eid (java.util.HashMap. 1200)
-          pass-eids (java.util.HashSet. 1200)
-          eid->pass-tx (transient {})
-          var->green-tx (transient {})]
-      (doseq [dt (d/datoms db :aevt :seon.test/var)]
-        (.put var-by-eid (:e dt) [(:v dt) (:tx dt)]))
-      (when (contains? (:schema db) :seon.test/pass?)
-        (doseq [dt (d/datoms db :aevt :seon.test/pass?)]
-          (let [e (:e dt)
-                pass? (:v dt)
-                tx (long (:tx dt))]
-            (assoc! eid->pass-tx e tx)
-            (when pass?
-              (.add pass-eids e)
-              (when-let [[vsym _] (.get var-by-eid e)]
-                (let [prev (get var->green-tx vsym -1)]
-                  (when (> tx prev)
-                    (assoc! var->green-tx vsym tx))))))))
-      {:var-by-eid var-by-eid
-       :pass-eids pass-eids
-       :supersession {:var->green-tx (persistent! var->green-tx)
-                      :eid->pass-tx (persistent! eid->pass-tx)}})))
-
 (defn- report-cache-key-with-sigs [db form-hash-sig form-order-sig var-name-sig]
   (when (and db
              (not (instance? datahike.db.AsOfDB db))
@@ -390,21 +297,64 @@
 (defonce ^:private ^:seon.flow/edge test-state-cache (store/lru-cache 8))
 
 (defn- cached-test-state [db]
-  (let [ck (when (and db
-                      (not (instance? datahike.db.AsOfDB db))
-                      (not (instance? datahike.db.HistoricalDB db)))
-             [(get-in db [:config :store :id])
-              (get-in db [:config :branch] :main)
-              (attr-sig db :seon.test/var)
-              (attr-sig db :seon.test/pass?)
-              (attr-sig db :seon.test/ms)])
-        compute (fn []
-                  (let [tsnap (test-snapshot db)]
-                    {:supersession (:supersession tsnap)
-                     :test-eff (eff/test-efficiency-warnings db tsnap)}))]
-    (if ck
-      (store/lru-get! test-state-cache 8 ck compute)
-      (compute))))
+(let [base-ck (when (and db
+                         (not (instance? datahike.db.AsOfDB db))
+                         (not (instance? datahike.db.HistoricalDB db)))
+                [(get-in db [:config :store :id])
+                 (get-in db [:config :branch] :main)])
+      compute (fn []
+                (let [tsnap (eff/test-snapshot db)]
+                  {:supersession (:supersession tsnap)
+                   :var-sig (:var-sig tsnap)
+                   :pass-sig (:pass-sig tsnap)
+                   :test-eff (eff/test-efficiency-warnings db tsnap)}))
+      hit (when (and base-ck (pos? (count @test-state-cache)))
+            (let [ck (conj base-ck (attr-sig db :seon.test/var) (attr-sig db :seon.test/pass?))]
+              (when (contains? @test-state-cache ck)
+                (store/lru-get! test-state-cache 8 ck compute))))]
+  (or hit
+      (let [[data rset] (reads/with-reads compute)]
+        (when-let [outer di/*reads*]
+          (when (seq rset) (swap! outer into rset)))
+        (when base-ck
+          (let [ck (conj base-ck (:var-sig data) (:pass-sig data))]
+            (store/lru-get! test-state-cache 8 ck
+                            (fn []
+                              (when-let [outer di/*reads*]
+                                (when (seq rset) (swap! outer into rset)))
+                              data))))
+        data))))
+
+(defn- cached-live-main-problems [main-db]
+(let [sk (db-snapshot-key main-db)
+      compute (fn []
+                (let [tstate (cached-test-state main-db)]
+                  (vec (concat (failing-tests main-db tstate)
+                               (:test-eff tstate)
+                               (open-faults main-db)))))]
+  (if sk
+    (store/lru-get! live-main-cache 16 sk compute)
+    (compute))))
+
+(defn live-problems-for-scope
+  "Returns dynamic runtime, test, perf-outlier, and eval-efficiency alerts for `scope` + `agent-id`.
+   Caches global `:main` live problems per DB commit-id and accepts optional `prefetched-evals`."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any :any :any] [:vector :map]]
+                  [:=> [:cat :any :any :any :any :any] [:vector :map]]]}
+  ([main-db branch-db scope agent-id]
+   (live-problems-for-scope main-db branch-db scope agent-id nil))
+  ([main-db branch-db scope agent-id prefetched-evals]
+   (let [live-main (cached-live-main-problems main-db)
+         eval-warns (eff/eval-efficiency-warnings branch-db agent-id prefetched-evals {:main-db main-db})]
+     (if (= scope 'seon)
+       (vec (concat live-main eval-warns))
+       (let [owned? (fn [p]
+                      (or (= agent-id (:agent p))
+                          (ns-in-scope? scope (:ns p))
+                          (when-let [v (:var p)]
+                            (and (namespace v) (ns-in-scope? scope (symbol (namespace v)))))))]
+         (vec (concat (filter owned? live-main) eval-warns)))))))
 
 (defn- compute-report-data [db]
   (let [vsnap (static/var-snapshot db {:schemas? true :catches? true})
@@ -446,7 +396,7 @@
   (let [sk (db-snapshot-key db)
         compute-full
         (fn []
-          (let [pre-ck (when (pos? (count @report-cache)) (report-cache-key db))
+          (let [pre-ck (when (pos? (count @report-cache)) (report-cache-key-with-sigs db nil nil nil))
                 raw-hit (when pre-ck (get @report-cache pre-ck ::miss))
                 hit-entry (if (and (map? raw-hit) (contains? raw-hit :seon.store/lru-val))
                             (:seon.store/lru-val raw-hit)
@@ -530,40 +480,60 @@
                             :subject (str (or (get-in e [:seon.error/data :subject]) v (:seon.error/agent e) scope))
                             :message (str (:seon.error/message e))})))
           edit-a (when (and branch-db (seq branch-edited))
-                   (filterv #(or (= :error (:severity %)) (:fix %)) (eff/static-efficiency-warnings branch-db scope)))]
-      (vec (take 8 (distinct (concat err-a edit-a (fast-scoped-test-alerts main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals) sig-a)))))))
+                   (if (= scope 'seon)
+                   (let [nss (distinct (keep #(let [p (first (str/split (str %) #"[#/]" 2))]
+                                                (when-not (str/blank? p) (symbol p)))
+                                             (take 6 branch-edited)))]
+                     (into [] (comp (mapcat #(eff/static-efficiency-warnings branch-db %))
+                                    (filter #(or (= :error (:severity %)) (:fix %))))
+                           nss))
+                   (if (= scope 'seon)
+                   (into [] (comp (mapcat #(eff/static-efficiency-warnings branch-db %))
+                                  (filter #(or (= :error (:severity %)) (:fix %))))
+                         (distinct (keep #(let [p (first (str/split (str %) #"[#/]" 2))] (when-not (str/blank? p) (symbol p))) (take 6 branch-edited))))
+                   (filterv #(or (= :error (:severity %)) (:fix %)) (eff/static-efficiency-warnings branch-db scope)))))]
+      (vec (take 8 (distinct (concat err-a edit-a (fast-scoped-test-alerts main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals {:main-db main-db :branch-edited branch-edited}) sig-a)))))))
 
 (defonce ^:private ^:seon.flow/edge branch-base-health-cache (store/lru-cache 8))
 
 (defn caused-by-branch
-"Returns only the structural/schema health errors *introduced* by `theirs-db` relative to `ours-db`
- (including `:retyped-attribute`, `:schema-breaks-stored-data`, new `:blocking-in-flow-proc`,
- new `:used-before-defined`, and new `:missing-ns-form`). When `touched-nss` is supplied,
- runs `used-before-defined` and `missing-ns-forms` in O(|Delta|) instead of scanning all N forms."
-{:malli/schema [:function [:=> [:cat :any :any :map] [:vector :map]] [:=> [:cat :any :any :map [:maybe [:sequential :symbol]]] [:vector :map]]]}
+"Returns only the structural/schema health errors introduced by `theirs-db` relative to `ours-db`.
+ Short-circuits immediately when zero code/schema entities changed and shares one `var-snapshot`."
+{:malli/schema [:function
+                [:=> [:cat :any :any :map] [:vector :map]]
+                [:=> [:cat :any :any :map [:maybe [:or [:sequential :symbol] [:set :symbol]]]] [:vector :map]]]}
 ([ours-db theirs-db changed-schema-forms]
  (caused-by-branch ours-db theirs-db changed-schema-forms nil))
 ([ours-db theirs-db changed-schema-forms touched-nss]
- (let [schema-errs (schema-violations ours-db changed-schema-forms)
+ (let [no-code? (and (some? touched-nss) (empty? touched-nss))
        ocid (when (instance? datahike.db.DB ours-db) (d/commit-id ours-db))
-       base-sets (let [compute (fn []
-                                 {:blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db))
-                                  :bref (into #{} (map :subject) (broken-symbol-refs ours-db))
-                                  :dref (into #{} (map :subject) (broken-doc-refs ours-db))
-                                  :imp (into #{} (map :subject) (impure-generatable-fns ours-db))})]
-                   (if ocid
-                     (store/lru-get! branch-base-health-cache 8 [(get-in ours-db [:config :store :id]) ocid] compute)
-                     (compute)))
-       new-blocks (->> (blocking-in-flow-procs theirs-db)
-                       (remove #(contains? (:blocks base-sets) ((juxt :class :subject :var) %))))
-       base-ubd (into #{} (map :subject) (used-before-defined ours-db touched-nss))
-       new-ubd (->> (used-before-defined theirs-db touched-nss)
-                    (remove #(contains? base-ubd (:subject %))))
-       base-mns (into #{} (map :subject) (missing-ns-forms ours-db touched-nss))
-       new-mns (->> (missing-ns-forms theirs-db touched-nss)
-                    (remove #(contains? base-mns (:subject %))))
-       new-bref (remove #(contains? (:bref base-sets) (:subject %)) (broken-symbol-refs theirs-db))
-       new-dref (remove #(contains? (:dref base-sets) (:subject %)) (broken-doc-refs theirs-db))
-       new-imp (remove #(contains? (:imp base-sets) (:subject %)) (impure-generatable-fns theirs-db))]
-   (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
-                (missing-contract-violations ours-db theirs-db touched-nss))))))
+       tcid (when (instance? datahike.db.DB theirs-db) (d/commit-id theirs-db))]
+   (if (and (empty? changed-schema-forms)
+            (or no-code? (and (some? ocid) (= ocid tcid))))
+     []
+     (let [schema-errs (schema-violations ours-db changed-schema-forms)
+           base-sets (let [compute (fn []
+                                     (let [osnap (static/var-snapshot ours-db {:schemas? true})]
+                                       {:blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db (:vmap osnap)))
+                                        :bref (into #{} (map :subject) (contracts/broken-symbol-refs ours-db osnap))
+                                        :dref (into #{} (map :subject) (contracts/broken-doc-refs ours-db nil osnap))
+                                        :imp (into #{} (map :subject) (contracts/impure-generatable-fns ours-db nil osnap))}))]
+                       (if ocid
+                         (store/lru-get! branch-base-health-cache 8 [(get-in ours-db [:config :store :id]) ocid] compute)
+                         (compute)))]
+       (if no-code?
+         (vec (concat schema-errs
+                      (remove #(contains? (:bref base-sets) (:subject %)) (contracts/broken-symbol-refs theirs-db))))
+         (let [tseq (when (some? touched-nss) (vec touched-nss))
+               tsnap (static/var-snapshot theirs-db {:schemas? true})
+               new-blocks (remove #(contains? (:blocks base-sets) ((juxt :class :subject :var) %))
+                                  (blocking-in-flow-procs theirs-db (:vmap tsnap)))
+               base-ubd (into #{} (map :subject) (used-before-defined ours-db tseq))
+               new-ubd (remove #(contains? base-ubd (:subject %)) (used-before-defined theirs-db tseq))
+               base-mns (into #{} (map :subject) (missing-ns-forms ours-db tseq))
+               new-mns (remove #(contains? base-mns (:subject %)) (missing-ns-forms theirs-db tseq))
+               new-bref (remove #(contains? (:bref base-sets) (:subject %)) (contracts/broken-symbol-refs theirs-db tsnap))
+               new-dref (remove #(contains? (:dref base-sets) (:subject %)) (contracts/broken-doc-refs theirs-db nil tsnap))
+               new-imp (remove #(contains? (:imp base-sets) (:subject %)) (contracts/impure-generatable-fns theirs-db nil tsnap))]
+           (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
+                        (missing-contract-violations ours-db theirs-db tseq))))))))))
