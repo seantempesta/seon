@@ -155,46 +155,6 @@
                   :else op))
               tx-data)))))
 
-(defn- topo-sort-ns-forms
-  "Attempts deterministic Kahn topological sort of non-`#ns` forms in `nsym` by same-ns `:deps`,
-   preserving original `:order` as tie-breaker. Returns ordered vec if acyclic, or `nil` on cycle."
-  [nsym body-forms]
-  (let [by-key (into {} (map (juxt :key identity)) body-forms)
-        sym->key (into {}
-                       (keep (fn [{:keys [key]}]
-                               (when (and key (not (str/includes? key "#")))
-                                 [(symbol key) key])))
-                       body-forms)
-        in-deg (volatile! (into {} (map (fn [f] [(:key f) 0])) body-forms))
-        rdeps  (volatile! {})
-        _ (doseq [{:keys [key deps]} body-forms]
-            (let [local-deps (->> deps
-                                  (keep #(get sym->key %))
-                                  (remove #(= % key))
-                                  distinct)]
-              (doseq [dk local-deps]
-                (vswap! in-deg update key (fnil inc 0))
-                (vswap! rdeps update dk (fnil conj []) key))))
-        orig-ord (into {} (map-indexed (fn [i f] [(:key f) i])) body-forms)]
-    (loop [ready (vec (sort-by orig-ord (keep (fn [[k d]] (when (zero? d) k)) @in-deg)))
-           deg @in-deg
-           out []]
-      (if (empty? ready)
-        (when (= (count out) (count body-forms))
-          (mapv by-key out))
-        (let [cur (first ready)
-              rest-r (subvec ready 1)
-              kids (get @rdeps cur)
-              [deg' newly] (reduce (fn [[dm nr] k]
-                                     (let [nd (dec (get dm k 0))]
-                                       [(assoc dm k nd) (if (zero? nd) (conj nr k) nr)]))
-                                   [deg []]
-                                   kids)
-              next-ready (if (seq newly)
-                           (vec (sort-by orig-ord (into rest-r newly)))
-                           rest-r)]
-          (recur next-ready deg' (conj out cur)))))))
-
 (defn- ^:seon.flow/edge resolve-ours-db [store ours-branch ours-conn]
   (or (try (d/branch-as-db store ours-branch) (catch Throwable _ nil)) @ours-conn))
 
@@ -380,7 +340,7 @@
                        body-forms)]
     (if-not has-fwd?
       {:ops [] :reordered? false :auto-fixed nil :extra-path nil}
-      (if-let [sorted-body (topo-sort-ns-forms nsym body-forms)]
+      (if-let [sorted-body (cst-ns/topo-sort-ns-forms nsym body-forms)]
         (let [full-ord (into [(get eff-map hdr-key)] sorted-body)
               ops (vec (keep-indexed (fn [i f]
                                        (when (not= (long i) (:order f))
@@ -449,105 +409,134 @@
              :reordered-nss reordered-nss
              :extra-paths extra-paths}))))))
 
+(defn- branch-sync-state [ours-conn ours-cid theirs-db base-db theirs-ds id-attr-rank]
+  (let [dh (:schema theirs-db)
+        sync-dts (when (contains? dh :seon.tx/merged) (d/datoms theirs-db :avet :seon.tx/merged :main))]
+    (if (empty? sync-dts)
+      {:worker-ds theirs-ds :synced-cid-by-key {} :sync-dbs {}}
+      (let [sync-txs (into #{} (map :e) sync-dts)
+            has-sc? (contains? dh :seon.tx/synced-commit)
+            tx->cid (into {} (keep (fn [txe]
+                                     (when-let [c (and has-sc? (:v (first (d/datoms theirs-db :eavt txe :seon.tx/synced-commit))))]
+                                       [txe c])))
+                          sync-txs)
+            worker-ds (filterv #(not (contains? sync-txs (:tx %))) theirs-ds)
+            sync-ds (filterv #(contains? sync-txs (:tx %)) theirs-ds)
+            synced-cid-by-key
+            (reduce (fn [acc dt]
+                      (if (= :db/txInstant (:a dt))
+                        acc
+                        (if-let [cid (get tx->cid (:tx dt))]
+                          (if-let [lref (or (find-identity-ref theirs-db (:e dt) id-attr-rank)
+                                            (find-identity-ref base-db (:e dt) id-attr-rank))]
+                            (let [prev (get acc lref)]
+                              (if (or (nil? prev) (> (long (:tx dt)) (long (:tx prev))))
+                                (assoc acc lref {:tx (:tx dt) :cid cid})
+                                acc))
+                            acc)
+                          acc)))
+                    {} sync-ds)
+            cids (into #{} (map :cid) (vals synced-cid-by-key))
+            sync-dbs (into {} (keep (fn [cid]
+                                      (when (or (= cid ours-cid)
+                                                (= cid (try (d/merge-base ours-conn cid ours-cid) (catch Throwable _ nil))))
+                                        (when-let [sdb (try (d/commit-as-db ours-conn cid) (catch Throwable _ nil))]
+                                          [cid sdb]))))
+                           cids)]
+        {:worker-ds worker-ds
+         :synced-cid-by-key (into {} (map (fn [[k v]] [k (:cid v)])) synced-cid-by-key)
+         :sync-dbs sync-dbs}))))
+
+(defn- merge-ordered-keys [ours-db ours-cid base-db base-cid theirs-db ordered-keys many-attrs skipped-attrs id-attr-rank synced-cid-by-key sync-dbs]
+  (reduce
+   (fn [acc [id-attr id-val :as lref]]
+     (let [scid (get synced-cid-by-key lref)
+           eff-base-db (or (when scid (get sync-dbs scid)) base-db)
+           eff-base-cid (if (identical? eff-base-db base-db) base-cid scid)
+           b-val (pull-clean-entity eff-base-db id-attr id-val many-attrs skipped-attrs id-attr-rank)
+           t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs id-attr-rank)
+           o-val (if (= eff-base-cid ours-cid)
+                   b-val
+                   (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs id-attr-rank))
+           {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val many-attrs)
+           p (when (or (seq ops) (seq conflicts))
+               (entity->disk-path ours-db theirs-db id-attr id-val (or t-val b-val)))]
+       (cond-> acc
+         (seq ops) (update :tx-data into ops)
+         (or (seq ops) (seq conflicts))
+         (update :entity-diffs conj {:entity lref
+                                     :status (cond (seq conflicts) :conflict
+                                                   (nil? t-val) :deleted
+                                                   (nil? b-val) :added
+                                                   :else :modified)
+                                     :path p})
+         p (update :touched-paths conj p)
+         (seq conflicts) (update :conflicts into conflicts))))
+   {:tx-data [] :touched-paths #{} :entity-diffs [] :conflicts []}
+   ordered-keys))
+
 (defn three-way
-  {:malli/schema [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]}
-  [ours-conn _cfg theirs-branch]
-  (let [ours-branch (get-in @ours-conn [:config :branch] :main)
-        store (:store @ours-conn)
-        ours-db (resolve-ours-db store ours-branch ours-conn)
-        ours-cid (d/commit-id ours-db)
-        theirs-db (d/branch-as-db store theirs-branch)
-        theirs-cid (d/commit-id theirs-db)
-        base-cid (d/merge-base ours-conn ours-branch theirs-branch)]
-    (when-not base-cid
-      (throw (ex-info (str "No common merge-base between " ours-branch " and " theirs-branch)
-                      {:ours ours-branch :theirs theirs-branch})))
-    (let [base-db (d/commit-as-db ours-conn base-cid)
-          theirs-schemas (schema/db-schema-forms theirs-db)
-          reg-union (schema/registry-for-db ours-db theirs-schemas)
-          {:keys [identity-attrs many-attrs skipped-attrs]} (:merge-meta reg-union)
-          new-dh-decls (schema/sync-dh-decls (:schema ours-db) (:declarations reg-union))
-          id-attr-rank (into {} (map-indexed (fn [i a] [a i])) identity-attrs)
-          theirs-ds (if (= base-cid theirs-cid) [] (d/changes ours-conn base-cid theirs-cid))
-          theirs-keys (touched-entities-in-changes base-db theirs-db theirs-ds id-attr-rank)
-          changed-schema-forms (into {}
-                                     (keep (fn [[id-attr id-val]]
-                                             (when (= :seon.schema/key id-attr)
-                                               (when-let [f (get theirs-schemas id-val)]
-                                                 [id-val f]))))
-                                     theirs-keys)
-          touched-nss (into #{}
-                            (keep (fn [[id-attr id-val]]
-                                    (case id-attr
-                                      :seon.code.ns/name id-val
-                                      :seon.code.form/key
-                                      (or (:seon.code.form/ns (d/pull theirs-db '[:seon.code.form/ns] [:seon.code.form/key id-val]))
-                                          (:seon.code.form/ns (d/pull ours-db '[:seon.code.form/ns] [:seon.code.form/key id-val])))
-                                      :seon.code.var/name
-                                      (or (:seon.code.var/ns (d/pull theirs-db '[:seon.code.var/ns] [:seon.code.var/name id-val]))
-                                          (:seon.code.var/ns (d/pull ours-db '[:seon.code.var/ns] [:seon.code.var/name id-val])))
-                                      nil)))
-                            theirs-keys)
-          health-blocks (health/caused-by-branch ours-db theirs-db changed-schema-forms (vec touched-nss))
-          ordered-theirs-keys (sort-by (fn [[id-attr id-val]]
-                                         [(if (= :seon.code.ns/name id-attr) 0 1)
-                                          (count (str/split (str id-val) #"\."))
-                                          (pr-str id-attr)
-                                          (pr-str id-val)])
-                                       theirs-keys)
-          {:keys [tx-data touched-paths entity-diffs conflicts]}
-          (reduce
-           (fn [acc [id-attr id-val :as lref]]
-             (let [b-val (pull-clean-entity base-db id-attr id-val many-attrs skipped-attrs id-attr-rank)
-                   t-val (pull-clean-entity theirs-db id-attr id-val many-attrs skipped-attrs id-attr-rank)
-                   o-val (if (= base-cid ours-cid)
-                         b-val
-                         (pull-clean-entity ours-db id-attr id-val many-attrs skipped-attrs id-attr-rank))
-                   {:keys [ops conflicts]} (merge-one-entity lref b-val o-val t-val many-attrs)
-                   p (when (or (seq ops) (seq conflicts))
-                       (entity->disk-path ours-db theirs-db id-attr id-val (or t-val b-val)))]
-               (cond-> acc
-                 (seq ops) (update :tx-data into ops)
-                 (or (seq ops) (seq conflicts))
-                 (update :entity-diffs conj {:entity lref
-                                             :status (cond (seq conflicts) :conflict
-                                                           (nil? t-val) :deleted
-                                                           (nil? b-val) :added
-                                                           :else :modified)
-                                             :path p})
-                 p (update :touched-paths conj p)
-                 (seq conflicts) (update :conflicts into conflicts))))
-           {:tx-data [] :touched-paths #{} :entity-diffs [] :conflicts []}
-           ordered-theirs-keys)
-          af (if (empty? conflicts)
-               (auto-fix-touched-nss ours-db theirs-db touched-nss tx-data)
-               {:tx-data tx-data :auto-fixed [] :reordered-nss #{} :extra-paths #{}})
-          eff-health-blocks (remove (fn [hb]
-                                      (and (= :used-before-defined (:class hb))
-                                           (contains? (:reordered-nss af) (:ns hb))))
-                                    health-blocks)
-          all-conflicts (into conflicts
-                              (map (fn [hb]
-                                     {:entity [:seon.health/problem (:subject hb)]
-                                      :reason (:class hb)
-                                      :message (:message hb)}))
-                              eff-health-blocks)
-          final-tx (order-merge-tx-ops
-          (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
-          (retracted-dh-ident-ops ours-db theirs-db theirs-schemas theirs-keys))
-          touched-paths (into touched-paths (:extra-paths af))]
-      (let [deleted-paths (into #{}
-                                      (keep (fn [{:keys [status path]}]
-                                              (when (and (= :deleted status) path) path)))
-                                      entity-diffs)]
-      {:ok? (empty? all-conflicts)
-       :base-commit base-cid
-       :ours-commit ours-cid
-       :theirs-commit theirs-cid
-       :schema-tx new-dh-decls
-       :tx-data final-tx
-       :auto-fixed (:auto-fixed af)
-       :touched-paths touched-paths
-       :deleted-paths deleted-paths
-       :entity-diffs entity-diffs
-       :conflicts all-conflicts}))))
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/conn :map :seon.store/branch] :seon.merge/plan]
+                  [:=> [:cat :seon.host/conn :map :seon.store/branch [:maybe :map]] :seon.merge/plan]]}
+  ([ours-conn cfg theirs-branch] (three-way ours-conn cfg theirs-branch nil))
+  ([ours-conn _cfg theirs-branch opts]
+   (let [ours-branch (get-in @ours-conn [:config :branch] :main)
+         store (:store @ours-conn)
+         ours-db (resolve-ours-db store ours-branch ours-conn)
+         ours-cid (d/commit-id ours-db)
+         theirs-db (d/branch-as-db store theirs-branch)
+         theirs-cid (d/commit-id theirs-db)
+         base-cid (d/merge-base ours-conn ours-branch theirs-branch)]
+     (when-not base-cid
+       (throw (ex-info (str "No common merge-base between " ours-branch " and " theirs-branch)
+                       {:ours ours-branch :theirs theirs-branch})))
+     (let [base-db (d/commit-as-db ours-conn base-cid)
+           theirs-schemas (schema/db-schema-forms theirs-db)
+           reg-union (schema/registry-for-db ours-db theirs-schemas)
+           {:keys [identity-attrs many-attrs skipped-attrs]} (:merge-meta reg-union)
+           new-dh-decls (schema/sync-dh-decls (:schema ours-db) (:declarations reg-union))
+           id-attr-rank (into {} (map-indexed (fn [i a] [a i])) identity-attrs)
+           theirs-ds (if (= base-cid theirs-cid) [] (d/changes ours-conn base-cid theirs-cid))
+           {:keys [worker-ds synced-cid-by-key sync-dbs]}
+           (if (= ours-branch :main)
+             (branch-sync-state ours-conn ours-cid theirs-db base-db theirs-ds id-attr-rank)
+             {:worker-ds theirs-ds :synced-cid-by-key {} :sync-dbs {}})
+           theirs-keys (touched-entities-in-changes base-db theirs-db worker-ds id-attr-rank)
+           changed-schema-forms (into {}
+                                      (keep (fn [[id-attr id-val]]
+                                              (when (= :seon.schema/key id-attr)
+                                                (when-let [f (get theirs-schemas id-val)] [id-val f]))))
+                                      theirs-keys)
+           touched-nss (into #{}
+                             (keep (fn [[id-attr id-val]]
+                                     (case id-attr
+                                       :seon.code.ns/name id-val
+                                       :seon.code.form/key
+                                       (or (:seon.code.form/ns (d/pull theirs-db '[:seon.code.form/ns] [:seon.code.form/key id-val]))
+                                           (:seon.code.form/ns (d/pull ours-db '[:seon.code.form/ns] [:seon.code.form/key id-val])))
+                                       :seon.code.var/name
+                                       (or (:seon.code.var/ns (d/pull theirs-db '[:seon.code.var/ns] [:seon.code.var/name id-val]))
+                                           (:seon.code.var/ns (d/pull ours-db '[:seon.code.var/ns] [:seon.code.var/name id-val])))
+                                       nil)))
+                             theirs-keys)
+           health-blocks (if (:skip-health? opts) [] (health/caused-by-branch ours-db theirs-db changed-schema-forms (vec touched-nss)))
+           ordered-theirs-keys (sort-by (fn [[id-attr id-val]]
+                                          [(if (= :seon.code.ns/name id-attr) 0 1)
+                                           (count (str/split (str id-val) #"\.")) (pr-str id-attr) (pr-str id-val)])
+                                        theirs-keys)
+           {:keys [tx-data touched-paths entity-diffs conflicts]}
+           (merge-ordered-keys ours-db ours-cid base-db base-cid theirs-db ordered-theirs-keys
+                               many-attrs skipped-attrs id-attr-rank synced-cid-by-key sync-dbs)
+           af (if (empty? conflicts)
+                (auto-fix-touched-nss ours-db theirs-db touched-nss tx-data)
+                {:tx-data tx-data :auto-fixed [] :reordered-nss #{} :extra-paths #{}})
+           eff-health-blocks (remove #(and (= :used-before-defined (:class %)) (contains? (:reordered-nss af) (:ns %))) health-blocks)
+           all-conflicts (into conflicts (map (fn [hb] {:entity [:seon.health/problem (:subject hb)] :reason (:class hb) :message (:message hb)})) eff-health-blocks)
+           final-tx (order-merge-tx-ops (bind-new-ref-tempids ours-db (:tx-data af) identity-attrs)
+                                        (retracted-dh-ident-ops ours-db theirs-db theirs-schemas theirs-keys))
+           touched-paths (into touched-paths (:extra-paths af))
+           deleted-paths (into #{} (keep (fn [{:keys [status path]}] (when (and (= :deleted status) path) path))) entity-diffs)]
+       {:ok? (empty? all-conflicts) :base-commit base-cid :ours-commit ours-cid :theirs-commit theirs-cid
+        :schema-tx new-dh-decls :tx-data final-tx :auto-fixed (:auto-fixed af) :touched-paths touched-paths
+        :deleted-paths deleted-paths :entity-diffs entity-diffs :conflicts all-conflicts}))))

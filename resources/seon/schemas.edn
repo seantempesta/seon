@@ -1013,6 +1013,9 @@
  :seon.tx/reason
  [:string {:seon.db/storable true, :seon.schema/doc "Human-readable reason or commit message for this transaction."}]
 
+ :seon.tx/synced-commit
+ [:uuid {:seon.db/index true, :seon.schema/doc "Source `:main` commit UUID synced onto a worker branch by this transaction."}]
+
  :seon.ui.status/agent
  [:and {:seon.db/index true, :gen/elements [:agent/root :agent/worker], :seon.schema/doc "Agent keyword id owning this live visual status."} :keyword]
 

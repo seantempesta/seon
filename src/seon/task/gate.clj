@@ -4,7 +4,8 @@
   (:require [datahike.api :as d]
             [seon.rule :as rules]
             [seon.store :as store]
-            [seon.rule.seed :as rseed]))
+            [seon.rule.seed :as rseed]
+            [clojure.string :as str]))
 
 (defn- eid-of [db a v]
   (when (and db (some? v) (get-in db [:schema a]))
@@ -224,6 +225,71 @@
     (alter-meta! v2 merge {:arglists '([] [agent-id] [agent-id opts]) :doc "Inspect :rule.gate/* proof gating."})
     [v1 v2]))
 
+(defn- format-gate-blocker [b]
+  (let [{:keys [task reason detail]} b]
+    (case reason
+      :test-missing (str "- " task ": required test " (:var detail) " (" (name (or (:cause detail) :missing)) ")")
+      :test-failing (str "- " task ": required test " (:var detail) " FAILED"
+                         (when (and (string? (:report detail)) (not (str/blank? (:report detail))))
+                           (str " — " (first (str/split-lines (:report detail))))))
+      (str "- " task ": " (name (or reason :blocked)) " " (pr-str detail)))))
+
+(defn gate-blocked-notify-op
+  "Returns a `:gate-blocked` message op when `status` is `:gate-blocked` with fixable test blockers not yet notified."
+  {:malli/schema [:=> [:cat :keyword :map :keyword :any [:set :any]] [:maybe :map]]
+   :cost/ticks 500000}
+  [status gate agent-id head-tx gate-notified-set]
+  (when (and (= status :gate-blocked)
+             (not (contains? gate-notified-set [agent-id head-tx])))
+    (let [fixable (filterv #(contains? #{:test-missing :test-failing} (:reason %))
+                           (:blockers gate))]
+      (when (seq fixable)
+        {:op :send-message :from :reconciler :to agent-id :type :gate-blocked
+         :body (str "Merge gate blocked at branch tx " head-tx
+                    " — fix these required proof blocker(s) and call (user/ready!) again:\n"
+                    (str/join "\n" (map format-gate-blocker fixable)))}))))
+
+(defn- ^:seon.flow/edge branch-has-code-edits? [main-db branch-db]
+  (when (and main-db branch-db (not (identical? main-db branch-db)))
+    (try
+      (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
+        (when (and mc bc (not= mc bc))
+          (let [base (or (d/merge-base branch-db mc bc) mc)]
+            (when (not= base bc)
+              (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+                         :seon.code.var/name :seon.code.doc/id :seon.schema/key]
+                    attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
+                (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
+      (catch Throwable _ false))))
+
+(defn wrapup-grace-notify-op
+  "Returns a `:turn-cap-wrapup` message op when a branch hits its turn limit with unmerged edits."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :keyword :any [:sequential :map] [:set :any]] [:maybe :map]]
+   :cost/ticks 5000000}
+  [main-db branch-db b agent-id head-tx inbox gate-notified-set]
+  (when (and (not= b :main) (not (contains? gate-notified-set [agent-id head-tx :wrapup])))
+    (let [last-real (reduce #(if (= :turn-cap-wrapup (:seon.agent.message/type %2)) %1
+                                 (max %1 (long (or (:seon.agent.message/seq %2) 0))))
+                            0 inbox)
+          sent? (some #(and (= :turn-cap-wrapup (:seon.agent.message/type %))
+                            (> (long (or (:seon.agent.message/seq %) 0)) last-real))
+                      inbox)]
+      (when (and (not sent?) (branch-has-code-edits? main-db branch-db))
+        {:op :send-message :from :reconciler :to agent-id :type :turn-cap-wrapup
+         :body "Turn limit reached with unmerged edits on branch. Run final test check if needed and call (user/ready!) now."}))))
+
+(defn has-active-reviewer?
+  "True when `agent-eid` has an unarchived, unmerged reviewer pointing at it via `:seon.agent/target`."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] :boolean]
+   :cost/ticks 500000}
+  [main-db agent-eid]
+  (boolean
+   (and (integer? agent-eid) (contains? (or (:schema main-db) {}) :seon.agent/target)
+        (some (fn [dt]
+                (let [ra (d/pull main-db '[:seon.agent/archived? :seon.agent/merged-tx] (:e dt))]
+                  (and (not (:seon.agent/archived? ra)) (nil? (:seon.agent/merged-tx ra)))))
+              (d/datoms main-db :avet :seon.agent/target agent-eid)))))
+
 (defn compute-review-ops
   "Pure rule-driven review trigger & target auto-resume ops derived from `:seon.rule/*` entities asserting `:agent/needs-review` and `:seon.agent/target`."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :map] [:vector :map]]
@@ -234,28 +300,32 @@
         target (:seon.agent/target ma)
         dh (or (:schema main-db) {})]
     (cond
-      ;; 1. If a reviewer finished/merged and its target agent is still paused, resume target on top of the merged fix!
+      ;; 1. If a reviewer finished/merged and has not yet sent a :review-note to its paused target, atomically sync :main, unpause, and deliver :review-note!
       (and merged? target (contains? dh :seon.agent/id))
       (let [teid (if (map? target) (:db/id target) target)
-            ta (when (integer? teid) (d/pull main-db '[:seon.agent/id :seon.agent/paused?] teid))]
-        (if (and (:seon.agent/id ta) (:seon.agent/paused? ta))
-          [{:op :transact :tx-data [{:seon.agent/id (:seon.agent/id ta) :seon.agent/paused? false}]
-            :reason [:review-resume (:seon.agent/id ta)]}]
+            ta (when (integer? teid) (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/paused?] teid))
+            taid (:seon.agent/id ta)
+            already-resumed? (boolean
+                               (and taid (contains? dh :seon.agent.message/to)
+                                    (some (fn [dt]
+                                            (let [m (d/pull main-db '[:seon.agent.message/from :seon.agent.message/type] (:e dt))]
+                                              (and (= aid (:seon.agent.message/from m))
+                                                   (= :review-note (:seon.agent.message/type m)))))
+                                          (d/datoms main-db :avet :seon.agent.message/to taid))))]
+        (if (and taid (:seon.agent/paused? ta) (not already-resumed?))
+          [{:op :resume-reviewed-target
+            :reviewer aid
+            :reviewer-branch b
+            :target taid
+            :target-branch (:seon.agent/branch ta :main)}]
           []))
 
       ;; 2. For active non-main worker agents with :seon.config/review-every-turns > 0 (and not already under review), evaluate :agent/needs-review rules!
       (and active? (not= b :main) (not raw-ready?) (not waiting?) (nil? target)
            (contains? dh :seon.config/review-every-turns)
            (pos? (long (or (seon.store/config-val main-db aid :seon.config/review-every-turns) 0))))
-      (let [rev-every (long (seon.store/config-val main-db aid :seon.config/review-every-turns))
-            has-active-rev?
-            (boolean
-             (and (integer? agent-eid) (contains? dh :seon.agent/target)
-                  (some (fn [dt]
-                          (let [ra (d/pull main-db '[:seon.agent/archived? :seon.agent/merged-tx] (:e dt))]
-                            (and (not (:seon.agent/archived? ra)) (nil? (:seon.agent/merged-tx ra)))))
-                        (d/datoms main-db :avet :seon.agent/target agent-eid))))]
-        (if has-active-rev?
+      (let [rev-every (long (seon.store/config-val main-db aid :seon.config/review-every-turns))]
+        (if (has-active-reviewer? main-db agent-eid)
           []
           (let [all-rs (rules/load-rules (or branch-db main-db) (rseed/starter-rules))
                 rev-rs (filterv (fn [r]
@@ -270,11 +340,13 @@
                           (and (empty? rule-reasons) (>= (long (or tool-streak 0)) rev-every))
                           (conj [:periodic-review (long tool-streak)]))]
             (if (seq reasons)
-              (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))]
+              (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))
+                    spawn-op (cond-> {:op :spawn-agent :id rid :parent aid :target [:seon.agent/id aid]
+                                      :task :template/review-and-improve :auto-merge? true
+                                      :goal (str "Review session " aid " (triggered by " (pr-str reasons) "). Clean hunting/error evals and update :seon.agent/memory via @ctx on :seon.agent/target, fix any Seon root cause on your branch, then call (user/ready!) — do NOT unpause target manually.")}
+                               (:seon.agent/scope ma) (assoc :scope (:seon.agent/scope ma)))]
                 [{:op :transact :tx-data [{:seon.agent/id aid :seon.agent/paused? true}] :reason [:review-pause aid]}
-                 {:op :spawn-agent :id rid :parent aid :target [:seon.agent/id aid]
-                  :task :template/review-and-improve :auto-merge? true
-                  :goal (str "Review session " aid " (triggered by " (pr-str reasons) "). Clean hunting/error evals via @ctx on :seon.agent/target, fix any Seon root cause on your branch, and resume target.")}])
+                 spawn-op])
               []))))
 
       :else [])))

@@ -295,3 +295,56 @@
             (finally
               (d/release bconn)
               (doseq [n ['tmp.ov-rule-test 'tmp.ov-unrel-test]] (when (find-ns n) (remove-ns n))))))))))
+
+(deftest ^{:cost/ticks 120000000} lmdb-monotonic-mapsize-grow-and-resize-recovery-test
+  (testing "open-env monotonically grows existing writable data.mdb (never shrinks or remaps RDONLY), close-env is idempotent, and interrupt-safe RW-lock never leaks"
+    (is (true? (store/install-interrupt-safe-lmdb!)))
+    (let [tmp (java.io.File. (str "/tmp/seon-lmdb-grow-" (System/nanoTime)))
+          path (.getPath tmp)
+          mb4 (* 4 1024 1024)
+          mb64 (* 64 1024 1024)]
+      (try
+        (.mkdirs tmp)
+        ;; 1. Create store at 4 MB and commit a value
+        (let [db1 (lmdb-ffi/open-env path {:map-size mb4})]
+          (try
+            (is (= mb4 (:map-bytes (lmdb-ffi/env-info db1))))
+            (lmdb-ffi/write-txn db1 #(lmdb-ffi/put-bytes! db1 % "k1" (.getBytes "v1" "UTF-8")))
+            (finally (lmdb-ffi/close-env db1))))
+        ;; 2. RDONLY open with larger map-size does NOT gratuitously remap 4 MB store
+        (let [dbr (lmdb-ffi/open-env path {:map-size mb64 :flags lmdb-ffi/MDB_RDONLY})]
+          (try
+            (is (= mb4 (:map-bytes (lmdb-ffi/env-info dbr))))
+            (finally (lmdb-ffi/close-env dbr))))
+        ;; 3. Re-open existing writable store with 64 MB -> grows monotonically and persists on write
+        (let [db2 (lmdb-ffi/open-env path {:map-size mb64})]
+          (try
+            (is (= mb64 (:map-bytes (lmdb-ffi/env-info db2))))
+            (lmdb-ffi/write-txn db2 #(lmdb-ffi/put-bytes! db2 % "k2" (.getBytes "v2" "UTF-8")))
+            (is (= "v1" (String. ^bytes (lmdb-ffi/read-txn db2 #(lmdb-ffi/get-bytes db2 % "k1")) "UTF-8")))
+            (finally (lmdb-ffi/close-env db2))))
+        ;; 4. Re-open with smaller 4 MB -> NEVER shrinks below persisted 64 MB
+        (let [db3 (lmdb-ffi/open-env path {:map-size mb4})]
+          (try
+            (is (= mb64 (:map-bytes (lmdb-ffi/env-info db3))))
+            (is (= "v2" (String. ^bytes (lmdb-ffi/read-txn db3 #(lmdb-ffi/get-bytes db3 % "k2")) "UTF-8")))
+            (finally (lmdb-ffi/close-env db3))))
+        ;; 5. Interrupt mid-read-txn & mid-write-txn releases RW lock cleanly + adopt-mapsize! + idempotent double close
+        (let [db4 (lmdb-ffi/open-env path {:map-size mb64})
+              ^java.util.concurrent.locks.ReentrantReadWriteLock rw (:rw-lock db4)]
+          (try
+            (is (some? rw))
+            (try
+              (jolt.host/run-interruptible (jolt.host/make-interrupt)
+                #(lmdb-ffi/read-txn db4 (fn [_] (loop [i 0 a []] (if (< i 500000) (recur (inc i) (conj a (str i))) a))))
+                100000000 524288)
+              (catch Throwable _ nil))
+            (is (zero? (.getReadLockCount rw)) "Interrupted read-txn must release RW readLock cleanly")
+            (is (false? (.isWriteLocked rw)))
+            (is (zero? (lmdb-ffi/adopt-mapsize! db4)))
+            (is (= mb64 (:map-bytes (lmdb-ffi/env-info db4))))
+            (is (= "v2" (String. ^bytes (lmdb-ffi/read-txn db4 #(lmdb-ffi/get-bytes db4 % "k2")) "UTF-8")))
+            (finally
+              (lmdb-ffi/close-env db4)
+              (lmdb-ffi/close-env db4))))
+        (finally (store/rm-rf! tmp))))))

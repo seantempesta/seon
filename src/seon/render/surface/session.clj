@@ -6,7 +6,8 @@
             [seon.render.links :as rlinks :refer [badge btn ent-link feedback-banner kicker]]
             [seon.render.markdown :as rmd]
             [seon.store :as store]
-            [seon.render.status :as rstatus]))
+            [seon.render.status :as rstatus]
+            [datahike.api :as d]))
 
 (def ^:private enter-submit-js
   "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.isComposing||evt.keyCode===229)return;if(evt.target.value.trim()){evt.target.form.requestSubmit();}}")
@@ -152,12 +153,33 @@
         (:seon.agent/ready? ag) (badge "green" "ready") (:seon.agent/paused? ag) (badge "muted" "paused")
         (:seon.agent/waiting? ag) (badge "blue" "waiting") :else (badge "muted" "idle")))
 
-(defn- render-work-bar [agent viewing-id label branch tx-num active? expert-mode?]
+(defn- review-bar-links [main-db agent viewing-id]
+  (when (and main-db (contains? (rlinks/db-schema main-db) :seon.agent/target))
+    (let [teid (rlinks/ref-eid (:seon.agent/target agent))
+          t-ag (when teid (d/pull main-db '[:seon.agent/id] teid))
+          ag-eid (or (when viewing-id (:e (first (d/datoms main-db :avet :seon.agent/id viewing-id))))
+                     (:db/id agent))
+          active-rev (when (and ag-eid (:seon.agent/paused? agent))
+                       (some (fn [dt]
+                               (let [ra (d/pull main-db '[:seon.agent/id :seon.agent/archived? :seon.agent/merged-tx] (:e dt))]
+                                 (when (and (:seon.agent/id ra) (not (:seon.agent/archived? ra)) (nil? (:seon.agent/merged-tx ra)))
+                                   (:seon.agent/id ra))))
+                             (d/datoms main-db :avet :seon.agent/target ag-eid)))]
+      {:target-id (:seon.agent/id t-ag)
+       :reviewer-id active-rev})))
+
+(defn- render-work-bar [main-db agent viewing-id label branch tx-num active? expert-mode?]
   (let [scope (:seon.agent/scope agent) task (:seon.agent/task agent) parent (:seon.agent/parent agent)
+        {:keys [target-id reviewer-id]} (review-bar-links main-db agent viewing-id)
         role-b (badge "blue" (name (or (:seon.agent/role agent) :worker)))
+        status-b (cond reviewer-id (badge "amber" "under review")
+                       (and target-id (nil? (:seon.agent/merged-tx agent)) (not (:seon.agent/archived? agent))) (badge "purple" "reviewing")
+                       :else (honest-status-badge agent active?))
         meta-row [:div {:class "pill-row tiny mono muted"}
                   (ent-link [:seon.branch/name branch] (str branch (when tx-num (str " @ tx " tx-num))) "mono tiny muted")
                   (when parent (list "·" (ent-link [:seon.agent/id parent] (str "↑" (name parent)) "mono tiny muted")))
+                  (when target-id (list "·" (ent-link [:seon.agent/id target-id] (str "→ " (name target-id)) "mono tiny")))
+                  (when reviewer-id (list "·" (ent-link [:seon.agent/id reviewer-id] (str "reviewer: " (name reviewer-id)) "mono tiny")))
                   (when scope (list "·" (ent-link [:seon.code.ns/name scope] (str scope) "mono tiny")))
                   (when task (list "·" (ent-link [:seon.task/id task] (str task) "mono tiny")))]
         br-acts (when (not= branch :main)
@@ -167,11 +189,13 @@
     (if expert-mode?
       [:div {:class "ws-head work-bar"}
        [:div {:class "stack-xs"}
-        [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") role-b (honest-status-badge agent active?)]
+        [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") role-b status-b]
         meta-row]
        br-acts]
       [:div {:class "ws-head work-bar"}
-       [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") (honest-status-badge agent active?)]
+       [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") status-b
+        (when target-id (ent-link [:seon.agent/id target-id] (str "→ " (name target-id)) "mono tiny muted"))
+        (when reviewer-id (ent-link [:seon.agent/id reviewer-id] (str "→ " (name reviewer-id)) "mono tiny"))]
        [:details {:class "expert-drawer"}
         [:summary {:class "mono tiny muted" :style {:cursor "pointer"}} "Details"]
         [:div {:class "stack-xs" :style {:margin-top "6px"}}
@@ -197,7 +221,7 @@
                   [:button {:type "submit" :class "btn sm"} "+ Pin"]]]
     (list
      [:section {:id "ws-left-unit" :class "ws-left"}
-      (render-work-bar agent viewing-id label branch tx-num active? exp?)
+      (render-work-bar main-db agent viewing-id label branch tx-num active? exp?)
       (feedback-banner branch-feedback)
       [:div {:class "ws-timeline" :data-agent (str viewing-id)}
        (when (and (map? agent-status) (:seon.ui.status/label agent-status))

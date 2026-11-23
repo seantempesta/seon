@@ -19,7 +19,8 @@
             [seon.signals :as sig]
             [seon.store :as store]
             [seon.render.status :as rstatus]
-            [seon.ctx.ground :as ground]))
+            [seon.ctx.ground :as ground]
+            [datahike.versioning :as dv]))
 
 (defonce ^:seon.flow/edge wire-request-cache (store/lru-cache 8))
 
@@ -74,33 +75,6 @@
          [(:width viewport-screenshot) (:height viewport-screenshot) (:bytes viewport-screenshot)
           (:captured-at viewport-screenshot) (hash (:data-url viewport-screenshot))
           (hash (:base64 viewport-screenshot))])])))
-
-(defn- build-wire-examples [main-db branch-db conn ag]
-  (let [ex-list
-        (vec (for [ex-id (sort (:seon.agent/examples ag))
-                   :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
-                   :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])]]
-               {:id ex-id :kind :example :goal (:seon.agent/goal ex-ag)
-                :turns (rdata/evals->turns (rdata/agent-evals-in main-db ex-id))}))
-        t-raw (:seon.agent/target ag)
-        t-eid (cond (integer? t-raw) t-raw (map? t-raw) (:db/id t-raw) :else nil)
-        t-ag (when (and t-eid (contains? (db-schema main-db) :seon.agent/id))
-               (let [p (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/goal] t-eid)]
-                 (when (:seon.agent/id p) p)))
-        rev-sess (when t-ag
-                   (let [taid (:seon.agent/id t-ag)
-                         tb (:seon.agent/branch t-ag :main)
-                         tdb (or (when (and conn (not= tb :main))
-                                   (try (store/head conn tb) (catch Throwable _ nil)))
-                                 (when (= tb (get-in branch-db [:config :branch])) branch-db)
-                                 main-db)
-                         tevs (rdata/agent-evals-in tdb taid)
-                         tmsgs (rdata/agent-messages-in main-db taid)
-                         msg-map (into {} (map (juxt :seon.agent.message/id identity)) tmsgs)]
-                     (when (seq tevs)
-                       {:id taid :branch tb :kind :review :goal (:seon.agent/goal t-ag)
-                        :turns (rdata/evals->turns tevs msg-map)})))]
-    (cond-> ex-list rev-sess (conj rev-sess))))
 
 (defn- fast-health-summary [db]
   (let [{:keys [branch health]} (sig/all-signals db)]
@@ -318,34 +292,46 @@
       read-main? (or (= :main (:seon.agent/read-branch ag))
                      (:seon.agent/router? ag)
                      (= :coordinator (:seon.agent/role ag)))
-      base-cid (when (and conn (not= branch :main) (not read-main?) (= anchor-turn 1)
-                        (contains? (try (d/branches conn) (catch Throwable _ nil)) branch))
-               (try (d/merge-base conn :main branch) (catch Throwable _ nil)))
+      store-or-conn (or conn (:store branch-db))
+      reset-tx (rstatus/branch-reset-tx (if read-main? main-db branch-db) (:seon.agent/id ag))
+      anchor-cid (when (and (pos? reset-tx) (not read-main?) (not= branch :main))
+                   (or (try (:commit (dv/commit-holding-tx branch-db reset-tx)) (catch Throwable _ nil))
+                       (live-cid branch-db)))
+      base-cid (when (and (nil? anchor-cid) store-or-conn (not= branch :main) (not read-main?)
+                          (contains? (try (d/branches store-or-conn) (catch Throwable _ nil)) branch))
+                 (try (d/merge-base store-or-conn :main branch) (catch Throwable _ nil)))
       eff-cid (cond
                 (seq (:already-shown opts))
                 (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
+                anchor-cid anchor-cid
                 base-cid base-cid
+                (pos? reset-tx) [:main-reset reset-tx]
                 :else :main-session)
       task? (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
       dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
       walk-key (let [msig (rules/rules-db-sig main-db)
-                   bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
-               [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch
-                msig bsig
-                (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
-                (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
-                (:seon.agent/context-prefs ag) anchor-turn task? dis-key])
+                     bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
+                 [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch reset-tx
+                  msig bsig
+                  (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
+                  (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
+                  (:seon.agent/context-prefs ag) anchor-turn task? dis-key])
       cached (store/lru-get!
               walk-prefix-cache 64 walk-key
               (fn []
-                (let [base-db (when (and conn base-cid)
+                (let [anchor-db (when anchor-cid
+                                  (if (= anchor-cid (live-cid branch-db))
+                                    branch-db
+                                    (try (d/commit-as-db store-or-conn anchor-cid) (catch Throwable _ branch-db))))
+                      base-db (when (and (nil? anchor-db) store-or-conn base-cid)
                                 (if (= base-cid (live-cid main-db))
                                   main-db
-                                  (try (d/commit-as-db conn base-cid) (catch Throwable _ nil))))
+                                  (try (d/commit-as-db store-or-conn base-cid) (catch Throwable _ nil))))
                       scope (:seon.agent/scope ag)
                       scope-in-base? (or (nil? scope)
                                          (and base-db (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
                       walk-db (cond read-main? main-db
+                                    anchor-db anchor-db
                                     (and base-db scope-in-base?) base-db
                                     :else branch-db)
                       pool (build-wire-candidate-pool main-db walk-db (if task? branch-db main-db) ag opts)]
@@ -423,7 +409,10 @@
                   (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs))
                 [])
                 branch (:seon.agent/branch ag :main)
-                anchor-turn (let [t (:seon.agent.eval/turn (first evals))] (if (and t (> t 1)) t 1))
+                anchor-turn (or (when-let [t (:seon.agent.eval/turn (first evals))] (when (> t 1) t))
+                                (when (and (empty? evals) (pos? (rstatus/branch-reset-tx branch-db agent-id)))
+                                  (max 1 (inc (long (:max-turn (store/agent-eval-history-stats branch-db agent-id) 0)))))
+                                1)
                 {:keys [tile-projections walk-text walk-db walk-main-cid tail-tile-blocks rule-trace fit-trace shown
                         surface-stats explained candidates]}
                 (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn (assoc opts :turn (max 0 (dec (long anchor-turn)))))
@@ -439,7 +428,7 @@
                       {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
                       {:agent-id agent-id :branch branch :role (:seon.agent/role ag :worker)
                        :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
-                       :examples (build-wire-examples main-db branch-db conn ag) :walk-text walk-text
+                       :examples (rstatus/build-wire-examples main-db branch-db conn ag) :walk-text walk-text
                        :tail-blocks tail-blocks :ephemeral-image (:image tail-res)
                        :history (rdata/evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
                        :unread unread :eval-db walk-db :main-db main-db :fallback-db branch-db

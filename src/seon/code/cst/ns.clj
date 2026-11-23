@@ -384,3 +384,31 @@
                 {:seon.code.form/key (:seon.code.form/key f),
                  :seon.code.form/order (long i)}))
             final-forms))))))
+
+(defn topo-sort-ns-forms
+  "Deterministic Kahn topological sort of non-`#ns` forms in `nsym` by same-ns `:deps`, preserving `:order` as tie-breaker. Returns ordered vec if acyclic, or `nil` on cycle."
+  {:malli/schema [:=> [:cat :symbol [:sequential :map]] [:maybe [:vector :map]]]
+   :cost/ticks 5000000}
+  [_nsym body-forms]
+  (let [by-key (into {} (map (juxt :key identity)) body-forms)
+        sym->key (into {} (keep (fn [{:keys [key]}] (when (and key (not (str/includes? key "#"))) [(symbol key) key]))) body-forms)
+        in-deg (volatile! (into {} (map (fn [f] [(:key f) 0])) body-forms))
+        rdeps  (volatile! {})
+        _ (doseq [{:keys [key deps]} body-forms]
+            (let [local-deps (->> deps (keep #(get sym->key %)) (remove #(= % key)) distinct)]
+              (doseq [dk local-deps]
+                (vswap! in-deg update key (fnil inc 0))
+                (vswap! rdeps update dk (fnil conj []) key))))
+        orig-ord (into {} (map-indexed (fn [i f] [(:key f) i])) body-forms)]
+    (loop [ready (vec (sort-by orig-ord (keep (fn [[k d]] (when (zero? d) k)) @in-deg)))
+           deg @in-deg
+           out []]
+      (if (empty? ready)
+        (when (= (count out) (count body-forms)) (mapv by-key out))
+        (let [cur (first ready) rest-r (subvec ready 1) kids (get @rdeps cur)
+              [deg' newly] (reduce (fn [[dm nr] k]
+                                     (let [nd (dec (get dm k 0))]
+                                       [(assoc dm k nd) (if (zero? nd) (conj nr k) nr)]))
+                                   [deg []] kids)
+              next-ready (if (seq newly) (vec (sort-by orig-ord (into rest-r newly))) rest-r)]
+          (recur next-ready deg' (conj out cur)))))))

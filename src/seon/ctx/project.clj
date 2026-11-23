@@ -254,6 +254,7 @@
       (conj :rule.ctx/scope-task-history-and-fixes)
       (not any-docs?) (conj :rule.ctx/citing-docs)
       (not evs?) (conj :rule.ctx/recent-eval-results)
+      (not (:seon.agent/target ag)) (conj :rule.ctx/review-target)
       (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?))
       (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
 

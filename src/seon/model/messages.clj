@@ -23,7 +23,7 @@
   (str "You are a Seon Clojure agent in your branch's live Jolt runtime.\n"
        "Relevant code, schemas, docs, tasks, and primers are surfaced dynamically in context.\n"
        "When replying directly to the user (greetings, simple answers, or final summaries), respond in clear plain prose with NO tool calls.\n"
-       "Never treat `<session kind=\"example\">` as your live session."))
+       "Never treat `<session kind=\"example\">` or `<session kind=\"review\">` as your live session."))
 
 (defn format-tool-content
   {:malli/schema [:function [:=> [:cat :any] :string] [:=> [:cat :map :any] :string]], :cost/ticks 200000}
@@ -38,7 +38,7 @@
 (defn turns->wire-messages
   {:malli/schema [:=> [:cat :map [:maybe [:sequential :map]]] [:sequential :map]], :cost/ticks 5000000}
   [{:keys [thinking? replay-reasoning?] :or {replay-reasoning? true} :as opts} turns]
-  (let [seen-tc-ids (volatile! #{})
+  (let [seen-tc-ids (or (:seen-tc-ids opts) (volatile! #{}))
         uniq-tc-id (fn [raw-id]
                      (let [base (str (or raw-id "tc"))]
                        (if-not (contains? @seen-tc-ids base)
@@ -137,11 +137,68 @@
                          (when (seq (:svgs dom)) (str "svgBoxes=" (pr-str (:svgs dom))))])]
       (when (seq parts) (str/join " · " parts)))))
 
+(defn build-request-body
+  "Constructs the OpenAI-compat / DeepSeek request body using present-only optional params
+   (`temperature` omitted unless explicitly set, `stream_options: {:include_usage true}` when streaming)."
+  {:malli/schema [:=> [:cat [:map [:model {:optional true} :string] [:max-tokens {:optional true} :int] [:temperature {:optional true} :double] [:thinking {:optional true} [:enum :enabled :disabled]] [:reasoning-effort {:optional true} [:enum :low :medium :high]] [:replay-reasoning {:optional true} :boolean] [:stream? {:optional true} :boolean] [:messages {:optional true} [:vector [:map [:role :string] [:content :string]]]]] [:maybe :string] [:vector [:map [:thought {:optional true} :string]]] [:maybe :string]] :map], :cost/ticks 5000000}
+  [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning stream? messages]
+    :or {stream? true replay-reasoning true}}
+   system-prompt history user-prompt]
+  (let [thinking-enabled? (= :enabled thinking)
+        raw-msgs (or messages
+                     (build-wire-messages {:thinking? thinking-enabled?
+                                           :replay-reasoning? (not (false? replay-reasoning))}
+                                          system-prompt history user-prompt))
+        ;; DeepSeek thinking mode requires every prior assistant message to carry `:reasoning_content`
+        msgs (if thinking-enabled?
+               (mapv (fn [m]
+                       (if (and (= "assistant" (:role m)) (not (contains? m :reasoning_content)))
+                         (assoc m :reasoning_content "")
+                         m))
+                     raw-msgs)
+               raw-msgs)]
+    (cond-> {:model (or model "deepseek-flash")
+             :messages msgs
+             :tools [eval-tool]
+             :tool_choice "auto"
+             :stream (boolean stream?)}
+      stream? (assoc :stream_options {:include_usage true})
+      max-tokens (assoc :max_tokens (long max-tokens))
+      (some? temperature) (assoc :temperature temperature)
+      thinking (assoc :thinking {:type (name thinking)})
+      (and reasoning-effort (not= :disabled thinking))
+      (assoc :reasoning_effort (name reasoning-effort)))))
+
+(defn- render-example-sessions [opts examples main-db eval-db]
+  (vec
+   (mapcat
+    (fn [{:keys [id branch kind goal turns db omitted-turns]}]
+      (let [rev? (= :review kind)
+            sid (if rev? (str id) (str "example/" (name id)))
+            hdr (if rev?
+                  (str "<session id=\"" sid "\" branch=\"" (or branch :main) "\" kind=\"review\" from=\"seon\">\n"
+                       "Live session under review (start to end). Inspect for hunting loops, errors, or Seon root causes; clean noisy/failed evals and update `:seon.agent/memory` via `(swap! ctx ...)` on `:seon.agent/target`, fix any Seon root cause on your branch, then call `(user/ready!)` (do NOT unpause target manually — merging your branch automatically syncs `:main` into target, delivers your summary, and restarts target cleanly).\n"
+                       "Goal: " (or goal "(none)"))
+                  (str "<session id=\"" sid "\" kind=\"example\" from=\"seon\">\n"
+                       "A finished session of another task, shown for how its work was done; not yours.\n"
+                       "Goal: " (or goal "(none)")))
+            ex-db (or db main-db eval-db)
+            ex-opts (cond-> (assoc opts :seen-tc-ids (volatile! #{}))
+                      ex-db (assoc :eval-db ex-db :fallback-db ex-db)
+                      main-db (assoc :main-db main-db))
+            turn-msgs (if (and (pos? (long (or omitted-turns 0))) (>= (count turns) 3))
+                        (concat (turns->wire-messages ex-opts (take 2 turns))
+                                [{:role "user" :content (str "(... " omitted-turns " middle turns omitted ...)")}]
+                                (turns->wire-messages ex-opts (drop 2 turns)))
+                        (turns->wire-messages ex-opts turns))]
+        (concat [{:role "user" :content hdr}] turn-msgs [{:role "user" :content "</session>"}])))
+    examples)))
+
 (defn build-agent-wire-messages
   "Single source of truth for BOTH live LLM requests AND Level 3 Debug View.
    Produces proper OpenAI-compat / DeepSeek wire messages with:
    1. Byte-identical `system` message (KV prefix cache anchor)
-   2. Optional `<session id=\"example/...\" kind=\"example\" from=\"seon\">...</session>` in exact wire roles
+   2. Optional `<session id=\"example/...\" kind=\"example|review\" from=\"seon\">...</session>` in exact wire roles
    3. `<agent id=\"...\" branch=\"...\" from=\"seon\">` opening + initial rendered walk tiles
    4. Append-only live conversation turns (`user`, `assistant` + `tool_calls`, `tool` with `result/e<n>`)
    5. Current turn unread messages + volatility-ordered ephemeral tail blocks + optional viewport screenshot.
@@ -150,25 +207,7 @@
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
    {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image eval-db main-db fallback-db]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
-        example-msgs
-        (vec
-         (mapcat
-          (fn [{:keys [id branch kind goal turns]}]
-          (let [rev? (= :review kind)
-                sid (if rev? (str id) (str "example/" (name id)))
-                kstr (if rev? "review" "example")
-                hdr (if rev?
-                      (str "<session id=\"" sid "\" branch=\"" (or branch :main) "\" kind=\"review\" from=\"seon\">\n"
-                           "Live session under review (start to end). Inspect for hunting loops, errors, or Seon root causes; clean noisy/failed evals and course-correct via `(swap! ctx ...)` on `:seon.agent/target` (or Datahike), fix any Seon root cause on your branch, then set `[:seon.agent/target :seon.agent/paused?] false` so it continues.\n"
-                           "Goal: " (or goal "(none)"))
-                      (str "<session id=\"" sid "\" kind=\"example\" from=\"seon\">\n"
-                           "A finished session of another task, shown for how its work was done; not yours.\n"
-                           "Goal: " (or goal "(none)")))]
-            (concat
-             [{:role "user" :content hdr}]
-             (turns->wire-messages opts turns)
-             [{:role "user" :content "</session>"}])))
-          examples))
+        example-msgs (render-example-sessions opts examples main-db eval-db)
         open-msg
         {:role "user"
          :content (str "<agent id=\"" (or agent-id :agent/unknown)
@@ -238,35 +277,3 @@
      :prefix-messages-count (dec (count messages))
      :ephemeral-screenshot (or (:raw eff-img) (when (nil? tail-blocks) viewport-screenshot))
      :ephemeral-eval-images eval-images}))
-
-(defn build-request-body
-  "Constructs the OpenAI-compat / DeepSeek request body using present-only optional params
-   (`temperature` omitted unless explicitly set, `stream_options: {:include_usage true}` when streaming)."
-  {:malli/schema [:=> [:cat [:map [:model {:optional true} :string] [:max-tokens {:optional true} :int] [:temperature {:optional true} :double] [:thinking {:optional true} [:enum :enabled :disabled]] [:reasoning-effort {:optional true} [:enum :low :medium :high]] [:replay-reasoning {:optional true} :boolean] [:stream? {:optional true} :boolean] [:messages {:optional true} [:vector [:map [:role :string] [:content :string]]]]] [:maybe :string] [:vector [:map [:thought {:optional true} :string]]] [:maybe :string]] :map], :cost/ticks 5000000}
-  [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning stream? messages]
-    :or {stream? true replay-reasoning true}}
-   system-prompt history user-prompt]
-  (let [thinking-enabled? (= :enabled thinking)
-        raw-msgs (or messages
-                     (build-wire-messages {:thinking? thinking-enabled?
-                                           :replay-reasoning? (not (false? replay-reasoning))}
-                                          system-prompt history user-prompt))
-        ;; DeepSeek thinking mode requires every prior assistant message to carry `:reasoning_content`
-        msgs (if thinking-enabled?
-               (mapv (fn [m]
-                       (if (and (= "assistant" (:role m)) (not (contains? m :reasoning_content)))
-                         (assoc m :reasoning_content "")
-                         m))
-                     raw-msgs)
-               raw-msgs)]
-    (cond-> {:model (or model "deepseek-flash")
-             :messages msgs
-             :tools [eval-tool]
-             :tool_choice "auto"
-             :stream (boolean stream?)}
-      stream? (assoc :stream_options {:include_usage true})
-      max-tokens (assoc :max_tokens (long max-tokens))
-      (some? temperature) (assoc :temperature temperature)
-      thinking (assoc :thinking {:type (name thinking)})
-      (and reasoning-effort (not= :disabled thinking))
-      (assoc :reasoning_effort (name reasoning-effort)))))

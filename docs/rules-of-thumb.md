@@ -1,4 +1,3 @@
-## Section
 # Rules of Thumb: Data Model, Rules, Renderers & `@ctx`
 
 Seon aims for **Distributed Understanding**: any agent working with any entity — built-in or brand-new custom domain data — should be able to attach or pull that data and automatically get its schemas, compatible functions, citing docs, clean multi-scale rendering, and direct Clojure/Datahike manipulation without bespoke one-off plumbing.

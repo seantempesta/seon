@@ -379,3 +379,64 @@
                         :style {:display "flex" :justify-content "center" :align-items "center"
                                 :padding "6px 0" :max-width "100%" :overflow "hidden"}}
                   (render/raw-html safe-svg)])]))}))
+
+(defn branch-reset-tx
+  "Purely derives the latest session-reset transaction on `branch-db` for `agent-id`:
+   `max(retract-tx, sync-tx)` where `retract-tx` is max `:tx` of retracted evals in `(d/history branch-db)`
+   and `sync-tx` is max `:tx` of `:seon.tx/merged :main` datoms on `branch-db`. Zero during normal turns."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int]
+   :cost/ticks 5000000}
+  [branch-db agent-id]
+  (let [dh (or (:schema branch-db) {})
+        keep-hist? (not= false (get-in branch-db [:config :keep-history?]))
+        retract-tx (if (and branch-db agent-id keep-hist? (contains? dh :seon.agent.eval/agent))
+                     (reduce (fn [m dt]
+                               (if-not (:added dt)
+                                 (max m (long (:tx dt)))
+                                 m))
+                             0
+                             (d/datoms (d/history branch-db) :avet :seon.agent.eval/agent agent-id))
+                     0)
+        sync-tx (if (and branch-db (contains? dh :seon.tx/merged))
+                  (reduce (fn [m dt] (max m (long (:tx dt))))
+                          0
+                          (d/datoms branch-db :avet :seon.tx/merged :main))
+                  0)]
+    (max retract-tx sync-tx)))
+
+(defn ^:seon.flow/edge build-wire-examples
+  "Builds `<session kind=\"example|review\">` descriptors for `ag`, loading `:seon.agent/target`'s branch DB and capping >12-turn review sessions."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :any :map] [:vector :map]]
+   :cost/ticks 15000000}
+  [main-db branch-db conn ag]
+  (let [ex-list
+        (vec (for [ex-id (sort (:seon.agent/examples ag))
+                   :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
+                   :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])]]
+               {:id ex-id :kind :example :goal (:seon.agent/goal ex-ag)
+                :turns (rdata/evals->turns (rdata/agent-evals-in main-db ex-id))}))
+        t-raw (:seon.agent/target ag)
+        t-eid (cond (integer? t-raw) t-raw (map? t-raw) (:db/id t-raw) :else nil)
+        t-ag (when (and t-eid (contains? (or (:schema main-db) {}) :seon.agent/id))
+               (let [p (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/goal] t-eid)]
+                 (when (:seon.agent/id p) p)))
+        rev-sess (when t-ag
+                   (let [taid (:seon.agent/id t-ag)
+                         tb (:seon.agent/branch t-ag :main)
+                         tdb (or (when-let [sc (and (not= tb :main) (or conn (:store main-db) (:store branch-db)))]
+                                   (try (store/head sc tb) (catch Throwable _ nil)))
+                                 (when (= tb (get-in branch-db [:config :branch])) branch-db)
+                                 main-db)
+                         tevs (rdata/agent-evals-in tdb taid)
+                         tmsgs (rdata/agent-messages-in main-db taid)
+                         msg-map (into {} (map (juxt :seon.agent.message/id identity)) tmsgs)
+                         all-turns (when (seq tevs) (vec (rdata/evals->turns tevs msg-map)))
+                         n (count all-turns)
+                         capped? (> n 12)
+                         turns (if capped? (into (subvec all-turns 0 2) (subvec all-turns (- n 10))) all-turns)]
+                     (when (seq turns)
+                       (cond-> {:id taid :branch tb :kind :review :goal (:seon.agent/goal t-ag)
+                                :db tdb :turns turns}
+                         capped? (assoc :omitted-turns (- n 12))))))
+        ]
+    (cond-> ex-list rev-sess (conj rev-sess))))
