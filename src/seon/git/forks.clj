@@ -31,16 +31,21 @@
     (fibers/join (fibers/spawn #(apply sh/sh args)))))
 
 (defn git!
-  "Runs `git -C repo-dir args...`, returning stdout or throwing `ex-info` carrying `:exit` and `:err`."
+  "Runs `git -C repo-dir args...`, returning stdout or throwing `ex-info` carrying `:exit` and `:err`.
+   Retries briefly on transient `.git/index.lock` contention from concurrent read-only git commands."
   {:seon.flow/edge true
    :malli/schema [:function [:=> [:cat :string [:* :string]] :string]]
    :cost/ticks 1000000}
   [repo-dir & args]
-  (let [{:keys [exit out err]} (apply sh-fiber "git" "-C" repo-dir args)]
-    (if (zero? exit)
-      out
-      (throw (ex-info (str "git " (str/join " " args) " failed (" exit "): " (str/trim err))
-                      {:repo repo-dir :args (vec args) :exit exit :err err})))))
+  (loop [attempt 0]
+    (let [{:keys [exit out err]} (apply sh-fiber "git" "-C" repo-dir args)]
+      (cond
+        (zero? exit) out
+        (and (< attempt 8) (str/includes? (str err) "index.lock"))
+        (do (Thread/sleep 75) (recur (inc attempt)))
+        :else
+        (throw (ex-info (str "git " (str/join " " args) " failed (" exit "): " (str/trim err))
+                        {:repo repo-dir :args (vec args) :exit exit :err err}))))))
 
 (defn- git-ok? [dir & args]
   (zero? (:exit (apply sh-fiber "git" "-C" dir args))))

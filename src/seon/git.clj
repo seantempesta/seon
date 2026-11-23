@@ -142,8 +142,14 @@
                  (.delete f))
                (throw (ex-info (str "Refusing blind deletion of " path ": render-path returned nil without an explicit entity deletion")
                                {:error :seon.git/refused-blind-delete :path path}))))))
-       (let [fork-res (mapv (fn [[root rels]] (forks/write-and-commit-fork! db repo-dir root rels merged-branch message del-set)) fork-map)]
-       (apply git! repo-dir "add" "-A" "--" (into main-paths (map :root) fork-res)))
+       (let [fork-res (mapv (fn [[root rels]] (forks/write-and-commit-fork! db repo-dir root rels merged-branch message del-set)) fork-map)
+            dirty-synced (keep (fn [p]
+                                 (let [p (str/trim p)
+                                       f (when (and (not (str/blank? p)) (tracked-path? p)) (io/file repo-dir p))]
+                                   (when (and f (.isFile f) (= (slurp f) (code/render-path db p))) p)))
+                               (str/split-lines (or (:out (sh-fiber "git" "-C" repo-dir "diff" "--name-only")) "")))
+            stage-paths (vec (distinct (concat main-paths dirty-synced (map :root fork-res))))]
+       (apply git! repo-dir "add" "-A" "--" stage-paths))
        (let [status (str/trim (git! repo-dir "status" "--porcelain" "--"))]
          (if (str/blank? status)
            {:committed? false :commit cur-sha}
