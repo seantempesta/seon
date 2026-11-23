@@ -425,7 +425,7 @@
                 tail-blocks (vec (concat (:blocks tail-res) live-tail))
                 activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
                 wire (model/build-agent-wire-messages
-                      {:thinking? true :replay-reasoning? true :vision? (boolean vision?)}
+                      {:thinking? true :replay-reasoning? true :vision? (boolean vision?) :out-max-chars (store/config-val main-db agent-id :seon.config/eval-out-chars)}
                       {:agent-id agent-id :branch branch :role (:seon.agent/role ag :worker)
                        :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
                        :examples (rstatus/build-wire-examples main-db branch-db conn ag) :walk-text walk-text

@@ -519,7 +519,7 @@
                   [:cat :map] :string]
    :cost/ticks 500000
    :cost/bytes 1048576}
-  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars db main-db fallback-db code]}]
+  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars out-max-chars db main-db fallback-db code]}]
   (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
         cap (long (max 256 (if (number? max-chars) max-chars 24000)))
         h-str (if handle (str handle) "result/e?")
@@ -538,17 +538,18 @@
                                     (when branch (str branch (when branch-tx (str " @ tx " branch-tx))))])))
         out-s (when (and (some? out) (not (str/blank? (str out))))
                 (let [os (str out)
-                                      n (count os)]
-                                  (if (> n cap)
-                                    (let [budget (min n (max 120 (- cap 400)))
-                                          head-n (quot (* budget 3) 4)
-                                          tail-n (max 0 (- budget head-n))
-                                          omitted (max 0 (- n head-n tail-n))]
-                                      (str "; stdout (" n " chars; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))):
-                                      " (subs os 0 head-n) "
-                                      ... (" omitted " chars omitted; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))) ...
-                                      " (when (pos? tail-n) (subs os (- n tail-n)))))
-                                    (str "; stdout:
+                                                      n (count os)
+                                                      ocap (long (max 256 (if (number? out-max-chars) out-max-chars cap)))]
+                                                  (if (> n ocap)
+                                                    (let [budget (min n (max 120 (- ocap 400)))
+                                                          head-n (quot (* budget 3) 4)
+                                                          tail-n (max 0 (- budget head-n))
+                                                          omitted (max 0 (- n head-n tail-n))]
+                                                      (str "; stdout (" n " chars; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))):
+                " (subs os 0 head-n) "
+                ... (" omitted " chars omitted; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))) ...
+                " (when (pos? tail-n) (subs os (- n tail-n)))))
+                                                    (str "; stdout:
                 " os))))
         body (if-not eff-ok?
                (str "ERROR: " (or error "Unknown error"))

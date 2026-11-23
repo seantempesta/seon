@@ -378,3 +378,76 @@
         (if (pos? last-paren)
           (str (subs ns-src 0 last-paren) "\n  (:require " clause-str ")" (subs ns-src last-paren))
           ns-src)))))
+
+(defn extract-require-clauses
+  "Extracts `:require` clauses from an `(ns ...)` form string."
+  {:malli/schema [:=> [:cat :string] [:maybe [:vector :any]]] :cost/ticks 50000}
+  [^String ns-src]
+  (let [form (try (read-string ns-src) (catch Throwable _ nil))]
+    (when (and (seq? form) (= 'ns (first form)))
+      (->> (drop 2 form)
+           (filter #(and (seq? %) (= :require (first %))))
+           (mapcat rest)
+           vec))))
+
+(defn extract-ns-extra-clauses
+  "Extracts `:import` and `:refer-clojure` clauses from an `(ns ...)` form string."
+  {:malli/schema [:=> [:cat :string] [:maybe [:vector :any]]] :cost/ticks 50000}
+  [^String ns-src]
+  (let [form (try (read-string ns-src) (catch Throwable _ nil))]
+    (when (and (seq? form) (= 'ns (first form)))
+      (->> (drop 2 form)
+           (filter #(and (seq? %) (#{:import :refer-clojure} (first %))))
+           vec))))
+
+(defn build-ns-header-src
+  "Builds a clean `(ns ...)` header string with optional docstring, `:require` clauses, and extra clauses (`:import`, `:refer-clojure`)."
+  {:malli/schema [:function
+                  [:=> [:cat :symbol [:maybe :string] [:maybe [:sequential :any]]] :string]
+                  [:=> [:cat :symbol [:maybe :string] [:maybe [:sequential :any]] [:maybe [:sequential :any]]] :string]]
+   :cost/ticks 50000}
+  ([to-ns doc requires] (build-ns-header-src to-ns doc requires nil))
+  ([to-ns doc requires extra-clauses]
+   (let [req-lines (when (seq requires)
+                     (str "\n  (:require "
+                          (str/join "\n            " (map pr-str requires))
+                          ")"))
+         extra-lines (when (seq extra-clauses)
+                       (str/join "" (map #(str "\n  " (pr-str %)) extra-clauses)))]
+     (str "(ns " to-ns
+          (when-not (str/blank? (str doc))
+            (str "\n  " (pr-str (str doc))))
+          req-lines
+          extra-lines
+          ")"))))
+
+(defn make-reexport-src
+  "Builds a forwarding stub in `from` pointing to `alias-sym/var` (preserving `^:seon/callable` / `^:seon.flow/edge`)."
+  {:malli/schema [:function
+                  [:=> [:cat :symbol :symbol :string] :string]
+                  [:=> [:cat :symbol :symbol :string :boolean] :string]]
+   :cost/ticks 50000}
+  ([vsym alias-sym orig-src] (make-reexport-src vsym alias-sym orig-src false))
+  ([vsym alias-sym orig-src private?]
+   (let [vname (name vsym)
+         target (str (name alias-sym) "/" vname)
+         trimmed (str/triml (str orig-src))
+         is-fn? (boolean (re-find #"^\(\s*defn-?\b" trimmed))
+         callable? (boolean (re-find #"\^:seon/callable|\{\s*:seon/callable\s+true" (str orig-src)))
+         meta-tags (str (when (and (not private?) callable?) "^:seon/callable ")
+                        (when (str/includes? (str orig-src) ":seon.flow/edge") "^:seon.flow/edge "))]
+     (cond
+       (and is-fn? private?) (str "(defn- " vname " [& args] (apply " target " args))")
+       is-fn?                (str "(defn " meta-tags vname " [& args] (apply " target " args))")
+       private?              (str "(def ^:private " vname " " target ")")
+       :else                 (str "(def " meta-tags vname " " target ")")))))
+
+(defn promote-private-src
+  "Promotes a private `defn-` or `^:private` def/defonce source string to public."
+  {:malli/schema [:=> [:cat :string] :string] :cost/ticks 50000}
+  [^String src]
+  (-> src
+      (str/replace-first #"^\(\s*defn-\s+" "(defn ")
+      (str/replace-first #"^\(\s*(def|defonce)\s+\^:private\s+" "($1 ")
+      (str/replace-first #"^\(\s*(def|defonce)\s+\^:seon\.flow/edge\s+\^:private\s+" "($1 ^:seon.flow/edge ")
+      (str/replace-first #"^\(\s*(def|defonce)\s+\^:private\s+\^:seon\.flow/edge\s+" "($1 ^:seon.flow/edge ")))

@@ -125,8 +125,8 @@
                                 sub (entity->tree use-db target-eid (dec depth) vis nil)]
                             (if (and mdb (not= tb :main))
                               (let [main-sub (eavt-map mdb target-eid nil)]
-                                (merge (select-keys main-sub [:seon.agent/paused? :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx])
-                                       sub {:seon.ctx/branch tb}))
+                                (merge sub (select-keys main-sub [:seon.agent/paused? :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx])
+                                {:seon.ctx/branch tb}))
                               sub)))))
          fwd (eavt-map db eid expand-fwd)]
      (if-not (pos? depth)

@@ -249,18 +249,24 @@
                     " — fix these required proof blocker(s) and call (user/ready!) again:\n"
                     (str/join "\n" (map format-gate-blocker fixable)))}))))
 
-(defn- ^:seon.flow/edge branch-has-code-edits? [main-db branch-db]
-  (when (and main-db branch-db (not (identical? main-db branch-db)))
-    (try
-      (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
-        (when (and mc bc (not= mc bc))
-          (let [base (or (d/merge-base branch-db mc bc) mc)]
-            (when (not= base bc)
-              (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
-                         :seon.code.var/name :seon.code.doc/id :seon.schema/key]
-                    attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
-                (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
-      (catch Throwable _ false))))
+(defn ^:seon.flow/edge branch-has-code-edits?
+  "True when `branch-db` contains code, doc, or schema edits relative to its merge-base with `main-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :boolean]
+   :cost/ticks 5000000}
+  [main-db branch-db]
+  (boolean
+   (when (and main-db branch-db (not (identical? main-db branch-db)))
+     (try
+       (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
+         (when (and mc bc (not= mc bc))
+           (let [base (or (d/merge-base branch-db mc bc) mc)]
+             (when (not= base bc)
+               (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+                          :seon.code.var/name :seon.code.ns/name :seon.code.doc/id
+                          :seon.code.file/path :seon.schema/key]
+                     attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
+                 (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
+       (catch Throwable _ false)))))
 
 (defn wrapup-grace-notify-op
   "Returns a `:turn-cap-wrapup` message op when a branch hits its turn limit with unmerged edits."
@@ -341,12 +347,11 @@
                           (conj [:periodic-review (long tool-streak)]))]
             (if (seq reasons)
               (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))
-                    spawn-op (cond-> {:op :spawn-agent :id rid :parent aid :target [:seon.agent/id aid]
-                                      :task :template/review-and-improve :auto-merge? true
-                                      :goal (str "Review session " aid " (triggered by " (pr-str reasons) "). Clean hunting/error evals and update :seon.agent/memory via @ctx on :seon.agent/target, fix any Seon root cause on your branch, then call (user/ready!) — do NOT unpause target manually.")}
-                               (:seon.agent/scope ma) (assoc :scope (:seon.agent/scope ma)))]
-                [{:op :transact :tx-data [{:seon.agent/id aid :seon.agent/paused? true}] :reason [:review-pause aid]}
-                 spawn-op])
+                  spawn-op {:op :spawn-agent :id rid :parent aid :target [:seon.agent/id aid]
+                            :task :template/review-and-improve :auto-merge? true
+                            :goal (str "Review session " aid " (triggered by " (pr-str reasons) "). NEVER implement target's task on your review branch. If target is healthy with no Seon root cause, leave an optional 1-line note on :seon.agent/target's :seon.agent/memory and call (user/ready!) immediately. Otherwise fix the Seon root cause on your branch, clean noisy/failed evals via @ctx on :seon.agent/target, and call (user/ready!) on YOUR session (do NOT unpause target manually).")}]
+              [{:op :transact :tx-data [{:seon.agent/id aid :seon.agent/paused? true}] :reason [:review-pause aid]}
+               spawn-op])
               []))))
 
       :else [])))

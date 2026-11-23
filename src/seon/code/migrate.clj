@@ -9,7 +9,8 @@
             [seon.code.parse :as parse]
             [seon.code.rewrite :as rw]
             [seon.health :as health]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.store :as store]))
 
 (defn- src-may-match? [^String s needles]
   (boolean (and s (some #(str/includes? s %) needles))))
@@ -390,6 +391,67 @@
         (-> (dissoc res :tx-data)
             (assoc :tx (if r (:max-tx (:db-after r)) (:max-tx @conn))))))))
 
+(defn revert-ns-tx
+  "Builds an atomic Datahike transaction reverting `nsym` on `cur-db` back to its state in `base-db`
+   (deleting the namespace if created on branch, or restoring its merge-base source & retracting branch-added vars)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:or :symbol :string]] :map]
+   :cost/ticks 15000000}
+  [cur-db base-db nsym]
+  (let [nsym (if (string? nsym) (symbol nsym) nsym)
+        base-forms (if base-db (code/ns-forms base-db nsym) [])
+        cur-forms (code/ns-forms cur-db nsym)]
+    (cond
+      (and (empty? base-forms) (empty? cur-forms))
+      {:ok? true :ns nsym :action :unchanged :tx-data [] :retracted-keys #{}}
+
+      (empty? base-forms)
+      (let [ns-exists? (boolean (first (d/datoms cur-db :avet :seon.code.ns/name nsym)))
+            ops (vec (concat (map #(vector :db/retractEntity [:seon.code.form/key (:seon.code.form/key %)]) cur-forms)
+                             (map #(vector :db/retractEntity [:seon.code.var/name (:seon.code.var/name %)]) (code/ns-vars cur-db nsym))
+                             (when ns-exists? [[:db/retractEntity [:seon.code.ns/name nsym]]])))]
+        {:ok? true :ns nsym :action :deleted :tx-data ops :retracted-keys #{(str nsym "#ns")}})
+
+      :else
+      (let [base-path (or (:seon.code.ns/path (d/pull base-db '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
+                          (parse/ns->default-path nsym))
+            base-src (or (code/render-path base-db base-path)
+                         (str (str/join "\n\n" (map :seon.code.form/src base-forms)) "\n"))
+            base-keys (into #{} (map :seon.code.form/key) base-forms)
+            base-vars (into #{} (map :seon.code.var/name) (code/ns-vars base-db nsym))
+            extra-forms (filterv #(not (contains? base-keys (:seon.code.form/key %))) cur-forms)
+            extra-vars (filterv #(not (contains? base-vars (:seon.code.var/name %))) (code/ns-vars cur-db nsym))
+            extra-ops (concat (map #(vector :db/retractEntity [:seon.code.form/key (:seon.code.form/key %)]) extra-forms)
+                              (map #(vector :db/retractEntity [:seon.code.var/name (:seon.code.var/name %)]) extra-vars))
+            import-ops (code/file-import-tx cur-db base-path base-src false)]
+        {:ok? true :ns nsym :action :restored :path base-path
+         :tx-data (vec (concat extra-ops import-ops))
+         :retracted-keys (into #{} (map :seon.code.form/key) extra-forms)}))))
+
+(defn ^:seon.flow/edge apply-revert-ns!
+  "Reverts `nsym` on branch `conn` back to its merge-base with `:main` and reloads/removes the live namespace."
+  {:seon.eval/budget-override {:ticks 500000000 :bytes 1073741824}
+   :malli/schema [:=> [:cat :seon.host/conn [:or :symbol :string]] :map]}
+  [conn nsym]
+  (let [nsym (if (string? nsym) (symbol nsym) nsym)
+        branch (get-in @conn [:config :branch] :main)]
+    (if (= branch :main)
+      {:ok? false :error :cannot-revert-on-main :ns nsym}
+      (let [base-db (or (try (store/merge-base-db conn :main branch) (catch Throwable _ nil))
+                        (try (store/head conn :main) (catch Throwable _ nil)))
+            res (revert-ns-tx @conn base-db nsym)]
+        (if (empty? (:tx-data res))
+          (dissoc res :tx-data :retracted-keys)
+          (let [r (d/transact conn {:tx-data (:tx-data res)})
+                db-after (:db-after r)
+                load-errs (if (= :deleted (:action res))
+                            (do (try (remove-ns nsym) (catch Throwable _ nil)) [])
+                            (let [upserts (code/ns-forms db-after nsym)]
+                              (if (seq upserts)
+                                (code/apply-overlay! db-after {:upserts upserts :retracted-keys (:retracted-keys res)} true)
+                                [])))]
+            (assoc (dissoc res :tx-data :retracted-keys)
+                   :ok? (empty? load-errs) :tx (:max-tx db-after) :load-errors load-errs)))))))
+
 (defn install-user-helpers!
   "Interns `user/{plan-rewrite,rewrite-graph!,rename-ns!,rename-schema!,migrate-data!,validate-migration}`
    with proper `:doc` and `:seon.eval/budget-override` so any Seon agent can refactor the graph safely."
@@ -444,4 +506,13 @@
                        (when-let [{:keys [conn]} (get-agent-ctx-fn)]
                          (validate-migration @conn opts))))
                     "Validates schema registry compilation, renderer var targets, and health after a graph migration."
+                    big-budget)
+    (intern-helper! u 'revert-ns!
+                    (fn [nsym]
+                      (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                        (let [res (apply-revert-ns! conn nsym)]
+                          (when (and (:ok? res) refresh-ctx-fn)
+                            (refresh-ctx-fn @conn nil))
+                          res)))
+                    "Reverts a branch-edited or branch-created namespace cleanly back to its merge-base with :main."
                     big-budget)))

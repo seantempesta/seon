@@ -48,6 +48,7 @@
 (def ^:private MDB_SAFENOSYNC 0x8000)
 
 (def default-config-values
+  "Default operational values for `:seon.config/root` (overridden by `resources/seon/config/default.edn`)."
   {:seon.config/eval-ticks               100000000
    :seon.config/eval-bytes               268435456
    :seon.config/gen-samples              100
@@ -74,7 +75,8 @@
    :seon.config/ai-reasoning-effort      :low
    :seon.config/max-tool-turns           32
    :seon.config/viewport-screenshot?     false
-   :seon.config/ns-outline-tokens        6000})
+   :seon.config/ns-outline-tokens        6000
+   :seon.config/eval-out-chars           10000})
 
 (defn read-aero-config-tx
   "Reads an Aero EDN config file once at bootstrap and returns the `:seon.config/root` entity map.

@@ -608,10 +608,11 @@
                             (when-let [base (d/merge-base branch-db mc bc)]
                               (if (= base bc)
                                 []
-                                (into [] (comp (filter #(and (:added %) (= :seon.code.form/hash (:a %))))
+                                (let [ha (into #{:seon.code.form/hash} (keep #(get-in branch-db [:ident-ref-map %])) [:seon.code.form/hash])]
+                                (into [] (comp (filter #(and (:added %) (contains? ha (:a %))))
                                                (map :e) (distinct)
                                                (filter #(first (d/datoms branch-db :eavt % :seon.code.form/hash))))
-                                      (d/changes branch-db base bc))))
+                                      (d/changes branch-db base bc)))))
                             (catch Throwable _ nil)))
                         (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
                                    (reduce #(assoc %1 (:e %2) [(:v %2) (long (:tx %2 0))]) {}

@@ -31,9 +31,10 @@
 ([opts c]
  (wire/format-eval-output
   (cond-> c
-    (:eval-db opts)     (assoc :db (:eval-db opts))
-    (:main-db opts)     (assoc :main-db (:main-db opts))
-    (:fallback-db opts) (assoc :fallback-db (:fallback-db opts))))))
+  (:eval-db opts)       (assoc :db (:eval-db opts))
+  (:main-db opts)       (assoc :main-db (:main-db opts))
+  (:fallback-db opts)   (assoc :fallback-db (:fallback-db opts))
+  (:out-max-chars opts) (assoc :out-max-chars (:out-max-chars opts))))))
 
 (defn turns->wire-messages
   {:malli/schema [:=> [:cat :map [:maybe [:sequential :map]]] [:sequential :map]], :cost/ticks 5000000}
@@ -177,7 +178,7 @@
             sid (if rev? (str id) (str "example/" (name id)))
             hdr (if rev?
                   (str "<session id=\"" sid "\" branch=\"" (or branch :main) "\" kind=\"review\" from=\"seon\">\n"
-                       "Live session under review (start to end). Inspect for hunting loops, errors, or Seon root causes; clean noisy/failed evals and update `:seon.agent/memory` via `(swap! ctx ...)` on `:seon.agent/target`, fix any Seon root cause on your branch, then call `(user/ready!)` (do NOT unpause target manually — merging your branch automatically syncs `:main` into target, delivers your summary, and restarts target cleanly).\n"
+                       "Live session under review (start to end). NEVER implement target's task on your review branch. Inspect for hunting loops, errors, or Seon root causes. If target is healthy with no Seon bug, leave an optional 1-line note on `:seon.agent/target`'s `:seon.agent/memory` and call `(user/ready!)` immediately (1-2 turns). Otherwise fix the Seon root cause on your branch, clean noisy/failed evals via `(swap! ctx ...)` on `:seon.agent/target`, then call `(user/ready!)` on YOUR session (never set `:ready?` or `:paused?` on target).\n"
                        "Goal: " (or goal "(none)"))
                   (str "<session id=\"" sid "\" kind=\"example\" from=\"seon\">\n"
                        "A finished session of another task, shown for how its work was done; not yours.\n"

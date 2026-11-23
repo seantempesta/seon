@@ -63,52 +63,6 @@
      :form-count (count rows)
      :forms rows}))
 
-(defn- extract-require-clauses [^String ns-src]
-  (let [form (try (read-string ns-src) (catch Throwable _ nil))]
-    (when (and (seq? form) (= 'ns (first form)))
-      (->> (drop 2 form)
-           (filter #(and (seq? %) (= :require (first %))))
-           (mapcat rest)
-           vec))))
-
-(defn- build-ns-header-src [to-ns doc requires]
-  (let [req-lines (when (seq requires)
-                    (str "\n  (:require "
-                         (str/join "\n            " (map pr-str requires))
-                         ")"))]
-    (str "(ns " to-ns
-         (when-not (str/blank? (str doc))
-           (str "\n  " (pr-str (str doc))))
-         req-lines
-         ")")))
-
-(defn- add-require-to-ns-src [& args] (apply move/add-require-to-ns-src args))
-
-(defn- callable-var-src? [^String src]
-  (boolean (re-find #"\^:seon/callable|\{\s*:seon/callable\s+true" (str src))))
-
-(defn- make-reexport-src
-  ([vsym alias-sym orig-src] (make-reexport-src vsym alias-sym orig-src false))
-  ([vsym alias-sym orig-src private?]
-   (let [vname (name vsym)
-         target (str (name alias-sym) "/" vname)
-         trimmed (str/triml (str orig-src))
-         is-fn? (boolean (re-find #"^\(\s*defn-?\b" trimmed))
-         meta-tags (str (when (and (not private?) (callable-var-src? orig-src)) "^:seon/callable ")
-                        (when (str/includes? (str orig-src) ":seon.flow/edge") "^:seon.flow/edge "))]
-     (cond
-       (and is-fn? private?) (str "(defn- " vname " [& args] (apply " target " args))")
-       is-fn?                (str "(defn " meta-tags vname " [& args] (apply " target " args))")
-       private?              (str "(def ^:private " vname " " target ")")
-       :else                 (str "(def " meta-tags vname " " target ")")))))
-
-(defn- promote-private-src [^String src]
-  (-> src
-      (str/replace-first #"^\(\s*defn-\s+" "(defn ")
-      (str/replace-first #"^\(\s*(def|defonce)\s+\^:private\s+" "($1 ")
-      (str/replace-first #"^\(\s*(def|defonce)\s+\^:seon\.flow/edge\s+\^:private\s+" "($1 ^:seon.flow/edge ")
-      (str/replace-first #"^\(\s*(def|defonce)\s+\^:private\s+\^:seon\.flow/edge\s+" "($1 ^:seon.flow/edge ")))
-
 (defn- expand-local-dep-closure [from found-by-key seed-keys]
   (let [ns-str (name from)
         ns-hdr-k (str ns-str "#ns")]
@@ -168,7 +122,7 @@
   [from to from-forms from-vars seed-keys found-by-key include-deps? re-export-public? existing-to-syms]
   (let [ns-str (name from)
         from-ns-hdr (first (filter #(= (str ns-str "#ns") (:seon.code.form/key %)) from-forms))
-        full-from-reqs (vec (or (extract-require-clauses (:seon.code.form/src from-ns-hdr "")) []))
+        full-from-reqs (vec (or (move/extract-require-clauses (:seon.code.form/src from-ns-hdr "")) []))
         from-env (rewrite/parse-require-env full-from-reqs)
         inherited-reqs (filterv #(not (and (vector? %) (= to (first %)))) full-from-reqs)
         stub-ns-by-sym
@@ -266,16 +220,16 @@
   [db from to alias-sym moved-forms remaining-forms remaining-var-syms all-stubbed
    re-exported-priv referred-syms from-ns-hdr found-by-key to-tx]
   (let [ns-str (name from)
-        updated-from-hdr (add-require-to-ns-src (:seon.code.form/src from-ns-hdr "")
-                                                to alias-sym referred-syms)
+        updated-from-hdr (move/add-require-to-ns-src (:seon.code.form/src from-ns-hdr "")
+                         to alias-sym referred-syms)
         reexport-forms-meta (keep (fn [f]
                                     (let [k (:seon.code.form/key f)
                                           vsym (var-key->sym from k)
                                           simple (when vsym (symbol (name vsym)))]
                                       (when (contains? all-stubbed simple)
                                         {:key k :order (:seon.code.form/order f) :lead (:seon.code.form/lead f "\n\n")
-                                         :src (make-reexport-src vsym alias-sym (:seon.code.form/src f)
-                                                                 (contains? re-exported-priv simple))})))
+                                         :src (move/make-reexport-src vsym alias-sym (:seon.code.form/src f)
+                                              (contains? re-exported-priv simple))})))
                                   moved-forms)
         delta-from-src (str updated-from-hdr "\n\n"
                             (str/join "\n\n" (map :src reexport-forms-meta)) "\n")
@@ -356,7 +310,7 @@
 (defn- build-to-ns
   "Builds the target child namespace's file source, path, import tx, and new form keys."
   {:cost/ticks 150}
-  [db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private? must-promote existing-to-forms]
+  [db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private? must-promote existing-to-forms extra-clauses]
   (let [raw-moved-srcs (mapv (fn [f]
                                (let [s (str (:seon.code.form/src f))
                                      simple (some-> (var-key->sym from (:seon.code.form/key f)) name symbol)
@@ -364,7 +318,7 @@
                                                 (false? keep-private?) true
                                                 (true? keep-private?) false
                                                 :else (contains? must-promote simple))]
-                                 (if promote? (promote-private-src s) s)))
+                                 (if promote? (move/promote-private-src s) s)))
                              moved-forms)
         {:keys [hdr-src to-reqs]}
         (cond
@@ -376,7 +330,7 @@
                 dstr (or doc
                          (when (seq existing-to-forms) (:seon.code.ns/doc (d/pull db '[:seon.code.ns/doc] [:seon.code.ns/name to])))
                          (str "Extracted child namespace of `" from "`."))]
-            {:hdr-src (build-ns-header-src to dstr rs) :to-reqs rs}))
+            {:hdr-src (move/build-ns-header-src to dstr rs extra-clauses) :to-reqs rs}))
         existing-to-body (if (seq existing-to-forms) (mapv :seon.code.form/src (rest existing-to-forms)) [])
         to-env (rewrite/parse-require-env to-reqs)
         moved-simple-syms (into #{} (keep #(some-> (var-key->sym from (:seon.code.form/key %)) name symbol)) moved-forms)
@@ -420,7 +374,7 @@
       :else
       (let [existing-to-forms (code/ns-forms db to)
             to-env0 (when-let [hdr (first existing-to-forms)]
-                      (rewrite/parse-require-env (vec (or (extract-require-clauses (:seon.code.form/src hdr "")) []))))
+                      (rewrite/parse-require-env (vec (or (move/extract-require-clauses (:seon.code.form/src hdr "")) []))))
             existing-to-syms (into (set (keys (:refer->ns to-env0)))
                                    (keep #(some-> (var-key->sym to (:seon.code.form/key %)) name symbol))
                                    existing-to-forms)
@@ -436,8 +390,20 @@
               eff-alias (or (when alias (symbol (name alias)))
                             (get (:ns->alias from-env) to)
                             alias-sym)
+              extra-clauses (when (empty? existing-to-forms) (move/extract-ns-extra-clauses (:seon.code.form/src from-ns-hdr "")))
+              must-promote (into re-exported-priv referred-syms)
+              promoted-privs (->> moved-forms
+                                  (keep (fn [f]
+                                          (let [s (str (:seon.code.form/src f))
+                                                simple (some-> (var-key->sym from (:seon.code.form/key f)) name symbol)
+                                                priv? (boolean (re-find #"^\(\s*(?:defn-\s+|(?:def|defonce)\s+(?:\^:seon\.flow/edge\s+)?\^:private\s+)" (str/triml s)))
+                                                prom? (cond (false? keep-private?) true
+                                                            (true? keep-private?) false
+                                                            :else (contains? must-promote simple))]
+                                            (when (and priv? prom? simple) simple))))
+                                  sort vec)
               {:keys [to-file-src to-path to-tx newly-added-to-keys]}
-              (build-to-ns db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private? (into re-exported-priv referred-syms) existing-to-forms)
+              (build-to-ns db from to moved-forms requires doc from-env inherited-reqs stub-refers-by-ns keep-private? must-promote existing-to-forms extra-clauses)
               {:keys [from-path updated-from-forms updated-from-vars retract-ops stale-from-deps
                       stale-from-refs from-ns-ent rem-chars]}
               (build-from-ns db from to eff-alias moved-forms remaining-forms remaining-var-syms
@@ -449,6 +415,10 @@
            :alias eff-alias
            :moved (mapv #(symbol (name (var-key->sym from (:seon.code.form/key %)))) moved-forms)
            :re-exported (vec (sort all-stubbed))
+           :promoted-privates promoted-privs
+           :contract-note (when (seq promoted-privs)
+                            (str (count promoted-privs) " private defn- promoted to public in " to
+                                 " — each needs :malli/schema (or move public callers together so helpers stay private)."))
            :referred (vec (sort referred-syms))
            :auto-referred-stubs stub-refers-by-ns
            :from-tokens (quot rem-chars 4)

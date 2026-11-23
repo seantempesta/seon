@@ -475,8 +475,9 @@
                      (and
                       [$main ?e :seon.error/agent-ref ?t]
                       [$main ?e :seon.error/status :open ?tx])
-                     (and [$main ?t :seon.agent/scope ?sc] [$branch ?e :seon.code.ns/name ?sc ?tx])
-                     [$branch ?e :seon.code.doc/path "docs/rules-of-thumb.md" ?tx])],
+                     (and
+                      [$branch ?e :seon.code.doc/path "docs/rules-of-thumb.md" ?tx]
+                      [$branch ?e :seon.code.doc/order 0]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?e,
@@ -489,9 +490,6 @@
                              :seon.error/kind
                              :seon.error/message
                              :seon.error/var
-                             :seon.code.ns/name
-                             :seon.code.ns/doc
-                             :seon.code.ns/path
                              :seon.code.doc/id
                              :seon.code.doc/path
                              :seon.code.doc/heading
@@ -499,7 +497,7 @@
                       :zone :static-prefix,
                       :priority 94,
                       :tx ?tx}],
-  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, surface that target's task(s), open errors, scope namespace, and docs/rules-of-thumb.md.",
+  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, surface that target's task(s), open errors, and the docs/rules-of-thumb.md overview (order 0) without inheriting target's :scope ns.",
   :seon.rule/stratum 18,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/review-target}

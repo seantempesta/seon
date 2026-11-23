@@ -18,7 +18,10 @@
             [seon.render.status :as rstatus]
             [seon.render.surface.session :as rsession]
             [seon.code :as code]
-            [seon.merge :as merge]))
+            [seon.merge :as merge]
+            [seon.model.wire :as mwire]
+            [seon.code.refactor :as refactor]
+            [seon.code.migrate :as migrate]))
 
 (deftest ^{:cost/ticks 120000000} pure-two-index-ctx-swap-and-custom-data-test
   (testing "Pure 2-index @ctx attaches evals via :seon.agent.eval/_agent-ref, retracts via swap!, and generalizes to arbitrary custom schemas"
@@ -209,7 +212,7 @@
           ;; 1. Trigger-tick race eliminated: needs-turn? is FALSE on the tick review-ops triggers!
           (let [st0 (rec/derive-agent-status @conn (:store @conn) {:w/p2 {:pid 101 :busy? false}} #{} #{} #{} #{} :w/p2)]
             (is (= 2 (count (:review-ops st0))))
-            (is (= 'demo.p2-target (:scope (second (:review-ops st0)))))
+            (is (nil? (:scope (second (:review-ops st0)))) "Reviewer must not inherit worker :scope")
             (is (false? (:needs-turn? st0)) "Must not run worker turn on the same tick review triggers"))
           ;; 2. Pause worker + spawn reviewer + add pending incoming ask! call -> pause releases OS proc AND does NOT kill parent call!
           (let [we-main (:e (first (d/datoms @conn :avet :seon.agent/id :w/p2)))
@@ -241,8 +244,8 @@
                       all-txt (str/join "\n" (map :content (:messages rwire)))]
                   (is (str/includes? sys-txt "kind=\"review\""))
                   (is (some? rev-txt))
-                  (is (str/includes? rev-txt "do NOT unpause target manually"))
-                  (is (str/includes? all-txt "Fix the Data Model First") "Review rule must surface full docs/rules-of-thumb.md sections"))
+                  (is (str/includes? rev-txt "NEVER implement target's task"))
+                  (is (str/includes? all-txt "Rules of Thumb") "Review rule must surface docs/rules-of-thumb.md overview"))
                 ;; Reviewer cleans 100% of :w/p2's evals and writes memory, leaving :paused? true
                 (let [rca (ctx/ctx-atom rconn [:seon.agent/id :review/p2])
                       old-eids (set (map :db/id (get-in @rca [:seon.agent/target :seon.agent.eval/_agent-ref])))]
@@ -314,3 +317,53 @@
                           (finally (d/release wconn2))))))) 
                 (finally (d/release rconn))))) 
           (finally (d/release wconn)))))))
+
+(deftest ^{:cost/ticks 150000000} cycle3-review-polish-scope-edited-eids-out-cap-move-and-revert-test
+  (testing "Reviewer omits worker :scope, edited-form-eids matches numeric :ident-ref-map, :out-max-chars bounds stdout independently, move-vars-tx preserves :import & reports :promoted-privates, and apply-revert-ns! restores/deletes cleanly"
+    ;; 1. format-eval-output honors :out-max-chars separately from :max-chars
+    (let [big-out (apply str (repeat 2000 "x"))
+          s (mwire/format-eval-output {:handle 'result/e9 :ok? true :out big-out :value ":ok" :max-chars 24000 :out-max-chars 512})]
+      (is (str/includes? s "chars omitted"))
+      (is (str/includes? s "{:out? true}"))
+      (is (< (count s) 1200)))
+    (with-test-store [{:keys [conn]}]
+      ;; Seed a real namespace with (:import [java.util.regex Pattern]) and a private helper
+      (let [src "(ns demo.rev.orig\n  \"Orig.\"\n  (:require [clojure.string :as str])\n  (:import [java.util.regex Pattern]))\n\n(defn- helper [x] (Pattern/quote (str x)))\n\n(defn pub [x] (helper x))\n"]
+        (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/rev/orig.clj" src false)})
+        (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/review-every-turns 2}
+                                    {:db/id "w1" :seon.agent/id :w/scoped :seon.agent/branch :branch/w-scoped
+                                     :seon.agent/role :worker :seon.agent/scope 'demo.rev.orig
+                                     :seon.agent/goal "Split orig" :seon.agent/paused? false}]})
+        (store/branch! conn :main :branch/w-scoped)
+        (let [wconn (store/connect (:config @conn) :branch/w-scoped)]
+          (try
+            ;; 2. compute-review-ops must NOT copy worker :scope onto reviewer!
+            (let [ma (d/pull @conn '[*] [:seon.agent/id :w/scoped])
+                  ops (tgate/compute-review-ops @conn @wconn ma
+                        {:agent-eid (:db/id ma) :active? true :raw-ready? false :waiting? false :merged? false :tool-streak 2 :head-tx (:max-tx @wconn)})
+                  spawn-op (second ops)]
+              (is (= :spawn-agent (:op spawn-op)))
+              (is (nil? (:scope spawn-op)) "Reviewer must not inherit worker :scope")
+              (is (str/includes? (:goal spawn-op) "NEVER implement target's task")))
+            ;; 3. move-vars-tx preserves (:import ...) on new child ns & reports :promoted-privates in dry-run
+            (let [plan (refactor/move-vars-tx @wconn {:from 'demo.rev.orig :to 'demo.rev.child :vars '[helper]})]
+              (is (:ok? plan))
+              (is (= '[helper] (:promoted-privates plan)))
+              (is (string? (:contract-note plan)))
+              (let [hdr-op (some #(when (and (map? %) (= "demo.rev.child#ns" (:seon.code.form/key %))) %) (:tx-data plan))]
+                (is (str/includes? (:seon.code.form/src hdr-op) "(:import [java.util.regex Pattern])"))))
+            ;; 4. Apply move-vars on branch -> edited-form-eids MUST detect edited forms (even with numeric :ident-ref-map!)
+            (let [res (refactor/apply-move-vars! wconn {:from 'demo.rev.orig :to 'demo.rev.child :vars '[helper] :reload? false})]
+              (is (:ok? res))
+              (is (seq (rules/edited-form-eids @conn @wconn)) "edited-form-eids must find branch code edits via :ident-ref-map")
+              (is (true? (tgate/branch-has-code-edits? @conn @wconn)))
+              ;; 5. apply-revert-ns! deletes branch-created child ns AND restores modified orig ns cleanly!
+              (let [r-del (migrate/apply-revert-ns! wconn 'demo.rev.child)
+                    r-res (migrate/apply-revert-ns! wconn 'demo.rev.orig)]
+                (is (:ok? r-del))
+                (is (= :deleted (:action r-del)))
+                (is (empty? (code/ns-forms @wconn 'demo.rev.child)))
+                (is (:ok? r-res))
+                (is (= :restored (:action r-res)))
+                (is (str/includes? (or (code/render-path @wconn "src/demo/rev/orig.clj") "") "(defn- helper [x]"))))
+            (finally (d/release wconn))))))))

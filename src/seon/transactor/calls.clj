@@ -6,7 +6,8 @@
             [datahike.api :as d]
             [seon.schema :as schema]
             [seon.store :as store]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.task.gate :as gate]))
 
 (defn pull-call
   {:doc "Pulls `:seon.agent.call/*` fields by `call-id`.", :malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :uuid]] [:maybe :map]], :cost/ticks 500000}
@@ -24,6 +25,7 @@
 (defn call-cycle-chain
   "Checks in O(|pending-calls|) whether adding edge `caller -> callee` forms a deadlock cycle.
    Returns the cycle path `[callee ... caller callee]` if cyclic, else nil."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword :keyword] [:maybe [:vector :keyword]]], :cost/ticks 5000000}
   [db caller callee]
   (cond
     (= caller callee) [caller callee]
@@ -51,6 +53,7 @@
 
 (defn pending-descendant-calls
   "Returns `[root-id ...]` of `root-call-id` plus all `:pending` descendant calls via `:parent-call`."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:vector :any]], :cost/ticks 5000000}
   [db root-call-id]
   (loop [queue [root-call-id]
          seen #{root-call-id}
@@ -71,14 +74,18 @@
                (into seen fresh)
                (cond-> acc (= :pending (:seon.agent.call/status c)) (conj cur)))))))
 
-(defn infer-ns-scope [db callee explicit-scope]
+(defn infer-ns-scope
+  {:malli/schema [:=> [:cat :seon.host/db :any :any] [:maybe :symbol]], :cost/ticks 500000}
+  [db callee explicit-scope]
   (or explicit-scope
       (when (and (keyword? callee) (= "ns" (namespace callee)))
         (let [cand (symbol (name callee))]
           (when (first (d/datoms db :avet :seon.code.ns/name cand))
             cand)))))
 
-(defn format-call-request-body [call-id caller prompt result-schema]
+(defn format-call-request-body
+  {:malli/schema [:=> [:cat :any :any :any :any] :string], :cost/ticks 200000, :cost/bytes 65536}
+  [call-id caller prompt result-schema]
   (str "Structured call from " caller " (call-id: " (pr-str call-id) ")\n"
        (when result-schema
          (str "Required result schema: " (pr-str result-schema) "\n"))
@@ -88,7 +95,9 @@
        "or if out of scope / blocked:\n"
        "  (user/fail! " (pr-str call-id) " {:class :out-of-scope :message \"...\"})"))
 
-(defn call-summary-map [c]
+(defn call-summary-map
+  {:malli/schema [:=> [:cat [:maybe :map]] :map], :cost/ticks 50000, :cost/bytes 16384}
+  [c]
   (cond-> {:call-id (:seon.agent.call/id c)
            :callee (:seon.agent.call/callee c)
            :status (:seon.agent.call/status c)
@@ -96,7 +105,9 @@
     (contains? c :seon.agent.call/result) (assoc :result (:seon.agent.call/result c))
     (contains? c :seon.agent.call/error)  (assoc :error (:seon.agent.call/error c))))
 
-(defn format-call-results-body [calls]
+(defn format-call-results-body
+  {:malli/schema [:=> [:cat [:maybe [:sequential [:maybe :map]]]] :string], :cost/ticks 500000, :cost/bytes 131072}
+  [calls]
   (let [by-id (into {} (map (fn [c] [(:seon.agent.call/id c) (call-summary-map c)])) calls)]
     (str "Resolved call results (" (count calls) "):\n"
          (pr-str by-id))))
@@ -189,25 +200,6 @@
             (when (first (d/datoms db :avet :seon.task/id cand))
               cand))))))
 
-(defn- ^:seon.flow/edge branch-has-code-edits? [conn branch]
-  (if (or (nil? branch) (= branch :main))
-    false
-    (try
-      (let [bdb (store/head conn branch)
-            base-cid (when bdb (d/merge-base conn :main branch))]
-        (if-not (and bdb base-cid)
-          false
-          (let [bcid (d/commit-id bdb)]
-            (if (= base-cid bcid)
-              false
-              (let [ds (d/changes conn base-cid bcid)
-                    code-kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
-                              :seon.code.var/name :seon.code.ns/name :seon.code.doc/id
-                              :seon.code.file/path :seon.schema/key]
-                    code-attrs (into (set code-kws) (keep #(get-in bdb [:ident-ref-map %])) code-kws)]
-                (boolean (some #(contains? code-attrs (:a %)) ds)))))))
-      (catch Throwable _ false))))
-
 (defn- summarize-call-result [result]
   (let [raw (cond
               (string? result) result
@@ -227,7 +219,7 @@
                  (not (:seon.task/done? t))
                  (empty? (:seon.task/tests t))
                  (empty? (:seon.task/test-vars t))
-                 (not (branch-has-code-edits? conn callee-branch)))
+                 (not (and callee-branch (not= callee-branch :main) (gate/branch-has-code-edits? (store/head conn :main) (try (store/head conn callee-branch) (catch Throwable _ nil))))))
         (let [sum (summarize-call-result result)]
           (cond-> {:seon.task/id tid :seon.task/done? true}
             (and (contains? (:schema db0) :seon.task/summary) (not (str/blank? sum)))
