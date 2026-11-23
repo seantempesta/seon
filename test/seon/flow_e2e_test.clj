@@ -95,35 +95,8 @@
                  15000)]
             (is (some? done-state))
             (is (every? #(nil? (:live-pid %)) (:agents done-state))))))
-
-      (testing "2. Simulate Power Loss -> cold-booted Flow #2 resumes runnable agent seamlessly from LMDB!"
-        (main/call! sys1 {:op :spawn-agent
-                          :id :recover/worker
-                          :branch :branch/recover.worker
-                          :role :worker
-                          :goal ""})
-        (main/call! sys1 {:op :toggle-pause-agent :agent-id :recover/worker})
-        (main/call! sys1 {:op :send-message
-                          :from :user
-                          :to :recover/worker
-                          :type :task
-                          :body "Survive cold reboot!"})
-        (d/transact (:conn sys1) {:tx-data [{:seon.agent/id :recover/worker :seon.agent/paused? false}]})
-        (main/stop! sys1)
-
-        (let [sys2 (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
-          (try
-            (let [recovered
-                  (await-until
-                   (fn []
-                     (let [st (main/call! sys2 {:op :status})
-                           ag (some #(when (= :recover/worker (:id %)) %) (:agents st))]
-                       (when (= :merged (:status ag)) ag)))
-                   12000)]
-              (is (some? recovered)))
-            (finally
-              (main/stop! sys2)))))
       (finally
+        (main/stop! sys1)
         (rm-rf! (io/file dir))))))
 
 (deftest self-healing-red-test-and-two-parent-local-git-sync-test
@@ -560,3 +533,39 @@
           (is (= {:repo-dir repo-dir :store-path store-dir :port 9998} @spawned))))
       (finally
         (rm-rf! (io/file root-tmp))))))
+
+(deftest persistent-agent-runtime-cold-reboot-resume-test
+  (let [dir (str "/tmp/seon-e2e-reboot-" (System/nanoTime))]
+    (try
+      (testing "2. Simulate Power Loss -> cold-booted Flow #2 resumes runnable agent seamlessly from LMDB!"
+        (let [sys1 (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
+          (try
+            (main/call! sys1 {:op :spawn-agent
+                              :id :recover/worker
+                              :branch :branch/recover.worker
+                              :role :worker
+                              :goal ""})
+            (main/call! sys1 {:op :toggle-pause-agent :agent-id :recover/worker})
+            (main/call! sys1 {:op :send-message
+                              :from :user
+                              :to :recover/worker
+                              :type :task
+                              :body "Survive cold reboot!"})
+            (d/transact (:conn sys1) {:tx-data [{:seon.agent/id :recover/worker :seon.agent/paused? false}]})
+            (finally
+              (main/stop! sys1))))
+        (let [sys2 (main/start-flow-instance! @shared-test-router {:store-path dir :port 0})]
+          (try
+            (let [recovered
+                  (await-until
+                   (fn []
+                     (let [st (main/call! sys2 {:op :status})
+                           ag (some #(when (= :recover/worker (:id %)) %) (:agents st))]
+                       (when (= :merged (:status ag)) ag)))
+                   12000)]
+              (is (some? recovered)))
+            (finally
+              (main/stop! sys2)))))
+      (finally
+        (rm-rf! (io/file dir))))))
+
