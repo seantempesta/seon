@@ -12,7 +12,8 @@
       - Quoted call form:       `{:on-click '(seon.web/select-tab! :health)}`
    4. `step-walk` tracks `datahike.reads/reads-index` per mounted unit: untouched panels do ZERO
       work on commits/streams, emitting targeted Datastar `datastar-patch-elements` fragments in < 0.2 ms."
-  (:require [clojure.repl :as repl]
+  (:require [clojure.data.json :as json]
+            [clojure.repl :as repl]
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.reads :as reads]
@@ -82,7 +83,7 @@
   [handler-val form? hkey]
   (let [post-expr (fn [url]
                     (if form?
-                      (str "evt.preventDefault(); const _f = evt.currentTarget || evt.target; @post('" url "', {contentType: 'form'}); setTimeout(() => _f && _f.reset && _f.reset(), 0)")
+                      (str "evt.preventDefault(); const _f = evt.currentTarget || evt.target; Promise.resolve(@post('" url "', {contentType: 'form'})).finally(() => _f && _f.reset && _f.reset())")
                       (str "@post('" url "')")))]
     (cond
       ;; 1. Quoted call form `'(ns/fn arg1 ...)`
@@ -455,15 +456,33 @@
  (rctx/discover-tiles main-db branch-db agent-ent evals health-fn opts)))
 
 (defn datastar-patch-event
-  ([html] (datastar-patch-event html nil nil))
-  ([html selector mode]
+  "Formats a Datastar v1 `datastar-patch-elements` SSE event with optional selector, mode, and `useViewTransition`."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :string]
+                  [:=> [:cat :any [:maybe :string] [:maybe :string]] :string]
+                  [:=> [:cat :any [:maybe :string] [:maybe :string] :boolean] :string]]
+   :cost/ticks 5000000
+   :cost/bytes 16777216}
+  ([html] (datastar-patch-event html nil nil false))
+  ([html selector mode] (datastar-patch-event html selector mode false))
+  ([html selector mode use-vt?]
    (let [s (if (string? html) html (hiccup->html html))]
      (str "event: datastar-patch-elements\n"
           (when selector (str "data: selector " selector "\n"))
           (when mode (str "data: mode " mode "\n"))
+          (when use-vt? "data: useViewTransition true\n")
           (apply str (for [line (str/split-lines s) :when (not (str/blank? line))]
                        (str "data: elements " line "\n")))
           "\n"))))
+
+(defn datastar-patch-signals
+  "Formats a Datastar v1 `datastar-patch-signals` SSE event from signal map `signals-map`."
+  {:malli/schema [:=> [:cat [:map-of [:or :keyword :string] [:or :string :int :boolean :nil]]] :string]
+   :cost/ticks 500000
+   :cost/bytes 1048576}
+  [signals-map]
+  (str "event: datastar-patch-signals\n"
+       "data: signals " (json/write-str (or signals-map {})) "\n\n"))
 
 (defn empty-walk
   "Initial empty incremental render walk value (held inside `:web` Flow proc state — zero atoms!)."
@@ -474,11 +493,18 @@
   "Advances kept `walk` across `unit-specs` (`[{:id \"...\" :comp f :args [...]}]`) given `db` and
    `tx-datoms` (nil forces check of all units; vector of datoms skips every unit whose
    `datahike.reads/reads-index` wasn't touched AND whose `[comp args]` didn't change!).
+   Optional `opts` supports `:use-view-transition?` and `:vt-unit-ids`.
    Returns `{:walk walk' :patches [sse-str ...] :rerendered n :skipped m}`."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe [:sequential :any]] [:vector :map]] :map]}
-  [walk db tx-datoms unit-specs]
-  (let [prev-units (:units walk)
-        order (mapv :id unit-specs)]
+  {:malli/schema [:function
+                  [:=> [:cat :map :seon.host/db [:maybe [:sequential :any]] [:vector :map]] :map]
+                  [:=> [:cat :map :seon.host/db [:maybe [:sequential :any]] [:vector :map] [:maybe :map]] :map]]}
+  ([walk db tx-datoms unit-specs]
+   (step-walk walk db tx-datoms unit-specs nil))
+  ([walk db tx-datoms unit-specs opts]
+   (let [prev-units (:units walk)
+         order (mapv :id unit-specs)
+         vt-on? (boolean (:use-view-transition? opts))
+         vt-ids (:vt-unit-ids opts)]
     (reduce
      (fn [acc {:keys [id comp args]}]
        (let [prev (get prev-units id)
@@ -512,19 +538,20 @@
                  entry {:id id :comp comp-fn :args args :html html
                         :reads-idx ridx :reads-sample reads-sample :reads-count reads-count
                         :handlers handlers}
-                 changed-bytes? (not= html (:html prev))]
+                 changed-bytes? (not= html (:html prev))
+                 unit-vt? (boolean (and vt-on? (or (nil? vt-ids) (contains? vt-ids id))))]
              (cond-> (-> acc
                          (assoc-in [:walk :units id] entry)
                          (update-in [:walk :handlers] merge handlers)
                          (update :rerendered inc))
                error (update :render-errors conj error)
-               changed-bytes? (update :patches conj (datastar-patch-event html)))))))
+               changed-bytes? (update :patches conj (datastar-patch-event html nil nil unit-vt?)))))))
      {:walk {:units {} :handlers {} :order order}
       :patches []
       :render-errors []
       :rerendered 0
       :skipped 0}
-     unit-specs)))
+     unit-specs))))
 
 (defn compose-keyframe
   "Composes the full cached HTML of all mounted units in `walk` without re-running any component!"
