@@ -24,7 +24,8 @@
             [malli.core :as m]
             [seon.schema :as schema]
             [datahike.index.interface :as di]
-            [datahike.reads :as reads]))
+            [datahike.reads :as reads]
+            [jolt.scheme :as scm]))
 
 (def checkout-root schema/checkout-root)
 
@@ -494,3 +495,205 @@
        (when (or created? changed?)
          (sync! cfg))
        {:cfg cfg :conn main-conn :created? created?}))))
+
+(defonce ^:private ^:seon.flow/edge lmdb-tx-state (atom {:active-writes 0 :aborted-writes 0}))
+
+(defn ^:seon.flow/edge active-lmdb-write-txns
+  "Returns the count of currently open LMDB write transactions on this process."
+  {:malli/schema [:=> [:cat] :int]
+   :cost/ticks 50000}
+  []
+  (long (:active-writes @lmdb-tx-state 0)))
+
+(defn ^:seon.flow/edge aborted-lmdb-write-txns
+  "Returns the cumulative count of LMDB write transactions aborted via unwind/error in this process."
+  {:malli/schema [:=> [:cat] :int]
+   :cost/ticks 50000}
+  []
+  (long (:aborted-writes @lmdb-tx-state 0)))
+
+(def ^:private ^:seon.flow/edge with-masked-lmdb-txn-fn
+  (scm/eval-string
+   "(lambda (begin-fn body-fn commit-fn check-rc-fn abort-fn)
+      (let ((lv (jolt-locks-held))
+            (txn #f)
+            (finished #f))
+        (dynamic-wind
+          jolt-finally-in
+          (lambda ()
+            (jolt-locks-enter!)
+            (let ((t (begin-fn)))
+              (set! txn t)
+              (jolt-locks-exit!))
+            (let ((r (body-fn txn)))
+              (if commit-fn
+                  (let ((rc #f))
+                    (jolt-locks-enter!)
+                    (set! finished #t)
+                    (set! rc (commit-fn txn))
+                    (jolt-locks-exit!)
+                    (when check-rc-fn (check-rc-fn rc))
+                    r)
+                  r)))
+          (lambda ()
+            (when (fx>? (jolt-locks-held) lv)
+              (jolt-locks-exit!))
+            (when (and txn (not finished))
+              (jolt-locks-enter!)
+              (set! finished #t)
+              (dynamic-wind
+                jolt-finally-in
+                (lambda () (abort-fn txn))
+                (lambda ()
+                  (when (fx>? (jolt-locks-held) lv)
+                    (jolt-locks-exit!))))))))) "))
+
+(defn ^:seon.flow/edge install-interrupt-safe-lmdb!
+  "Idempotently wraps `konserve.jolt.lmdb-ffi/{transact,write-txn,read-txn}` with masked-edge
+   `dynamic-wind` unwind abort so a `jolt.host/run-interruptible` `call/cc` escape can NEVER leak
+   an open LMDB write transaction or self-deadlock on `lock.mdb`."
+  {:malli/schema [:=> [:cat] :boolean]
+   :cost/ticks 500000}
+  []
+  (let [v-tr (find-var (quote konserve.jolt.lmdb-ffi/transact))
+        v-wt (find-var (quote konserve.jolt.lmdb-ffi/write-txn))
+        v-rt (find-var (quote konserve.jolt.lmdb-ffi/read-txn))
+        v-bg (find-var (quote konserve.jolt.lmdb-ffi/begin))
+        v-le (find-var (quote konserve.jolt.lmdb-ffi/live-env))
+        v-ck (find-var (quote konserve.jolt.lmdb-ffi/check))
+        v-cm (find-var (quote konserve.jolt.lmdb-ffi/mdb-txn-commit))
+        v-ab (find-var (quote konserve.jolt.lmdb-ffi/mdb-txn-abort))]
+    (if (and v-tr v-wt v-rt v-bg v-le v-ck v-cm v-ab)
+      (do
+        (when-not (:seon.store/interrupt-safe? (meta v-tr))
+          (let [begin-f @v-bg
+                live-f @v-le
+                check-f @v-ck
+                commit-f @v-cm
+                abort-f @v-ab
+                rd-flags lmdb-ffi/MDB_RDONLY
+                run-write!
+                (fn [db body-f]
+                  (let [env (live-f db)]
+                    (with-masked-lmdb-txn-fn
+                      (fn []
+                        (let [t (begin-f env 0)]
+                          (swap! lmdb-tx-state update :active-writes inc)
+                          t))
+                      body-f
+                      (fn [t]
+                        (swap! lmdb-tx-state update :active-writes #(max 0 (dec %)))
+                        (commit-f t))
+                      (fn [rc] (check-f "txn_commit" rc))
+                      (fn [t]
+                        (try
+                          (abort-f t)
+                          (finally
+                            (swap! lmdb-tx-state
+                                   (fn [s]
+                                     (-> s
+                                         (update :active-writes #(max 0 (dec %)))
+                                         (update :aborted-writes inc))))))))))
+                run-read!
+                (fn [db body-f]
+                  (let [env (live-f db)]
+                    (with-masked-lmdb-txn-fn
+                      (fn [] (begin-f env rd-flags))
+                      body-f
+                      false
+                      false
+                      (fn [t] (abort-f t)))))]
+            (alter-var-root v-tr
+              (constantly
+                (fn [db f]
+                  (if lmdb-ffi/*txn*
+                    (f)
+                    (run-write! db (fn [txn] (binding [lmdb-ffi/*txn* txn] (f))))))))
+            (alter-meta! v-tr assoc :seon.store/interrupt-safe? true)
+            (alter-var-root v-wt
+              (constantly
+                (fn [db f]
+                  (if-some [t lmdb-ffi/*txn*]
+                    (f t)
+                    (run-write! db f)))))
+            (alter-meta! v-wt assoc :seon.store/interrupt-safe? true)
+            (alter-var-root v-rt
+              (constantly
+                (fn [db f]
+                  (if-some [t lmdb-ffi/*txn*]
+                    (f t)
+                    (run-read! db f)))))
+            (alter-meta! v-rt assoc :seon.store/interrupt-safe? true)))
+        true)
+      false)))
+
+(defn- strip-schema-doc [x]
+  (cond
+    (map? x)
+    (let [m (dissoc x :seon.schema/doc)]
+      (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} m))
+    (vector? x)
+    (let [v (mapv strip-schema-doc x)]
+      (if (and (>= (count v) 2) (map? (nth v 1)) (empty? (nth v 1)))
+        (into [(nth v 0)] (subvec v 2))
+        v))
+    :else x))
+
+(defonce ^:private ^:seon.flow/edge stripped-base-cache (atom {:forms nil :stripped nil}))
+
+(defonce ^:private ^:seon.flow/edge fast-reg-cache (cw/lru-cache-factory {} :threshold 32))
+
+(defn fast-registry-for-db
+  "Fast DB schema registry lookup: reuses COW-shared `@schema/base-registry` whenever `db` schema
+   forms match disk schemas up to cosmetic `:seon.schema/doc` metadata (avoiding a 21 MB cold recompile
+   per worker), falling back to `schema/registry-for-db` whenever a branch modifies or adds schemas."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :map]
+   :cost/ticks 15000000}
+  [db]
+  (if (nil? db)
+    @schema/base-registry
+    (let [compute
+          (fn []
+            (let [base @schema/base-registry
+                  bforms (:forms base)
+                  db-forms (schema/db-schema-forms db)]
+              (if (empty? db-forms)
+                base
+                (let [cur @stripped-base-cache
+                      stripped-base (if (identical? (:forms cur) bforms)
+                                      (:stripped cur)
+                                      (let [s (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} bforms)]
+                                        (reset! stripped-base-cache {:forms bforms :stripped s})
+                                        s))
+                      matches-base? (reduce-kv
+                                     (fn [_ k v]
+                                       (let [bv (get stripped-base k ::missing)]
+                                         (if (or (identical? bv ::missing)
+                                                 (not= (if (identical? v bv) v (strip-schema-doc v)) bv))
+                                           (reduced false)
+                                           true)))
+                                     true
+                                     db-forms)]
+                  (if matches-base?
+                    base
+                    (schema/registry-for-db db))))))
+          ck (when (instance? datahike.db.DB db)
+               [(get-in db [:config :store :id])
+                (get-in db [:config :branch])
+                (:max-tx db)
+                (count (:schema db))
+                (if schema/*base-forms-override* (System/identityHashCode schema/*base-forms-override*) 0)])]
+      (if-not ck
+        (compute)
+        (do
+          (when-not (satisfies? cache/CacheProtocol @fast-reg-cache)
+            (reset! fast-reg-cache (cache/lru-cache-factory {} :threshold 32)))
+          (let [entry (cw/lookup-or-miss
+                       fast-reg-cache ck
+                       (fn [_]
+                         (let [[v rs] (reads/with-reads compute)]
+                           {:val v :reads rs})))]
+            (when-let [outer di/*reads*]
+              (when (seq (:reads entry))
+                (swap! outer into (:reads entry))))
+            (:val entry)))))))
