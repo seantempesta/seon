@@ -153,6 +153,7 @@
   :seon.task/id :seon.wave-e1/health-oom-and-cleanup,
   :seon.task/plan "",
   :seon.task/scope seon.health,
+  :seon.task/summary "Removed dead duplicate `(if (= scope 'seon) ...)` branch inside seon.health/fast-scoped-alerts `edit-a` (the inner then-branch was unreachable when scope≠'seon) — behavior-preserving CST edit, auto-proofs 7/7, health-perf + failing-tests tests green. Diagnosed allocation bloat: on the live main DB, cold seon.health/report allocates 216–268 MB (>256 MB eval cap) — dominated by bulk d/datoms scans (var-snapshot ~91 MB, refs scan ~35 MB at ~1.6 KB/datom, static-efficiency ~88 MB); d/q is 2x worse than d/datoms here, so the lever is fewer scans + shared per-DB caches, not a query rewrite. Noted unmerged-branch leakage: failing-tests is intentionally global (protected by core-test), while live-problems-for-scope surfaces every branch's :failing-test to a specialist's wire — candidate guard is branch-matching only :failing-test class. Remaining allocation/leakage work deferred (ran out of turn budget); no test regressions introduced.",
   :seon.task/title "Fix seon.health allocation bloat, unmerged-branch failure leakage, and dead code"}
  {:seon.task/done? false,
   :seon.task/id :seon.wave-e1/store-cache-keys,
