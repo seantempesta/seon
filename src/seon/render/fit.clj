@@ -435,20 +435,44 @@
         (->> (concat (when (qualified-keyword? meta-sk) [meta-sk]) facets)
              (filter qualified-keyword?) distinct vec)))))
 
-(defn- normalize-entity-for-malli [db ent]
-  (let [dh (db-schema db)]
-    (if-not (and db (map? ent) (seq dh))
-      ent
-      (into {} (map (fn [[k v]]
-                      [k (if (and (= :db.cardinality/many (get-in dh [k :db/cardinality])) (sequential? v))
-                           (set v) v)]))
-            ent))))
+(defn- set-schema-form? [f]
+  (and (vector? f)
+       (or (= :set (first f))
+           (and (= :and (first f)) (some set-schema-form? (rest f))))))
 
-(defn- invoke-discovered-renderers [db reg-info item ent-data sks extra-ctx fallback-map]
-  (let [disc (discover-renderers db sks)
-        rsyms (if (seq disc) disc
+(defn- unwrap-ref [x]
+  (if (and (map? x) (= 1 (count x)) (integer? (:db/id x))) (:db/id x) x))
+
+(defn- normalize-entity-for-malli
+  ([db ent] (normalize-entity-for-malli db ent nil nil))
+  ([db ent forms main-dh]
+   (if-not (map? ent)
+     ent
+     (let [dh (db-schema db)]
+       (into {} (map (fn [[k v]]
+                       (let [spec (or (get dh k) (get main-dh k))
+                             many? (or (= :db.cardinality/many (:db/cardinality spec))
+                                       (set-schema-form? (get forms k)))
+                             ref? (= :db.type/ref (:db/valueType spec))
+                             v1 (cond
+                                  (and many? (sequential? v))
+                                  (into #{} (if ref? (map unwrap-ref) identity) v)
+                                  (and many? (set? v) ref?)
+                                  (into #{} (map unwrap-ref) v)
+                                  (and many? (some? v) (not (set? v)))
+                                  #{(if ref? (unwrap-ref v) v)}
+                                  ref? (unwrap-ref v)
+                                  :else v)]
+                         [k v1])))
+             ent)))))
+
+(defn- invoke-discovered-renderers [db reg-info item ent-data sks extra-ctx fallback-map main-db]
+  (let [disc (or (seq (discover-renderers db sks))
+                 (when (and main-db (not= main-db db)) (seq (discover-renderers main-db sks))))
+        rsyms (if (seq disc) (vec disc)
                   (when (map? fallback-map) (vec (distinct (mapcat #(get fallback-map %) sks)))))
-        norm-ent (normalize-entity-for-malli db ent-data)
+        main-dh (when main-db (db-schema main-db))
+        norm-ent (normalize-entity-for-malli db ent-data (:forms reg-info) main-dh)
         non-nil-ctx (into {} (filter (fn [[_ v]] (some? v))) (merge extra-ctx (:params item)))]
     (vec
      (keep (fn [rsym]
@@ -473,7 +497,8 @@
                     (:slot o) (assoc :seon.ui/slot (:slot o))
                     (:avail-w slot-b) (assoc :seon.ui/avail-w (:avail-w slot-b)))
         fb-map (:fallback-renderers o)
-        reg-info (cached-registry-info db)
+        main-db (:main-db o)
+        reg-info (cached-registry-info (or main-db db))
         ent-idx (:entity-index reg-info)]
     (mapv (fn [item]
             (let [eid (:entity item)
@@ -484,7 +509,7 @@
               (if (seq (:candidates item))
                 (cond-> (assoc item :data ent-data) (seq sks) (assoc :schemas sks))
                 (let [cands (when (seq sks)
-                              (invoke-discovered-renderers db reg-info item ent-data sks extra-ctx fb-map))]
+                              (invoke-discovered-renderers db reg-info item ent-data sks extra-ctx fb-map main-db))]
                   (cond-> (assoc item :data ent-data :schemas sks)
                     (seq cands) (assoc :candidates cands))))))
           items)))
