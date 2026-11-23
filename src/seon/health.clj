@@ -27,11 +27,13 @@
             [seon.health.contracts :as contracts]
           [datahike.index.interface :as di]
           [datahike.reads :as reads]
-          [seon.error :as serr]))
+          [seon.error :as serr]
+          [seon.health.branch :as hbranch]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
    with `'seon` matching all `seon.*` namespaces). Delegates to `seon.health.efficiency/ns-in-scope?`."
+  {:malli/schema [:=> [:cat [:maybe :symbol] [:maybe :symbol]] [:maybe :boolean]], :cost/ticks 50000}
   [scope nsym]
   (eff/ns-in-scope? scope nsym))
 
@@ -52,16 +54,19 @@
 
 (defn static-efficiency-warnings
   "Delegates to `seon.health.efficiency/static-efficiency-warnings`."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] [:vector :map]] [:=> [:cat [:maybe :seon.host/db] :any] [:vector :map]]], :cost/ticks 25000000}
   ([db] (eff/static-efficiency-warnings db))
   ([db scope] (eff/static-efficiency-warnings db scope)))
 
 (defn test-efficiency-warnings
   "Delegates to `seon.health.efficiency/test-efficiency-warnings`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]], :cost/ticks 15000000}
   [db]
   (eff/test-efficiency-warnings db))
 
 (defn eval-efficiency-warnings
   "Delegates to `seon.health.efficiency/eval-efficiency-warnings`."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] [:vector :map]] [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:vector :map]]], :cost/ticks 15000000}
   ([branch-db] (eff/eval-efficiency-warnings branch-db))
   ([branch-db agent-id] (eff/eval-efficiency-warnings branch-db agent-id)))
 
@@ -455,65 +460,17 @@
 (defonce ^:private ^:seon.flow/edge branch-base-health-cache (store/lru-cache 8))
 
 (defn caused-by-branch
-  "Returns only the structural/schema health errors introduced by `theirs-db` relative to `ours-db`.
-   Short-circuits immediately when zero code/schema entities changed, and scopes checks to `touched-nss`
-   (O(|touched-nss|) indexed reads + patched base vmap) avoiding full-DB `theirs-db` scans."
+  "Returns only the structural/schema health errors introduced by `theirs-db` relative to `ours-db`
+   using O(|touched-nss| + |retracted| + |added-edges|) indexed reads."
   {:malli/schema [:function
                   [:=> [:cat :any :any :map] [:vector :map]]
                   [:=> [:cat :any :any :map [:maybe [:or [:sequential :symbol] [:set :symbol]]]] [:vector :map]]]}
   ([ours-db theirs-db changed-schema-forms]
    (caused-by-branch ours-db theirs-db changed-schema-forms nil))
   ([ours-db theirs-db changed-schema-forms touched-nss]
-   (let [no-code? (and (some? touched-nss) (empty? touched-nss))
-         ocid (when (instance? datahike.db.DB ours-db) (d/commit-id ours-db))
-         tcid (when (instance? datahike.db.DB theirs-db) (d/commit-id theirs-db))]
-     (if (and (empty? changed-schema-forms)
-              (or no-code? (and (some? ocid) (= ocid tcid))))
-       []
-       (let [schema-errs (schema-violations ours-db changed-schema-forms)
-             get-base (delay
-                        (let [compute (fn []
-                                        (let [osnap (static/var-snapshot ours-db {:schemas? true})]
-                                          {:vmap (:vmap osnap)
-                                           :blocks (into #{} (map (juxt :class :subject :var)) (blocking-in-flow-procs ours-db (:vmap osnap)))
-                                           :bref (into #{} (map :subject) (contracts/broken-symbol-refs ours-db osnap))
-                                           :dref (into #{} (map :subject) (contracts/broken-doc-refs ours-db nil osnap))
-                                           :imp (into #{} (map :subject) (contracts/impure-generatable-fns ours-db nil osnap))}))]
-                          (if ocid
-                            (store/lru-get! branch-base-health-cache 8 [:v2 (get-in ours-db [:config :store :id]) ocid] compute)
-                            (compute))))]
-         (if no-code?
-           (vec (concat schema-errs
-                        (remove #(contains? (:bref @get-base) (:subject %)) (contracts/broken-symbol-refs theirs-db))))
-           (let [tseq (when (some? touched-nss) (vec (distinct (remove nil? touched-nss))))
-                 delta (when (seq tseq) (contracts/touched-ns-var-delta ours-db theirs-db tseq))
-                 var-ret? (if delta (:var-retracted? delta) true)
-                 edge-add? (if delta (:edge-added? delta) true)
-                 refs-chg? (if delta (:refs-changed? delta) true)
-                 need-full-tsnap? (or (nil? tseq) var-ret? edge-add? (seq changed-schema-forms))
-                 tsnap (when need-full-tsnap? (static/var-snapshot theirs-db {:schemas? true}))
-                 new-blocks (if refs-chg?
-                              (let [base @get-base
-                                    tvmap (if tsnap
-                                            (:vmap tsnap)
-                                            (merge (apply dissoc (:vmap base) (keys (:ovm delta))) (:tvm delta)))]
-                                (remove #(contains? (:blocks base) ((juxt :class :subject :var) %))
-                                        (blocking-in-flow-procs theirs-db tvmap)))
-                              [])
-                 base-ubd (into #{} (map :subject) (used-before-defined ours-db tseq))
-                 new-ubd (remove #(contains? base-ubd (:subject %)) (used-before-defined theirs-db tseq))
-                 base-mns (into #{} (map :subject) (missing-ns-forms ours-db tseq))
-                 new-mns (remove #(contains? base-mns (:subject %)) (missing-ns-forms theirs-db tseq))
-                 new-bref (if (or (seq changed-schema-forms) var-ret?)
-                            (remove #(contains? (:bref @get-base) (:subject %)) (contracts/broken-symbol-refs theirs-db tsnap))
-                            [])
-                 new-dref (if var-ret?
-                            (remove #(contains? (:dref @get-base) (:subject %)) (contracts/broken-doc-refs theirs-db nil tsnap))
-                            (let [bd (into #{} (map :subject) (contracts/broken-doc-refs-for-nss ours-db tseq))]
-                              (remove #(contains? bd (:subject %)) (contracts/broken-doc-refs-for-nss theirs-db tseq))))
-                 new-imp (if edge-add?
-                           (remove #(contains? (:imp @get-base) (:subject %)) (contracts/impure-generatable-fns theirs-db nil tsnap))
-                           (let [bi (into #{} (map :subject) (contracts/impure-generatable-fns-for-nss ours-db tseq))]
-                             (remove #(contains? bi (:subject %)) (contracts/impure-generatable-fns-for-nss theirs-db tseq))))]
-             (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp
-                          (missing-contract-violations ours-db theirs-db tseq))))))))))
+   (hbranch/caused-by-branch-impl ours-db theirs-db changed-schema-forms touched-nss
+     {:cache branch-base-health-cache
+      :schema-violations-fn schema-violations
+      :blocking-fn blocking-in-flow-procs
+      :ubd-fn used-before-defined
+      :mns-fn missing-ns-forms})))

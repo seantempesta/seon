@@ -188,3 +188,23 @@
             (is (= 5000 (:seon.code.var/ticks-budget v)))
             (is (= 65536 (:seon.code.var/bytes-budget v))))
             (finally (remove-ns 'demo.c4.c)))))))
+
+(deftest ^{:cost/ticks 180000000} cycle4-retracted-var-and-added-edge-scoped-health-test
+  (testing "O(|Delta|) caused-by-branch catches retracted-var schema/doc refs and newly-edge impure callers without full theirs-db var-snapshot"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/c4demo/a.clj"
+                                   "(ns seon.c4demo.a)\n(defn helper {:malli/schema [:=> [:cat :int] :int] :cost/ticks 5000} [x] (inc x))\n(defn render-box {:malli/schema [:=> [:cat :map] :any] :cost/ticks 5000} [m] m)\n" false)})
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/c4demo/b.clj"
+                                   "(ns seon.c4demo.b (:require [seon.c4demo.a :as a]))\n(defn caller \"Uses `seon.c4demo.a/render-box`.\" {:malli/schema [:=> [:cat :int] :int] :cost/ticks 5000} [x] (a/helper x))\n" false)})
+      (d/transact conn {:tx-data [{:seon.schema/key :seon.c4demo/box :seon.schema/form [:map {:seon.render/hiccup 'seon.c4demo.a/render-box} [:id :int]]}]})
+      (store/branch! conn :main :branch/c4-ret)
+      (let [bconn (store/connect cfg :branch/c4-ret)]
+        (try
+          (d/transact bconn {:tx-data (code/file-import-tx @bconn "src/seon/c4demo/a.clj"
+                                        "(ns seon.c4demo.a)\n(defn ^:seon.flow/edge helper {:malli/schema [:=> [:cat :int] :int] :cost/ticks 5000} [x] (inc x))\n" false)})
+          (let [errs (health/caused-by-branch @conn @bconn {} ['seon.c4demo.a])
+                classes (set (map :class errs))]
+            (is (contains? classes :broken-symbol-ref) "Retracting schema renderer must flag :broken-symbol-ref")
+            (is (contains? classes :broken-doc-ref) "Retracting doc-referenced var in another ns must flag :broken-doc-ref")
+            (is (contains? classes :impure-generatable-fn) "Marking callee ^:seon.flow/edge must flag caller in another ns"))
+          (finally (d/release bconn)))))))
