@@ -53,6 +53,9 @@
  :seon.agent.eval/agent
  [:and {:seon.db/index true} :keyword]
 
+ :seon.agent.eval/agent-ref
+ [:and {:seon.db/to [:seon.agent/entity], :seon.db/index true, :seon.schema/doc "True :db.type/ref link from an eval entity to its :seon.agent/entity, attaching evals natively to the 2-index graph."} :seon.store/ref]
+
  :seon.agent.eval/bytes
  :int
 
@@ -75,7 +78,7 @@
  :int
 
  :seon.agent.eval/entity
- [:map {:seon.db/attributes true} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens] [:seon.agent.eval/prefix-hash {:optional true} :seon.agent.eval/prefix-hash] [:seon.agent.eval/touched {:optional true} :seon.agent.eval/touched] [:seon.agent.eval/result-schemas {:optional true} :seon.agent.eval/result-schemas] [:seon.agent.eval/images {:optional true} :seon.agent.eval/images]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-eval-card} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens] [:seon.agent.eval/prefix-hash {:optional true} :seon.agent.eval/prefix-hash] [:seon.agent.eval/touched {:optional true} :seon.agent.eval/touched] [:seon.agent.eval/result-schemas {:optional true} :seon.agent.eval/result-schemas] [:seon.agent.eval/images {:optional true} :seon.agent.eval/images] [:seon.agent.eval/agent-ref {:optional true} :seon.agent.eval/agent-ref] [:seon.agent.eval/touched-refs {:optional true} :seon.agent.eval/touched-refs]]
 
  :seon.agent.eval/error
  :string
@@ -124,6 +127,9 @@
 
  :seon.agent.eval/touched
  [:vector {:seon.db/storable true, :seon.schema/doc "Bounded set of entity IDs and lookup-refs touched via datahike.reads during this eval."} :any]
+
+ :seon.agent.eval/touched-refs
+ [:set {:seon.db/index true, :seon.schema/doc "True :db.type/ref set of existing entities touched via datahike.reads during this eval, enabling direct Datalog joins."} :seon.store/ref]
 
  :seon.agent.eval/turn
  :int
@@ -498,7 +504,7 @@
  [:int {:min 1, :max 512}]
 
  :seon.config/entity
- [:map {:seon.db/attributes true} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights]]
+ [:map {:seon.db/attributes true} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights] [:seon.config/store-map-bytes {:optional true} :seon.config/store-map-bytes] [:seon.config/gc-keep-merged-branches {:optional true} :seon.config/gc-keep-merged-branches] [:seon.config/gc-history-hours {:optional true} :seon.config/gc-history-hours] [:seon.config/review-every-turns {:optional true} :seon.config/review-every-turns] [:seon.config/unwritten-review-turns {:optional true} :seon.config/unwritten-review-turns] [:seon.config/semantic-min-score {:optional true} :seon.config/semantic-min-score]]
 
  :seon.config/eval-bytes
  [:int {:min 65536, :max 17179869184}]
@@ -514,6 +520,12 @@
 
  :seon.config/gc-generations
  [:int {:min 4, :max 6}]
+
+ :seon.config/gc-history-hours
+ [:int {:default 168, :seon.schema/doc "Minimum age in hours before d/gc-storage sweeps historical non-head commits (protects active branch merge-bases)."}]
+
+ :seon.config/gc-keep-merged-branches
+ [:int {:default 16, :seon.schema/doc "Number of newest merged branches retained before rolling branch pruning."}]
 
  :seon.config/gen-samples
  [:int {:min 1, :max 10000}]
@@ -538,6 +550,18 @@
 
  :seon.config/rank-weights
  [:map {:seon.db/storable true, :seon.schema/doc "Tunable weights for 3-signal self-balancing candidate ranking (urgency, recency, convergence).", :gen/elements [{:urgency 1.0, :recency 0.75, :convergence 0.5} {:urgency 1.4, :recency 0.9, :convergence 0.35}]} [:urgency {:optional true} number?] [:recency {:optional true} number?] [:convergence {:optional true} number?]]
+
+ :seon.config/review-every-turns
+ [:int {:default 0, :seon.schema/doc "Outer turn interval (0 disables auto-review) for rule-driven session review."}]
+
+ :seon.config/semantic-min-score
+ [:double {:default 0.45, :seon.schema/doc "Minimum EmbeddingGemma-2 cosine similarity for Turn-0 semantic candidate retrieval."}]
+
+ :seon.config/store-map-bytes
+ [:int {:default 1099511627776, :seon.schema/doc "LMDB virtual map-size ceiling in bytes (sparse on APFS/Linux; default 1 TB)."}]
+
+ :seon.config/unwritten-review-turns
+ [:int {:default 8, :seon.schema/doc "Minimum surviving branch eval turns without edits before :rule.ctx/unwritten-session-turns triggers :agent/needs-review."}]
 
  :seon.config/viewport-screenshot?
  :boolean
