@@ -10,6 +10,7 @@
   (:import [java.io InputStream OutputStream]
            [java.security MessageDigest]
            [java.util.concurrent TimeUnit]))
+{}
 
 (def default-coarse-dims 128)
 
@@ -264,8 +265,10 @@
    :cost/ticks 100000}
   ([] (resolve-model-path (System/getenv "SEON_EMBED_MODEL")))
   ([path]
-   (when (and (string? path) (not (str/blank? path)))
-     (let [f (io/file path)] (when (.isFile f) (.getAbsolutePath f))))))
+  (let [p (or (when (and (string? path) (not (str/blank? path))) path)
+              (System/getenv "SEON_EMBED_MODEL"))]
+    (when (and (string? p) (not (str/blank? p)))
+      (let [f (io/file p)] (when (.isFile f) (.getAbsolutePath f)))))))
 
 (defn- scan-attr-map [db attr]
   (if (contains? (:schema db) attr)
