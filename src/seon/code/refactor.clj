@@ -513,3 +513,97 @@
                            res))))]
       (alter-meta! mv assoc :seon.eval/budget-override {:ticks 500000000 :bytes 1073741824})
       mv)))
+
+(defn- plan-move
+  "Computes which forms move vs stay, resolves forwarding stubs, and derives
+   re-export & refer symbol sets. Returns an error map or {:ok? true ...}."
+  {:malli/schema [:=> [:cat :any :any :any :any :any :any :boolean :boolean] :map]}
+  [from to from-forms from-vars seed-keys found-by-key include-deps? re-export-public?]
+  (let [ns-str (name from)
+        from-ns-hdr (first (filter #(= (str ns-str "#ns") (:seon.code.form/key %)) from-forms))
+        inherited-reqs (->> (extract-require-clauses (:seon.code.form/src from-ns-hdr ""))
+                            (remove #(and (vector? %) (= to (first %))))
+                            vec)
+        stub-ns-by-sym
+        (into {}
+              (keep (fn [f]
+                      (when-let [[a-sym v-sym] (stub-target-alias-ns (:seon.code.form/src f))]
+                        (when-let [real-ns (resolve-alias-ns inherited-reqs a-sym)]
+                          [(symbol ns-str (name v-sym)) [real-ns v-sym]]))))
+              from-forms)
+        wanted-keys (if include-deps?
+                      (expand-local-dep-closure from found-by-key seed-keys)
+                      seed-keys)
+        wanted-keys (if include-deps?
+                      (into #{} (remove (fn [k]
+                                          (and (not (contains? seed-keys k))
+                                               (contains? stub-ns-by-sym (var-key->sym from k)))))
+                            wanted-keys)
+                      wanted-keys)
+        moved-forms (filterv #(contains? wanted-keys (:seon.code.form/key %)) from-forms)
+        remaining-forms (filterv #(not (contains? wanted-keys (:seon.code.form/key %))) from-forms)
+        remaining-var-syms (into #{} (keep #(var-key->sym from (:seon.code.form/key %)) remaining-forms))
+        raw-unresolved (->> moved-forms
+                            (mapcat :seon.code.form/deps)
+                            (filter #(contains? remaining-var-syms %))
+                            distinct sort vec)
+        stub-refers-by-ns (reduce (fn [acc dep-sym]
+                                    (if-let [[real-ns v-sym] (get stub-ns-by-sym dep-sym)]
+                                      (update acc real-ns (fnil conj #{}) v-sym)
+                                      acc))
+                                  {} raw-unresolved)
+        unresolved-deps (vec (remove #(contains? stub-ns-by-sym %) raw-unresolved))]
+    (if (seq unresolved-deps)
+      {:ok? false
+       :error :unresolved-from-deps
+       :missing-deps unresolved-deps
+       :hint "Moved forms still call these vars left in source ns; include them in :vars or pass :include-deps? true."}
+      (let [rem-deps-set (into #{} (mapcat :seon.code.form/deps) remaining-forms)
+            re-exported-pub
+            (if re-export-public?
+              (into #{}
+                    (keep (fn [f]
+                            (let [k (:seon.code.form/key f)
+                                  v (get from-vars k)
+                                  vsym (:seon.code.var/name v)]
+                              (when (and vsym
+                                         (not (:seon.code.var/private? v))
+                                         (not (dynamic-var-src? (:seon.code.form/src f))))
+                                (symbol (name vsym))))))
+                    moved-forms)
+              #{})
+            re-exported-priv
+            (into #{}
+                  (keep (fn [f]
+                          (let [k (:seon.code.form/key f)
+                                vsym (var-key->sym from k)
+                                simple (when vsym (symbol (name vsym)))]
+                            (when (and simple
+                                       (not (contains? re-exported-pub simple))
+                                       (not (dynamic-var-src? (:seon.code.form/src f)))
+                                       (contains? rem-deps-set vsym))
+                              simple))))
+                  moved-forms)
+            all-stubbed (into re-exported-pub re-exported-priv)
+            referred-syms
+            (into #{}
+                  (keep (fn [f]
+                          (let [k (:seon.code.form/key f)
+                                vsym (var-key->sym from k)
+                                simple (when vsym (symbol (name vsym)))]
+                            (when (and simple
+                                       (not (contains? all-stubbed simple))
+                                       (dynamic-var-src? (:seon.code.form/src f)))
+                              simple))))
+                  moved-forms)]
+        {:ok? true
+         :from-ns-hdr from-ns-hdr
+         :inherited-reqs inherited-reqs
+         :stub-ns-by-sym stub-ns-by-sym
+         :stub-refers-by-ns stub-refers-by-ns
+         :moved-forms moved-forms
+         :remaining-forms remaining-forms
+         :re-exported-pub re-exported-pub
+         :re-exported-priv re-exported-priv
+         :all-stubbed all-stubbed
+         :referred-syms referred-syms}))))
