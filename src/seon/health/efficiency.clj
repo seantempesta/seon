@@ -224,104 +224,6 @@
                       lib)))))
             (:requires decl))))))
 
-(defn static-efficiency-warnings
-  "Scans non-test `:seon.code.form/src` (cached per `:seon.code.form/hash` + per-ns `:unused-require` cache,
-   reusing optional `form-snap`) to flag `:oversized-namespace`, `:minified-form`, `:large-function`,
-   `:nested-db-scan`, and `:unused-require`."
-  {:malli/schema [:function
-                  [:=> [:cat :any] [:vector :map]]
-                  [:=> [:cat :any [:maybe :symbol]] [:vector :map]]
-                  [:=> [:cat :any [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
-  ([db] (static-efficiency-warnings db nil nil))
-  ([db scope] (static-efficiency-warnings db scope nil))
-  ([db scope form-snap]
-   (if-not (and db (contains? (:schema db) :seon.code.form/src))
-     []
-     (let [br (get-in db [:config :branch] :main)
-           forms-by-ns (if (and (nil? scope) form-snap)
-                         (:src-forms-by-ns form-snap)
-                         (collect-forms-by-ns db scope))
-           fcache @form-static-cache
-           rcache @ns-unused-req-cache
-           has-rcache? (pos? (count rcache))
-           needed-eids (java.util.HashSet. 256)
-           req-sigs (java.util.HashMap. 160)]
-       (doseq [[nsym forms] forms-by-ns]
-         (let [rsig (when (every? :hash forms) [nsym (mapv (juxt :key :hash) (sort-by :key forms))])
-               _ (when rsig (.put req-sigs nsym rsig))
-               rcached? (and has-rcache? rsig (contains? rcache rsig))
-               hdr-form (some #(when (and (string? (:key %)) (str/ends-with? (:key %) "#ns")) %) forms)]
-           (doseq [{:keys [e key hash]} forms]
-             (let [hdr? (boolean (and (string? key) (str/ends-with? key "#ns")))]
-               (when-not (and hash (contains? fcache [hash hdr?]))
-                 (.add needed-eids e))))
-           (when (and (not rcached?) hdr-form)
-             (let [hc (when-let [hh (:hash hdr-form)] (get fcache [hh true]))]
-               (when (or (nil? hc) (let [d (:decl hc)] (or (seq (:aliases d)) (seq (:refers d)))))
-                 (doseq [{:keys [e key]} forms]
-                   (when-not (and (string? key) (str/ends-with? key "#ns"))
-                     (.add needed-eids e))))))))
-       (let [src-hm (fetch-missing-srcs db needed-eids)
-             _ (when (and di/*reads* (zero? (.size needed-eids)))
-                 (di/record-read! (dd/datom 0 :seon.code.form/src nil 0)
-                                  (dd/datom Long/MAX_VALUE :seon.code.form/src nil Long/MAX_VALUE)))
-             get-src! (fn [e] (or (.get src-hm e)
-                                  (let [s (str (:v (first (d/datoms db :eavt e :seon.code.form/src))))]
-                                    (.put src-hm e s) s)))
-             new-f (volatile! {})
-             new-r (volatile! {})
-             oversized (volatile! [])
-             unused-reqs (volatile! [])
-             nested (volatile! [])
-             large-fns (volatile! [])]
-         (doseq [[nsym forms] forms-by-ns]
-           (let [hdr-decl (volatile! nil)
-                 total-chars (volatile! 0)]
-             (doseq [{:keys [e key hash]} forms]
-               (let [hdr? (boolean (and (string? key) (str/ends-with? key "#ns")))
-                     ck (when hash [hash hdr?])
-                     info (if ck
-                            (let [h (get fcache ck ::miss)]
-                              (if-not (identical? ::miss h)
-                                h
-                                (let [v (analyze-form-static hdr? (get-src! e))]
-                                  (vswap! new-f assoc ck v)
-                                  v)))
-                            (analyze-form-static hdr? (get-src! e)))]
-                 (vswap! total-chars + (long (:chars info 0)))
-                 (if hdr? (vreset! hdr-decl (:decl info)) (emit-form-advisories! br nsym key info nested large-fns))))
-             (let [toks (quot @total-chars 4)]
-               (when (> toks 8000)
-                 (vswap! oversized conj
-                         {:class :oversized-namespace :severity :warning :kind :static
-                          :ns nsym :subject (str nsym) :branch br
-                          :message (str "Namespace " nsym " is ~" toks " tokens (> 8k cap). "
-                                        "Split into cohesive 2k-6k tok child namespaces so specialists load cleanly.")})))
-             (when-let [decl @hdr-decl]
-               (when (or (seq (:aliases decl)) (seq (:refers decl)))
-                 (let [rsig (.get req-sigs nsym)
-                       unused (if rsig
-                                (let [h (get rcache rsig ::miss)]
-                                  (if-not (identical? ::miss h)
-                                    h
-                                    (let [v (compute-unused-requires forms decl get-src!)]
-                                      (vswap! new-r assoc rsig v)
-                                      v)))
-                                (compute-unused-requires forms decl get-src!))]
-                   (when (seq unused)
-                     (vswap! unused-reqs conj
-                             {:class :unused-require :severity :warning :kind :static
-                              :ns nsym :subject (str nsym) :branch br :unused unused
-                              :fix {:fn 'seon.code.edit/prune-requires! :args [nsym]}
-                              :message (str "Unused :require(s) in " nsym ": " (str/join ", " unused)
-                                            ". Fix automatically via (user/prune-requires! '" nsym ") or (user/autofix-health!).")})))))))
-         (batch-cache-put! form-static-cache 2048 @new-f)
-         (batch-cache-put! ns-unused-req-cache 256 @new-r)
-         (vec (concat (sort-by :subject @oversized)
-                      (sort-by :subject @nested)
-                      (sort-by :subject @unused-reqs)
-                      (sort-by :subject @large-fns))))))))
-
 (defn- suppress-heavy-eval? [branch-db br aid opts]
   (let [call-db (or (:main-db opts) branch-db)
         resolved? (when (and call-db aid (contains? (:schema call-db) :seon.agent.call/callee))
@@ -523,3 +425,114 @@
                                            (when (and mratio (> mratio 2.5) (> dms 200.0)) (str (format "%.1fx" mratio) " ms "))
                                            "(" (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms).")}))))
      (vec (sort-by :subject @out))))))
+
+(defn- metrics->info [{:seon.code.form/keys [lines chars nested-scan?]}]
+  (let [ln (long (or lines 0))]
+    {:ns-hdr? false :chars (long (or chars 0)) :defn? (pos? ln) :lines ln :nested-scan? (true? nested-scan?)}))
+
+(defn- persisted-form-info [db e]
+  (when (contains? (:schema db) :seon.code.form/chars)
+    (when-let [c (:v (first (d/datoms db :eavt e :seon.code.form/chars)))]
+      (metrics->info {:seon.code.form/chars c
+                      :seon.code.form/lines (:v (first (d/datoms db :eavt e :seon.code.form/lines)))
+                      :seon.code.form/nested-scan? (:v (first (d/datoms db :eavt e :seon.code.form/nested-scan?)))}))))
+
+(defn static-efficiency-warnings
+  "Scans non-test `:seon.code.form/src` (cached per `:seon.code.form/hash` + per-ns `:unused-require` cache,
+   reusing optional `form-snap`) to flag `:oversized-namespace`, `:minified-form`, `:large-function`,
+   `:nested-db-scan`, and `:unused-require`."
+  {:malli/schema [:function
+                  [:=> [:cat :any] [:vector :map]]
+                  [:=> [:cat :any [:maybe :symbol]] [:vector :map]]
+                  [:=> [:cat :any [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  ([db] (static-efficiency-warnings db nil nil))
+  ([db scope] (static-efficiency-warnings db scope nil))
+  ([db scope form-snap]
+   (if-not (and db (contains? (:schema db) :seon.code.form/src))
+     []
+     (let [br (get-in db [:config :branch] :main)
+           forms-by-ns (if (and (nil? scope) form-snap)
+                         (:src-forms-by-ns form-snap)
+                         (collect-forms-by-ns db scope))
+           fcache @form-static-cache
+           rcache @ns-unused-req-cache
+           has-rcache? (pos? (count rcache))
+           needed-eids (java.util.HashSet. 256)
+           req-sigs (java.util.HashMap. 160)]
+       (doseq [[nsym forms] forms-by-ns]
+         (let [rsig (when (every? :hash forms) [nsym (mapv (juxt :key :hash) (sort-by :key forms))])
+               _ (when rsig (.put req-sigs nsym rsig))
+               rcached? (and has-rcache? rsig (contains? rcache rsig))
+               hdr-form (some #(when (and (string? (:key %)) (str/ends-with? (:key %) "#ns")) %) forms)]
+           (doseq [{:keys [e key hash]} forms]
+             (let [hdr? (boolean (and (string? key) (str/ends-with? key "#ns")))]
+               (when-not (and hash (contains? fcache [hash hdr?]))
+               (if-let [pi (when-not hdr? (persisted-form-info db e))]
+                 (.put pinfo e pi)
+                 (.add needed-eids e)))))
+           (when (and (not rcached?) hdr-form)
+             (let [hc (when-let [hh (:hash hdr-form)] (get fcache [hh true]))]
+               (when (or (nil? hc) (let [d (:decl hc)] (or (seq (:aliases d)) (seq (:refers d)))))
+                 (doseq [{:keys [e key]} forms]
+                   (when-not (and (string? key) (str/ends-with? key "#ns"))
+                     (.add needed-eids e))))))))
+       (let [src-hm (fetch-missing-srcs db needed-eids)
+             _ (when (and di/*reads* (zero? (.size needed-eids)))
+                 (di/record-read! (dd/datom 0 :seon.code.form/src nil 0)
+                                  (dd/datom Long/MAX_VALUE :seon.code.form/src nil Long/MAX_VALUE)))
+             get-src! (fn [e] (or (.get src-hm e)
+                                  (let [s (str (:v (first (d/datoms db :eavt e :seon.code.form/src))))]
+                                    (.put src-hm e s) s)))
+             new-f (volatile! {})
+             new-r (volatile! {})
+             oversized (volatile! [])
+             unused-reqs (volatile! [])
+             nested (volatile! [])
+             large-fns (volatile! [])]
+         (doseq [[nsym forms] forms-by-ns]
+           (let [hdr-decl (volatile! nil)
+                 total-chars (volatile! 0)]
+             (doseq [{:keys [e key hash]} forms]
+               (let [hdr? (boolean (and (string? key) (str/ends-with? key "#ns")))
+                     ck (when hash [hash hdr?])
+                     info (if ck
+                            (let [h (get fcache ck ::miss)]
+                              (if-not (identical? ::miss h)
+                                h
+                                (let [v (analyze-form-static hdr? (get-src! e))]
+                                  (vswap! new-f assoc ck v)
+                                  v)))
+                            (analyze-form-static hdr? (get-src! e)))]
+                 (vswap! total-chars + (long (:chars info 0)))
+                 (if hdr? (vreset! hdr-decl (:decl info)) (emit-form-advisories! br nsym key info nested large-fns))))
+             (let [toks (quot @total-chars 4)]
+               (when (> toks 8000)
+                 (vswap! oversized conj
+                         {:class :oversized-namespace :severity :warning :kind :static
+                          :ns nsym :subject (str nsym) :branch br
+                          :message (str "Namespace " nsym " is ~" toks " tokens (> 8k cap). "
+                                        "Split into cohesive 2k-6k tok child namespaces so specialists load cleanly.")})))
+             (when-let [decl @hdr-decl]
+               (when (or (seq (:aliases decl)) (seq (:refers decl)))
+                 (let [rsig (.get req-sigs nsym)
+                       unused (if rsig
+                                (let [h (get rcache rsig ::miss)]
+                                  (if-not (identical? ::miss h)
+                                    h
+                                    (let [v (compute-unused-requires forms decl get-src!)]
+                                      (vswap! new-r assoc rsig v)
+                                      v)))
+                                (compute-unused-requires forms decl get-src!))]
+                   (when (seq unused)
+                     (vswap! unused-reqs conj
+                             {:class :unused-require :severity :warning :kind :static
+                              :ns nsym :subject (str nsym) :branch br :unused unused
+                              :fix {:fn 'seon.code.edit/prune-requires! :args [nsym]}
+                              :message (str "Unused :require(s) in " nsym ": " (str/join ", " unused)
+                                            ". Fix automatically via (user/prune-requires! '" nsym ") or (user/autofix-health!).")})))))))
+         (batch-cache-put! form-static-cache 2048 @new-f)
+         (batch-cache-put! ns-unused-req-cache 256 @new-r)
+         (vec (concat (sort-by :subject @oversized)
+                      (sort-by :subject @nested)
+                      (sort-by :subject @unused-reqs)
+                      (sort-by :subject @large-fns))))))))
