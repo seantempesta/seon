@@ -211,7 +211,8 @@
          filtered (vec (cond->> raw
                          (integer? (:after-tx o)) (filter #(> (ev-tx %) (long (:after-tx o))))
                          (integer? (:upto-tx o)) (filter #(<= (ev-tx %) (long (:upto-tx o))))
-                         (integer? (:after-turn o)) (filter #(> (nonneg-long (:seon.agent.eval/turn %)) (long (:after-turn o))))))
+                         (integer? (:after-turn o)) (filter #(> (nonneg-long (:seon.agent.eval/turn %)) (long (:after-turn o))))
+                         (integer? (:upto-turn o)) (filter #(<= (nonneg-long (:seon.agent.eval/turn %)) (long (:upto-turn o))))))
          per-turn (mapv #(extract-one-eval edb %) filtered)
          ks [:touched-eids :touched-syms :touched-schemas :touched-refs :manual-lookup-eids
              :manual-lookup-syms :manual-lookup-schemas :manual-lookup-refs :manual-lookup-queries]]
@@ -254,26 +255,35 @@
 
 (defn build-candidate-pool
   "Builds the bounded candidate entity pool for `agent-id` at `(main-db, branch-db)` with prior
-   eval touch counts/txs and pre-measured multi-level Hiccup render candidates."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] [:vector :map]]
+   eval touch counts/txs and pre-measured multi-level Hiccup render candidates.
+   Optional `opts` supports `:upto-turn` for merged-branch single-tx turn splitting."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword [:maybe :map]] [:vector :map]]]
    :cost/ticks 40000000}
-  [main-db branch-db agent-id]
-  (let [edb (or branch-db main-db)
-        ag (or (rdata/pull-agent-entity main-db edb agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
-        ru-ps (:seon.ctx/projections (ctx/related-updates {:seon.db/main main-db :seon.db/branch edb :seon.agent/id agent-id
-                                                           :seon.view/target :wire :seon.view/token-budget 100000}))
-        world (proj/agent-world-datoms main-db edb agent-id)
-        seen (into #{} (keep :entity) ru-ps)
-        pins (:pinned world)
-        w-extra (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen (key %)))) (take 12)
-                               (map (fn [[e tx]] {:entity e :tx tx :priority (if (pins e) 88 60)
-                                                  :pinned? (boolean (pins e)) :zone :workspace :rules [:seed/world]})))
-                      (sort-by (comp - val) (:connected world)))
-        prior (reduce (fn [acc t]
-                        (reduce (fn [a e] (-> a (update-in [:counts e] (fnil inc 0))
-                                              (update-in [:max-tx e] #(max (long (or % 0)) (long (:tx t 0))))))
-                                acc (:touched-eids t)))
-                      {:counts {} :max-tx {}} (:by-turn (extract-eval-touches edb (pull-agent-evals edb agent-id) nil)))
+  ([main-db branch-db agent-id]
+   (build-candidate-pool main-db branch-db agent-id nil))
+  ([main-db branch-db agent-id opts]
+   (let [o (if (map? opts) opts {})
+         edb (or branch-db main-db)
+         ag (or (rdata/pull-agent-entity main-db edb agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
+         ru-ps (:seon.ctx/projections (ctx/related-updates {:seon.db/main main-db :seon.db/branch edb :seon.agent/id agent-id
+                                                            :seon.view/target :wire :seon.view/token-budget 100000}))
+         world (proj/agent-world-datoms main-db edb agent-id)
+         seen (into #{} (keep :entity) ru-ps)
+         pins (:pinned world)
+         w-extra (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen (key %)))) (take 12)
+                                (map (fn [[e tx]] {:entity e :tx tx :priority (if (pins e) 88 60)
+                                                   :pinned? (boolean (pins e)) :zone :workspace :rules [:seed/world]})))
+                       (sort-by (comp - val) (:connected world)))
+         ut (when (integer? (:upto-turn o)) (long (:upto-turn o)))
+         prior-evs (extract-eval-touches edb (pull-agent-evals edb agent-id) (when ut {:upto-turn ut}))
+         prior (reduce (fn [acc t]
+                         (let [t-ord (if ut (+ (long (:tx t 0)) (long (:turn t 0))) (long (:tx t 0)))]
+                           (reduce (fn [a e] (-> a (update-in [:counts e] (fnil inc 0))
+                                                 (update-in [:max-tx e] #(max (long (or % 0)) t-ord))))
+                                   acc (:touched-eids t))))
+                       {:counts {} :max-tx {}} (:by-turn prior-evs))
         seen2 (into seen (map :entity) w-extra)
         p-extra (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen2 (key %)))) (take 14)
                                (map (fn [[e tx]] {:entity e :tx tx :priority 66 :zone :workspace :rules [:rule.ctx/eval-frontier]})))
@@ -288,4 +298,4 @@
     (mapv #(if-let [m (get by-e (:entity %))]
              (assoc % :candidates (or (:candidates m) []) :tokens (long (or (:measured-tokens m) (:tokens m) 0)))
              %)
-          enriched)))
+          enriched))))
