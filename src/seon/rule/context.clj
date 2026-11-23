@@ -17,6 +17,8 @@
             [seon.schema.index :as six]
             [seon.code.files :as files]))
 
+(defn- dsch [db] (or (:schema db) (when db (d/schema db)) {}))
+
 (defn seed-rules-fallback
   "Loads canonical `:seon.rule/*` fallback rules (delegates to `seon.rule.seed/starter-rules`)."
   {:malli/schema [:=> [:cat] [:vector :map]] :cost/ticks 2000000 :seon.flow/edge true}
@@ -74,7 +76,7 @@
                       w))
                   wm
                   (:seon.agent/pinned agent-ent))
-      task-curated (when (and tid (contains? (:schema task-db) :seon.task/curated))
+      task-curated (when (and tid (contains? (dsch task-db) :seon.task/curated))
                      (:seon.task/curated (d/pull task-db '[:seon.task/curated] [:seon.task/id tid])))]
   (reduce (fn [w c]
             (if-let [{:keys [eid kind attr val ref]} (resolve-any c)]
@@ -158,9 +160,9 @@
         scope (:seon.agent/scope agent-ent)
         lin (lineage/agent-task-lineage task-db branch-db agent-ent)
         has-peers? (boolean
-                    (or (and aid (contains? (:schema main-db) :seon.agent.call/caller)
+                    (or (and aid (contains? (dsch main-db) :seon.agent.call/caller)
                              (first (d/datoms main-db :avet :seon.agent.call/caller aid)))
-                        (and tid (contains? (:schema task-db) :seon.task/needs)
+                        (and tid (contains? (dsch task-db) :seon.task/needs)
                              (seq (:seon.task/needs (d/pull task-db '[:seon.task/needs] [:seon.task/id tid]))))))
         boot-tx (effects/baseline-import-tx code-db)
         base-facts (cond-> [[:env :env/boot-tx boot-tx]]
@@ -383,7 +385,7 @@
   (let [t0 (System/nanoTime)
         dbs {:main main-db :branch branch-db :code code-db :task eff-task-db}
         active-rules (or rules-override
-        (let [fb (when-not (and (contains? (:schema main-db) :seon.rule/id) (first (d/datoms main-db :aevt :seon.rule/id))) (seed-rules-fallback))
+        (let [fb (when-not (and (contains? (dsch main-db) :seon.rule/id) (first (d/datoms main-db :aevt :seon.rule/id))) (seed-rules-fallback))
               m-rules (rules/load-rules main-db fb)]
           (if (or (= main-db branch-db) (= (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)))
             m-rules
