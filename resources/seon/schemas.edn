@@ -53,6 +53,9 @@
  :seon.agent.eval/agent
  [:and {:seon.db/index true} :keyword]
 
+ :seon.agent.eval/agent-ref
+ [:and {:seon.db/to [:seon.agent/entity], :seon.db/index true, :seon.schema/doc "True :db.type/ref link from an eval entity to its :seon.agent/entity, attaching evals natively to the 2-index graph."} :seon.store/ref]
+
  :seon.agent.eval/bytes
  :int
 
@@ -124,6 +127,9 @@
 
  :seon.agent.eval/touched
  [:vector {:seon.db/storable true, :seon.schema/doc "Bounded set of entity IDs and lookup-refs touched via datahike.reads during this eval."} :any]
+
+ :seon.agent.eval/touched-refs
+ [:set {:seon.db/index true, :seon.schema/doc "True :db.type/ref set of existing entities touched via datahike.reads during this eval, enabling direct Datalog joins."} :seon.store/ref]
 
  :seon.agent.eval/turn
  :int
@@ -515,6 +521,12 @@
  :seon.config/gc-generations
  [:int {:min 4, :max 6}]
 
+ :seon.config/gc-history-hours
+ [:int {:default 168, :seon.schema/doc "Minimum age in hours before d/gc-storage sweeps historical non-head commits (protects active branch merge-bases)."}]
+
+ :seon.config/gc-keep-merged-branches
+ [:int {:default 16, :seon.schema/doc "Number of newest merged branches retained before rolling branch pruning."}]
+
  :seon.config/gen-samples
  [:int {:min 1, :max 10000}]
 
@@ -538,6 +550,12 @@
 
  :seon.config/rank-weights
  [:map {:seon.db/storable true, :seon.schema/doc "Tunable weights for 3-signal self-balancing candidate ranking (urgency, recency, convergence).", :gen/elements [{:urgency 1.0, :recency 0.75, :convergence 0.5} {:urgency 1.4, :recency 0.9, :convergence 0.35}]} [:urgency {:optional true} number?] [:recency {:optional true} number?] [:convergence {:optional true} number?]]
+
+ :seon.config/review-every-turns
+ [:int {:default 0, :seon.schema/doc "Outer turn interval (0 disables auto-review) for rule-driven session review."}]
+
+ :seon.config/store-map-bytes
+ [:int {:default 1099511627776, :seon.schema/doc "LMDB virtual map-size ceiling in bytes (sparse on APFS/Linux; default 1 TB)."}]
 
  :seon.config/viewport-screenshot?
  :boolean
