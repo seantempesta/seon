@@ -1,5 +1,5 @@
 (ns seon.rule
-  "Native Datahike `d/q` + `datahike.reads` incremental stratified rule engine:\n   - Rules are editable Datahike entities (`:seon.rule/*`, persisted to `resources/seon/rules.edn`).\n   - `:seon.rule/query` executes natively via `datahike.api/q` over `$main`, `$branch`, `$code`, `$task`,\n     `$wm`, `?agent`, `?agent-eid`, and shared recursive Datalog rules (`default-datalog-rules` as `%`).\n   - `:seon.rule/assert` emits `[e a v]` WM triples (chaining across strata) and/or projection maps\n     `{:entity ?e :fn ... :pull [...] :parent ?p :zone ... :priority ... :params {...}}`.\n   - `step-rules` skips untouched rules in O(|Delta|) via per-DB `datahike.reads` + WM attr deltas while\n     forwarding reads from both executed and skipped rules into outer `datahike.index.interface/*reads*`."
+  "Native Datahike `d/q` + `datahike.reads` incremental stratified rule engine over `:seon.rule/*` entities."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -413,17 +413,52 @@
    fixtures inherit the branch's live `:seon.rule/*` entities before merge writes `resources/seon/rules.edn` to disk."
   nil)
 
+(defn- branch-passing-run [db dh tx]
+  (when (and (dh :seon.test.run/branch) (dh :seon.test.run/pass?))
+    (let [br (or (get-in db [:config :branch]) (get-in (:origin-db db) [:config :branch]) :main)
+          be (:e (first (d/datoms db :avet :seon.test.run/branch br)))
+          re (or be (when (not= br :main) (:e (first (d/datoms db :avet :seon.test.run/branch :main)))))]
+      (when (and re (true? (:v (first (d/datoms db :eavt re :seon.test.run/pass?)))))
+        (let [rtx (if be Long/MAX_VALUE (reduce max 0 (map #(long (:tx % 0)) (d/datoms db :eavt re))))]
+          (when (>= rtx tx)
+            {:failed (if (dh :seon.test.run/failed-digests)
+                       (into #{} (map :v) (d/datoms db :eavt re :seon.test.run/failed-digests))
+                       #{})}))))))
+
 (defn verdict-latest-for-var?
-  "True when no newer passing `:seon.test/verdict` exists for test var EID `var-eid` after `tx`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :int :int] :boolean]
-   :cost/ticks 200000}
-  [db var-eid tx]
-  (if-not (and db (contains? (:schema db) :seon.test/var-ref))
-    true
-    (not-any? (fn [dt]
-                (let [pdt (first (d/datoms db :eavt (:e dt) :seon.test/pass?))]
-                  (and pdt (true? (:v pdt)) (> (long (:tx pdt 0)) (long tx)))))
-              (d/datoms db :avet :seon.test/var-ref var-eid))))
+  "True when no passing verdict exists for `var-eid` at `(>= (:tx pdt) tx)` and no passing branch run clears it."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :int :int] :boolean]
+                  [:=> [:cat [:maybe :seon.host/db] :int :int [:maybe :string]] :boolean]]
+   :cost/ticks 300000}
+  ([db var-eid tx] (verdict-latest-for-var? db var-eid tx nil))
+  ([db var-eid tx digest]
+   (let [dh (:schema db)]
+     (if-not (and db (dh :seon.test/var-ref))
+       true
+       (let [txl (long tx)
+             prun (branch-passing-run db dh txl)
+             fset (:failed prun)]
+         (cond
+           (and prun (empty? fset)) false
+           (and prun (string? digest) (not (contains? fset digest))) false
+           :else
+           (let [res (reduce
+                      (fn [acc dt]
+                        (if-let [pdt (first (d/datoms db :eavt (:e dt) :seon.test/pass?))]
+                          (let [ptx (long (:tx pdt 0))]
+                            (cond
+                              (and (true? (:v pdt)) (>= ptx txl)) (reduced ::cleared)
+                              (and prun (nil? digest) (false? (:v pdt)) (= ptx txl))
+                              (if-let [dg (:v (first (d/datoms db :eavt (:e dt) :seon.test/digest)))]
+                                (conj acc dg)
+                                acc)
+                              :else acc))
+                          acc))
+                      (if (string? digest) #{digest} #{})
+                      (d/datoms db :avet :seon.test/var-ref var-eid))]
+             (and (not= ::cleared res)
+                  (or (nil? prun) (boolean (some fset res)))))))))))
 
 (defonce ^:private ^:seon.flow/edge query-meta-cache (store/lru-cache 256))
 
