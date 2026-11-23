@@ -7,9 +7,11 @@
             [seon.code :as code]
             [seon.health.efficiency :as heff]
             [seon.render.data :as rdata]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.web.router :as router]))
 
 (defonce ^:private ^:seon.flow/edge ns-enrich-cache (store/lru-cache 64))
+
 (defonce ^:private ^:seon.flow/edge schema-used-by-cache (store/lru-cache 128))
 
 (defn db-schema
@@ -72,22 +74,23 @@
     :else nil))
 
 (defn ent-link
-  "Renders a semantic clickable `.ent-link` button dispatching `(seon.web/inspect-entity! [attr val])`,
+  "Renders a bookmarkable semantic `.ent-link` `<a href>` dispatching `(seon.web/inspect-entity! [attr val])`,
    or a plain `[:span]` when the ref is invalid. `render/hiccup->text` preserves `.ent-link` text cleanly."
   {:malli/schema [:function
                   [:=> [:cat :any :any] [:vector :any]]
                   [:=> [:cat :any :any [:maybe :string]] [:vector :any]]
                   [:=> [:cat :any :any :any [:maybe :string]] [:vector :any]]]
-   :cost/ticks 100000}
+   :cost/ticks 500000}
   ([ref lbl] (ent-link ref lbl "mono"))
   ([ref lbl cls]
    (if-let [r (rdata/normalize-inspect-ref ref)]
-     [:button {:type "button"
-               :class (if cls (str "ent-link " cls) "ent-link")
-               :data-preview-ref (pr-str r)
-               :interestfor "seon-hovercard"
-               :on-click (list 'seon.web/inspect-entity! r)}
-      (str lbl)]
+     [:a {:href (router/entity-ref->path nil r)
+          :class (if cls (str "ent-link " cls) "ent-link")
+          :data-ref (pr-str r)
+          :data-preview-ref (pr-str r)
+          :interestfor "seon-hovercard"
+          :on-click (list 'seon.web/inspect-entity! r)}
+      [:span (str lbl)]]
      [:span {:class (or cls "")} (str lbl)]))
   ([a v lbl cls]
    (if (and (qualified-keyword? a) (some? v))
@@ -455,12 +458,12 @@
         est-tok (when (seq feids) (quot (reduce + 0 (map #(count (str (:v (first (d/datoms db :eavt % :seon.code.form/src))))) feids)) 4))
         scope-match? (and agent (= nsym (:seon.agent/scope agent)) (not (rdata/router-agent? agent)))
         alerts (when (and scope-match? nsym)
-                 (if (empty? vars)
-                   (heff/static-efficiency-warnings db nsym)
-                   (cond-> []
-                     (and est-tok (> est-tok 8000))
-                     (conj {:class :oversized-namespace :severity :warning :kind :static :ns nsym
-                            :subject (str nsym) :message (str "Namespace " nsym " (~" est-tok " tok > 8000).")}))))
+               (if (and (empty? vars) (empty? kids))
+                 (heff/static-efficiency-warnings db nsym)
+                 (cond-> []
+                   (and est-tok (> est-tok 8000))
+                   (conj {:class :oversized-namespace :severity :warning :kind :static :ns nsym
+                          :subject (str nsym) :message (str "Namespace " nsym " (~" est-tok " tok > 8000).")}))))
         rich-kids (when (seq kids)
                     (let [sprefs (when router? (all-ns-schema-prefixes db 3))
                           ag-map (when (and router? main-db ((db-schema main-db) :seon.agent/id))
