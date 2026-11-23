@@ -270,21 +270,6 @@
       (mapv :schema (six/facets-of (schema/entity-index db) ent))
       [])))
 
-(defn edited-form-eids
-  "Returns vector of `:seon.code.form/*` EIDs whose `:seon.code.form/hash` differs on `branch-db` vs `main-db`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
-   :cost/ticks 5000000}
-  [main-db branch-db]
-  (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
-    []
-    (if (or (nil? main-db) (= main-db branch-db))
-      (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
-      (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
-                 (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms main-db :aevt :seon.code.form/hash))
-                 {})]
-        (vec (keep #(when (not= (:v %) (get mh (:e %))) (:e %))
-                   (d/datoms branch-db :aevt :seon.code.form/hash)))))))
-
 (defn parse-query
   "Normalizes a vector or map Datahike Datalog query into `{:find :keys :in :where}`."
   {:malli/schema [:=> [:cat :any] :map]
@@ -650,3 +635,54 @@
    :cost/ticks 20000000}
   ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
   ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))
+
+(defonce ^:private ^:seon.flow/edge edited-forms-cache (store/lru-cache 32))
+
+(defn- ^:seon.flow/edge changes-form-eids [main-db branch-db]
+  (when (and (instance? datahike.db.DB main-db)
+             (instance? datahike.db.DB branch-db)
+             (= (get-in main-db [:config :store :id]) (get-in branch-db [:config :store :id])))
+    (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
+      (when (and mc bc)
+        (try
+          (let [base (d/merge-base branch-db mc bc)]
+            (when base
+              (if (= base bc)
+                []
+                (into [] (comp (filter #(and (:added %) (= :seon.code.form/hash (:a %))))
+                               (map :e) (distinct)
+                               (filter #(some? (first (d/datoms branch-db :eavt % :seon.code.form/hash)))))
+                      (d/changes branch-db base bc)))))
+          (catch Throwable _ nil))))))
+
+(defn edited-form-eids
+  "Returns vector of `:seon.code.form/*` EIDs modified on `branch-db` since its `d/merge-base` with `main-db`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
+   :cost/ticks 5000000}
+  [main-db branch-db]
+  (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
+    []
+    (let [mc (when (instance? datahike.db.DB main-db) (d/commit-id main-db))
+          bc (when (instance? datahike.db.DB branch-db) (d/commit-id branch-db))
+          same? (or (nil? main-db) (identical? main-db branch-db)
+                    (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))]
+      (if same?
+        (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
+        (let [compute (fn []
+                        (first (d/datoms branch-db :aevt :seon.code.form/hash))
+                        (or (changes-form-eids main-db branch-db)
+                            (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
+                                       (reduce #(assoc %1 (:e %2) [(:v %2) (long (:tx %2 0))]) {}
+                                               (d/datoms main-db :aevt :seon.code.form/hash))
+                                       {})]
+                              (vec (keep (fn [dt]
+                                           (let [[mv mtx] (get mh (:e dt))]
+                                             (when (and (not= (:v dt) mv)
+                                                        (or (nil? mtx) (> (long (:tx dt 0)) (long mtx))))
+                                               (:e dt))))
+                                         (d/datoms branch-db :aevt :seon.code.form/hash))))))]
+          (if (and mc bc)
+            (store/lru-get! edited-forms-cache 32
+                            [(get-in branch-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx branch-db)]
+                            compute)
+            (compute)))))))
