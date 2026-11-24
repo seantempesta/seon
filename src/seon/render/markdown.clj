@@ -5,7 +5,8 @@
             [seon.render.data :as rdata]
             [seon.render.links :as rlinks]
             [seon.render.markdown.parse :as mdp]
-            [seon.web.router :as router]))
+            [seon.web.router :as router]
+            [seon.render.sanitize :as sanitize]))
 
 (def svg-sidebar
   [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
@@ -288,11 +289,7 @@
          (when (pos? total-ms) (str " · " total-ms " ms")))))
 
 (defn render-activity-fold
-  "Chronological collapsed `▸ Thinking & actions` summary pill placed ABOVE the response prose
-   (both in Canvas and in Workspace). When expanded, renders a single connected vertical list
-   of steps showing only the eval description in readable UI typography and right-aligned
-   tabular timing; clicking `▸` on any step opens handle metadata plus separately expandable
-   drawers for Thinking, Note, Code, Output, and Result/Error."
+  "Collapsed `▸ Thinking & actions` fold above prose with expandable per-step drawers."
   {:malli/schema [:=> [:cat [:maybe [:sequential :map]] :string] :any]}
   [action-evals id-prefix]
   (when (seq action-evals)
@@ -378,19 +375,21 @@
 
 (defn- render-hiccup-block [content]
   (let [raw (str (or content ""))
-        parsed (mdp/safe-read-edn raw)
-        safe (when (:ok? parsed) (mdp/sanitize-hiccup (:val parsed)))]
-    [:div {:class "md-live-card md-hiccup-card"}
-     [:div {:class "md-live-head"}
-      [:span {:class "badge purple tiny mono"} "live hiccup"]
-      [:div {:class "md-code-actions"} (copy-code-btn)]]
-     (if (and (:ok? parsed) (some? safe))
-       [:div {:class "md-live-body"} safe]
-       [:div {:class "notice red mono tiny"}
-        (if (:ok? parsed) "Hiccup block contained no whitelisted tags." (str "Invalid Hiccup EDN: " (:error parsed)))])
-     [:details {:class "md-live-source"}
-      [:summary {:class "mono tiny muted"} "View Hiccup Source"]
-      [:pre {:class "code-box tiny"} [:code {:class "language-clojure"} raw]]]]))
+      parsed (mdp/safe-read-edn raw)]
+  (if (and (:ok? parsed) (sanitize/contains-unevaluated-form? (:val parsed)))
+    (render-clojure-block "clojure" raw)
+    (let [safe (when (:ok? parsed) (mdp/sanitize-hiccup (:val parsed)))]
+      [:div {:class "md-live-card md-hiccup-card"}
+       [:div {:class "md-live-head"}
+        [:span {:class "badge purple tiny mono"} "live hiccup"]
+        [:div {:class "md-code-actions"} (copy-code-btn)]]
+       (if (and (:ok? parsed) (some? safe))
+         [:div {:class "md-live-body"} safe]
+         [:div {:class "notice red mono tiny"}
+          (if (:ok? parsed) "Hiccup block contained no whitelisted tags." (str "Invalid Hiccup EDN: " (:error parsed)))])
+       [:details {:class "md-live-source"}
+        [:summary {:class "mono tiny muted"} "View Hiccup Source"]
+        [:pre {:class "code-box tiny"} [:code {:class "language-clojure"} raw]]]]))))
 
 (defn- invoke-seon-view-var [var-sym data]
   (let [ns-s (when (qualified-symbol? var-sym) (namespace var-sym))]

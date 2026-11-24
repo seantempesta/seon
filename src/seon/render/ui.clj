@@ -150,16 +150,11 @@
   "Unified mounted view unit (`#seon-view-unit`) delegating to `seon.render.surface/render-surface`."
   {:malli/schema [:=> [:cat :seon.host/db :map] :any] :cost/ticks 15000000}
   [db {:keys [conn] :as opts}]
-  (let [{:keys [viewing-id view-mode selected-branch as-of-tx inspect-ref inspect-trail inspect-forward lab-prefs expert-mode?]} (user-view-state db)
-        view-opts (assoc opts :viewing-id viewing-id :selected-branch selected-branch
-                         :as-of-tx as-of-tx :view-mode view-mode
-                         :inspect-ref inspect-ref :inspect-trail inspect-trail
-                         :inspect-forward inspect-forward :lab-prefs lab-prefs
-                         :expert-mode? expert-mode?
-                         :include-composer? false)
-        branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id viewing-id])) :main)
-        head-bdb (branch-db-for db conn branch)]
-    (surface/render-surface db head-bdb view-opts)))
+  (let [vs (user-view-state db)
+      vid (:viewing-id vs)
+      sys? (and (= :system (rdata/canonical-view-mode (:view-mode vs))) (nil? (:inspect-ref vs)))
+      head-bdb (if sys? db (branch-db-for db conn (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id vid])) :main)))]
+  (surface/render-surface db head-bdb (assoc (merge opts (select-keys vs [:viewing-id :selected-branch :as-of-tx :view-mode :inspect-ref :inspect-trail :inspect-forward :lab-prefs :expert-mode?])) :include-composer? false))))
 
 (defn css-unit
   "Mounted live `<style id=\"seon-css\">` unit (0 DB reads)."
@@ -272,8 +267,8 @@
          (ibtn "icon-btn" "Forward" '(seon.web/inspect-forward!) "→" (not can-fwd?) "hdr-nav-fwd")])
        [:a {:href "/" :class "brand-link nav-link" :title "Home" :on-click '(seon.web/set-view-mode! :canvas)}
         [:span {:class "diamond"} "◆"]
-        (when-not narrow? [:strong {:class "wordmark"} "seon"])]
-       (when-not narrow? [:span {:class "crumb-sep"} "/"])
+        [:strong {:class "wordmark"} "seon"]]
+       [:span {:class "crumb-sep"} "/"]
        (header-focal-crumbs db inspect-ref inspect-trail canon viewing-id expert-mode?)]
       [:div {:class "stats-strip"}
        (when (and expert-mode? (>= vw 900)) (header-signals-strip db sigs))

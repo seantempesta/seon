@@ -236,7 +236,7 @@
 (defn- compute-entity-world [mdb bdb ref]
   (let [[ra rv] ref]
     (case ra
-      :seon.system/id   (let [w (system-entity-world mdb bdb rv)] (assoc w :candidates (hydrate bdb mdb (:neighbors w))))
+      :seon.system/id   (let [w (system-entity-world mdb mdb rv)] (assoc w :candidates (hydrate mdb mdb (:neighbors w))))
       :seon.signal/kind (let [w (virtual-signal-world mdb bdb rv)] (assoc w :candidates (hydrate bdb mdb (:neighbors w))))
       :seon.branch/name (let [w (virtual-branch-world mdb rv)] (assoc w :candidates (hydrate bdb mdb (:neighbors w))))
       (let [eid (when ref (resolve-eid bdb mdb ref))
@@ -252,12 +252,12 @@
   "Commit-cached 2-read entity-rooted world discovery + `seon.vector/near`."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map] :cost/ticks 30000000}
   [main-db branch-db ref-or-eid]
-  (let [bdb (or branch-db main-db)
-        ref (if (integer? ref-or-eid) [:db/id ref-or-eid] (rdata/normalize-inspect-ref ref-or-eid))
-        mc (live-cid main-db) bc (live-cid bdb)
-        ck (when (and mc bc ref) [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb) ref])]
-    (if ck (store/lru-get! entity-world-cache 32 ck #(compute-entity-world main-db bdb ref))
-        (compute-entity-world main-db bdb ref))))
+  (let [ref (if (integer? ref-or-eid) [:db/id ref-or-eid] (rdata/normalize-inspect-ref ref-or-eid))
+      bdb (if (= :seon.system/id (first ref)) main-db (or branch-db main-db))
+      mc (live-cid main-db) bc (live-cid bdb)
+      ck (when (and mc bc ref) [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb) ref])]
+  (if ck (store/lru-get! entity-world-cache 32 ck #(compute-entity-world main-db bdb ref))
+      (compute-entity-world main-db bdb ref))))
 
 (defn render-variations-panel
   "Renders all renderer variations side-by-side (`Browser HTML` vs `Model Text`)."

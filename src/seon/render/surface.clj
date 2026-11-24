@@ -55,17 +55,18 @@
 
     :else
     (let [t (case canon :context :debug :system :workspace :canvas)
-          gather-fn #(ctx/gather-agent-candidates emdb ebdb aid {:agent ag :target t :semantic? true :enrich? true :rich-ns? false :situational? false})
-          proj (sentity/project-entity-view
-                emdb ebdb [:seon.agent/id aid]
-                (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) 8))))]
-      {:wire (when (:include-wire? o)
-               (rwire/build-live-wire-request
-                emdb ebdb aid
-                (select-keys o [:conn :viewport-screenshot :vision? :already-shown :token-budget :strategy])))
-       :fitted (:fitted proj)
-       :pool-count (:pool-count proj 0)
-       :ctx-trace (:ctx-trace proj)})))
+        ctx-db (if (rdata/reads-main? ag) emdb ebdb)
+        gather-fn #(ctx/gather-agent-candidates emdb ctx-db aid {:agent ag :target t :semantic? true :enrich? true :rich-ns? false :situational? false})
+        proj (sentity/project-entity-view
+              emdb ctx-db [:seon.agent/id aid]
+              (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) 8))))]
+    {:wire (when (:include-wire? o)
+             (rwire/build-live-wire-request
+              emdb ebdb aid
+              (select-keys o [:conn :viewport-screenshot :vision? :already-shown :token-budget :strategy])))
+     :fitted (:fitted proj)
+     :pool-count (:pool-count proj 0)
+     :ctx-trace (:ctx-trace proj)})))
 
 (defn windowed-history-indices
   "Selects up to 14 bounded step indices for the interactive `d/as-of` timeline scrubber."
