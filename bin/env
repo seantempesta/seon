@@ -52,11 +52,11 @@ JOLT_CACHE_DIR=${JOLT_CACHE_DIR:-$MAIN_TREE/target/cache/aot}
 JOLT_CACHE_GENERATIONS=${JOLT_CACHE_GENERATIONS:-4}
 # Its value is the config key :seon.config.build/jolt-cache-mb (resources/seon/config/default.edn), read from its one
 # line as JOLT_COMPILER_OPTIONS' is below: Jolt reads it before any Seon config exists
-JOLT_CACHE_MB=${JOLT_CACHE_MB:-$(sed -nE 's#^ :seon\.config\.build/jolt-cache-mb ([0-9]+)$#\1#p' "$ROOT/resources/seon/config/default.edn")}
+JOLT_CACHE_MB=${JOLT_CACHE_MB:-$(sed -nE 's#^ :seon\.config\.build/jolt-cache-mb ([0-9]+),?$#\1#p' "$ROOT/resources/seon/config/default.edn")}
 export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GENERATIONS JOLT_CACHE_MB
 # Jolt's whole-program inference at build, the config key :seon.config.build/jolt-whole-program-inference, read from its one line:
 # false exports JOLT_NO_WP_INFER=1, which jolt build reads (a caller's value wins)
-if [ "$(sed -nE 's#^ :seon\.config\.build/jolt-whole-program-inference (true|false)$#\1#p' "$ROOT/resources/seon/config/default.edn")" = false ]; then
+if [ "$(sed -nE 's#^ :seon\.config\.build/jolt-whole-program-inference (true|false),?$#\1#p' "$ROOT/resources/seon/config/default.edn")" = false ]; then
   export JOLT_NO_WP_INFER=${JOLT_NO_WP_INFER:-1}
 fi
 # Jolt's compile options for everything a Seon process compiles (its build, the test runner,
@@ -65,7 +65,7 @@ fi
 # (a third less allocation a compile; task jolt.backend/image-registration-is-opt-in)
 # Its value is the config key :seon.config.build/jolt-compiler-options (resources/seon/config/default.edn),
 # read from its one line, as bin/ports reads its ports
-JOLT_COMPILER_OPTIONS=${JOLT_COMPILER_OPTIONS:-$(sed -nE 's#^ :seon\.config\.build/jolt-compiler-options "(.*)"$#\1#p' "$ROOT/resources/seon/config/default.edn")}
+JOLT_COMPILER_OPTIONS=${JOLT_COMPILER_OPTIONS:-$(sed -nE 's#^ :seon\.config\.build/jolt-compiler-options "?(\{.*\})"?[,]?$#\1#p' "$ROOT/resources/seon/config/default.edn")}
 export JOLT_COMPILER_OPTIONS
 # Test and check verdicts are a cache by digest, one directory in the main tree's target/ for every
 # checkout (:seon.config.proofs/results-dir, seon.fx/write-verdicts!), published by temp+rename as the
