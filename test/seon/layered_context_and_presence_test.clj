@@ -11,7 +11,8 @@
             [seon.render.wire :as rwire]
             [seon.signals :as sig]
             [seon.store :as store]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.fork.worker-support :as wsup]))
 
 (defn demo-reactive-canvas
   "Sample pure reactive canvas renderer `(fn [db agent])` used by Stage 4 test."
@@ -147,3 +148,24 @@
         (is (str/includes? hic-old "Frame One"))
         (is (not (str/includes? hic-old "reactive-demo"))
             "d/as-of time-travel must cleanly rewind custom Canvas to earlier frame")))))
+
+(deftest sync-conn-to-latest-branch-head-preserves-writer-test
+  (testing "sync-conn-to-latest-branch-head! preserves :writer on @(:wrapped-atom conn) after external branch commits so subsequent d/transact never throws PWriter nil"
+    (with-test-store [{:keys [conn cfg]}]
+      (store/branch! conn :main :branch/w-sync)
+      (let [wconn (store/connect cfg :branch/w-sync)
+            c0 (d/commit-id @wconn)
+            m0 (d/commit-id (store/head wconn :main))]
+        (try
+          ;; Simulate external reviewer merge-back advancing :branch/w-sync on a separate connection
+          (let [ext-conn (store/connect cfg :branch/w-sync)]
+            (try
+              (d/transact ext-conn {:tx-data [{:seon.agent/id :w/sync-target :seon.agent/branch :branch/w-sync :seon.agent/summary "merged review"}]})
+              (finally (d/release ext-conn))))
+          (let [res (wsup/sync-conn-to-latest-branch-head! wconn :branch/w-sync c0 m0)]
+            (is (not= c0 (:branch-cid res)))
+            (is (some? (:writer @(:wrapped-atom wconn))) "Live PWriter must survive branch-moved? swap")
+            (let [txr (d/transact wconn {:tx-data [{:seon.agent/id :w/sync-target :seon.agent/waiting? false}]})]
+              (is (some? (:db-after txr)))
+              (is (= "merged review" (:seon.agent/summary (d/pull @wconn '[:seon.agent/summary] [:seon.agent/id :w/sync-target]))))))
+          (finally (d/release wconn)))))))

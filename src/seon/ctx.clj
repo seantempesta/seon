@@ -127,14 +127,16 @@
                  (let [dh (store/db-schema branch-db)
                        struct-errs (try (health/caused-by-branch main-db branch-db {} wnss) (catch Throwable _ []))
                        eff-errs (try
-                                  (let [p-key (juxt :class :subject)
-                                        base-keys (into #{} (map p-key)
-                                                        (mapcat #(health/static-efficiency-warnings main-db %) wnss))]
-                                    (into [] (comp (mapcat #(health/static-efficiency-warnings branch-db %))
-                                                   (filter (fn [p] (and (= :error (:severity p))
-                                                                        (not (contains? base-keys (p-key p)))))))
-                                          wnss))
-                                  (catch Throwable _ []))
+                       (let [br-errs (into [] (comp (mapcat #(health/static-efficiency-warnings branch-db %))
+                                                    (filter #(= :error (:severity %))))
+                                           wnss)]
+                         (if (empty? br-errs)
+                           []
+                           (let [p-key (juxt :class :subject)
+                                 base-keys (into #{} (map p-key)
+                                                 (mapcat #(health/static-efficiency-warnings main-db %) wnss))]
+                             (filterv #(not (contains? base-keys (p-key %))) br-errs))))
+                       (catch Throwable _ []))
                        resolve-p (fn [p]
                                    (or (when (and (:var p) (dh :seon.code.var/name))
                                          (:e (first (d/datoms branch-db :avet :seon.code.var/name (:var p)))))
