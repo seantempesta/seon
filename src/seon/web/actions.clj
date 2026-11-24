@@ -426,14 +426,12 @@
             (str/split s #"&"))))
 
 (defn parse-multipart-fields
-"Parses `multipart/form-data` text fields via `jolt-lang/multipart` (`multipart.core/parse-form-data`, RFC 7578)."
-{:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :map], :cost/ticks 2000000, :cost/bytes 2097152}
-[^String ct ^String body]
-(if (or (str/blank? ct) (nil? body))
+{:malli/schema [:=> [:cat [:maybe :string] :any] :map], :cost/ticks 2000000, :cost/bytes 2097152}
+[ct body]
+(if (or (str/blank? (str ct)) (nil? body))
   {}
-  (let [{:keys [params]} (multipart/parse-form-data
-                          {:content-type ct :body (.getBytes body "UTF-8")}
-                          {:check-complete false :ignore-errors true})]
+  (let [b (if (string? body) (.getBytes ^String body "UTF-8") body)
+        {:keys [params]} (multipart/parse-form-data {:content-type (str ct) :body b} {:check-complete false :ignore-errors true})]
     (into {} (map (fn [[k v]] [(keyword k) v])) params))))
 
 (defn parse-form-body
@@ -446,12 +444,7 @@
       raw-body (:body req)]
   (cond
     (nil? raw-body) {}
-    (str/includes? ct "multipart/form-data")
-    (let [b (if (string? raw-body) (.getBytes ^String raw-body "UTF-8") raw-body)
-          {:keys [params]} (multipart/parse-form-data
-                            {:content-type (str raw-ct) :body b}
-                            {:check-complete false :ignore-errors true})]
-      (into {} (map (fn [[k v]] [(keyword k) v])) params))
+    (str/includes? ct "multipart/form-data") (parse-multipart-fields raw-ct raw-body)
     :else
     (let [body-str (if (string? raw-body) raw-body (slurp raw-body))
           trimmed (str/trim body-str)]

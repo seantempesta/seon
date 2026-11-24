@@ -266,4 +266,20 @@
   :seon.fix/error-class :seon.code.overlay/stale-main-schema-arming,
   :seon.fix/root-cause "apply-form-overlay! passed main-db to code/apply-overlay! inside call-with-candidate-overrides, so arm-var! called registry-for-db on main-db whose old :seon.schema/* entities overwrote schema/*base-forms-override*, and untouched already-instrumented vars referencing modified schemas were never re-armed.",
   :seon.fix/regression-test seon.alloc-guard-test/apply-overlay-arms-against-candidate-schema-override-test,
-  :seon.fix/id #uuid "1e48e321-ba02-5494-aa6a-20947ed311f9"}]
+  :seon.fix/id #uuid "1e48e321-ba02-5494-aa6a-20947ed311f9"}
+ {:seon.fix/created-ms 1795502027374,
+  :seon.fix/symptom "Hand-rolled TCP chunk UTF-8 decoding in seon.model & seon.bench.proxy corrupted split multi-byte UTF-8 into U+FFFD and missed multi-line SSE/comments/BOM; seon.web.actions lowercased Content-Type before regex multipart boundary matching (breaking WebKit mixed-case boundaries); seon.web served uncompressed HTML/JS/SSE on default :threads strategy; 4 files duplicated SHA-256 hex loops.",
+  :seon.fix/change-summary "Migrated seon.model, seon.model.wire, seon.bench.proxy, and seon.bench-test onto jolt.http-client + jolt.http.sse (keep-alive pooled, gzip/deflate, UTF-8 BufferedReader, WHATWG 9.2.6 SSE); migrated seon.render & seon.web onto ring-chez.sse + ring-chez.middleware.compress (zstd/gzip) + :strategy :fibers; replaced regex parse-multipart-fields with multipart.core/parse-form-data preserving raw Content-Type; consolidated 4 SHA-256 hex loops into seon.store/sha256-hex.",
+  :seon.fix/before-after "[M] Split multi-byte UTF-8 SSE & mixed-case WebKit multipart: broken -> 100% green; 8.6 KB HTML page compresses to 63 B via zstd; SSE & keep-alive sockets park on kqueue fibers; 788/788 tests green.",
+  :seon.fix/error-class :seon.http/hand-rolled-sse-multipart-and-uncompressed-web,
+  :seon.fix/root-cause "seon.model, seon.model.wire, and seon.bench.proxy bypassed jolt.http-client/jolt.http.sse for raw jolt.http.core sockets; seon.web bypassed ring-chez.sse, ring-chez.middleware.compress (zstd/gzip), and :strategy :fibers; seon.web.actions bypassed jolt-lang/multipart and lowercased boundary strings.",
+  :seon.fix/regression-test seon.bench-test/sse-utf8-chunk-boundary-and-multiline-streaming-test,
+  :seon.fix/id #uuid "20261124-0003-4000-8000-000000000001"}
+ {:seon.fix/created-ms 1795502027374,
+  :seon.fix/symptom "Freshly forked test workers failed 15 unrelated generative :cost/ticks checks (1.18M ticks on Ratio, 413k ticks on UUID, 192k ticks on Set) and core_test structural-edit-fn failed :no-match on quoted forms carrying Jolt 0.9.x reader :line/:column metadata.",
+  :seon.fix/change-summary "Made seon.schema/stress-var re-measure a pure sample once when its first call exceeds a cost/alloc/ms budget (isolating steady-state cost from one-time cold init), and taught seon.code.cst/node->structural-key to unwrap reader-only location metadata via pure CST token checks (zero try/catch).",
+  :seon.fix/before-after "[M] 15 cold-init generative false failures + 1 structural-edit-fn failure -> 0 generative failures, 788/788 green (sb-str 1.18M -> 546 ticks, msg-ent 1.18M -> 650 ticks).",
+  :seon.fix/error-class :seon.schema/cold-init-stress-var-and-reader-meta-cst,
+  :seon.fix/root-cause "Jolt lazily initializes print-method per type on first call (768k ticks once -> 158 ticks steady-state) and stress-var charged one-time init ticks to whichever pure fn ran first; seon.code.cst/node->structural-key did not strip reader-only {:line :column} :meta wrappers.",
+  :seon.fix/regression-test seon.core-test/structural-edit-fn-and-unused-requires-test,
+  :seon.fix/id #uuid "20261124-0003-4000-8000-000000000002"}]

@@ -23,10 +23,11 @@
     (let [kids (vec (remove n/whitespace-or-comment? (n/children nd)))
           meta-nd (first kids)
           val-nd (second kids)
-          reader-only? (and (= :map (n/tag meta-nd))
-                            (let [m (try (n/sexpr meta-nd) (catch Throwable _ nil))]
-                              (and (map? m) (seq m)
-                                   (every? #{:line :column :end-line :end-column :file} (keys m)))))]
+          mch (when (= :map (n/tag meta-nd)) (vec (remove n/whitespace-or-comment? (n/children meta-nd))))
+          reader-only? (and (seq mch) (even? (count mch))
+                            (every? (fn [knd] (and (= :token (n/tag knd))
+                                                   (#{":line" ":column" ":end-line" ":end-column" ":file"} (n/string knd))))
+                                    (take-nth 2 mch)))]
       (if reader-only?
         (node->structural-key val-nd)
         [:meta (mapv node->structural-key kids)]))
