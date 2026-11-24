@@ -161,7 +161,18 @@
                                (:avail-w slot-b) (:area-budget slot-b) target
                                (:strategy fopts) (:token-budget fopts)]
                               #(first (:selected (fit/fit-projections emdb [{:entity :signals/live :schema :seon.signal/snapshot :data sigs :priority 100}] fopts)))))
-         {:keys [wire fitted ctx-trace pool-count]} (build-mode-payload canon explaining? inspecting? insp-ref emdb ebdb aid ag br fopts lp o)
+         expert-mode? (if (contains? o :expert-mode?)
+                        (boolean (:expert-mode? o))
+                        (boolean (when (and ((db-schema main-db) :seon.user/expert-mode?)
+                                            (first (d/datoms main-db :aevt :seon.user/expert-mode?))
+                                            (first (d/datoms main-db :avet :seon.user/id :user/default)))
+                                   (:seon.user/expert-mode?
+                                    (d/pull main-db '[:seon.user/expert-mode?] [:seon.user/id :user/default])))))
+         skip-ctx? (and (:seon.render.surface/for-render? o) (not expert-mode?) (not (:include-wire? o))
+                        (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?))
+         {:keys [wire fitted ctx-trace pool-count]} (if skip-ctx?
+                                                      {:wire nil :fitted {:selected [] :tokens 0 :budget 16000} :ctx-trace nil :pool-count 0}
+                                                      (build-mode-payload canon explaining? inspecting? insp-ref emdb ebdb aid ag br fopts lp o))
          peids (vec (keep #(when (integer? (:entity %)) (:entity %)) (:selected fitted)))
          htxs (if (or inspecting? (= canon :system) (and explaining? insp-ref)) [] (or (rdata/view-history-txs hbdb main-db aid peids) []))
          sidx (when (seq htxs)
@@ -169,13 +180,6 @@
                               (last (keep-indexed #(when (<= %2 as-of) %1) htxs)) 0)
                     (dec (count htxs))))
          active? (or (= :active (get (:agent-states o) aid)) (map? (:live-stream o)))
-         expert-mode? (if (contains? o :expert-mode?)
-         (boolean (:expert-mode? o))
-         (boolean (when (and ((db-schema main-db) :seon.user/expert-mode?)
-                             (first (d/datoms main-db :aevt :seon.user/expert-mode?))
-                             (first (d/datoms main-db :avet :seon.user/id :user/default)))
-                    (:seon.user/expert-mode?
-                     (d/pull main-db '[:seon.user/expert-mode?] [:seon.user/id :user/default])))))
          agent-status (when (and (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?))
          (rstatus/latest-agent-status emdb ebdb aid))
          conv (if (and (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?)) (ssess/extract-conversation emdb ebdb aid ag active? as-of) {})

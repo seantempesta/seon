@@ -140,63 +140,6 @@
     (when-let [nsym (:v (first (d/datoms db :eavt e :seon.code.var/ns)))]
       (:e (first (d/datoms db :avet :seon.code.ns/name nsym))))))
 
-(defn- compute-branch-writes [main-db branch-db]
-  (store/without-agent-eval-reads
-   (fn []
-     (let [mc (live-cid main-db)
-           bc (live-cid branch-db)
-           sid (get-in branch-db [:config :store :id])
-           same? (or (nil? main-db) (identical? main-db branch-db)
-                     (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))]
-       (if (or same? (not (and mc bc (= sid (get-in main-db [:config :store :id])))))
-         {}
-         (let [base (try (d/merge-base branch-db mc bc) (catch Throwable _ nil))]
-           (if (or (nil? base) (= base bc))
-             {}
-             (let [dh (db-schema branch-db)
-                   per-tx (reduce (fn [acc dt]
-                                    (let [a (resolve-change-attr branch-db (:a dt))
-                                          e (:e dt)
-                                          tx (long (or (:tx dt) 0))]
-                                      (if (and (integer? e) (pos? (long e))
-                                               (qualified-keyword? a)
-                                               (not (excluded-attr? a))
-                                               (not (contains? dh e)))
-                                        (-> acc
-                                            (update-in [e :txs] (fnil conj #{}) tx)
-                                            (update-in [e :max-tx] #(max (long (or % 0)) tx)))
-                                        acc)))
-                                  {}
-                                  (try (d/changes branch-db base bc) (catch Throwable _ [])))]
-               (reduce-kv
-                (fn [acc e {:keys [txs max-tx]}]
-                  (let [w (max 1 (count txs))
-                        ce (canonicalize-eid branch-db dh e)]
-                    (update acc ce (fn [prev]
-                                     {:writes (max w (long (:writes prev 0)))
-                                      :max-tx (max max-tx (long (:max-tx prev 0)))}))))
-                {}
-                per-tx)))))))))
-
-(defn ^:seon.flow/edge branch-write-eids
-  "Derives canonicalized domain entity EIDs written on `branch-db` since `d/merge-base` with `main-db`
-   directly from raw Datahike `d/changes` (commit-cached, zero persisted derived datoms)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :int]] :map]
-   :cost/ticks 10000000}
-  [main-db branch-db self-agent-eid]
-  (if-not branch-db
-    {}
-    (let [mc (live-cid main-db)
-          bc (live-cid branch-db)
-          sid (get-in branch-db [:config :store :id])
-          raw (if (and mc bc sid)
-                (store/lru-get! branch-writes-cache 32 [sid mc (:max-tx main-db) bc (:max-tx branch-db)]
-                                #(compute-branch-writes main-db branch-db))
-                (compute-branch-writes main-db branch-db))]
-      (if (integer? self-agent-eid)
-        (dissoc raw (long self-agent-eid))
-        raw))))
-
 (defn analyze-touch-sets
   "Pure set-algebra & attention-conserved working-set progression over chronological per-turn
    entries and branch writes: computes per-turn novelty, recurrence, `:counts`, `:written`,
@@ -308,6 +251,83 @@
       has-vec? (when-let [tdt (first (d/datoms db :eavt ee :seon.agent.eval/touched))]
                  (let [ts (:v tdt)] (when (coll? ts) (filterv integer? ts))))
       :else nil)))
+
+(defonce ^:private ^:seon.flow/edge merge-base-cache
+  (atom {}))
+
+(defn- ^:seon.flow/edge fast-merge-base [main-db branch-db sid mc bc]
+  (let [k [sid bc]
+        prev (get @merge-base-cache k)
+        parents (get-in main-db [:meta :datahike/parents])]
+    (cond
+      (and prev (= mc (:mc prev)))
+      (:base prev)
+
+      (and prev (set? parents) (= 1 (count parents)) (= (first parents) (:mc prev)))
+      (let [b (:base prev)]
+        (swap! merge-base-cache assoc k {:mc mc :base b})
+        b)
+
+      :else
+      (let [b (try (d/merge-base branch-db mc bc) (catch Throwable _ nil))]
+        (when b
+          (swap! merge-base-cache (fn [m] (let [m1 (if (> (count m) 64) {} m)] (assoc m1 k {:mc mc :base b})))))
+        b))))
+
+(defn- ^:seon.flow/edge compute-branch-writes-for-base [branch-db base bc]
+  (store/without-agent-eval-reads
+   (fn []
+     (if (or (nil? base) (= base bc))
+       {}
+       (let [dh (db-schema branch-db)
+             per-tx (reduce (fn [acc dt]
+                              (let [a (resolve-change-attr branch-db (:a dt))
+                                    e (:e dt)
+                                    tx (long (or (:tx dt) 0))]
+                                (if (and (integer? e) (pos? (long e))
+                                         (qualified-keyword? a)
+                                         (not (excluded-attr? a))
+                                         (not (contains? dh e)))
+                                  (-> acc
+                                      (update-in [e :txs] (fnil conj #{}) tx)
+                                      (update-in [e :max-tx] #(max (long (or % 0)) tx)))
+                                  acc)))
+                            {}
+                            (try (d/changes branch-db base bc) (catch Throwable _ [])))]
+         (reduce-kv
+          (fn [acc e {:keys [txs max-tx]}]
+            (let [w (max 1 (count txs))
+                  ce (canonicalize-eid branch-db dh e)]
+              (update acc ce (fn [prev]
+                               {:writes (max w (long (:writes prev 0)))
+                                :max-tx (max max-tx (long (:max-tx prev 0)))}))))
+          {}
+          per-tx))))))
+
+(defn ^:seon.flow/edge branch-write-eids
+  "Derives canonicalized domain entity EIDs written on `branch-db` since `d/merge-base` with `main-db`
+   directly from raw Datahike `d/changes` (O(1) parent-chain merge-base + immutable `[sid base bc]` cache)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :int]] :map]
+   :cost/ticks 10000000}
+  [main-db branch-db self-agent-eid]
+  (if-not branch-db
+    {}
+    (let [mc (live-cid main-db)
+          bc (live-cid branch-db)
+          sid (get-in branch-db [:config :store :id])
+          same? (or (nil? main-db) (identical? main-db branch-db)
+                    (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))
+          raw (if (or same? (not (and mc bc sid (= sid (get-in main-db [:config :store :id])))))
+                {}
+                (if-let [base (fast-merge-base main-db branch-db sid mc bc)]
+                  (if (= base bc)
+                    {}
+                    (store/lru-get! branch-writes-cache 64 [sid base bc]
+                                    #(compute-branch-writes-for-base branch-db base bc)))
+                  {}))]
+      (if (integer? self-agent-eid)
+        (dissoc raw (long self-agent-eid))
+        raw))))
 
 (defn- compute-derived-touches [mdb bdb agent-id o]
   (store/without-agent-eval-reads
