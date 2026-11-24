@@ -411,8 +411,12 @@
            _ (when (and eval? (nil? (find-ns nsym)) (not (str/starts-with? raw-src "(ns ")))
                (when-let [pre-ns (:seon.code.form/src (d/pull db-pre [:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))]
                  (analyze/eval-form-with-account! db-pre nsym pre-ns true)))
-           parsed (try {:ok? true :val (binding [*ns* (or (find-ns nsym) *ns*)] (read-string raw-src))}
-                       (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
+           parsed (try (let [v (binding [*ns* (or (find-ns nsym) *ns*)] (read-string raw-src))]
+            (if (seq? v)
+              {:ok? true :val v}
+              {:ok? false :error :expected-list-form
+               :message "add-fn! expects a top-level list form like (defn ...), not a bare symbol or scalar"}))
+           (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
        (if-not (:ok? parsed)
          (assoc parsed :ns nsym)
          (let [fv (:val parsed)

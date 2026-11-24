@@ -380,8 +380,16 @@
                        {:turn 5 :thought "after compact" :calls [{:id "c5" :handle (quote result/e5) :code "(+ 3 4)" :ok? true :value "7"}]}]))
           tool-contents (mapv :content (filter #(= "tool" (:role %)) msgs))]
       (is (= 2 (count tool-contents)))
-      (is (str/starts-with? (first tool-contents) "; turn 1 · result/e1 · ok"))
-      (is (str/starts-with? (second tool-contents) "; turn 5 · result/e5 · ok"))))
+      (let [d1 (clojure.edn/read-string (first tool-contents))
+            d5 (clojure.edn/read-string (second tool-contents))]
+        (is (not (str/starts-with? (first tool-contents) ";")))
+        (is (= 1 (:seon.eval/turn d1)))
+        (is (= 'result/e1 (:seon.eval/handle d1)))
+        (is (true? (:seon.eval/ok? d1)))
+        (is (= 3 (:seon.eval/value d1)))
+        (is (= 5 (:seon.eval/turn d5)))
+        (is (= 'result/e5 (:seon.eval/handle d5)))
+        (is (= 7 (:seon.eval/value d5))))))
   (testing "2. Compaction detection derives missing turns from d/history and fires history doc hop, plus ctx-friction progressive disclosure"
     (with-test-store [{:keys [conn]}]
       (let [aid :agent/compact-probe]

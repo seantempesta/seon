@@ -122,14 +122,15 @@
                         :value (pr-str {:seon.demo.note/id :n/alpha :seon.demo.note/body "Fallback rendered cleanly"})})]
           (is (str/includes? ev-map "METRIC-RENDER::m/latency"))
           (is (str/includes? ev-map "val=42"))
-          (is (str/includes? ev-map "; Breadcrumbs · :seon.demo.metric/entity"))
+          (is (str/includes? ev-map "Breadcrumbs · :seon.demo.metric/entity"))
+          (is (= 'result/e1 (:seon.eval/handle (clojure.edn/read-string ev-map))))
           (is (str/includes? ev-map "seon.demo.metrics/double-metric"))
           (is (str/includes? ev-map "docs/demo-metric.md#overview"))
           (is (str/includes? ev-map "d/pull"))
           (is (str/includes? ev-ref "METRIC-RENDER::m/latency"))
           (is (str/includes? ev-ref "seon.demo.metrics/double-metric"))
           (is (str/includes? ev-note "Fallback rendered cleanly"))
-          (is (str/includes? ev-note "; Breadcrumbs · :seon.demo.note/entity"))
+          (is (str/includes? ev-note "Breadcrumbs · :seon.demo.note/entity"))
           (is (str/includes? ev-note "self-printer")))
 
         (d/transact conn

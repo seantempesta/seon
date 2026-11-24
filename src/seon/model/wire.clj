@@ -442,82 +442,6 @@
 
       :else nil)))
 
-(defn format-eval-output
-  "Formats a single REPL eval outcome via `seon.render.fit/discover-renderers` +
-   `seon.render/render-value -> seon.render/hiccup->text` (single Hiccup -> text pipeline).
-   Bounds large outputs structurally pointing to the live `result/e<n>` handle."
-  {:malli/schema [:=> {:examples [[[{:handle 'result/e1 :ok? true :ms 1.5 :ticks 500 :value "42"}]
-                                   "; result/e1 · ok · 1.5 ms · 500 ticks\n42"]]}
-                  [:cat :map] :string]
-   :cost/ticks 500000
-   :cost/bytes 1048576}
-  [{:keys [turn handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars out-max-chars db main-db fallback-db code]}]
-  (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
-        cap (long (max 256 (if (number? max-chars) max-chars 24000)))
-        h-str (if handle (str handle) "result/e?")
-        sch (or result-schema schema)
-        ticks-str (when (and (number? ticks) (pos? (long ticks)))
-                    (let [t (long ticks)]
-                      (if (>= t 1000) (str (quot t 1000) "k ticks") (str t " ticks"))))
-        hdr (str "; "
-                 (str/join " · "
-                           (remove nil?
-                                   [(when (integer? turn) (str "turn " turn))
-                                   (when handle (str handle))
-                                   (if eff-ok? "ok" "error")
-                                   (when (number? ms) (str ms " ms"))
-                                   ticks-str
-                                   (when sch (str sch))
-                                   (when branch (str branch (when branch-tx (str " @ tx " branch-tx))))])))
-        out-s (when (and (some? out) (not (str/blank? (str out))))
-                (let [os (str out)
-                                                      n (count os)
-                                                      ocap (long (max 256 (if (number? out-max-chars) out-max-chars cap)))]
-                                                  (if (> n ocap)
-                                                    (let [budget (min n (max 120 (- ocap 400)))
-                                                          head-n (quot (* budget 3) 4)
-                                                          tail-n (max 0 (- budget head-n))
-                                                          omitted (max 0 (- n head-n tail-n))]
-                                                      (str "; stdout (" n " chars; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))):
-                " (subs os 0 head-n) "
-                ... (" omitted " chars omitted; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))) ...
-                " (when (pos? tail-n) (subs os (- n tail-n)))))
-                                                    (str "; stdout:
-                " os))))
-        body (if-not eff-ok?
-               (str "ERROR: " (or error "Unknown error"))
-               (let [val-str (if (nil? value) "nil" (str value))
-                     pr (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
-                          (safe-read-eval-edn edn-tag-val val-str)
-                          {:ok? false})
-                     parsed-ok? (boolean (:ok? pr))
-                     parsed (:val pr)
-                     eff-db (choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
-                     eff-opts (cond-> {:handle (symbol h-str) :max-chars cap
-                                     :budget (min 1200 (quot cap 4)) :mode :model}
-                              (not (string? parsed)) (assoc :limit 20)
-                              (and (string? code) (str/includes? code "expand!")) (assoc :expanded? true)
-                              sch (assoc :schema sch)
-                              eff-db (assoc :render-root? true :main-db (or main-db eff-db)))
-                     media-txt (when parsed-ok? (format-media-eval-value parsed sch))
-                     safe-val-str (strip-raw-base64-text val-str)
-                     val-body (cond
-                                media-txt (cap-eval-text media-txt cap h-str)
-                                parsed-ok? (render-eval-val-text eff-db parsed sch eff-opts cap h-str)
-                                (<= (count safe-val-str) cap) safe-val-str
-                                :else (render-eval-val-text eff-db safe-val-str nil eff-opts cap h-str))
-                     crumb-s (when (and eff-db parsed-ok?)
-                               (when-let [bh (render/render-schema-breadcrumbs eff-db sch parsed (assoc eff-opts :mode :model :main-db (or main-db eff-db) :fn-limit 5 :doc-limit 2))]
-                                 (let [bt (render/hiccup->text bh)]
-                                   (when-not (str/blank? bt)
-                                     (str "; " (str/replace bt "\n" "\n; "))))))]
-                 (if (and crumb-s (not (str/blank? crumb-s)))
-                   (str val-body "\n" crumb-s)
-                   val-body)))]
-    (str hdr
-         (when out-s (str "\n" out-s))
-         "\n" body)))
-
 (defn decode-sse-data
   "Decodes an SSE event `data` payload into a keywordized JSON map, returning nil for blank/`[DONE]`/non-map JSON."
   {:malli/schema [:=> {:examples [[["{\"choices\":[]}"] {:choices []}] [["[DONE]"] nil] [[""] nil] [[nil] nil]]}
@@ -584,3 +508,98 @@
 [url headers ^String body]
 (let [r (http/post url {:headers (headers->map headers) :body body :throw false})]
   {:status (:status r) :headers (:headers r) :body (or (:body r) "")}))
+
+(defn- edn-multiline-str [^String s]
+  (let [n (count s)
+        sb (StringBuilder. (+ n 16))]
+    (.append sb \")
+    (dotimes [i n]
+      (let [ch (.charAt s i)]
+        (case ch
+          \\ (.append sb "\\\\")
+          \" (.append sb "\\\"")
+          \return (.append sb "\\r")
+          (.append sb ch))))
+    (.append sb \")
+    (.toString sb)))
+
+(defn format-eval-output
+  "Formats a single REPL eval outcome as structured Clojure EDN data (`{:seon.eval/turn ... :seon.eval/handle result/e<n> :seon.eval/ok? ... :seon.eval/value ...}` — zero fake `;` comments), using `seon.render.fit/discover-renderers` + `seon.render/render-value` for custom entity renderers or oversized collections."
+  {:malli/schema [:=> {:examples [[[{:handle 'result/e1 :ok? true :ms 1.5 :ticks 500 :value "42"}]
+                                   "{:seon.eval/handle result/e1, :seon.eval/ok? true, :seon.eval/ms 1.5, :seon.eval/ticks 500, :seon.eval/value 42}"]]}
+                  [:cat :map] :string]
+   :cost/ticks 800000
+   :cost/bytes 1048576}
+  [{:keys [turn handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars out-max-chars db main-db fallback-db code]}]
+  (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
+        cap (long (max 256 (if (number? max-chars) max-chars 24000)))
+        h-str (if handle (str handle) "result/e?")
+        sch (or result-schema schema)
+        out-s (when (and (some? out) (not (str/blank? (str out))))
+                (let [os (str out)
+                      n (count os)
+                      ocap (long (max 256 (if (number? out-max-chars) out-max-chars cap)))]
+                  (if (> n ocap)
+                    (let [budget (min n (max 120 (- ocap 260)))
+                          head-n (quot (* budget 3) 4)
+                          tail-n (max 0 (- budget head-n))
+                          omitted (max 0 (- n head-n tail-n))]
+                      (str (subs os 0 head-n)
+                           "\n... (" omitted " chars omitted; (user/expand! '" h-str " {:out? true}) or (:seon.eval/out (meta #'" h-str "))) ...\n"
+                           (when (pos? tail-n) (subs os (- n tail-n)))))
+                    os)))
+        val-res (when eff-ok?
+                  (let [val-str (if (nil? value) "nil" (str value))
+                        tagged? (volatile! false)
+                        pr (if (and (string? value) (not (str/blank? val-str)) (< (count val-str) 2000000))
+                             (safe-read-eval-edn (fn [t v] (vreset! tagged? true) (edn-tag-val t v)) val-str)
+                             {:ok? false})
+                        parsed-ok? (boolean (:ok? pr))
+                        parsed (:val pr)
+                        eff-db (choose-eval-db (or db main-db) fallback-db (when parsed-ok? parsed) sch)
+                        eff-opts (cond-> {:handle (symbol h-str) :max-chars cap
+                                          :budget (min 1200 (quot cap 4)) :mode :model}
+                                   (not (string? parsed)) (assoc :limit 20)
+                                   (and (string? code) (str/includes? code "expand!")) (assoc :expanded? true)
+                                   sch (assoc :schema sch)
+                                   eff-db (assoc :render-root? true :main-db (or main-db eff-db)))
+                        media-txt (when parsed-ok? (format-media-eval-value parsed sch))
+                        safe-val-str (strip-raw-base64-text val-str)
+                        target (when (and parsed-ok? (not (string? parsed))) (detect-schema-target eff-db parsed sch))
+                        disc (when (and eff-db (:schema target) (map? (:ent target)))
+                               (fit/discover-renderers eff-db [(:schema target)]))
+                        schema-rsym (when (and eff-db (:schema target))
+                                      (render/schema-render-sym eff-db (:schema target)))
+                        plain-edn? (and parsed-ok?
+                                        (not @tagged?)
+                                        (not media-txt)
+                                        (not (string? parsed))
+                                        (empty? disc)
+                                        (nil? schema-rsym)
+                                        (<= (count safe-val-str) (min cap 4000))
+                                        (not (and (coll? parsed) (> (count parsed) 20))))
+                        val-edn (cond
+                                  media-txt (edn-multiline-str (cap-eval-text media-txt cap h-str))
+                                  plain-edn? safe-val-str
+                                  parsed-ok? (edn-multiline-str (render-eval-val-text eff-db parsed sch eff-opts cap h-str))
+                                  (<= (count safe-val-str) cap) (edn-multiline-str safe-val-str)
+                                  :else (edn-multiline-str (render-eval-val-text eff-db safe-val-str nil eff-opts cap h-str)))
+                        crumb-s (when (and eff-db parsed-ok?)
+                                  (when-let [bh (render/render-schema-breadcrumbs eff-db sch parsed (assoc eff-opts :mode :model :main-db (or main-db eff-db) :fn-limit 5 :doc-limit 2))]
+                                    (let [bt (render/hiccup->text bh)]
+                                      (when-not (str/blank? bt) bt))))]
+                    {:val-edn val-edn :related crumb-s}))
+        entries (cond-> []
+                  (integer? turn) (conj (str ":seon.eval/turn " turn))
+                  handle (conj (str ":seon.eval/handle " handle))
+                  true (conj (str ":seon.eval/ok? " eff-ok?))
+                  (number? ms) (conj (str ":seon.eval/ms " ms))
+                  (and (number? ticks) (pos? (long ticks))) (conj (str ":seon.eval/ticks " (long ticks)))
+                  sch (conj (str ":seon.eval/schema " (pr-str sch)))
+                  branch (conj (str ":seon.eval/branch " (pr-str branch)))
+                  branch-tx (conj (str ":seon.eval/branch-tx " branch-tx))
+                  out-s (conj (str ":seon.eval/out " (edn-multiline-str out-s)))
+                  (not eff-ok?) (conj (str ":seon.eval/error " (edn-multiline-str (str (or error "Unknown error")))))
+                  eff-ok? (conj (str ":seon.eval/value " (:val-edn val-res)))
+                  (:related val-res) (conj (str ":seon.eval/related " (edn-multiline-str (:related val-res)))))]
+    (str "{" (str/join ", " entries) "}")))
