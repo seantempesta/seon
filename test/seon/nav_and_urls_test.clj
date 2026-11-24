@@ -15,7 +15,10 @@
             [seon.web :as web]
             [seon.web.actions :as actions]
             [seon.web.css :as wcss]
-            [seon.web.router :as router]))
+            [seon.web.router :as router]
+            [seon.browser :as browser]
+            [seon.render :as render]
+            [seon.web.js :as wjs]))
 
 (defn- run-show! [conn op]
   (let [{:keys [tx-data]} (txu/show-user-tx @conn op)]
@@ -270,3 +273,158 @@
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (:ok? res)
                 (str sym " failed seed=42 generative check: " (pr-str res)))))))))
+
+(deftest ^{:cost/ticks 90000000} nav-ids-chat-scroll-and-headless-guard-test
+  (testing "Header nav stable IDs, counted suppressPop url-sync-js, immediate/VT sticky-scroll-js, and headless viewport guard"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (router/core-routes-tx)})
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/label "Root"}
+                                  {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
+                                   :seon.user/view-mode :canvas :seon.user/expert-mode? true}]})
+      (let [h0 (render/hiccup->html (ui/header-unit @conn {:boot-seq 1 :agent-states {} :active-count 0}))]
+        (is (str/includes? h0 "id=\"hdr-nav-back\""))
+        (is (str/includes? h0 "id=\"hdr-nav-fwd\"")))
+      (run-action! conn '(seon.web/set-view-mode! :session))
+      (run-action! conn '(seon.web/inspect-back!))
+      (let [h1 (render/hiccup->html (ui/header-unit @conn {:boot-seq 1 :agent-states {} :active-count 0}))]
+        (is (str/includes? h1 "id=\"hdr-nav-back\""))
+        (is (str/includes? h1 "id=\"hdr-nav-fwd\"")))
+      (let [res (schema/stress-var @conn 'seon.browser/headless-url {:samples 100 :seed 42})]
+        (is (:ok? res) (str "headless-url failed seed=42 check: " (pr-str res)))))
+
+    ;; url-sync-js counted suppressPop (never boolean) + per-op fallback timers + rAF arm on datastar-fetch
+    (doseq [needle ["suppressPop=0" "suppressPop+=1" "suppressPop>0" "suppressPop-=1"
+                    "supTimers" "requestAnimationFrame(arm)" "history.back()" "history.forward()"]]
+      (is (str/includes? wcss/url-sync-js needle) (str "url-sync-js missing " needle)))
+    (is (not (str/includes? wcss/url-sync-js "suppressPop=false")))
+
+    ;; sticky-scroll-js immediate init + load + activeViewTransition/datastar-fetch resnap + .ws-timeline/.stage-scroll + zero MutationObserver
+    (doseq [needle ["document.readyState==='loading'" "window.addEventListener('load'"
+                    "activeViewTransition" "updateCallbackDone" "datastar-fetch"
+                    ".ws-timeline" ".stage-scroll" "#cv-pending,#cv-live-prose" ".composer-inp"]]
+      (is (str/includes? wjs/sticky-scroll-js needle) (str "sticky-scroll-js missing " needle)))
+    (is (not (str/includes? wjs/sticky-scroll-js "MutationObserver")))
+
+    ;; viewport-sync-js headless guards + seon.browser/headless-url
+    (doseq [needle ["window.__seonPreviewBusy" "#seon-headless" "seon-preview-stage"]]
+      (is (str/includes? wjs/viewport-sync-js needle) (str "viewport-sync-js missing " needle)))
+    (is (= "http://127.0.0.1:9998/#seon-headless" (browser/headless-url "http://127.0.0.1:9998/")))
+    (is (= "http://127.0.0.1:9998/chat?tx=5#seon-headless" (browser/headless-url "http://127.0.0.1:9998/chat?tx=5")))
+    (is (= "http://127.0.0.1:9998/#existing" (browser/headless-url "http://127.0.0.1:9998/#existing")))
+    (is (= "" (browser/headless-url "")))))
+
+(deftest ^{:cost/ticks 90000000} browser-snapshot-enrichment-and-auto-recover-test
+  (testing "browser-proc :snapshot chains :snapshot-enrich-dom, falls back on timeout, auto-recovers Missing #seon-app, and restores size on :clear"
+    (let [mk-mock (fn []
+                    (let [sent (atom [])
+                          st0 (browser/browser-proc {:port 0 :width 1280 :height 820})]
+                      [(assoc st0 :url "http://127.0.0.1:9998/#seon-headless"
+                                  :handle {:send! (fn [cmd] (swap! sent conj cmd) true) :stop! (fn [] nil)})
+                       sent]))]
+      ;; 1. Enriched snapshot merges visual defects & preserves Obj-C :dom keys
+      (let [[st sent] (mk-mock)
+            rch (a/chan 1)
+            [st1 _] (browser/browser-proc st :req {:op :snapshot :req-id :r1 :agent-id :agent/root :reply-ch rch})
+            c1 (first @sent)
+            _ (is (= "snapshot" (:op c1)))
+            [st2 out-mid] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :mime "image/jpeg" :width 1280 :height 820
+                                                         :base64 "SNAP1" :dom {:viewing ":agent/root" :mode "canvas" :theme "dark"
+                                                                               :overflowX false :svgCount 2 :url "/"}})
+            c2 (last @sent)
+            _ (is (nil? out-mid))
+            _ (is (= "eval_js" (:op c2)))
+            _ (is (str/includes? (:code c2) "visual-defects"))
+            [st3 out3] (browser/browser-proc st2 :ipc {:id (:id c2) :ok true
+                                                       :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
+                                                               :elements [{:selector "#seon-header" :w 1280 :h 48 :scroll-w 1280 :scroll-h 48 :client-w 1280 :client-h 48 :overflow-x? false :overflow-y? false :scrollable-y? false}]
+                                                               :visual-defects []}})
+            ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)
+            dom (get-in ans [:snapshot :dom])]
+        (is (true? (:ok? ans)))
+        (is (= "SNAP1" (get-in ans [:snapshot :base64])))
+        (is (= ":agent/root" (:viewing dom)))
+        (is (= "dark" (:theme dom)))
+        (is (= 2 (:svgCount dom)))
+        (is (true? (:visual-ok? dom)))
+        (is (= [] (:visual-defects dom)))
+        (is (= 0 (:clipped-count dom)))
+        (is (string? (:summary dom)))
+        (is (= 1 (:snap-count st3)))
+        (is (= (:snapshot ans) (:last-snap st3)))
+        (is (= (:snapshot ans) (get-in out3 [:agents-res 0 :snapshot])))
+        (is (= (:snapshot ans) (get-in out3 [:web-snap 0 :snapshot])))
+        (is (nil? (:verify st3))))
+
+      ;; 2. Enrichment timeout gracefully returns original snapshot
+      (let [[st sent] (mk-mock)
+            rch (a/chan 1)
+            [st1 _] (browser/browser-proc st :req {:op :snapshot :req-id :r2 :agent-id :agent/root :reply-ch rch})
+            c1 (first @sent)
+            [st2 _] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :mime "image/jpeg" :width 1280 :height 820
+                                                   :base64 "SNAP2" :dom {:url "/chat" :theme "dark"}})
+            c2 (last @sent)
+            [st3 out3] (browser/browser-proc st2 :timer {:ev :timeout :id (:id c2)})
+            ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)]
+        (is (true? (:ok? ans)))
+        (is (= "SNAP2" (get-in ans [:snapshot :base64])))
+        (is (= {:url "/chat" :theme "dark"} (get-in ans [:snapshot :dom])))
+        (is (= 1 (:snap-count st3)))
+        (is (= (:snapshot ans) (get-in out3 [:web-snap 0 :snapshot]))))
+
+      ;; 3. Missing #seon-app triggers background verify in both :snapshot-enrich-dom and :measure-dom (once)
+      (let [[st sent] (mk-mock)
+            rch (a/chan 1)
+            [st1 _] (browser/browser-proc st :req {:op :snapshot :reply-ch rch})
+            c1 (first @sent)
+            [st2 _] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :base64 "BOOT503" :dom {:url "/"}})
+            c2 (last @sent)
+            [st3 out3] (browser/browser-proc st2 :ipc {:id (:id c2) :ok true
+                                                       :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
+                                                               :elements []
+                                                               :visual-defects ["Missing #seon-app root (page may still be booting)"]}})
+            ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)
+            c3 (last @sent)]
+        (is (true? (:ok? ans)))
+        (is (false? (get-in ans [:snapshot :dom :visual-ok?])))
+        (is (some? (:verify st3)))
+        (is (= "eval_js" (:op c3)))
+        (is (str/includes? (:code c3) "seon-app"))
+        (is (seq (:clojure.core.async.flow/report out3))))
+
+      (let [[st sent] (mk-mock)
+            rch (a/chan 1)
+            [st1 _] (browser/browser-proc st :req {:op :measure-dom :reply-ch rch})
+            c1 (first @sent)
+            [st2 out2] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true
+                                                       :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
+                                                               :elements []
+                                                               :visual-defects ["Missing #seon-app root (page may still be booting)"]}})
+            ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)]
+        (is (false? (:ok? ans)))
+        (is (some? (:verify st2)))
+        (is (seq (:clojure.core.async.flow/report out2)))
+        (let [n0 (count @sent)
+              rch2 (a/chan 1)
+              [st3 _] (browser/browser-proc st2 :req {:op :measure-dom :reply-ch rch2})
+              c2 (last @sent)
+              [st4 out4] (browser/browser-proc st3 :ipc {:id (:id c2) :ok true
+                                                         :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
+                                                                 :elements []
+                                                                 :visual-defects ["Missing #seon-app root (page may still be booting)"]}})]
+          (is (= (:verify st2) (:verify st4)))
+          (is (nil? out4))
+          (is (= (+ n0 1) (count @sent)))))
+
+      ;; 4. :render-hiccup-frames :clear phase restores WKWebView size
+      (let [[st sent] (mk-mock)
+            rch (a/chan 1)
+            [st1 _] (browser/browser-proc st :req {:op :render-hiccup-frames :html "<div>x</div>" :widths [360] :reply-ch rch})
+            c1 (last @sent)
+            [st2 _] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :value {:slot-w 360 :w 360 :h 120 :scroll-w 360 :scroll-h 120 :overflow-x? false :overflow-y? false}})
+            c2 (last @sent)
+            [st3 _] (browser/browser-proc st2 :ipc {:id (:id c2) :ok true :mime "image/jpeg" :width 360 :height 220 :base64 "AAA=" :dom {:url "/"}})
+            c3 (last @sent)
+            [_ _] (browser/browser-proc st3 :ipc {:id (:id c3) :ok true :value {:cleared true :existed true}})
+            ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)]
+        (is (true? (:ok? ans)))
+        (is (some #(and (= "resize" (:op %)) (= 1280 (:width %)) (= 820 (:height %))) @sent))))))
