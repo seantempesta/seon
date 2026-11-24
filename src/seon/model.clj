@@ -55,58 +55,6 @@
   {:seon.flow/edge true, :malli/schema [:=> [:cat [:* :any]] :any]}
   [& args] (apply wire/http-post! args))
 
-(defn openai-stream-chat!
-  "Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
-   `(on-delta {:kind :token|:reasoning-token :text s})` per chunk and returning `finalize-stream-state`."
-  {:malli/schema [:function [:=> [:cat :map [:maybe :string] :any :string :any] :any] [:=> [:cat :map [:maybe :string] :any :string :any :any] :any]]}
-  ([prov system-prompt history user-prompt on-delta]
-   (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
-  ([prov system-prompt history user-prompt wire-messages on-delta]
-   (let [api-key-env (or (:api-key-env prov) "DEEPSEEK_API_KEY")
-         api-key (or (:api-key prov) (System/getenv api-key-env))]
-     (when (str/blank? api-key)
-       (throw (ex-info (str "Missing model API key in env var " api-key-env)
-                       {:error :seon.model/missing-api-key :env api-key-env})))
-     (let [base-url (or (:base-url prov) "https://api.deepseek.com")
-         url (str (str/replace base-url #"/+$" "") "/chat/completions")
-         req-body (json/write-str (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
-                                                      system-prompt history user-prompt))
-         resp (http/post url {:headers {"Authorization" (str "Bearer " api-key)
-                                        "Content-Type" "application/json"
-                                        "Accept" "text/event-stream"}
-                              :body req-body
-                              :as :stream
-                              :throw false})
-         status (long (or (:status resp) 0))
-         body (:body resp)]
-     (if (not= 200 status)
-       (let [body-str (cond
-                        (nil? body) ""
-                        (string? body) body
-                        :else (with-open [in ^java.io.InputStream body] (slurp in :encoding "UTF-8")))
-             hdrs (:headers resp)
-             retry-after (some (fn [[k v]]
-                                 (when (= "retry-after" (str/lower-case (str k)))
-                                   (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
-                               hdrs)]
-         (throw (ex-info (str "Model HTTP " status ": " (subs body-str 0 (min 300 (count body-str))))
-                         {:error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error)
-                          :status status
-                          :retry-after-ms retry-after
-                          :headers hdrs
-                          :body body-str})))
-       (let [st-vol (volatile! (make-stream-state))]
-         (when body
-           (with-open [rdr (io/reader body :encoding "UTF-8")]
-             (sse/read-events!
-              rdr
-              {:on-event (fn [ev]
-                           (when-let [parsed (wire/decode-sse-data (:data ev))]
-                             (let [[st' delta] (process-sse-chunk parsed @st-vol)]
-                               (vreset! st-vol st')
-                               (when (and delta on-delta) (on-delta delta)))))})))
-         (finalize-stream-state @st-vol)))))))
-
 (defn- built-in-agent-synthesis
   [{:keys [agent-id scope router? goal parent unread turn]}]
   (let [explicit-code (some (fn [m]
@@ -162,6 +110,150 @@
                                   (when parent
                                     (str "(user/send-message! " parent " :report \"Defined " fn-ns "/" fn-sym " with passing deftest\")\n"))
                                   "(user/ready!)")}]}))))
+
+(defonce ^:private ^:seon.flow/edge multimodal-fallback-logged (atom #{}))
+
+(defn- messages-have-image-parts? [messages]
+  (boolean
+   (some (fn [m]
+           (let [c (:content m)]
+             (and (sequential? c)
+                  (some (fn [p]
+                          (and (map? p)
+                               (or (= "image_url" (:type p))
+                                   (= :image_url (:type p))
+                                   (contains? p :image_url))))
+                        c))))
+         messages)))
+
+(defn strip-image-parts
+  "Converts multimodal `{:role ... :content [...]}` messages into text-only messages by removing
+   `image_url` parts and joining `:text` parts cleanly into a string."
+  {:malli/schema [:=> {:examples [[[[{:role "user"
+                                      :content [{:type "text" :text "Check card"}
+                                                {:type "image_url" :image_url {:url "data:image/jpeg;base64,AA=="}}
+                                                {:type "text" :text "DOM ok"}]}]]
+                                   [{:role "user" :content "Check card\nDOM ok"}]]
+                                  [[[{:role "user" :content "plain text"}]]
+                                   [{:role "user" :content "plain text"}]]]}
+                  [:cat [:sequential :map]] [:vector :map]]
+   :cost/ticks 2000000 :cost/bytes 1048576}
+  [messages]
+  (mapv (fn [m]
+          (let [c (:content m)]
+            (if-not (sequential? c)
+              m
+              (let [texts (keep (fn [p]
+                                  (cond
+                                    (and (map? p)
+                                         (or (= "image_url" (:type p))
+                                             (= :image_url (:type p))
+                                             (contains? p :image_url)))
+                                    nil
+
+                                    (and (map? p) (some? (:text p)))
+                                    (let [s (str (:text p))]
+                                      (when-not (str/blank? s) s))
+
+                                    (string? p)
+                                    (when-not (str/blank? p) p)
+
+                                    :else nil))
+                                c)]
+                (assoc m :content (str/join "\n" texts))))))
+        messages))
+
+(defn multimodal-unsupported-error?
+  "Returns true when HTTP `status` (400/422) and response `body-str` indicate the model endpoint
+   does not accept multimodal `image_url` content parts."
+  {:malli/schema [:=> {:examples [[[400 "{\"error\":\"unknown variant `image_url`, expected `text`\"}"] true]
+                                  [[422 "This model does not support image inputs"] true]
+                                  [[400 "context_length_exceeded"] false]
+                                  [[500 "image_url unsupported"] false]]}
+                  [:cat [:maybe :int] [:maybe :string]] :boolean]
+   :cost/ticks 500000 :cost/bytes 131072}
+  [status body-str]
+  (boolean
+   (and (integer? status)
+        (contains? #{400 422} (long status))
+        (string? body-str)
+        (let [lo (str/lower-case body-str)]
+          (some #(str/includes? lo %)
+                ["image_url"
+                 "multimodal"
+                 "vision"
+                 "unknown variant"
+                 "invalid content"
+                 "does not support image"])))))
+
+(defn ^:seon.flow/edge openai-stream-chat!
+  "Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
+   `(on-delta {:kind :token|:reasoning-token :text s})` per chunk and returning `finalize-stream-state`.
+   Automatically strips `image_url` parts and retries once on HTTP 400/422 multimodal-unsupported errors."
+  {:malli/schema [:function [:=> [:cat :map [:maybe :string] :any :string :any] :any]
+                  [:=> [:cat :map [:maybe :string] :any :string :any :any] :any]]
+   :cost/ticks 100000000}
+  ([prov system-prompt history user-prompt on-delta]
+   (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
+  ([prov system-prompt history user-prompt wire-messages on-delta]
+   (let [api-key-env (or (:api-key-env prov) "DEEPSEEK_API_KEY")
+         api-key (or (:api-key prov) (System/getenv api-key-env))]
+     (when (str/blank? api-key)
+       (throw (ex-info (str "Missing model API key in env var " api-key-env)
+                       {:error :seon.model/missing-api-key :env api-key-env})))
+     (let [base-url (or (:base-url prov) "https://api.deepseek.com")
+           url (str (str/replace base-url #"/+$" "") "/chat/completions")
+           init-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
+                                        system-prompt history user-prompt)]
+       (loop [attempt 0
+              req-map init-req]
+         (let [req-body (json/write-str req-map)
+               resp (http/post url {:headers {"Authorization" (str "Bearer " api-key)
+                                              "Content-Type" "application/json"
+                                              "Accept" "text/event-stream"}
+                                    :body req-body
+                                    :as :stream
+                                    :throw false})
+               status (long (or (:status resp) 0))
+               body (:body resp)]
+           (if (not= 200 status)
+             (let [body-str (cond
+                              (nil? body) ""
+                              (string? body) body
+                              :else (with-open [in ^java.io.InputStream body] (slurp in :encoding "UTF-8")))]
+               (if (and (zero? attempt)
+                        (messages-have-image-parts? (:messages req-map))
+                        (multimodal-unsupported-error? status body-str))
+                 (let [log-k [base-url (or (:model prov) (:model req-map))]]
+                   (when-not (contains? @multimodal-fallback-logged log-k)
+                     (swap! multimodal-fallback-logged conj log-k)
+                     (binding [*out* *err*]
+                       (println (str "[:model] endpoint " url " (model=" (second log-k)
+                                     ") rejected image_url parts (HTTP " status
+                                     "); stripping image parts and retrying text-only."))))
+                   (recur 1 (update req-map :messages strip-image-parts)))
+                 (let [hdrs (:headers resp)
+                       retry-after (some (fn [[k v]]
+                                           (when (= "retry-after" (str/lower-case (str k)))
+                                             (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
+                                         hdrs)]
+                   (throw (ex-info (str "Model HTTP " status ": " (subs body-str 0 (min 300 (count body-str))))
+                                   {:error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error)
+                                    :status status
+                                    :retry-after-ms retry-after
+                                    :headers hdrs
+                                    :body body-str})))))
+             (let [st-vol (volatile! (make-stream-state))]
+               (when body
+                 (with-open [rdr (io/reader body :encoding "UTF-8")]
+                   (sse/read-events!
+                    rdr
+                    {:on-event (fn [ev]
+                                 (when-let [parsed (wire/decode-sse-data (:data ev))]
+                                   (let [[st1 delta] (process-sse-chunk parsed @st-vol)]
+                                     (vreset! st-vol st1)
+                                     (when (and delta on-delta) (on-delta delta)))))})))
+               (finalize-stream-state @st-vol)))))))))
 
 (defn model-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}

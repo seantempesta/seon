@@ -11,7 +11,8 @@
             [seon.signals.touches :as touches]
             [seon.store :as store :refer [live-cid]]
             [seon.vector :as vec]
-            [seon.web.router]))
+            [seon.web.router]
+            [seon.browser.preview :as preview]))
 
 (defonce ^:private ^:seon.flow/edge ref-attrs-cache (store/lru-cache 16))
 
@@ -325,50 +326,55 @@
       (btn "nav-pill tiny" (list 'seon.web/set-explain-lens! true ref) "Explain / Variations →")
       (btn "btn sm" '(seon.web/inspect-close!) "Close ×")]]))
 
-(defn- render-focal-extras [world main-db]
-  (let [ent (:entity world)]
-    (cond
-      (= :signal (:kind world))
-      (let [sk (:signal-kind world) snap (get-in world [:focal-item :data]) sm (get snap sk)]
-        [:section {:class "card stack-sm"}
-         [:div {:class "card-head"} [:h2 (str (str/capitalize (name sk)) " Signal")]
+(defn- render-focal-extras
+  ([world main-db] (render-focal-extras world main-db nil))
+  ([world main-db branch-db]
+   (let [ent (:entity world)]
+     (cond
+       (= :signal (:kind world))
+       (let [sk (:signal-kind world) snap (get-in world [:focal-item :data]) sm (get snap sk)]
+         [:section {:class "card stack-sm"}
+          [:div {:class "card-head"} [:h2 (str (str/capitalize (name sk)) " Signal")]
+           [:div {:class "pill-row"}
+            (when-let [br (:branch snap)] (ent-link [:seon.branch/name br] (str br) "pill mono tiny"))
+            (badge (case (:level sm) :hot "red" :warm "amber" "green") (name (or (:level sm) :calm)))]]
           [:div {:class "pill-row"}
-           (when-let [br (:branch snap)] (ent-link [:seon.branch/name br] (str br) "pill mono tiny"))
-           (badge (case (:level sm) :hot "red" :warm "amber" "green") (name (or (:level sm) :calm)))]]
+           (for [k [:flow :pressure :context :proof :health]]
+             (ent-link [:seon.signal/kind k] (str/capitalize (name k)) (str "pill mono tiny" (when (= k sk) " strong"))))]
+          [:p {:class "mono sm-copy"} (str (:summary sm))]
+          [:pre {:class "code-box tiny"} (pr-str (dissoc sm :summary))]])
+
+       (= :branch (:kind world))
+       [:section {:class "card stack-sm"}
+        [:div {:class "card-head"} [:h2 (str "Branch " (:branch-name world))]
          [:div {:class "pill-row"}
-          (for [k [:flow :pressure :context :proof :health]]
-            (ent-link [:seon.signal/kind k] (str/capitalize (name k)) (str "pill mono tiny" (when (= k sk) " strong"))))]
-         [:p {:class "mono sm-copy"} (str (:summary sm))]
-         [:pre {:class "code-box tiny"} (pr-str (dissoc sm :summary))]])
+          (when-let [ag (get-in world [:test-run :seon.test.run/agent])] (ent-link [:seon.agent/id ag] (str ag) "pill mono tiny"))
+          (when-let [tr (:test-run world)] (badge (if (:seon.test.run/pass? tr) "green" "red") (if (:seon.test.run/pass? tr) "Tests PASS" "Tests FAIL")))]]
+        (when-let [fds (seq (get-in world [:test-run :seon.test.run/failed-digests]))] (rlinks/pill-list "failed verdicts:" fds :seon.test/digest 8))
+        (when-let [tr (:test-run world)] [:pre {:class "code-box tiny"} (pr-str (dissoc tr :db/id))])]
 
-      (= :branch (:kind world))
-      [:section {:class "card stack-sm"}
-       [:div {:class "card-head"} [:h2 (str "Branch " (:branch-name world))]
-        [:div {:class "pill-row"}
-         (when-let [ag (get-in world [:test-run :seon.test.run/agent])] (ent-link [:seon.agent/id ag] (str ag) "pill mono tiny"))
-         (when-let [tr (:test-run world)] (badge (if (:seon.test.run/pass? tr) "green" "red") (if (:seon.test.run/pass? tr) "Tests PASS" "Tests FAIL")))]]
-       (when-let [fds (seq (get-in world [:test-run :seon.test.run/failed-digests]))] (rlinks/pill-list "failed verdicts:" fds :seon.test/digest 8))
-       (when-let [tr (:test-run world)] [:pre {:class "code-box tiny"} (pr-str (dissoc tr :db/id))])]
+       (:seon.agent.eval/id ent)
+       (let [pt (long (or (:seon.agent.eval/prompt-tokens ent) 0)) ht (long (or (:seon.agent.eval/cache-hit-tokens ent) 0))
+             pct (if (pos? pt) (/ (Math/round (* 1000.0 (/ (double ht) (double pt)))) 10.0) 0.0)]
+         [:section {:class "card stack-sm"}
+          [:div {:class "card-head"} [:h2 "Eval Telemetry"]
+           [:div {:class "pill-row"}
+            (when-let [ag (:seon.agent.eval/agent ent)] (ent-link [:seon.agent/id ag] (str ag) "pill mono tiny"))
+            (when-let [rs (:seon.agent.eval/result-schema ent)] (ent-link [:seon.schema/key rs] (str rs) "pill mono tiny"))
+            (badge (if (>= pct 80.0) "green" "amber") (str "KV hit " pct "% (" ht "/" pt " tok)"))]]
+          (when-let [r (not-empty (str (:seon.agent.eval/reasoning ent ""))) ]
+            [:details {:class "activity-fold" :open true}
+             [:summary {:class "mono tiny"} (str "Reasoning (" (count r) " chars)")]
+             [:pre {:class "code-box tiny"} (trunc r 2400)]])])
 
-      (:seon.agent.eval/id ent)
-      (let [pt (long (or (:seon.agent.eval/prompt-tokens ent) 0)) ht (long (or (:seon.agent.eval/cache-hit-tokens ent) 0))
-            pct (if (pos? pt) (/ (Math/round (* 1000.0 (/ (double ht) (double pt)))) 10.0) 0.0)]
-        [:section {:class "card stack-sm"}
-         [:div {:class "card-head"} [:h2 "Eval Telemetry"]
-          [:div {:class "pill-row"}
-           (when-let [ag (:seon.agent.eval/agent ent)] (ent-link [:seon.agent/id ag] (str ag) "pill mono tiny"))
-           (when-let [rs (:seon.agent.eval/result-schema ent)] (ent-link [:seon.schema/key rs] (str rs) "pill mono tiny"))
-           (badge (if (>= pct 80.0) "green" "amber") (str "KV hit " pct "% (" ht "/" pt " tok)"))]]
-         (when-let [r (not-empty (str (:seon.agent.eval/reasoning ent "")))]
-           [:details {:class "activity-fold" :open true}
-            [:summary {:class "mono tiny"} (str "Reasoning (" (count r) " chars)")]
-            [:pre {:class "code-box tiny"} (trunc r 2400)]])])
+       (and (:seon.code.var/name ent) (preview/hiccup-renderer-var? ent))
+       (preview/render-derived-preview-card (or branch-db main-db) ent)
 
-      (:seon.schema/key ent)
-      (when-let [da (get (db-schema main-db) (:seon.schema/key ent))]
-        [:section {:class "card stack-xs"} (kicker "Derived Datahike Attribute") [:pre {:class "code-box tiny"} (pr-str da)]])
+       (:seon.schema/key ent)
+       (when-let [da (get (db-schema main-db) (:seon.schema/key ent))]
+         [:section {:class "card stack-xs"} (kicker "Derived Datahike Attribute") [:pre {:class "code-box tiny"} (pr-str da)]])
 
-      :else nil)))
+       :else nil))))
 
 (defn- render-generic-focal [ent ref dh]
   (when (map? ent)
@@ -452,7 +458,7 @@
          (list
           (when-let [fc (or winner-h (render-generic-focal (:entity world) (:ref world) dh))]
             [:section {:id "insp-focal-unit" :class "stack-xs"} fc])
-          (render-focal-extras world main-db)
+          (render-focal-extras world main-db branch-db)
           [:section {:id "insp-neighborhood-unit" :class "stack"}
            [:div {:class "row-between"}
             [:h2 (str "Related Entities (" (count sel-nb) ")")]
