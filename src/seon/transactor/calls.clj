@@ -89,7 +89,7 @@
   (str "Structured call from " caller " (call-id: " (pr-str call-id) ")\n"
        (when result-schema
          (str "Required result schema: " (pr-str result-schema) "\n"))
-       "\n" (str prompt) "\n\n"
+       "\n" prompt "\n\n"
        "When finished, settle this call via:\n"
        "  (user/answer! " (pr-str call-id) " <value>)\n"
        "or if out of scope / blocked:\n"
@@ -315,7 +315,7 @@
   (let [{:keys [conn]} st]
     (case (:op msg)
       :create-call
-      (let [{:keys [caller callee prompt parent-call result-schema await? scope role goal auto-merge?]} msg
+      (let [{:keys [caller callee prompt parent-call result-schema await? scope goal]} msg
             db0 @conn
             cycle-path (call-cycle-chain db0 caller callee)]
         (cond

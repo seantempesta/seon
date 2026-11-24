@@ -340,7 +340,7 @@
         fail? #{:failed :timeout :error}
         num (fn [x] (when (number? x) (double x)))
         dec-long (fn [r k] (when (number? (get r k)) (long (get r k))))
-        rate (fn [n d] (if (and (pos? (double d))) (/ (Math/round (* 10000.0 (/ (double n) (double d)))) 10000.0) 0.0))
+        rate (fn [n d] (if (pos? (double d)) (/ (Math/round (* 10000.0 (/ (double n) (double d)))) 10000.0) 0.0))
         info (fn [r]
                (let [ts (filterv map? (:seon.bench.run/trials r))
                      evals (keep (comp num :evals) ts)]

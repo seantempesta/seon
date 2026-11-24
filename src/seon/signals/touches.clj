@@ -10,7 +10,8 @@
             [seon.render.links :as rlinks :refer [db-cache-sig]]
             [seon.schema.index :as six]
             [seon.store :as store]
-            [seon.render.tails :as rtails]))
+            [seon.render.tails :as rtails]
+            [seon.render.text :as rtext]))
 
 (def ^:private ignored-nss
   #{"clojure.core" "clojure.string" "clojure.set" "clojure.edn" "clojure.java.io" "clojure.test"
@@ -41,10 +42,7 @@
   "Coerces finite non-negative numbers to `long`, defaulting to `0`."
   {:malli/schema [:=> [:cat :any] [:int {:min 0}]] :cost/ticks 5000}
   [x]
-  (cond
-    (integer? x) (max 0 (long x))
-    (number? x) (let [v (double x)] (if (and (== v v) (>= v 0.0) (<= v 9.0e18)) (long v) 0))
-    :else 0))
+  (rtext/nonneg-long x))
 
 (defn- build-var-index [db]
   (let [dh (db-schema db)

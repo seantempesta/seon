@@ -91,19 +91,6 @@
   [x n]
   (clip (-> (if (nil? x) "" (str x)) (str/replace #"\s+" " ") str/trim) n))
 
-(defn clamp-pct
-  "Clamps numeric percentage `x` into `[0.0, 100.0]` rounded to 1 decimal place (NaN/Inf/nil -> 0.0)."
-  {:malli/schema [:=> {:examples [[[105] 100.0] [[-3] 0.0] [[42.36] 42.4] [[nil] 0.0]]}
-                  [:cat :any] :double]
-   :cost/ticks 50000 :cost/bytes 16384}
-  [x]
-  (if (number? x)
-    (let [v (double x)]
-      (if (and (== v v) (not (Double/isInfinite v)))
-        (max 0.0 (min 100.0 (/ (double (Math/round (* v 10.0))) 10.0)))
-        0.0))
-    0.0))
-
 (defn clamp-pct-int
   "Clamps numeric percentage `x` into an integer in `[0, 100]`, returning nil for nil/non-number/NaN/Inf."
   {:malli/schema [:=> {:examples [[[105] 100] [[-3] 0] [[42.6] 43] [[nil] nil]]}
@@ -114,3 +101,77 @@
     (let [dv (double x)]
       (when (and (== dv dv) (not (Double/isInfinite dv)))
         (max 0 (min 100 (long (Math/round dv))))))))
+
+(defn finite-double
+  "Coerces finite numbers to `double`, falling back to `fallback` for NaN/Infinity/non-numbers."
+  {:malli/schema [:=> {:examples [[[3.5 0.0] 3.5] [[nil 1.0] 1.0]]}
+                  [:cat :any number?] number?]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x fallback]
+  (if (number? x)
+    (let [v (double x)]
+      (if (and (== v v) (not (Double/isInfinite v))) v (double fallback)))
+    (double fallback)))
+
+(defn safe-long
+  "Coerces finite numbers to `long`, falling back to `fallback`."
+  {:malli/schema [:=> {:examples [[[42 0] 42] [[3.9 0] 3] [[nil 7] 7]]}
+                  [:cat :any :int] :int]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x fallback]
+  (cond
+    (integer? x) (long x)
+    (number? x) (let [v (finite-double x fallback)]
+                  (if (and (>= v -9.0e18) (<= v 9.0e18)) (long v) (long fallback)))
+    :else (long fallback)))
+
+(defn nonneg-long
+  "Coerces finite non-negative numbers to `long`, defaulting to `0`."
+  {:malli/schema [:=> {:examples [[[5] 5] [[-3] 0] [[nil] 0]]}
+                  [:cat :any] [:int {:min 0}]]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x]
+  (cond
+    (integer? x) (max 0 (long x))
+    (number? x) (let [v (double x)]
+                  (if (and (== v v) (>= v 0.0) (<= v 9.0e18)) (long v) 0))
+    :else 0))
+
+(defn round-n
+  "Rounds finite numeric `x` to `1/scale` (e.g. `scale = 10.0` for 1dp), returning `0.0` for NaN/Infinity/non-numbers."
+  {:malli/schema [:=> {:examples [[[1.26 10.0] 1.3] [[0.12346 10000.0] 0.1235] [[nil 10.0] 0.0]]}
+                  [:cat :any number?] :double]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x scale]
+  (if (and (number? x) (number? scale))
+    (let [v (double x)
+          s (double scale)]
+      (if (and (== v v) (not (Double/isInfinite v))
+               (== s s) (pos? s) (not (Double/isInfinite s)))
+        (/ (double (Math/round (* v s))) s)
+        0.0))
+    0.0))
+
+(defn round1
+  "Rounds finite numeric `x` to 1 decimal place, returning `0.0` for NaN/Infinity/non-numbers."
+  {:malli/schema [:=> {:examples [[[1.26] 1.3] [[nil] 0.0]]}
+                  [:cat :any] :double]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x]
+  (round-n x 10.0))
+
+(defn clamp-pct
+  "Clamps numeric percentage `x` into `[0.0, 100.0]` rounded to 1 decimal place (NaN/Inf/nil -> 0.0)."
+  {:malli/schema [:=> {:examples [[[105] 100.0] [[-3] 0.0] [[42.36] 42.4] [[nil] 0.0]]}
+                  [:cat :any] :double]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x]
+  (max 0.0 (min 100.0 (round1 x))))
+
+(defn round4
+  "Rounds finite numeric `x` to 4 decimal places, returning `0.0` for NaN/Infinity/non-numbers."
+  {:malli/schema [:=> {:examples [[[0.12346] 0.1235] [[nil] 0.0]]}
+                  [:cat :any] :double]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x]
+  (round-n x 10000.0))

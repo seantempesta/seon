@@ -7,7 +7,8 @@
             [seon.render.fit.measure :as fmeas]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store :as store :refer [db-cache-sig db-schema]]))
+            [seon.store :as store :refer [db-cache-sig db-schema]]
+            [seon.render.text :as rtext]))
 
 (def default-rank-weights
   "Default tunable weights for the native Datahike ranking signals."
@@ -22,9 +23,6 @@
 
 (defn- clamp01 [x]
   (max 0.0 (min 1.0 (fmeas/finite-double x 0.0))))
-
-(defn- round4 [x]
-  (/ (double (Math/round (* (fmeas/finite-double x 0.0) 10000.0))) 10000.0))
 
 (defn cached-registry-info
   "Returns commit-anchored `schema/registry-for-db` enriched with `:reg-sig`, replaying `datahike.reads`."
@@ -174,12 +172,12 @@
                      boost (candidate-boost c)
                      supp (candidate-suppress c)
                      base (/ (+ (* wu u) (* wr r) (* wc cv) (* wsem sem)) w-sum)
-                     score (round4 (clamp01 (+ base boost (- supp))))
-                     sigs (cond-> {:urgency (round4 u) :recency (round4 r) :convergence (round4 cv)}
-                            has-sem? (assoc :semantic (round4 sem)))]
+                     score (rtext/round4 (clamp01 (+ base boost (- supp))))
+                     sigs (cond-> {:urgency (rtext/round4 u) :recency (rtext/round4 r) :convergence (rtext/round4 cv)}
+                            has-sem? (assoc :semantic (rtext/round4 sem)))]
                  (cond-> (assoc c :rank/score score :rank/signals sigs :rank/weights ws)
-                   (not (zero? boost)) (assoc :rank/boost (round4 boost))
-                   (pos? supp) (assoc :rank/suppress (round4 supp)))))
+                   (not (zero? boost)) (assoc :rank/boost (rtext/round4 boost))
+                   (pos? supp) (assoc :rank/suppress (rtext/round4 supp)))))
              candidates)
             (sort-by (fn [c]
                        [(- (double (:rank/score c 0.0))) (- (candidate-tx c))

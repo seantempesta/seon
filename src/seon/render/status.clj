@@ -13,7 +13,7 @@
             [seon.store :as store]
             [seon.model.messages :as messages]
             [seon.render.fit :as fit]
-            [seon.render.text :refer [clamp-pct-int one-line]]))
+            [seon.render.text :as rtext :refer [clamp-pct-int one-line]]))
 
 (defn format-forked-eval-manifest
   "Formats a compact turn/eid/handle/size/status table of `parent-id`'s live evals on `branch-db`."
@@ -40,10 +40,6 @@
                "| turn | eid | handle | chars | status | intent |\n"
                (str/join "\n" rows)
                "\nCompact noisy turns: `(user/compact! {:agent-id " parent-id " :turns #{...} :summary \"...\"})` or `:through-turn N`."))))))
-
-(defn- nonblank [x]
-  (when (and (string? x) (not (str/blank? x)))
-    (str/trim x)))
 
 (defn ^:seon.flow/edge resolve-prefix-agents
   "ONE self-assembling resolver for `:zone :agent-prefix` projections: derives continuation purely from `ag`'s `:seon.agent/forked-from` graph edge (recursing at `:seon.agent/fork-commit` for KV-cache reuse) and renders other linked agents as closed `<agent>` references."
@@ -155,7 +151,7 @@
   [{{:seon.ui.status/keys [label pct stage]} :seon.ui.status/entity}]
   (let [[bcls slbl] (stage-meta stage)
         p (clamp-pct-int pct)
-        lbl (one-line (or (nonblank label) "Working…") 64)]
+        lbl (one-line (or (rtext/nonblank label true) "Working…") 64)]
     {:seon.ui/hiccup
      (into [:span {:class "ent-chip ent-status" :data-min-width 180}
             (rlinks/badge bcls slbl)
@@ -178,8 +174,8 @@
   (let [m (if (map? spec) spec {})
         sid (let [raw (or (:seon.ui.status/id m) (:id m))]
               (if (keyword? raw) raw (status-id-for-agent agent-id)))
-        lbl (or (nonblank (or (:seon.ui.status/label m) (:label m))) "Working…")
-        det (nonblank (or (:seon.ui.status/detail m) (:detail m)))
+        lbl (or (rtext/nonblank (or (:seon.ui.status/label m) (:label m)) true) "Working…")
+        det (rtext/nonblank (or (:seon.ui.status/detail m) (:detail m)) true)
         p (clamp-pct-int (if (contains? m :seon.ui.status/pct) (:seon.ui.status/pct m) (:pct m)))
         stg (let [s (or (:seon.ui.status/stage m) (:stage m))] (when (keyword? s) s))
         svg (let [sv (or (:seon.ui.status/svg m) (:svg m))] (when (string? sv) sv))]
@@ -340,7 +336,7 @@
                   [:cat [:maybe :string]] [:maybe :string]]
    :cost/ticks 500000 :cost/bytes 2097152}
   [s]
-  (when-let [trimmed (nonblank s)]
+  (when-let [trimmed (rtext/nonblank s true)]
     (when (and (re-find svg-open-re trimmed) (str/includes? trimmed ">"))
       (let [lo (str/lower-case trimmed)
             dirty? (or (str/includes? lo "<script") (str/includes? lo "<foreignobject")
@@ -370,8 +366,8 @@
   (let [[bcls slbl] (stage-meta stage)
         p (clamp-pct-int pct)
         done? (or (= :done stage) (= 100 p))
-        lbl (one-line (or (nonblank label) "Working…") 120)
-        det (when-let [d (nonblank detail)] (one-line d 240))
+        lbl (one-line (or (rtext/nonblank label true) "Working…") 120)
+        det (when-let [d (rtext/nonblank detail true)] (one-line d 240))
         safe-svg (sanitize-svg svg)
         fill-color (if done? "var(--success,#34d399)" "var(--signal,#f0b429)")]
     {:seon.ui/hiccup
@@ -523,7 +519,7 @@
         (when (and (not recent-st?) (or (>= ec 2) (>= elapsed-s 5)))
           {:elapsed-s elapsed-s
            :eval-count ec
-           :prompt (when-let [b (nonblank (:seon.agent.message/body umsg))] (one-line b 100))
+           :prompt (when-let [b (rtext/nonblank (:seon.agent.message/body umsg) true)] (one-line b 100))
            :has-status? (some? st)})))))
 
 (defn unanswered-user-chat-tx

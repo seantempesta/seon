@@ -5,7 +5,8 @@
             [datahike.api :as d]
             [seon.render.fit :as fit]
             [seon.signals.touches :as touches]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.text :as rtext]))
 
 (def default-hyperparam-profiles
   "Default profiles compared by `compare-as-of-hyperparams`."
@@ -22,15 +23,8 @@
   ([db evals-or-agent] (touches/extract-eval-touches db evals-or-agent))
   ([db evals-or-agent opts] (touches/extract-eval-touches db evals-or-agent opts)))
 
-(defn- round-n [x scale]
-  (if (number? x)
-    (let [v (double x)]
-      (if (and (== v v) (not (Double/isInfinite v)))
-        (/ (double (Math/round (* v (double scale)))) (double scale))
-        0.0))
-    0.0))
+(defn- clamp01 [x] (max 0.0 (min 1.0 (rtext/round-n x 10000.0))))
 
-(defn- clamp01 [x] (max 0.0 (min 1.0 (round-n x 10000.0))))
 (defn- to-set [x] (cond (set? x) x (coll? x) (set x) (some? x) #{x} :else #{}))
 
 (defn- safe-as-of
@@ -137,8 +131,8 @@
        :pool-size (count pool-map) :pool-touched-count ptn :recall-gap-count gn :recall-gap-items gaps
        :by-rule (rollup-by sevals #(or (seq (item-rules %)) [:unattributed]))
        :by-fn (rollup-by sevals #(vector (or (:chosen-fn %) (:fn %) :unknown)))
-       :summary (str "P " (round-n (* 100.0 prec) 10.0) "% · tok-P " (round-n (* 100.0 tprec) 10.0)
-                     "% · R " (round-n (* 100.0 rec) 10.0) "% · " gn " recall gap" (when (not= 1 gn) "s"))}
+       :summary (str "P " (rtext/round-n (* 100.0 prec) 10.0) "% · tok-P " (rtext/round-n (* 100.0 tprec) 10.0)
+                     "% · R " (rtext/round-n (* 100.0 rec) 10.0) "% · " gn " recall gap" (when (not= 1 gn) "s"))}
       {:seon/schema :seon.signal/scoreboard})))
 
 (defn- filter-disabled-pool [pool disabled]
@@ -205,7 +199,7 @@
                                :manual-lookup-count (count (:manual-lookup-calls lt))
                                :reasoning-mention-count (count (set/union (:reasoning-eids lt) (:reasoning-syms lt)))
                                :include-reasoning? inc-r?
-                               :ms (round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
+                               :ms (rtext/round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
                   (seq (:disabled-rules o)) (assoc :disabled-rules (set (:disabled-rules o))))
        {:seon/schema :seon.signal/scoreboard}))))
 
@@ -273,7 +267,7 @@
                     :reasoning-mention-count (count (set/union (:reasoning-eids later) (:reasoning-syms later)))
                     :actual-touched-count (count (set/union (:touched-eids later) (:touched-syms later) (:touched-schemas later)))
                     :later-eval-count (:eval-count later) :manual-lookup-count (count (:manual-lookup-calls later))
-                    :ms (round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
+                    :ms (rtext/round-n (/ (double (- (System/nanoTime) t0)) 1000000.0) 10.0))
        split-turn (assoc :split-turn split-turn)))))
 
 (defn- resolve-agent-dbs

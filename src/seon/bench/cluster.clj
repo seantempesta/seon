@@ -20,8 +20,6 @@
 
 (defn agent-settled? [& args] (apply bh/agent-settled? args))
 
-(defn- configure-jolt-env! [& args] (apply bh/configure-jolt-env! args))
-
 (defn ^:seon.flow/edge instance-op!
   "Sends an EDN op map to a running isolated Seon instance via `POST /op` and returns its EDN response."
   {:malli/schema [:=> [:cat [:map [:base-url :string]] :map] :map]}
@@ -77,11 +75,10 @@
    returns an instance handle map."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map]]}
   ([] (start-instance! {}))
-  ([{:keys [id repo-dir bin-path work-dir store-path seed-store headless? commit-git?
-            auto-switch-over? model-base-url model model-stub? max-os-procs max-test-workers
-            extra-env timeout-ms]
-     :or {headless? true commit-git? false auto-switch-over? false timeout-ms 20000}
-     :as opts}]
+  ([{:keys [id repo-dir bin-path work-dir store-path headless? commit-git?
+           auto-switch-over? extra-env timeout-ms]
+    :or {headless? true commit-git? false auto-switch-over? false timeout-ms 20000}
+    :as opts}]
    (let [repo (str (or repo-dir (System/getProperty "user.dir")))
          bin (str (or bin-path (str repo "/target/seon")))
          inst-id (or id (keyword "bench" (str "inst-" (System/nanoTime))))
@@ -496,7 +493,6 @@
                  (try
                    (publish-fn (build-entity status finished-ms))
                    (catch Throwable _ nil)))))]
-    (do)
     (a/thread
       (try
         (let [res (do

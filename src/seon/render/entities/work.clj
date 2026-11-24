@@ -12,11 +12,9 @@
             [seon.render.data :refer [first-doc-line]]
             [seon.render.links :as rlinks :refer [badge btn ent-link kicker kv-dl mut pill-list]]
             [seon.render.markdown :as rmd]
-            [seon.render.text :refer [clip nonblank one-line]]))
+            [seon.render.text :as rtext :refer [clip nonblank one-line]]))
 
 (defn- seq-items [x] (when (and (coll? x) (not (map? x))) (seq x)))
-
-(defn- safe-long [x d] (if (number? x) (let [v (double x)] (if (and (== v v) (not (Double/isInfinite v))) (long v) d)) d))
 
 (defn- ns-children-block [children router?]
   (when (seq children)
@@ -103,7 +101,7 @@
             wschs (seq-items (:seon.ui/ns-working-schemas m))
             alerts (seq-items (:seon.ui/ns-static-alerts m))
             hyg (:seon.ui/ns-hygiene m)
-            max-v (max 1 (safe-long (:max-vars m) 24))]
+            max-v (max 1 (rtext/safe-long (:max-vars m) 24))]
         {:seon.ui/hiccup
          [:div {:class "card ent-full ent-ns" :data-min-width 560}
           [:div {:class "card-head ent-head"}
@@ -271,13 +269,13 @@
     :seon.bench.run/entity}]
   (let [st (or status :running) running? (= :running st)
         ts (if (sequential? trials) (filterv map? trials) [])
-        tot (safe-long total (count ts))
-        pas (safe-long passed 0) fld (safe-long failed 0)
+        tot (rtext/safe-long total (count ts))
+        pas (rtext/safe-long passed 0) fld (rtext/safe-long failed 0)
         pct (if (pos? tot) (min 100 (Math/round (* 100.0 (/ (double (+ pas fld)) (double tot))))) 0)
-        s-ms (safe-long started-ms 0) e-ms (safe-long (or finished-ms updated-ms started-ms) s-ms)
+        s-ms (rtext/safe-long started-ms 0) e-ms (rtext/safe-long (or finished-ms updated-ms started-ms) s-ms)
         es (if (and (pos? s-ms) (>= e-ms s-ms)) (/ (Math/round (* 10.0 (/ (double (- e-ms s-ms)) 1000.0))) 10.0) 0.0)
         ps (when (map? proxy-stats) proxy-stats)
-        pt (safe-long (:prompt-tokens ps) 0) ct (safe-long (:completion-tokens ps) 0) ht (safe-long (:cache-hit-tokens ps) 0)
+        pt (rtext/safe-long (:prompt-tokens ps) 0) ct (rtext/safe-long (:completion-tokens ps) 0) ht (rtext/safe-long (:cache-hit-tokens ps) 0)
         kv (when (pos? pt) (Math/round (* 100.0 (/ (double ht) (double pt)))))
         fmt-k (fn [n] (if (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k") (str n)))
         t-cls (fn [tst] (case tst (:merged :passed) "green mono" (:timeout :failed :error) "red mono" (:testing :merging) "purple mono" "amber mono"))]
@@ -288,7 +286,7 @@
         [:span {:class (str "dot " (if running? "pulsing" (when (= :passed st) "live"))) :aria-hidden "true"}]
         [:span (str "BENCHMARK · " (str/upper-case (if (keyword? st) (name st) (str st))))]
         (mut (str pas "/" tot " passed · " es "s"))]
-       (when ps (mut (str (safe-long (:requests ps) 0) " req · " (fmt-k (+ pt ct)) " tok" (when kv (str " · " kv "% KV")))))]
+       (when ps (mut (str (rtext/safe-long (:requests ps) 0) " req · " (fmt-k (+ pt ct)) " tok" (when kv (str " · " kv "% KV")))))]
       [:h2 {:class "ch-hero-title"} (or (nonblank title) "Benchmark Trial Run")]
       [:div {:class "heat-bar"} [:div {:class (str "heat-fill " (case st :passed "sig-calm" :failed "sig-hot" "sig-warm"))
                                        :style {:width (str (if (and running? (zero? pct)) 8 pct) "%")}}]]
@@ -298,7 +296,7 @@
            [:div {:class "ent-row"}
             (badge (t-cls tst) (if (keyword? tst) (name tst) (str tst)))
             [:strong {:class "mono tiny"} (if (keyword? tid) (name tid) (str tid))]
-            (mut (str (safe-long (:evals t) 0) " evals · " (/ (Math/round (/ (double (safe-long (:elapsed-ms t) 0)) 100.0)) 10.0) "s"))
+            (mut (str (rtext/safe-long (:evals t) 0) " evals · " (/ (Math/round (/ (double (rtext/safe-long (:elapsed-ms t) 0)) 100.0)) 10.0) "s"))
             (when (and (:alive? t) (:port t))
               [:a {:href (str "http://127.0.0.1:" (:port t) "/") :target "_blank" :rel "noopener" :class "tiny mono"}
                (str "Open :" (:port t) " ↗")])

@@ -360,7 +360,7 @@
   "Runs fast end-of-eval-block proofs (task `:seon.task/tests`, fast reaching deftests <= `fast-test-ms`,
    and 50-sample seed=42 generative checks on newly edited non-edge contracted vars with 65% `:cost/ticks` headroom)
    in-process once per code-mutating turn, storing a concise `:seon.agent/last-proofs` summary for `<branch-status>`."
-  {:malli/schema [:=> [:cat :seon.host/conn :keyword :keyword :any] :any]}
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :keyword :any] :any], :seon.flow/edge true}
   [conn agent-id branch before-cid]
   (when (and conn agent-id (not= branch :main) before-cid)
     (try
@@ -370,7 +370,7 @@
             (when (seq (:upserts ops))
               (let [t0 (System/nanoTime)
                     bdb @conn
-                    mdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)
+                    mdb (or (store/head conn :main) bdb)
                     fast-ms (double (or (store/config-val mdb agent-id :seon.config/fast-test-ms) 150))
                     edited-nss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
                     edited-fkeys (into #{} (map :seon.code.form/key) (:upserts ops))
@@ -446,7 +446,7 @@
                         (d/transact conn {:tx-data [{:seon.agent/id agent-id
                                                      :seon.agent/last-proofs summary}]}))
                       summary)))))))))
-      (catch Throwable _ nil))))
+      (catch Throwable ex {:ok? false :error :auto-proof-failed :branch branch :agent agent-id :message (or (.getMessage ex) (str ex))}))))
 
 (defn apply-form-overlay!
 "Applies a code overlay into the current worker under candidate schema & rule overrides.

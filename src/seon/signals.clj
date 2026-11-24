@@ -7,19 +7,11 @@
             [seon.store :as store :refer [db-schema]]
             [seon.signals.scoreboard :as scoreboard]
             [seon.store.query :as sq]
-            [seon.render.text :refer [clamp-pct]]))
+            [seon.render.text :as rtext :refer [clamp-pct]]))
 
 (def ^:private level-rank {:calm 0 :warm 1 :hot 2})
 
 (def ^:private signals-snap-cache (store/lru-cache 16))
-
-(defn- round1 [x]
-  (if (number? x)
-    (let [v (double x)]
-      (if (and (== v v) (not (Double/isInfinite v)))
-        (/ (double (Math/round (* v 10.0))) 10.0)
-        0.0))
-    0.0))
 
 (defn- worst-level [levels]
   (reduce #(if (> (get level-rank %2 0) (get level-rank %1 0)) %2 %1) :calm levels))
@@ -156,15 +148,15 @@
                 (eavt-map db ce)))
         tick-cap (max 1 (long (or (:seon.config/eval-ticks cfg) 100000000)))
         byte-cap (max 1 (long (or (:seon.config/eval-bytes cfg) 268435456)))
-        cap-mb (round1 (/ (double byte-cap) 1048576.0))
+        cap-mb (rtext/round1 (/ (double byte-cap) 1048576.0))
         ticks-v (mapv #(long (or (:seon.agent.eval/ticks %) 0)) evals)
         bytes-v (mapv #(long (or (:seon.agent.eval/bytes %) 0)) evals)
         peak-ticks (reduce max 0 ticks-v)
         peak-bytes (reduce max 0 bytes-v)
         med-ticks (median-long ticks-v)
         med-bytes (median-long bytes-v)
-        peak-mb (round1 (/ (double peak-bytes) 1048576.0))
-        median-mb (round1 (/ (double med-bytes) 1048576.0))
+        peak-mb (rtext/round1 (/ (double peak-bytes) 1048576.0))
+        median-mb (rtext/round1 (/ (double med-bytes) 1048576.0))
         ticks-pct (clamp-pct (* 100.0 (/ (double med-ticks) (double tick-cap))))
         bytes-pct (clamp-pct (* 100.0 (/ (double med-bytes) (double byte-cap))))
         peak-bytes-pct (clamp-pct (* 100.0 (/ (double peak-bytes) (double byte-cap))))
@@ -174,8 +166,8 @@
         slow-ms (reduce max 0.0 (keep slow-err-ms slow-errs))
         oom-err? (boolean (some eval-oom-error? open-errs))
         eval-ms (let [ms-v (keep #(when (number? (:seon.agent.eval/ms %)) (double (:seon.agent.eval/ms %))) evals)]
-                  (if (seq ms-v) (round1 (/ (reduce + 0.0 ms-v) (count ms-v))) 0.0))
-        frame-ms (round1 (if (pos? slow-ms) slow-ms (min 40.0 eval-ms)))
+                  (if (seq ms-v) (rtext/round1 (/ (reduce + 0.0 ms-v) (count ms-v))) 0.0))
+        frame-ms (rtext/round1 (if (pos? slow-ms) slow-ms (min 40.0 eval-ms)))
         frame-budget 40.0
         level (cond
                 (or (>= slow-hot-n 2) (>= bytes-pct 75.0) (>= ticks-pct 75.0) oom-err?) :hot
@@ -340,7 +332,7 @@
                 proof (proof-signal-from db)
                 health (health-signal-from db open-errs)
                 lvl (worst-level [(:level flow) (:level pressure) (:level context) (:level proof) (:level health)])
-                ms (round1 (/ (double (- (System/nanoTime) t0)) 1000000.0))]
+                ms (rtext/round1 (/ (double (- (System/nanoTime) t0)) 1000000.0))]
             (with-meta
               {:level lvl
                :branch (db-branch db)

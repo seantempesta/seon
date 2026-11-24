@@ -12,21 +12,14 @@
   {:malli/schema [:=> [:cat :any number?] number?]
    :cost/ticks 5000}
   [x fallback]
-  (if (number? x)
-    (let [v (double x)]
-      (if (and (== v v) (not (Double/isInfinite v))) v (double fallback)))
-    (double fallback)))
+  (rtext/finite-double x fallback))
 
 (defn safe-long
   "Coerces finite numbers to `long`, falling back to `fallback`."
   {:malli/schema [:=> [:cat :any :int] :int]
    :cost/ticks 5000}
   [x fallback]
-  (cond
-    (integer? x) (long x)
-    (number? x) (let [v (finite-double x fallback)]
-                  (if (and (>= v -9.0e18) (<= v 9.0e18)) (long v) (long fallback)))
-    :else (long fallback)))
+  (rtext/safe-long x fallback))
 
 (defn parse-px-hint
   "Parses a pixel width/height hint from an integer, finite double, or leading-digit string."

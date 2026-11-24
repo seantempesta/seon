@@ -4,34 +4,12 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.render.data :as rdata]
-            [seon.store :refer [db-schema]]))
-
-(defn- round1 [x]
-  (if (number? x)
-    (let [v (double x)]
-      (if (and (== v v) (not (Double/isInfinite v)))
-        (/ (double (Math/round (* v 10.0))) 10.0)
-        0.0))
-    0.0))
-
-(defn- round4 [x]
-  (if (number? x)
-    (let [v (double x)]
-      (if (and (== v v) (not (Double/isInfinite v)))
-        (/ (double (Math/round (* v 10000.0))) 10000.0)
-        0.0))
-    0.0))
-
-(defn- nonneg-long [x]
-  (cond
-    (integer? x) (max 0 (long x))
-    (number? x) (let [v (double x)]
-                  (if (and (== v v) (>= v 0.0) (<= v 9.0e18)) (long v) 0))
-    :else 0))
+            [seon.store :refer [db-schema]]
+            [seon.render.text :as rtext]))
 
 (defn- pct1 [part total]
   (if (pos? (long total))
-    (max 0.0 (min 100.0 (round1 (* 100.0 (/ (double part) (double total))))))
+    (rtext/clamp-pct (* 100.0 (/ (double part) (double total))))
     0.0))
 
 (defn- str-tokens [s]
@@ -59,7 +37,7 @@
         img-toks (if has-img? (max 85 (min 2048 (quot b64-len 64))) 0)
         dims (when (and (map? ephem-ss) (:width ephem-ss) (:height ephem-ss))
                (str (:width ephem-ss) "x" (:height ephem-ss)))]
-    (cond-> {:present? has-img? :tokens (long img-toks) :bytes (nonneg-long (:bytes ephem-ss))}
+    (cond-> {:present? has-img? :tokens (long img-toks) :bytes (rtext/nonneg-long (:bytes ephem-ss))}
       dims (assoc :dimensions dims))))
 
 (defn- est-msg-tokens [m]
@@ -109,11 +87,11 @@
         indexed (vec (map-indexed
                       (fn [i m]
                         (let [tok (if (and raw-toks (< i (count raw-toks)) (number? (nth raw-toks i)))
-                                    (nonneg-long (nth raw-toks i))
+                                    (rtext/nonneg-long (nth raw-toks i))
                                     (est-msg-tokens m))]
                           {:index i :role (str (or (:role m) "unknown")) :msg m :tokens tok}))
                       msgs))
-        total-tok (long (or (when (number? (:total-tokens w)) (nonneg-long (:total-tokens w)))
+        total-tok (long (or (when (number? (:total-tokens w)) (rtext/nonneg-long (:total-tokens w)))
                             (reduce + 0 (map :tokens indexed))))
         open-idx (find-prefix-end-idx msgs)
         pref-rows (if (neg? open-idx) [] (subvec indexed 0 (inc open-idx)))
@@ -171,8 +149,8 @@
         shown (if (map? (:shown w)) (:shown w) {})
         zero? (fn [it]
                 (or (= :unchanged (:status it))
-                    (and (zero? (nonneg-long (:tokens it)))
-                         (pos? (nonneg-long (:measured-tokens it))))))
+                    (and (zero? (rtext/nonneg-long (:tokens it)))
+                         (pos? (rtext/nonneg-long (:measured-tokens it))))))
         z-items (filterv zero? items)
         act-items (filterv (complement zero?) items)
         rew-items (filterv #(= :rewarmed (:status %)) act-items)
@@ -180,13 +158,13 @@
         fresh-items (filterv #(not (#{:rewarmed :upgraded} (:status %))) act-items)]
     {:total-shown (long (max (count shown) (count items)))
      :zero-token-count (long (count z-items))
-     :saved-tokens (long (reduce + 0 (map #(nonneg-long (or (:measured-tokens %) (:tokens %))) z-items)))
+     :saved-tokens (long (reduce + 0 (map #(rtext/nonneg-long (or (:measured-tokens %) (:tokens %))) z-items)))
      :fresh-count (long (count fresh-items))
-     :fresh-tokens (long (reduce + 0 (map #(nonneg-long (:tokens %)) fresh-items)))
+     :fresh-tokens (long (reduce + 0 (map #(rtext/nonneg-long (:tokens %)) fresh-items)))
      :rewarmed-count (long (count rew-items))
-     :rewarmed-tokens (long (reduce + 0 (map #(nonneg-long (:tokens %)) rew-items)))
+     :rewarmed-tokens (long (reduce + 0 (map #(rtext/nonneg-long (:tokens %)) rew-items)))
      :upgraded-count (long (count upg-items))
-     :upgraded-tokens (long (reduce + 0 (map #(nonneg-long (:tokens %)) upg-items)))
+     :upgraded-tokens (long (reduce + 0 (map #(rtext/nonneg-long (:tokens %)) upg-items)))
      :zero-token-items (mapv #(select-keys % [:entity :schema :chosen-fn :measured-tokens]) z-items)
      :active-items (mapv #(select-keys % [:entity :schema :chosen-fn :status :tokens]) act-items)}))
 
@@ -201,20 +179,20 @@
   (let [with-tel (->> evals
                       (filter map?)
                       (filter #(or (some? (:seon.agent.eval/prefix-hash %))
-                                   (pos? (nonneg-long (:seon.agent.eval/prompt-tokens %)))
-                                   (pos? (nonneg-long (:seon.agent.eval/cache-hit-tokens %)))))
-                      (sort-by (juxt #(nonneg-long (:seon.agent.eval/turn %))
-                                     #(nonneg-long (or (:_tx %) (:tx %) (:seon.agent.eval/tx %)))))
+                                   (pos? (rtext/nonneg-long (:seon.agent.eval/prompt-tokens %)))
+                                   (pos? (rtext/nonneg-long (:seon.agent.eval/cache-hit-tokens %)))))
+                      (sort-by (juxt #(rtext/nonneg-long (:seon.agent.eval/turn %))
+                                     #(rtext/nonneg-long (or (:_tx %) (:tx %) (:seon.agent.eval/tx %)))))
                       (take-last 32)
                       vec)
         {:keys [turns busts]}
         (reduce (fn [{:keys [prev turns busts]} ev]
-                  (let [turn (nonneg-long (:seon.agent.eval/turn ev))
-                        tx (nonneg-long (or (:_tx ev) (:tx ev) (:seon.agent.eval/tx ev)))
+                  (let [turn (rtext/nonneg-long (:seon.agent.eval/turn ev))
+                        tx (rtext/nonneg-long (or (:_tx ev) (:tx ev) (:seon.agent.eval/tx ev)))
                         ph (:seon.agent.eval/prefix-hash ev)
-                        hit (nonneg-long (:seon.agent.eval/cache-hit-tokens ev))
-                        miss (nonneg-long (:seon.agent.eval/cache-miss-tokens ev))
-                        prompt (max (nonneg-long (:seon.agent.eval/prompt-tokens ev)) (+ hit miss))
+                        hit (rtext/nonneg-long (:seon.agent.eval/cache-hit-tokens ev))
+                        miss (rtext/nonneg-long (:seon.agent.eval/cache-miss-tokens ev))
+                        prompt (max (rtext/nonneg-long (:seon.agent.eval/prompt-tokens ev)) (+ hit miss))
                         prev-ph (:prefix-hash prev)
                         busted? (boolean (and (some? prev-ph) (some? ph) (not= prev-ph ph)))
                         row {:turn turn :tx tx :prefix-hash ph
@@ -245,7 +223,7 @@
                                :seon.agent.eval/prompt-tokens :seon.agent.eval/cache-hit-tokens
                                :seon.agent.eval/cache-miss-tokens :seon.agent.eval/error]
                           (:e %))
-                  :_tx (nonneg-long (:tx %)))
+                  :_tx (rtext/nonneg-long (:tx %)))
           (d/datoms db :avet :seon.agent.eval/agent agent-id))))
 
 (defn- collect-history-changes [dbs eid]
@@ -253,7 +231,7 @@
     (vec (mapcat (fn [db]
                    (when (and db (instance? datahike.db.DB db))
                      (try
-                       (mapv (fn [dt] {:a (:a dt) :tx (nonneg-long (:tx dt))})
+                       (mapv (fn [dt] {:a (:a dt) :tx (rtext/nonneg-long (:tx dt))})
                              (d/datoms (d/history db) :eavt eid))
                        (catch Throwable _ []))))
                  (distinct (remove nil? dbs))))))
@@ -262,7 +240,7 @@
   (let [dh (db-schema db)]
     (if-not (and db (dh :seon.rule/id))
       #{}
-      (let [txs (fn [a] (when (dh a) (map #(nonneg-long (:tx %)) (d/datoms db :aevt a))))]
+      (let [txs (fn [a] (when (dh a) (map #(rtext/nonneg-long (:tx %)) (d/datoms db :aevt a))))]
         (into #{} (concat (txs :seon.rule/query)
                           (txs :seon.rule/assert)
                           (txs :seon.rule/enabled?)))))))
@@ -361,9 +339,9 @@
                 (mapv #(assoc (get us % {}) :id %) ord))
               :else [])
         units (mapv (fn [u]
-                      (let [rc (nonneg-long (or (:reads-count u)
+                      (let [rc (rtext/nonneg-long (or (:reads-count u)
                                                 (when (coll? (:reads-idx u)) (count (:reads-idx u)))))
-                            ms (round1 (or (:ms u) 0.0))
+                            ms (rtext/round1 (or (:ms u) 0.0))
                             hit? (cond
                                    (boolean? (:hit? u)) (:hit? u)
                                    (boolean? (:skipped? u)) (:skipped? u)
@@ -378,8 +356,8 @@
         hits (long (count (filter :hit? units)))
         misses (long (- n hits))
         total-reads (long (reduce + 0 (map :reads-count units)))
-        total-ms (round1 (reduce + 0.0 (map :ms units)))
-        hit-rate (if (pos? n) (round4 (/ (double hits) (double n))) 1.0)
+        total-ms (rtext/round1 (reduce + 0.0 (map :ms units)))
+        hit-rate (if (pos? n) (rtext/round4 (/ (double hits) (double n))) 1.0)
         hit-pct (if (pos? n) (pct1 hits n) 100.0)
         summary (str hits "/" n " hits (" hit-pct "%) · " total-reads " reads · " total-ms " ms")]
     {:hits hits :misses misses :unit-count (long n)

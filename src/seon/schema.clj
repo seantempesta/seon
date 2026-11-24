@@ -517,8 +517,7 @@
    (let [key      (or (:key m) (:seon.schema/key m))
          raw-form (or (:form m) (:seon.schema/form m))
          doc      (or (:doc m) (:seon.schema/doc m))
-         raw-ex   (or (:examples m) (:seon.schema/examples m))
-]
+         raw-ex   (or (:examples m) (:seon.schema/examples m))]
      (when-not (multi-segment-schema-key? key)
        (throw (ex-info (str "Schema key must use a multi-segment namespace co-located with code "
                             "(e.g. :seon.billing/amount, not :billing/amount), got: " (pr-str key))
@@ -556,24 +555,22 @@
                                           {:error :seon.schema/missing-generator :key key :form parsed-form})))))
            ;; Automatically derive Datahike attribute declarations if this schema declares storage!
            all-attr-ks (set (sdh/attribute-keys registry))
-           existing-dh (if db (set (keys (:schema db))) #{})
            dh-decls (cond
                       (contains? all-attr-ks key)
                       (sync-dh-decls (or (:schema db) {}) [(sdh/declaration registry key)])
 
                       ;; Also check if `key` is an entity map `{:seon.db/attributes true}` adding member attrs
                       :else
-                      (sync-dh-decls (or (:schema db) {}) (mapv #(sdh/declaration registry %) all-attr-ks)))]
-       (let [batch-refs (into {key (six/schema-tempid key)}
-                           (map (fn [k] [k (six/schema-tempid k)]))
-                           (keys sibling-forms))
+                      (sync-dh-decls (or (:schema db) {}) (mapv #(sdh/declaration registry %) all-attr-ks)))
+           batch-refs (into {key (six/schema-tempid key)}
+                            (map (fn [k] [k (six/schema-tempid k)]))
+                            (keys sibling-forms))
            ent (six/enrich-schema-entity-tx
                 db
                 {:seon.schema/key key
                  :seon.schema/form parsed-form
                  :seon.schema/doc doc
-                 :seon.schema/examples parsed-ex
-}
+                 :seon.schema/examples parsed-ex}
                 registry
                 {:schema->ref batch-refs})
            retracts (six/stale-schema-edge-retracts db [ent])]
@@ -581,4 +578,4 @@
         :sample sample
         :dh-decls dh-decls
         :retract-ops retracts
-        :entity ent})))))
+        :entity ent}))))

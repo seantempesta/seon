@@ -3,14 +3,11 @@
    mechanically discovered via `seon.render.fit/discover-renderers`, plus pure multi-width
    preview frame normalization helpers."
   (:require [clojure.string :as str]
-            [seon.render.links :as rlinks]))
+            [seon.render.links :as rlinks]
+            [seon.render.text :as rtext]))
 
 (defn- safe-px [n]
   (if (number? n) (max 0 (long n)) 0))
-
-(defn- nonblank [x]
-  (when (and (string? x) (not (str/blank? x)))
-    (str/trim x)))
 
 (defn- dom-overflow-x? [dom]
   (boolean
@@ -20,11 +17,11 @@
 (defn- image-meta-fields [img]
   (let [w (safe-px (:seon.media/width img))
         h (safe-px (:seon.media/height img))
-        mime (or (nonblank (:seon.media/mime img)) "image/jpeg")
-        lbl (or (nonblank (:seon.media/label img)) (str w "px"))
+        mime (or (rtext/nonblank (:seon.media/mime img) true) "image/jpeg")
+        lbl (or (rtext/nonblank (:seon.media/label img) true) (str w "px"))
         dom (:seon.media/dom img)
         ov-x? (dom-overflow-x? dom)
-        b64 (nonblank (:seon.media/base64 img))]
+        b64 (rtext/nonblank (:seon.media/base64 img) true)]
     {:id (:seon.media/id img) :w w :h h :dims (str w "×" h)
      :mime mime :label lbl :dom dom :ov-x? ov-x? :b64 b64}))
 
@@ -89,8 +86,8 @@
   [f]
   (let [w (safe-px (or (:seon.media/width f) (:width f)))
         h (safe-px (or (:seon.media/height f) (:height f)))
-        mime (or (nonblank (:seon.media/mime f)) (nonblank (:mime f)) "image/jpeg")
-        lbl (or (nonblank (:seon.media/label f)) (nonblank (:label f)) (str w "px"))
+        mime (or (rtext/nonblank (:seon.media/mime f) true) (rtext/nonblank (:mime f) true) "image/jpeg")
+        lbl (or (rtext/nonblank (:seon.media/label f) true) (rtext/nonblank (:label f) true) (str w "px"))
         dom (let [d (or (:seon.media/dom f) (:dom f))] (if (map? d) d {}))
         id (let [raw-id (:seon.media/id f)] (if (uuid? raw-id) raw-id (random-uuid)))]
     {:seon.media/id id
