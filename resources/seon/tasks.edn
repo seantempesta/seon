@@ -439,7 +439,7 @@
   :seon.task/done? true,
   :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
   :seon.task/owner :agent/w2168}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :task.dogfood/clean-role-leftovers-and-tail-caps,
   :seon.task/plan "Clean up remaining dead :role arguments in seon.bench.cluster and seon.repl, and remove raw Datahike index truncation caps in seon.render.tails that can silently drop newest entities before sorting by tx. Add regression tests proving newest entities on large tables always surface.",
   :seon.task/scope seon.render.tails,
@@ -454,10 +454,11 @@
   :seon.task/plan "Refactor seon.transactor.calls below both the 8,000-token namespace budget and the :large-function size limit on handle-call-op! by extracting cohesive helpers into a clean child namespace. Keep all call-delegation, subtask, and merge tests green.",
   :seon.task/scope seon.transactor.calls,
   :seon.task/title "Split seon.transactor.calls below 8k tokens and shrink handle-call-op!"}
- {:seon.task/done? false,
+ {:seon.task/done? true,
   :seon.task/id :task.dogfood/tighten-health-schemas,
   :seon.task/plan "Tighten the Malli schemas on public pure functions in seon.health and its child health namespaces so health reports and problem collections use the existing concrete health schemas instead of bare :map or :any. Verify the Datahike code graph records input/output schema edges for those functions and all health tests pass.",
   :seon.task/scope seon.health,
+  :seon.task/summary "Tightened Malli schemas on public pure functions across all 6 health namespaces (seon.health + .static/.contracts/.efficiency/.branch). Replaced every bare [:vector :map] in problem-collection outputs with [:vector :seon.health/problem], and seon.health/report's return :map with :seon.health/report (30 vars tightened). Datahike now records :seon.code.var/output edges pointing at the concrete :seon.health/problem / :seon.health/report schema entities. Fixed the variadic alias seon.health/test-efficiency-warnings to its true 1-arity schema. Green: seon.health-perf-test 9/9 (incl. report-parity + allocation budget), seon.core-test health-efficiency + failing-tests-supersession 2/2.",
   :seon.task/title "Tighten Malli schemas on public pure functions in seon.health"}
  {:seon.task/done? false,
   :seon.task/id :template/discover-and-plan,
