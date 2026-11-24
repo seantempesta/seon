@@ -18,16 +18,15 @@
         jolt-lang/crypto {:local/root "reference-code/crypto"}
 
         ;; unmodified, pinned
-        ;; 9b6fae80 (#56): send-all copies with the typed write-array; Jolt 0.8.25's old 4-arg form raises on every response
         jolt-lang/ring-chez-adapter {:git/url "https://github.com/jolt-lang/ring-chez-adapter.git"
-                                     :git/sha "9b6fae804e06a8877149ff3ce0531f0b30f881d0"}
+                                     :git/sha "e37d52f92c1c50d0a9af360e1d994554ec48f202"}
         jolt-lang/multipart {:git/url "https://github.com/jolt-lang/multipart.git"
-                             :git/sha "ca51dd47aff27dac3cc09557682e82ec63720310"}
+                             :git/sha "6b861d2516ee64dbaea2ebc6dfbc8ecb149f4133"}
         jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
-                        :git/sha "80e5fc22d9ddd8ee2f2f525580fbc643d0ecba4c"}
-        ;; our fork: a read from a fiber parks the fiber, not its carrier (jolt/fiber-aware-read)
+                        :git/sha "6c12a58d08586ca60421099d2d3d0bcd473238ac"}
+        ;; our fork: fiber-aware read over upstream http-client (+ jolt.http.sse, TLS fixes)
         jolt-lang/http-client {:git/url "https://github.com/seantempesta/http-client.git"
-                               :git/sha "e866277d81f89f7278f47da1e48048610ce6feed"}
+                               :git/sha "99f4a0c5021c1e0888daa7387056b001d49ef250"}
         ;; konserve and datahike require it (the same pin datahike declares); core.async is
         ;; excluded because Jolt ships its own
         org.replikativ/superv.async {:git/url "https://github.com/seantempesta/superv.async"

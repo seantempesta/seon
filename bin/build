@@ -346,11 +346,11 @@ build_seon() {
   # its branch. test/build is a project of its own (its root is test/build, the smoke binary's), so it is left out. Each
   # namespace is named by its file's ns form, read here, so a test file added is compiled in with no list kept by hand.
   INCLUDES=()
-  for f in $(cd "$ROOT" && git ls-files 'test/*.clj' 'test/**/*.clj' | grep -v '^test/build/'); do
+  for f in $(cd "$ROOT" && git ls-files 'src/*.clj' 'src/**/*.clj' 'test/*.clj' 'test/**/*.clj' | grep -v '^test/build/'); do
     n=$(awk 'match($0,/^\(ns [^ )]+/){print substr($0,5,RLENGTH-4); exit}' "$ROOT/$f")
     [ -n "$n" ] && INCLUDES+=(--include "$n")
   done
-  say "seon: jolt -A:test build -m seon.main, $(( ${#INCLUDES[@]} / 2 )) test namespaces included -> target/seon"
+  say "seon: jolt -A:test build -m seon.main, $(( ${#INCLUDES[@]} / 2 )) src+test namespaces included -> target/seon"
   ( set -e; cd "$ROOT"
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" -A:test build -m seon.main "${INCLUDES[@]}" -o "$T/seon.$ID.new" ) > "$T/seon-build.$ID.log" 2>&1 ||
     { tail -30 "$T/seon-build.$ID.log" >&2; rm -rf "$T/seon.$ID.new" "$T/seon.$ID.new.build"; die "seon build failed; see target/seon-build.$ID.log"; }
