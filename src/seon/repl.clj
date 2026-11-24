@@ -13,7 +13,9 @@
             [seon.health :as health]
             [seon.store :as store]
             [seon.health.metrics :as hmetrics]
-            [seon.repl.search :as search]))
+            [seon.repl.search :as search]
+            [seon.health.friction :as hfriction]
+            [seon.bench.golden :as bgolden]))
 
 (defn- intern-doc! [u sym f]
   (let [target (if (var? f) (fn [& args] (apply @f args)) f)
@@ -390,7 +392,7 @@
        {:error :unknown-helper :sym sym-or-str :available (vec (sort (keys vars)))}))))
 
 (defn install-repl-helpers!
-  "Interns `user/*` editing, inspection, test, health, search, and task helpers into `u`."
+  "Interns `user/*` editing, inspection, test, health, search, diagnostics, benchmark, and task helpers into `u`."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
   (doseq [[s v] [['add-fn! #'edit/add-fn!] ['edit-fn! #'edit/edit-fn!] ['add-require! #'edit/add-require!]
@@ -398,5 +400,7 @@
                  ['prune-requires! #'edit/prune-requires!] ['diff #'edit/diff] ['grep-src #'search/grep-src]
                  ['run-tests! #'run-tests!] ['health #'health] ['search #'search/search] ['help #'help]
                  ['autofix-health! #'autofix-health!] ['inspect-branch #'inspect-branch] ['save-example! #'save-example!]
-                 ['create-task! #'create-task!] ['metrics #'metrics]]]
+                 ['create-task! #'create-task!] ['metrics #'metrics]
+                 ['friction #'hfriction/repl-friction] ['golden-scoreboard #'bgolden/repl-golden-scoreboard]
+                 ['run-golden-suite! #'bgolden/run-golden-suite!]]]
     (intern-doc! u s v)))

@@ -172,21 +172,12 @@
              (recur (inc polls)))))))))
 
 (defn ^:seon.flow/edge probe-trial-trace
-  "Queries the isolated trial instance for `aid`'s latest 2 evals (snippet + last error) so
-   live monitoring and failure post-mortems never lose what a worker did before teardown."
+  "Queries the isolated trial instance via `seon.health.friction/agent-friction-summary` (with fallback) before teardown."
   {:malli/schema [:=> [:cat :map :keyword :keyword] :map]}
   [inst aid branch]
   (try
-    (let [code (str "(let [bdb (seon.store/head (user/conn) " (pr-str branch) ") "
-                    "evs (->> (datahike.api/datoms bdb :avet :seon.agent.eval/agent " (pr-str aid) ") "
-                    "(map #(datahike.api/pull bdb '[:seon.agent.eval/handle :seon.agent.eval/turn :seon.agent.eval/status :seon.agent.eval/error :seon.agent.eval/code] (:e %))) "
-                    "(sort-by #(or (:seon.agent.eval/turn %) 0)) vec) "
-                    "last-ev (last evs) "
-                    "last-err (last (filter #(or (:seon.agent.eval/error %) (= :error (:seon.agent.eval/status %))) evs)) "
-                    "clip (fn [s n] (let [t (clojure.string/replace (str (or s \"\")) #\"\\s+\" \" \") ] (if (> (count t) n) (str (subs t 0 n) \"…\") t)))] "
-                    "{:count (count evs) "
-                    ":last-snippet (when last-ev (str (:seon.agent.eval/handle last-ev) \": \" (clip (:seon.agent.eval/code last-ev) 100))) "
-                    ":last-error (when last-err (str (:seon.agent.eval/handle last-err) \" ERR: \" (clip (:seon.agent.eval/error last-err) 140)))})")
+    (let [code (str "(if-let [f (requiring-resolve (quote seon.health.friction/agent-friction-summary))] "
+                    "(f (user/conn) (user/main-db) " (pr-str aid) " {:branch " (pr-str branch) "}) {})")
           res (instance-op! inst {:op :eval :agent :repl/bench-probe :branch :branch/bench-probe :code code})
           parsed (when (and (:ok? res) (string? (:value res)))
                    (try (edn/read-string (:value res)) (catch Throwable _ nil)))]
@@ -199,8 +190,8 @@
   [idx task]
   (let [trial-id (or (:id task) (keyword "trial" (str "t" (inc (long idx)))))]
     {:id trial-id
-     :branch (or (:branch task) (keyword "branch" (str "trial-" (name trial-id))))
-     :agent-id (or (:agent-id task) (keyword "bench" (name trial-id)))}))
+     :branch (or (:branch task) (when (:chat-agent task) :branch/root) (keyword "branch" (str "trial-" (name trial-id))))
+     :agent-id (or (:chat-agent task) (:agent-id task) (keyword "bench" (name trial-id)))}))
 
 (defn trial-instance-opts
   "Merges a trial's per-task overrides over run-level `opts` and boot defaults."
@@ -312,35 +303,61 @@
                  (pr-str (take 2 (filter #(= :error (:severity %)) (:problems health-res)))))))
       (:last-error final-trace)))
 
+(defn- ^:seon.flow/edge pause-preexisting-agents!
+  ([inst] (pause-preexisting-agents! inst nil))
+  ([inst keep-aid]
+   (let [st (instance-op! inst {:op :status})
+         pre (filterv #(and (:id %) (not= keep-aid (:id %)) (not= :paused (:status %))) (:agents st))
+         tx (cond-> (mapv (fn [a] {:seon.agent/id (:id a) :seon.agent/paused? true}) pre)
+              keep-aid (conj {:seon.agent/id keep-aid :seon.agent/paused? false}))]
+     (when (seq tx)
+       (instance-op! inst {:op :transact :tx-data tx :reason :bench-isolate-preexisting-agents})))))
+
+(defn trial-telemetry
+  "Projects optional per-trial friction telemetry from `trace` and `category`."
+  {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :map]] :map] :cost/ticks 400}
+  [category trace]
+  (let [t (if (map? trace) trace {})]
+    (cond-> {}
+      category (assoc :category category)
+      (number? (:turns t)) (assoc :turns (long (:turns t)))
+      (number? (:cache-hit-tokens t)) (assoc :kv-hit-tokens (long (:cache-hit-tokens t)))
+      (number? (:cache-miss-tokens t)) (assoc :kv-miss-tokens (long (:cache-miss-tokens t)))
+      (number? (:prompt-tokens t)) (assoc :prompt-tokens (long (:prompt-tokens t)))
+      (number? (:completion-tokens t)) (assoc :completion-tokens (long (:completion-tokens t)))
+      (number? (:prefix-hash-count t)) (assoc :prefix-hashes (long (:prefix-hash-count t)))
+      (number? (:prefix-busts t)) (assoc :prefix-busts (long (:prefix-busts t)))
+      (number? (:ooms t)) (assoc :ooms (long (:ooms t)))
+      (number? (:eval-errors t)) (assoc :eval-errors (long (:eval-errors t)))
+      (number? (:upstream-errors t)) (assoc :upstream-errors (long (:upstream-errors t)))
+      (boolean? (:turn-overrun? t)) (assoc :turn-overrun? (:turn-overrun? t))
+      (number? (:rogue-fs-count t)) (assoc :rogue-fs-count (long (:rogue-fs-count t)))
+      (number? (:no-match-count t)) (assoc :no-match-count (long (:no-match-count t)))
+      (number? (:delegated-calls t)) (assoc :delegated-calls (long (:delegated-calls t))))))
+
 (defn trial-result
-  "Assembles one trial's public result map from its op responses."
+  "Assembles one trial result map from its op responses and friction trace."
   {:malli/schema [:=> [:cat :map] :map]
    :cost/ticks 400}
-  [{:keys [id port boot-ms elapsed-ms outcome ag-snap eval-res agent-res test-res merge-res
+  [{:keys [id category port boot-ms elapsed-ms outcome ag-snap eval-res agent-res test-res merge-res
            health-res final-trace failure]}]
-  {:id id
-   :port port
-   :boot-ms boot-ms
-   :elapsed-ms elapsed-ms
-   :ok? (boolean (:ok? outcome))
-   :merged? (boolean (:merged? outcome))
-   :agent-status (:status ag-snap)
-   :evals (long (or (:evals ag-snap) 0))
-   :eval eval-res
-   :agent agent-res
-   :test test-res
-   :merge merge-res
-   :health-ok? (boolean (:ok? health-res))
-   :last-snippet (:last-snippet final-trace)
-   :last-error failure})
-
-(defn- ^:seon.flow/edge pause-preexisting-agents! [inst]
-  (let [st (instance-op! inst {:op :status})
-        pre (filterv #(and (:id %) (not= :paused (:status %))) (:agents st))]
-    (when (seq pre)
-      (instance-op! inst {:op :transact
-                          :tx-data (mapv (fn [a] {:seon.agent/id (:id a) :seon.agent/paused? true}) pre)
-                          :reason :bench-isolate-preexisting-agents}))))
+  (merge
+   {:id id
+    :port port
+    :boot-ms boot-ms
+    :elapsed-ms elapsed-ms
+    :ok? (boolean (:ok? outcome))
+    :merged? (boolean (:merged? outcome))
+    :agent-status (:status ag-snap)
+    :evals (long (or (:evals final-trace) (:evals ag-snap) 0))
+    :eval eval-res
+    :agent agent-res
+    :test test-res
+    :merge merge-res
+    :health-ok? (boolean (:ok? health-res))
+    :last-snippet (:last-snippet final-trace)
+    :last-error failure}
+   (trial-telemetry category final-trace)))
 
 (defn run-one-trial!
   "Boots one isolated instance, drives a full trial against it, tears it down, returns its result map."
@@ -349,6 +366,7 @@
   (let [{:keys [on-trial-update keep-dirs? task-timeout-ms]} opts
         p (:proxy-instance opts)
         {:keys [id branch agent-id]} (trial-ids idx task)
+        chat-aid (:chat-agent task)
         t-start (System/nanoTime)
         inst (atom nil)
         elapsed-ms! (fn [] (/ (double (- (System/nanoTime) t-start)) 1e6))
@@ -362,15 +380,16 @@
     (try
       (let [i (start-instance! (trial-instance-opts id task opts))
             _ (reset! inst i)
-            _ (pause-preexisting-agents! i)
+            _ (pause-preexisting-agents! i chat-aid)
             _ (emit! {:status :booted :evals 0 :alive? true :boot-ms (long (:boot-ms i))})
             plan (trial-task-plan task)
             eval-res (when-let [code (:eval-code task)]
                        (instance-op! i {:op :eval :agent agent-id :branch branch :code code}))
-            agent-res (when (or (:task task) (:goal task) (:body task))
-                        (let [tmap (:task-map plan)
-                              _ (when tmap (instance-op! i (assoc tmap :op :create-task)))
-                              spawn (instance-op! i (trial-spawn-op agent-id branch plan))
+            agent-res (when (or chat-aid (:task task) (:goal task) (:body task))
+                        (let [spawn (when-not chat-aid
+                                      (when-let [tmap (:task-map plan)]
+                                        (instance-op! i (assoc tmap :op :create-task)))
+                                      (instance-op! i (trial-spawn-op agent-id branch plan)))
                               msg (when-let [op (trial-message-op agent-id (:body plan))]
                                     (instance-op! i op))
                               wait (wait-for-agent!
@@ -384,9 +403,7 @@
                                             (emit! (trial-progress agent-id st tr)))))))]
                           {:spawn spawn :message msg :wait wait}))
             ag-snap (some #(when (= agent-id (:id %)) %) (get-in agent-res [:wait :status :agents]))
-            final-trace (when (and agent-res
-                                   (or (not (get-in agent-res [:wait :ok?]))
-                                       (not= :merged (:status ag-snap))))
+            final-trace (when (or agent-res eval-res)
                           (probe-trial-trace i agent-id branch))
             timed-out? (= :timeout (get-in agent-res [:wait :error]))
             already-merged? (= :merged (:status ag-snap))
@@ -396,38 +413,20 @@
             merge-res (when (and (not timed-out?) (:merge? task))
                         (if already-merged?
                           {:ok? true :already-merged? true :branch branch}
-                          (instance-op! i {:op :merge :branch branch
-                                           :message (str "Bench trial " (name id))})))
+                          (instance-op! i {:op :merge :branch branch :message (str "Bench trial " (name id))})))
             health-res (instance-op! i {:op :health})
             outcome (trial-outcome {:task task :ag-snap ag-snap :eval-res eval-res
                                     :agent-res agent-res :test-res test-res :merge-res merge-res})
-            failure (trial-failure {:timeout-ms timeout-ms
-                                    :agent-res agent-res
-                                    :test-res test-res
-                                    :merge-res merge-res
-                                    :ag-snap ag-snap
-                                    :final-trace final-trace
-                                    :health-res health-res
-                                    :halted-not-merged? (:halted-not-merged? outcome)})]
-        (trial-result {:id id
-                       :port (:port i)
-                       :boot-ms (:boot-ms i)
-                       :elapsed-ms (elapsed-ms!)
-                       :outcome outcome
-                       :ag-snap ag-snap
-                       :eval-res eval-res
-                       :agent-res agent-res
-                       :test-res test-res
-                       :merge-res merge-res
-                       :health-res health-res
-                       :final-trace final-trace
-                       :failure failure}))
+            failure (trial-failure {:timeout-ms timeout-ms :agent-res agent-res :test-res test-res
+                                    :merge-res merge-res :ag-snap ag-snap
+                                    :final-trace (when-not (:ok? outcome) final-trace)
+                                    :health-res health-res :halted-not-merged? (:halted-not-merged? outcome)})]
+        (trial-result {:id id :category (:category task) :port (:port i) :boot-ms (:boot-ms i)
+                       :elapsed-ms (elapsed-ms!) :outcome outcome :ag-snap ag-snap :eval-res eval-res
+                       :agent-res agent-res :test-res test-res :merge-res merge-res
+                       :health-res health-res :final-trace final-trace :failure failure}))
       (catch Throwable ex
-        {:id id
-         :ok? false
-         :elapsed-ms (elapsed-ms!)
-         :error (or (.getMessage ex) (str ex))
-         :data (ex-data ex)})
+        {:id id :ok? false :elapsed-ms (elapsed-ms!) :error (or (.getMessage ex) (str ex)) :data (ex-data ex)})
       (finally
         (when-let [i @inst]
           (stop-instance! i {:keep-dir? keep-dirs?}))))))
@@ -462,65 +461,58 @@
        (when p (proxy/stop! p)))))))
 
 (defn ^:seon.flow/edge start-bench-run-async!
-  "Launches `run-parallel-trial!` asynchronously on a background thread and streams throttled
-   `:seon.bench.run/entity` snapshots via `(publish-fn entity-map)` so the Web UI monitors live
-   progress, proxy tokens/KV cache, and failure traces over a single coordinator port."
+  "Launches `run-parallel-trial!` asynchronously and streams `:seon.bench.run/entity` snapshots via `publish-fn`."
   {:malli/schema [:=> [:cat :map :seon.host/fn] :map]}
   [opts publish-fn]
   (let [run-id (random-uuid)
         tasks (vec (or (:tasks opts) []))
         started-ms (System/currentTimeMillis)
         title (or (not-empty (str (:title opts ""))) (str "Parallel Trial (" (count tasks) " tasks)"))
+        tks [:category :turns :kv-hit-tokens :kv-miss-tokens :prompt-tokens :completion-tokens
+             :prefix-hashes :prefix-busts :ooms :eval-errors :upstream-errors :turn-overrun?
+             :rogue-fs-count :no-match-count :delegated-calls]
         init-trials (mapv (fn [idx t]
-                            {:id (or (:id t) (keyword "trial" (str "t" (inc idx))))
-                             :status :booting :evals 0 :elapsed-ms 0 :alive? false})
+                            (cond-> {:id (or (:id t) (keyword "trial" (str "t" (inc idx))))
+                                     :status :booting :evals 0 :elapsed-ms 0 :alive? false}
+                              (:category t) (assoc :category (:category t))))
                           (range) tasks)
         state-atom (atom {:trials (into {} (map (juxt :id identity) init-trials))
-                          :order (mapv :id init-trials)
-                          :proxy-stats nil
-                          :last-pub-ms 0})
+                          :order (mapv :id init-trials) :proxy-stats nil :last-pub-ms 0})
         build-entity (fn [status finished-ms]
                        (let [{:keys [trials order proxy-stats]} @state-atom
                              tvec (mapv #(get trials %) order)
                              passed (count (filter #(#{:merged :passed} (:status %)) tvec))
-                             failed (count (filter #(#{:failed :timeout :error} (:status %)) tvec))
-                             now-ms (System/currentTimeMillis)]
+                             failed (count (filter #(#{:failed :timeout :error} (:status %)) tvec))]
                          (cond-> {:seon.bench.run/id run-id
                                   :seon.bench.run/title title
                                   :seon.bench.run/status status
                                   :seon.bench.run/started-ms started-ms
-                                  :seon.bench.run/updated-ms now-ms
+                                  :seon.bench.run/updated-ms (System/currentTimeMillis)
                                   :seon.bench.run/total (count tvec)
                                   :seon.bench.run/passed passed
                                   :seon.bench.run/failed failed
                                   :seon.bench.run/trials tvec}
                            finished-ms (assoc :seon.bench.run/finished-ms finished-ms)
-                           proxy-stats (assoc :seon.bench.run/proxy-stats proxy-stats))))
+                           proxy-stats (assoc :seon.bench.run/proxy-stats proxy-stats)
+                           (:suite-id opts) (assoc :seon.bench.run/suite-id (:suite-id opts))
+                           (:git-commit opts) (assoc :seon.bench.run/git-commit (str (:git-commit opts)))
+                           (:main-tx opts) (assoc :seon.bench.run/main-tx (long (:main-tx opts)))
+                           (:model opts) (assoc :seon.bench.run/model (str (:model opts))))))
         pub! (fn [status finished-ms force?]
                (let [now (System/currentTimeMillis) last-p (:last-pub-ms @state-atom)]
-               (when (or force? (>= (- now last-p) 1800))
-                 (swap! state-atom assoc :last-pub-ms now)
-                 (try
-                   (publish-fn (build-entity status finished-ms))
-                   (catch Throwable _ nil)))))]
+                 (when (or force? (>= (- now last-p) 1800))
+                   (swap! state-atom assoc :last-pub-ms now)
+                   (try (publish-fn (build-entity status finished-ms)) (catch Throwable _ nil)))))]
     (a/thread
       (try
-        (let [res (do
-                  (pub! :running nil true)
-                  (run-parallel-trial!
-                    (assoc
-                      opts
-                      :on-trial-update
-                      (fn [tm pstats]
-                        (let [prev-st (get-in @state-atom [:trials (:id tm) :status])]
-                          (swap!
-                            state-atom
-                            (fn [s]
-                              (cond->
-                                (update-in s [:trials (:id tm)] merge tm)
-                                pstats
-                                (assoc :proxy-stats pstats))))
-                          (pub! :running nil (not= prev-st (:status tm))))))))]
+        (let [res (do (pub! :running nil true)
+                      (run-parallel-trial!
+                       (assoc opts :on-trial-update
+                              (fn [tm pstats]
+                                (let [prev-st (get-in @state-atom [:trials (:id tm) :status])]
+                                  (swap! state-atom (fn [s] (cond-> (update-in s [:trials (:id tm)] merge tm)
+                                                              pstats (assoc :proxy-stats pstats))))
+                                  (pub! :running nil (not= prev-st (:status tm))))))))]
           (swap! state-atom
                  (fn [s]
                    (let [tmap (reduce (fn [acc r]
@@ -528,27 +520,20 @@
                                                        (and (:last-error r) (str/includes? (str (:last-error r)) "Timed out")) :timeout
                                                        :else :failed)]
                                           (assoc acc (:id r)
-                                                 (cond-> {:id (:id r)
-                                                          :status st
-                                                          :port (:port r)
-                                                          :evals (long (or (:evals r) 0))
-                                                          :elapsed-ms (long (or (:elapsed-ms r) 0))
-                                                          :boot-ms (long (or (:boot-ms r) 0))
-                                                          :merged? (boolean (:merged? r))
-                                                          :health-ok? (boolean (:health-ok? r))
-                                                          :alive? false}
-                                                   (:last-snippet r) (assoc :last-snippet (:last-snippet r))
-                                                   (or (:last-error r) (:error r)) (assoc :last-error (str (or (:last-error r) (:error r))))))))
-                                      (:trials s)
-                                      (:results res))]
-                     (cond-> (assoc s :trials tmap)
-                       (:proxy-stats res) (assoc :proxy-stats (:proxy-stats res))))))
-          (let [n-pass (count (filter :ok? (:results res)))
-                n-tot (count (:results res))
-                fin-st (cond (= n-pass n-tot) :passed
-                             (pos? n-pass) :partial
-                             :else :failed)]
-            (pub! fin-st (System/currentTimeMillis) true)))
+                                                 (merge (cond-> {:id (:id r) :status st :port (:port r)
+                                                                 :evals (long (or (:evals r) 0))
+                                                                 :elapsed-ms (long (or (:elapsed-ms r) 0))
+                                                                 :boot-ms (long (or (:boot-ms r) 0))
+                                                                 :merged? (boolean (:merged? r))
+                                                                 :health-ok? (boolean (:health-ok? r))
+                                                                 :alive? false}
+                                                          (:last-snippet r) (assoc :last-snippet (:last-snippet r))
+                                                          (or (:last-error r) (:error r)) (assoc :last-error (str (or (:last-error r) (:error r)))))
+                                                        (select-keys r tks)))))
+                                      (:trials s) (:results res))]
+                     (cond-> (assoc s :trials tmap) (:proxy-stats res) (assoc :proxy-stats (:proxy-stats res))))))
+          (let [n-pass (count (filter :ok? (:results res))) n-tot (count (:results res))]
+            (pub! (cond (= n-pass n-tot) :passed (pos? n-pass) :partial :else :failed) (System/currentTimeMillis) true)))
         (catch Throwable ex
           (swap! state-atom assoc-in [:proxy-stats :error] (or (.getMessage ex) (str ex)))
           (pub! :failed (System/currentTimeMillis) true))))

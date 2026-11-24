@@ -279,7 +279,7 @@
  [:boolean {:seon.merge/skip true}]
 
  :seon.bench.run/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-bench-run-card, :seon.schema/doc "Declarative live-monitored parallel benchmark run entity rendered onto Root Canvas."} [:seon.bench.run/id :seon.bench.run/id] [:seon.bench.run/title {:optional true} :seon.bench.run/title] [:seon.bench.run/status {:optional true} :seon.bench.run/status] [:seon.bench.run/started-ms {:optional true} :seon.bench.run/started-ms] [:seon.bench.run/updated-ms {:optional true} :seon.bench.run/updated-ms] [:seon.bench.run/finished-ms {:optional true} :seon.bench.run/finished-ms] [:seon.bench.run/total {:optional true} :seon.bench.run/total] [:seon.bench.run/passed {:optional true} :seon.bench.run/passed] [:seon.bench.run/failed {:optional true} :seon.bench.run/failed] [:seon.bench.run/proxy-stats {:optional true} :seon.bench.run/proxy-stats] [:seon.bench.run/trials {:optional true} :seon.bench.run/trials]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-bench-run-card, :seon.schema/doc "Declarative live-monitored parallel benchmark run entity rendered onto Root Canvas."} [:seon.bench.run/id :seon.bench.run/id] [:seon.bench.run/title {:optional true} :seon.bench.run/title] [:seon.bench.run/status {:optional true} :seon.bench.run/status] [:seon.bench.run/suite-id {:optional true} :seon.bench.run/suite-id] [:seon.bench.run/git-commit {:optional true} :seon.bench.run/git-commit] [:seon.bench.run/main-tx {:optional true} :seon.bench.run/main-tx] [:seon.bench.run/model {:optional true} :seon.bench.run/model] [:seon.bench.run/started-ms {:optional true} :seon.bench.run/started-ms] [:seon.bench.run/updated-ms {:optional true} :seon.bench.run/updated-ms] [:seon.bench.run/finished-ms {:optional true} :seon.bench.run/finished-ms] [:seon.bench.run/total {:optional true} :seon.bench.run/total] [:seon.bench.run/passed {:optional true} :seon.bench.run/passed] [:seon.bench.run/failed {:optional true} :seon.bench.run/failed] [:seon.bench.run/proxy-stats {:optional true} :seon.bench.run/proxy-stats] [:seon.bench.run/trials {:optional true} :seon.bench.run/trials]]
 
  :seon.bench.run/failed
  :int
@@ -287,8 +287,17 @@
  :seon.bench.run/finished-ms
  [:and {:seon.db/index true, :seon.schema/doc "Epoch ms when the benchmark run finished."} :int]
 
+ :seon.bench.run/git-commit
+ [:and {:seon.db/index true, :gen/elements ["abc1234" "d1ca4b5ca24c4f0d5b49a6392b7b79715a3f7f54"], :seon.schema/doc "Git HEAD commit SHA when this benchmark run executed."} [:string {:min 7}]]
+
  :seon.bench.run/id
  [:and {:seon.db/identity true, :seon.schema/doc "Unique benchmark run UUID."} :uuid]
+
+ :seon.bench.run/main-tx
+ [:and {:seon.db/index true, :gen/elements [536878630], :seon.schema/doc "Datahike :main max-tx when this benchmark run executed."} :int]
+
+ :seon.bench.run/model
+ [:and {:seon.db/index true, :gen/elements ["deepseek-flash" "deepseek-chat"], :seon.schema/doc "LLM model identifier used for this benchmark run."} [:string {:min 1}]]
 
  :seon.bench.run/passed
  :int
@@ -302,6 +311,9 @@
  :seon.bench.run/status
  [:and {:seon.db/index true, :gen/elements [:running :passed :partial :failed], :seon.schema/doc "Lifecycle status of the benchmark run."} :keyword]
 
+ :seon.bench.run/suite-id
+ [:and {:seon.db/index true, :gen/elements [:golden/v1 :bench/adhoc], :seon.schema/doc "Benchmark suite identifier (e.g. :golden/v1)."} :keyword]
+
  :seon.bench.run/title
  :string
 
@@ -309,10 +321,13 @@
  :int
 
  :seon.bench.run/trials
- [:vector {:seon.schema/doc "Ordered per-trial live status rows of a parallel benchmark run."} [:map [:id :keyword] [:status :keyword] [:port {:optional true} [:maybe :int]] [:evals {:optional true} :int] [:elapsed-ms {:optional true} number?] [:boot-ms {:optional true} number?] [:merged? {:optional true} :boolean] [:health-ok? {:optional true} :boolean] [:alive? {:optional true} :boolean] [:last-snippet {:optional true} [:maybe :string]] [:last-error {:optional true} [:maybe :string]]]]
+ [:vector {:seon.schema/doc "Ordered per-trial live status and friction telemetry rows of a parallel benchmark run."} [:map [:id :keyword] [:status :keyword] [:port {:optional true} [:maybe :int]] [:evals {:optional true} :int] [:elapsed-ms {:optional true} number?] [:boot-ms {:optional true} number?] [:merged? {:optional true} :boolean] [:health-ok? {:optional true} :boolean] [:alive? {:optional true} :boolean] [:last-snippet {:optional true} [:maybe :string]] [:last-error {:optional true} [:maybe :string]] [:category {:optional true} [:maybe :keyword]] [:turns {:optional true} :int] [:kv-hit-tokens {:optional true} :int] [:kv-miss-tokens {:optional true} :int] [:prompt-tokens {:optional true} :int] [:completion-tokens {:optional true} :int] [:prefix-hashes {:optional true} :int] [:prefix-busts {:optional true} :int] [:ooms {:optional true} :int] [:eval-errors {:optional true} :int] [:upstream-errors {:optional true} :int] [:turn-overrun? {:optional true} :boolean] [:rogue-fs-count {:optional true} :int] [:no-match-count {:optional true} :int] [:delegated-calls {:optional true} :int]]]
 
  :seon.bench.run/updated-ms
  [:and {:seon.db/index true, :seon.schema/doc "Epoch ms of the latest live progress update."} :int]
+
+ :seon.bench/scoreboard
+ [:map {:seon.render/hiccup seon.render.entities.diagnostics/render-golden-scoreboard-card, :gen/elements [{:suite-id :golden/v1, :level :calm, :summary "golden/v1: 87.5% merge (7/8) · med 9.0t · 64.2s · 91.4% KV · 0 OOM", :runs-count 2, :merge-rate-pct 87.5, :overall-pass-rate-pct 87.5, :median-turns-to-merge 9.0, :median-wall-s 64.2, :kv-cache-hit-pct 91.4, :upstream-errors 0, :livelocks 0, :ooms 0, :delta-vs-prev {:merge-rate-pct 12.5, :overall-pass-rate-pct 12.5, :median-turns-to-merge -2.0, :kv-cache-hit-pct 3.1, :ooms -1, :livelocks 0}, :latest {:git-commit "abc1234", :main-tx 536878630, :model "deepseek-flash", :status :partial, :total 8, :passed 7, :merged 7, :merge-rate-pct 87.5, :overall-pass-rate-pct 87.5, :median-turns-to-merge 9.0, :median-wall-s 64.2, :kv-cache-hit-pct 91.4, :upstream-errors 0, :livelocks 0, :ooms 0}, :history [{:git-commit "def5678", :main-tx 536878000, :model "deepseek-flash", :status :partial, :total 8, :passed 6, :merged 6, :merge-rate-pct 75.0, :overall-pass-rate-pct 75.0, :median-turns-to-merge 11.0, :median-wall-s 78.5, :kv-cache-hit-pct 88.3, :upstream-errors 0, :livelocks 0, :ooms 1} {:git-commit "abc1234", :main-tx 536878630, :model "deepseek-flash", :status :partial, :total 8, :passed 7, :merged 7, :merge-rate-pct 87.5, :overall-pass-rate-pct 87.5, :median-turns-to-merge 9.0, :median-wall-s 64.2, :kv-cache-hit-pct 91.4, :upstream-errors 0, :livelocks 0, :ooms 0}]} {:suite-id :golden/v1, :level :warm, :summary "golden/v1: no recorded runs yet", :runs-count 0, :merge-rate-pct 0.0, :overall-pass-rate-pct 0.0, :median-turns-to-merge nil, :median-wall-s nil, :kv-cache-hit-pct nil, :upstream-errors 0, :livelocks 0, :ooms 0, :delta-vs-prev nil, :latest nil, :history []}], :seon.schema/doc "Pure derived cross-commit golden benchmark scoreboard over stored :seon.bench.run/entity runs."} [:suite-id :keyword] [:level :seon.signal/level] [:summary :string] [:runs-count [:int {:min 0}]] [:merge-rate-pct number?] [:overall-pass-rate-pct number?] [:median-turns-to-merge [:maybe number?]] [:median-wall-s [:maybe number?]] [:kv-cache-hit-pct [:maybe number?]] [:upstream-errors [:int {:min 0}]] [:livelocks [:int {:min 0}]] [:ooms [:int {:min 0}]] [:delta-vs-prev [:maybe :map]] [:latest {:optional true} [:maybe :map]] [:history [:vector :map]] [:by-category {:optional true} [:map-of :keyword :map]]]
 
  :seon.bench/typed-answer
  [:map {:seon.schema/doc "Structured typed answer schema for benchmark and specialist audit calls."} [:summary :string] [:findings [:vector :string]] [:recommendation :string]]
@@ -503,6 +518,18 @@
  :seon.code.var/ticks-budget
  [:int {:min 1, :max 10000000000}]
 
+ :seon.config.build/jolt-cache-mb
+ [:int {:min 256, :max 262144, :default 32768, :seon.schema/doc "Jolt AOT compiler cache size in MB."}]
+
+ :seon.config.build/jolt-compiler-options
+ [:map {:seon.db/storable true, :default {:image-fn-forms false, :no-inline-ns-prefixes [seon my]}, :gen/elements [{:image-fn-forms false, :no-inline-ns-prefixes [seon my]}], :seon.schema/doc "Jolt AOT compiler options map from resources/seon/config/default.edn."} [:image-fn-forms {:optional true} :boolean] [:no-inline-ns-prefixes {:optional true} [:vector :symbol]]]
+
+ :seon.config.build/jolt-whole-program-inference
+ [:boolean {:default false, :seon.schema/doc "Whether Jolt AOT enables whole-program type inference."}]
+
+ :seon.config.source/tree-excludes
+ [:vector {:seon.db/storable true, :default ["claude_scratch" "runs" "target"], :gen/elements [["claude_scratch" "runs" "target"]], :seon.schema/doc "Workspace top-level directory names excluded from source tree scans."} :string]
+
  :seon.config/ai-api-key-env
  [:string {:min 1}]
 
@@ -531,7 +558,7 @@
  [:int {:min 4, :max 512, :default 32, :seon.schema/doc "Datahike node cache size in MB for each forked child agent process."}]
 
  :seon.config/entity
- [:map {:seon.db/attributes true} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights] [:seon.config/store-map-bytes {:optional true} :seon.config/store-map-bytes] [:seon.config/gc-keep-merged-branches {:optional true} :seon.config/gc-keep-merged-branches] [:seon.config/gc-history-hours {:optional true} :seon.config/gc-history-hours] [:seon.config/review-every-turns {:optional true} :seon.config/review-every-turns] [:seon.config/unwritten-review-turns {:optional true} :seon.config/unwritten-review-turns] [:seon.config/semantic-min-score {:optional true} :seon.config/semantic-min-score] [:seon.config/ns-outline-tokens {:optional true} :seon.config/ns-outline-tokens] [:seon.config/eval-out-chars {:optional true} :seon.config/eval-out-chars]]
+ [:map {:seon.db/attributes true} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights] [:seon.config/store-map-bytes {:optional true} :seon.config/store-map-bytes] [:seon.config/gc-keep-merged-branches {:optional true} :seon.config/gc-keep-merged-branches] [:seon.config/gc-history-hours {:optional true} :seon.config/gc-history-hours] [:seon.config/review-every-turns {:optional true} :seon.config/review-every-turns] [:seon.config/unwritten-review-turns {:optional true} :seon.config/unwritten-review-turns] [:seon.config/semantic-min-score {:optional true} :seon.config/semantic-min-score] [:seon.config/ns-outline-tokens {:optional true} :seon.config/ns-outline-tokens] [:seon.config/eval-out-chars {:optional true} :seon.config/eval-out-chars] [:seon.config/heavy-eval-bytes {:optional true} :seon.config/heavy-eval-bytes] [:seon.config/heavy-eval-ms {:optional true} :seon.config/heavy-eval-ms] [:seon.config/friction-min-kv-pct {:optional true} :seon.config/friction-min-kv-pct] [:seon.config.build/jolt-cache-mb {:optional true} :seon.config.build/jolt-cache-mb] [:seon.config.build/jolt-compiler-options {:optional true} :seon.config.build/jolt-compiler-options] [:seon.config.build/jolt-whole-program-inference {:optional true} :seon.config.build/jolt-whole-program-inference] [:seon.config.source/tree-excludes {:optional true} :seon.config.source/tree-excludes]]
 
  :seon.config/eval-bytes
  [:int {:min 65536, :max 17179869184}]
@@ -548,6 +575,9 @@
  :seon.config/fast-test-ms
  [:int {:min 1, :max 60000}]
 
+ :seon.config/friction-min-kv-pct
+ [:int {:min 0, :max 100, :default 70, :seon.schema/doc "Minimum KV-cache hit percentage (default 70%) before trace friction flags low KV cache reuse."}]
+
  :seon.config/gc-generations
  [:int {:min 4, :max 6}]
 
@@ -562,6 +592,12 @@
 
  :seon.config/gen-seed
  :int
+
+ :seon.config/heavy-eval-bytes
+ [:int {:min 1048576, :max 17179869184, :default 134217728, :seon.schema/doc "Byte allocation threshold (default 128 MB) flagging a heavy eval in trace friction analysis."}]
+
+ :seon.config/heavy-eval-ms
+ [:int {:min 100, :max 600000, :default 5000, :seon.schema/doc "Wall-time threshold in ms (default 5000 ms) flagging a heavy eval in trace friction analysis."}]
 
  :seon.config/key
  [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-keyword]
@@ -718,6 +754,15 @@
 
  :seon.health.fault/subject
  [:and {:seon.db/index true} :string]
+
+ :seon.health/agent-friction
+ [:map {:gen/elements [{:agent :worker/demo, :branch :branch/demo, :evals 8, :turns 6, :max-turn 6, :max-tool-turns 32, :turn-overrun? false, :empty-code-turns 0, :prompt-tokens 42000, :completion-tokens 2400, :cache-hit-tokens 36000, :cache-miss-tokens 6000, :kv-cache-hit-pct 85.7, :prefix-hash-count 1, :prefix-busts 0, :eval-errors 0, :error-classes {}, :repeated-errors 0, :ooms 0, :cst-errors 0, :no-match-count 0, :test-failure-messages 0, :upstream-errors 0, :rogue-fs-count 0, :heavy-evals 0, :max-mb 18.4, :max-ms 42.1, :friction-score 0, :level :calm} {:agent :worker/hot, :branch :branch/hot, :evals 40, :turns 35, :max-turn 35, :max-tool-turns 32, :turn-overrun? true, :empty-code-turns 4, :prompt-tokens 120000, :completion-tokens 9000, :cache-hit-tokens 60000, :cache-miss-tokens 60000, :kv-cache-hit-pct 50.0, :prefix-hash-count 3, :prefix-busts 2, :eval-errors 5, :error-classes {:alloc-budget-overrun 2, :other 3}, :repeated-errors 2, :ooms 2, :cst-errors 1, :no-match-count 2, :test-failure-messages 1, :upstream-errors 1, :rogue-fs-count 1, :heavy-evals 3, :max-mb 260.0, :max-ms 6400.0, :friction-score 92, :level :hot}], :seon.schema/doc "Per-agent trace friction telemetry summary computed via indexed :avet :seon.agent.eval/agent reads."} [:agent :keyword] [:branch :keyword] [:evals [:int {:min 0}]] [:turns [:int {:min 0}]] [:max-turn [:int {:min 0}]] [:max-tool-turns [:int {:min 0}]] [:turn-overrun? :boolean] [:empty-code-turns [:int {:min 0}]] [:prompt-tokens [:int {:min 0}]] [:completion-tokens [:int {:min 0}]] [:cache-hit-tokens [:int {:min 0}]] [:cache-miss-tokens [:int {:min 0}]] [:kv-cache-hit-pct [:maybe number?]] [:prefix-hash-count [:int {:min 0}]] [:prefix-busts [:int {:min 0}]] [:eval-errors [:int {:min 0}]] [:error-classes [:map-of :keyword :int]] [:repeated-errors [:int {:min 0}]] [:ooms [:int {:min 0}]] [:cst-errors [:int {:min 0}]] [:no-match-count [:int {:min 0}]] [:test-failure-messages [:int {:min 0}]] [:upstream-errors [:int {:min 0}]] [:rogue-fs-count [:int {:min 0}]] [:heavy-evals [:int {:min 0}]] [:max-mb number?] [:max-ms number?] [:friction-score [:int {:min 0}]] [:level :seon.signal/level] [:merged? {:optional true} :boolean] [:ready? {:optional true} :boolean] [:delegated-calls {:optional true} [:int {:min 0}]] [:last-snippet {:optional true} [:maybe :string]] [:last-error {:optional true} [:maybe :string]]]
+
+ :seon.health/coverage
+ [:map {:gen/elements [{:ok? true, :summary "27 entity schemas (20 rendered, 7 missing, 0 single-footprint, 0 ambiguous) | 51 rules (0 orphan-wm, 0 dead-fn, 0 conflict)", :counts {:entity-schemas 27, :rendered-schemas 20, :missing-renderers 7, :rules 51, :rule-holes 0}, :missing-renderers [], :ambiguous-renderers [], :single-footprint [], :rule-holes []}], :seon.schema/doc "Exhaustive rule & renderer coverage report returned by seon.health.coverage/coverage-report."} [:ok? :boolean] [:summary :string] [:counts [:map-of :keyword :int]] [:missing-renderers [:vector :map]] [:ambiguous-renderers [:vector :map]] [:single-footprint [:vector :map]] [:rule-holes [:vector :map]] [:rule-atlas {:optional true} [:vector :map]]]
+
+ :seon.health/friction
+ [:map {:seon.render/hiccup seon.render.entities.diagnostics/render-friction-card, :gen/elements [{:level :calm, :summary "0 hot · 1 warm · 8 agents · 88.2% KV · 0 OOM", :agents-scanned 8, :totals {:evals 64, :turns 48, :eval-errors 1, :ooms 0, :turn-overruns 0, :empty-code-turns 0, :prefix-busts 0, :upstream-errors 0, :rogue-fs-count 0, :no-match-count 0, :cst-errors 0, :heavy-evals 0, :kv-cache-hit-pct 88.2, :missing-renderers 2, :static-debt 3}, :agents [{:agent :worker/demo, :branch :branch/demo, :evals 8, :turns 6, :max-turn 6, :max-tool-turns 32, :turn-overrun? false, :empty-code-turns 0, :prompt-tokens 42000, :completion-tokens 2400, :cache-hit-tokens 36000, :cache-miss-tokens 6000, :kv-cache-hit-pct 85.7, :prefix-hash-count 1, :prefix-busts 0, :eval-errors 0, :error-classes {}, :repeated-errors 0, :ooms 0, :cst-errors 0, :no-match-count 0, :test-failure-messages 0, :upstream-errors 0, :rogue-fs-count 0, :heavy-evals 0, :max-mb 18.4, :max-ms 42.1, :friction-score 0, :level :calm}], :findings [], :ms 14.2} {:level :hot, :summary "1 hot · 0 warm · 2 agents · 52.0% KV · 2 OOM · 1 livelock", :agents-scanned 2, :totals {:evals 48, :turns 41, :eval-errors 5, :ooms 2, :turn-overruns 1, :empty-code-turns 4, :prefix-busts 2, :upstream-errors 1, :rogue-fs-count 1, :no-match-count 2, :cst-errors 1, :heavy-evals 3, :kv-cache-hit-pct 52.0, :missing-renderers 7, :static-debt 11}, :agents [{:agent :worker/hot, :branch :branch/hot, :evals 40, :turns 35, :max-turn 35, :max-tool-turns 32, :turn-overrun? true, :empty-code-turns 4, :prompt-tokens 120000, :completion-tokens 9000, :cache-hit-tokens 60000, :cache-miss-tokens 60000, :kv-cache-hit-pct 50.0, :prefix-hash-count 3, :prefix-busts 2, :eval-errors 5, :error-classes {:alloc-budget-overrun 2, :other 3}, :repeated-errors 2, :ooms 2, :cst-errors 1, :no-match-count 2, :test-failure-messages 1, :upstream-errors 1, :rogue-fs-count 1, :heavy-evals 3, :max-mb 260.0, :max-ms 6400.0, :friction-score 92, :level :hot}], :findings [{:id :hygiene/trace-livelock-worker-hot, :kind :turn-overrun, :scope seon, :title "Fix turn overrun on :worker/hot", :summary "35 turns > 32 cap", :curated [], :impact 95}], :ms 19.6}], :seon.schema/doc "Derived trace friction report aggregating per-agent trace friction, fast missing-renderer scan, and zero-src static-debt scan."} [:level :seon.signal/level] [:summary :string] [:agents-scanned [:int {:min 0}]] [:totals :map] [:agents [:vector :seon.health/agent-friction]] [:findings [:vector :map]] [:proposed-tasks {:optional true} [:vector :map]] [:ms number?]]
 
  :seon.health/problem
  [:map [:class :keyword] [:severity [:enum :error :warning]] [:subject :string] [:message :string] [:branch {:optional true} :keyword] [:var {:optional true} :qualified-symbol] [:ns {:optional true} :symbol] [:agent {:optional true} :keyword] [:kind {:optional true} [:enum :static :live]]]
