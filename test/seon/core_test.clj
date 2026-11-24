@@ -1288,3 +1288,26 @@
           (is (= 1 (count errs)))
           (is (= 'seon.demo/really-broken-test (:var (first errs))))
           (is (= :branch/stale-demo (:branch (first errs)))))))))
+
+(deftest ^{:cost/ticks 80000000} fixes-and-summaries-ledger-roundtrip-test
+  (testing "resources/seon/fixes.edn and resources/seon/summaries.edn render and re-import losslessly"
+    (with-test-store [{:keys [conn]}]
+      (let [fid (random-uuid)
+            sid (random-uuid)]
+        (d/transact conn {:tx-data
+          [{:seon.fix/id fid :seon.fix/error-class :test/demo-class :seon.fix/symptom "sym"
+            :seon.fix/root-cause "rc" :seon.fix/change-summary "chg" :seon.fix/created-ms 100}
+           {:seon.summary/id sid :seon.summary/kind :milestone :seon.summary/title "Demo"
+            :seon.summary/body "Body" :seon.summary/from-tx 1 :seon.summary/to-tx 2
+            :seon.summary/created-ms 200 :seon.summary/agent :agent/root}]})
+        (let [db @conn
+              ftxt (code/render-path db "resources/seon/fixes.edn")
+              stxt (code/render-path db "resources/seon/summaries.edn")]
+          (is (= "resources/seon/fixes.edn" (merge/entity->disk-path db db :seon.fix/id fid nil)))
+          (is (= "resources/seon/summaries.edn" (merge/entity->disk-path db db :seon.summary/id sid nil)))
+          (is (string? ftxt)) (is (str/includes? ftxt ":test/demo-class"))
+          (is (string? stxt)) (is (str/includes? stxt "Demo"))
+          (let [ftx (code/file-import-tx nil "resources/seon/fixes.edn" ftxt false)
+                stx (code/file-import-tx nil "resources/seon/summaries.edn" stxt false)]
+            (is (= [fid] (mapv :seon.fix/id ftx)))
+            (is (= [sid] (mapv :seon.summary/id stx)))))))))
