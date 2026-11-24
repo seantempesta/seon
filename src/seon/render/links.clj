@@ -4,7 +4,7 @@
    used across `seon.render.entities*`, `seon.render.tails`, `seon.render.surface*`, and `seon.ctx*`."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.code :as code]
+            [seon.code.reach :as reach]
             [seon.health.efficiency :as heff]
             [seon.render.data :as rdata]
             [seon.store :as store]
@@ -341,7 +341,7 @@
                                                     (when (:seon.code.doc/id p)
                                                       {:id (:seon.code.doc/id p) :path (:seon.code.doc/path p) :heading (:seon.code.doc/heading p)})))
                                                 eids))))]
-    (if (seq indexed) indexed (code/ns-linked-docs db nsym 6))))
+    (if (seq indexed) indexed (reach/ns-linked-docs db nsym 6))))
 
 (defn- ns-working-schemas [db nsym max-n]
   (let [dh (db-schema db)]
