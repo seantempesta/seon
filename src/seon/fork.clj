@@ -144,7 +144,7 @@
                                      :seon.agent.eval/bytes 0}
                               ag-eid (assoc :seon.agent.eval/agent-ref ag-eid)
                               err-str (assoc :seon.agent.eval/error err-str)
-                              (seq seen-ids) (assoc :seon.agent.eval/seen-messages (set seen-ids))
+                              (and (nil? err-str) (seq seen-ids)) (assoc :seon.agent.eval/seen-messages (set seen-ids))
                               reasoning (assoc :seon.agent.eval/reasoning reasoning)
                               prefix-hash (assoc :seon.agent.eval/prefix-hash (str prefix-hash))
                               (:prompt-tokens usage) (assoc :seon.agent.eval/prompt-tokens (long (:prompt-tokens usage)))
@@ -152,8 +152,8 @@
                               (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
                               (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage)))))]
               (d/transact conn {:tx-data [reply-ent
-                                          (cond-> {:seon.agent/id agent-id :seon.agent/waiting? true}
-                                            (seq seen-ids) (assoc :seon.agent/ready? false))]})
+              (cond-> {:seon.agent/id agent-id :seon.agent/waiting? (boolean (or (nil? err-str) (false? (:retryable? resp))))}
+                (and (nil? err-str) (seq seen-ids)) (assoc :seon.agent/ready? false))]})
               (ctx/refresh-active! @conn nil)
               (a/>!! out {:ev :turn-committed
                           :agent-id agent-id

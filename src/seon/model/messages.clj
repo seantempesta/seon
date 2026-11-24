@@ -137,18 +137,29 @@
     (max 4 (long (Math/ceil (/ (+ text-len tc-len r-len 16) 4.0))))))
 
 (defn vision-capable-model?
-  "Returns true when `model-name` natively accepts OpenAI-compat `image_url` content blocks."
-  {:malli/schema [:=> [:cat [:maybe :string]] :boolean], :cost/ticks 500000}
-  [model-name]
-  (let [m (str/lower-case (str (or model-name "")))]
-    (boolean
-     (or (str/includes? m "flash")
-         (str/includes? m "vision")
-         (str/includes? m "vl")
-         (str/starts-with? m "gpt-4o")
-         (str/starts-with? m "gpt-5")
-         (str/starts-with? m "claude-")
-         (str/starts-with? m "gemini-")))))
+"Returns true when `model-name` natively accepts OpenAI-compat `image_url` content blocks."
+{:malli/schema [:=> {:examples [[["deepseek-flash"] false]
+                                [["deepseek-chat"] false]
+                                [["deepseek-reasoner"] false]
+                                [["deepseek-vl2"] true]
+                                [["gemini-2.5-flash"] true]
+                                [["google/gemini-2.5-flash"] true]
+                                [["gpt-4o"] true]
+                                [["gpt-5"] true]
+                                [["claude-sonnet-4"] true]
+                                [["qwen2.5-vl-72b"] true]
+                                [[nil] false]]}
+                [:cat [:maybe :string]] :boolean]
+ :cost/ticks 1000000}
+[model-name]
+(let [m (str/lower-case (str (or model-name "")))]
+  (boolean
+   (or (str/includes? m "vision")
+       (some? (re-find #"(?:^|[-_/])vl(?:[-_0-9]|$)" m))
+       (str/includes? m "gpt-4o")
+       (str/includes? m "gpt-5")
+       (str/includes? m "claude-")
+       (str/includes? m "gemini")))))
 
 (defn format-viewport-dom
   {:malli/schema [:=> [:cat :any] [:maybe :string]], :cost/ticks 300000}

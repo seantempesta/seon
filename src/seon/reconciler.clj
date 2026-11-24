@@ -27,25 +27,38 @@
   (gate/evaluate-agent-gate main-db branch-db agent-id))
 
 (defn- eval-activity-summary
-  ([eval-ents] (eval-activity-summary eval-ents #{}))
-  ([eval-ents ignore-reset-mids]
-   (let [model-tool-eval? (fn [ev]
-                            (and (some? (:seon.agent.eval/call-id ev))
-                                 (not (str/blank? (str (:seon.agent.eval/code ev))))))
-         last-eval (peek eval-ents)
-         tool-streak (loop [es (reverse eval-ents), turns #{}]
-                       (let [ev (first es)]
-                         (if (and ev (model-tool-eval? ev))
-                           (let [turns' (conj turns (:seon.agent.eval/turn ev))
-                                 real-seen (remove ignore-reset-mids (:seon.agent.eval/seen-messages ev))]
-                             (if (seq real-seen)
-                               (count turns')
-                               (recur (rest es) turns')))
-                           (count turns))))]
-     {:eval-count (count eval-ents)
-      :last-eval last-eval
-      :last-was-tool? (boolean (and last-eval (model-tool-eval? last-eval)))
-      :tool-streak tool-streak})))
+([eval-ents] (eval-activity-summary eval-ents #{}))
+([eval-ents ignore-reset-mids]
+ (let [model-err-eval? (fn [ev]
+                         (and (str/blank? (str (:seon.agent.eval/code ev)))
+                              (not (str/blank? (str (:seon.agent.eval/error ev))))))
+       model-tool-eval? (fn [ev]
+                          (and (some? (:seon.agent.eval/call-id ev))
+                               (not (str/blank? (str (:seon.agent.eval/code ev))))))
+       last-eval (peek eval-ents)
+       trailing-errs (vec (take-while model-err-eval? (reverse eval-ents)))
+       last-err-tx (when (seq trailing-errs) (:tx (first trailing-errs)))
+       non-retryable? (boolean (and (seq trailing-errs)
+                                    (re-find #"\[(?:model/auth|missing-api-key)\]"
+                                             (str (:seon.agent.eval/error (first trailing-errs))))))
+       non-err-evals (vec (remove model-err-eval? eval-ents))
+       last-non-err (peek non-err-evals)
+       tool-streak (loop [es (reverse non-err-evals), turns #{}]
+                     (let [ev (first es)]
+                       (if (and ev (model-tool-eval? ev))
+                         (let [turns' (conj turns (:seon.agent.eval/turn ev))
+                               real-seen (remove ignore-reset-mids (:seon.agent.eval/seen-messages ev))]
+                           (if (seq real-seen)
+                             (count turns')
+                             (recur (rest es) turns')))
+                         (count turns))))]
+   {:eval-count (count eval-ents)
+    :last-eval last-eval
+    :last-was-tool? (boolean (and last-non-err (model-tool-eval? last-non-err)))
+    :tool-streak tool-streak
+    :trailing-model-errors (count trailing-errs)
+    :last-err-tx last-err-tx
+    :non-retryable-model-error? non-retryable?})))
 
 (defn- ^:seon.flow/edge safe-commit-changes [conn prev-cid cid]
   (try
@@ -124,9 +137,9 @@
 (defn- pull-agent-inbox-and-evals [main-db branch-db agent-id]
   (let [seen (store/agent-seen-message-ids branch-db agent-id)
         inbox (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
-                   (map #(d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
-                                           :seon.agent.message/from :seon.agent.message/type
-                                           :seon.agent.message/body] (:e %)))
+                   (map #(assoc (d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq
+                   :seon.agent.message/from :seon.agent.message/type
+                   :seon.agent.message/body] (:e %)) :tx (:tx %)))
                    (sort-by :seon.agent.message/seq)
                    vec)
         unread (filterv #(not (contains? seen (:seon.agent.message/id %))) inbox)
@@ -278,6 +291,14 @@
     {:live-pid live-pid :busy? busy?
      :needs-release? (boolean (and (some? live-pid) (or merged? (and (not paused?) retracted?))))}))
 
+(defn- model-error-halted? [trailing-errs non-retryable? last-err-tx unread]
+  (boolean
+   (when (pos? (long (or trailing-errs 0)))
+     (let [newest-unread-tx (reduce max 0 (map #(long (or (:tx %) 0)) unread))
+           fresh-unread? (> newest-unread-tx (long (or last-err-tx 0)))]
+       (and (not fresh-unread?)
+            (or non-retryable? (>= (long trailing-errs) 3)))))))
+
 (defn derive-agent-status
   {:malli/schema [:function
                   [:=> [:cat :any :any :map [:set :any] [:set :any] :keyword] [:maybe :map]]
@@ -306,7 +327,7 @@
            {:keys [seen inbox unread eval-ents]} (pull-agent-inbox-and-evals main-db branch-db agent-id)
            cur-eval-eids (into #{} (keep :db/id) eval-ents)
            wrapup-mids (into #{} (keep #(when (= :turn-cap-wrapup (:seon.agent.message/type %)) (:seon.agent.message/id %))) inbox)
-           {:keys [eval-count last-eval last-was-tool? tool-streak]} (eval-activity-summary eval-ents wrapup-mids)
+           {:keys [eval-count last-eval last-was-tool? tool-streak trailing-model-errors last-err-tx non-retryable-model-error?]} (eval-activity-summary eval-ents wrapup-mids)
            {:keys [awaiting-count awaiting-blocked? has-pending-outgoing? awaiting-ready-to-deliver async-ready-to-deliver]}
            (call-delivery-state main-db agent-id ma settling-set)
            head-tx (:max-tx branch-db)
@@ -342,7 +363,8 @@
                                        (not raw-ready?) (not waiting?) last-was-tool? (empty? unread))
                               (gate/wrapup-grace-notify-op main-db branch-db b agent-id head-tx inbox gate-notified-set))
            post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents (and (str/blank? (str (:seon.agent/summary ba))) (boolean (or (:seon.agent/target ma) (:seon.agent/forked-from ma)))))
-           needs-turn? (boolean (and active? (empty? review-ops) (not cutoff-reached?)
+           err-halted? (model-error-halted? trailing-model-errors non-retryable-model-error? last-err-tx unread)
+           needs-turn? (boolean (and active? (not err-halted?) (empty? review-ops) (not cutoff-reached?)
                                      (or (seq unread) post-ready-reply?
                                          (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?))))
            ready-idle? (and active? (empty? unread) (not post-ready-reply?) eligible-to-merge?)
