@@ -157,42 +157,74 @@
       :boot-affected? (:boot-affected? delta)})))
 
 (defn- spliced-caller-forms [db seed-syms upsert-keys retracted-keys]
-  (if-not (and db (seq seed-syms) (contains? (:schema db) :seon.code.var/calls))
-    []
-    (let [skip-nss #{'seon.main 'seon.fork 'seon.switchover}
-          form-pull '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
-                      :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
-                      :seon.code.form/test?]
-          direct-callers (fn [syms]
-                           (into #{}
-                                 (for [s syms
-                                       :let [veid (:e (first (d/datoms db :avet :seon.code.var/name s)))]
-                                       :when veid
-                                       dt (d/datoms db :avet :seon.code.var/calls veid)
-                                       :let [csym (:v (first (d/datoms db :eavt (:e dt) :seon.code.var/name)))]
-                                       :when csym]
-                                   csym)))
-          fetch-form (fn [csym]
-                       (when-let [veid (:e (first (d/datoms db :avet :seon.code.var/name csym)))]
-                         (when-let [fk (:v (first (d/datoms db :eavt veid :seon.code.var/form)))]
-                           (when (and (not (contains? upsert-keys fk))
-                                      (not (contains? retracted-keys fk)))
-                             (let [f (dissoc (d/pull db form-pull [:seon.code.form/key fk]) :db/id)
-                                   src (str (:seon.code.form/src f))]
-                               (when (and (seq src)
-                                          (not (contains? skip-nss (:seon.code.form/ns f)))
-                                          (not (str/starts-with? (str/trim src) "(defonce ")))
-                                 f))))))
-          hop1-syms (remove (set seed-syms) (direct-callers seed-syms))
-          hop1-forms (into {} (keep (fn [s] (when-let [f (fetch-form s)] [(:seon.code.form/key f) [s f]]))) hop1-syms)
-          small-hop1 (keep (fn [[_ [s f]]]
-                             (when (and (not (:seon.code.form/test? f))
-                                        (<= (count (str (:seon.code.form/src f))) 1800))
-                               s))
-                           hop1-forms)
-          hop2-syms (remove (into (set seed-syms) hop1-syms) (direct-callers small-hop1))
-          hop2-forms (into {} (keep (fn [s] (when-let [f (fetch-form s)] [(:seon.code.form/key f) [s f]]))) hop2-syms)]
-      (mapv second (vals (merge hop1-forms hop2-forms))))))
+(if-not (and db (seq seed-syms) (contains? (:schema db) :seon.code.var/calls))
+  []
+  (let [skip-nss #{'seon.main 'seon.fork 'seon.switchover}
+        form-pull '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                    :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                    :seon.code.form/test?]
+        direct-callers (fn [syms]
+                         (into #{}
+                               (for [s syms
+                                     :let [veid (:e (first (d/datoms db :avet :seon.code.var/name s)))]
+                                     :when veid
+                                     dt (d/datoms db :avet :seon.code.var/calls veid)
+                                     :let [csym (:v (first (d/datoms db :eavt (:e dt) :seon.code.var/name)))]
+                                     :when csym]
+                                 csym)))
+        fetch-form (fn [csym]
+                     (when-let [veid (:e (first (d/datoms db :avet :seon.code.var/name csym)))]
+                       (when-let [fk (:v (first (d/datoms db :eavt veid :seon.code.var/form)))]
+                         (when (and (not (contains? upsert-keys fk))
+                                    (not (contains? retracted-keys fk)))
+                           (let [f (dissoc (d/pull db form-pull [:seon.code.form/key fk]) :db/id)
+                                 src (str (:seon.code.form/src f))]
+                             (when (and (seq src)
+                                        (not (contains? skip-nss (:seon.code.form/ns f)))
+                                        (not (str/starts-with? (str/trim src) "(defonce ")))
+                               f))))))
+        hop1-syms (remove (set seed-syms) (direct-callers seed-syms))
+        hop1-forms (into {} (keep (fn [s] (when-let [f (fetch-form s)] [(:seon.code.form/key f) [s f]]))) hop1-syms)
+        small-hop1 (keep (fn [[_ [s f]]]
+                           (when (and (not (:seon.code.form/test? f))
+                                      (<= (count (str (:seon.code.form/src f))) 1800))
+                             s))
+                         hop1-forms)
+        hop2-syms (remove (into (set seed-syms) hop1-syms) (direct-callers small-hop1))
+        hop2-forms (into {} (keep (fn [s] (when-let [f (fetch-form s)] [(:seon.code.form/key f) [s f]]))) hop2-syms)
+        ;; Also rebind anonymous #expr# forms (deftype/defrecord/extend-type) referencing seed-syms via :seon.code.form/deps
+        ;; PLUS their same-ns constructors so AOT deftype classes never retain stale direct-linked targets!
+        expr-forms (when (contains? (:schema db) :seon.code.form/deps)
+                     (let [ef (into {}
+                                    (for [s seed-syms
+                                          dt (d/datoms db :avet :seon.code.form/deps s)
+                                          :let [f (dissoc (d/pull db form-pull (:e dt)) :db/id)
+                                                fk (:seon.code.form/key f)
+                                                src (str (:seon.code.form/src f))]
+                                          :when (and fk (str/includes? (str fk) "#expr#")
+                                                     (not (contains? upsert-keys fk))
+                                                     (not (contains? retracted-keys fk))
+                                                     (not (contains? skip-nss (:seon.code.form/ns f)))
+                                                     (not (str/starts-with? (str/trim src) "(defonce ")))]
+                                      [fk f]))
+                           ctor-forms (into {}
+                                            (for [[_ f] ef
+                                                  :let [m (re-find #"^\((?:deftype|defrecord)\s+([A-Za-z0-9_?!-]+)" (str/trim (str (:seon.code.form/src f))))
+                                                        tname (second m)]
+                                                  :when tname
+                                                  nf (ns-forms db (:seon.code.form/ns f))
+                                                  :let [nfk (:seon.code.form/key nf)
+                                                        nsrc (str (:seon.code.form/src nf))]
+                                                  :when (and nfk (not= nfk (:seon.code.form/key f))
+                                                             (not (contains? upsert-keys nfk))
+                                                             (not (contains? retracted-keys nfk))
+                                                             (not (str/starts-with? (str/trim nsrc) "(defonce "))
+                                                             (or (str/includes? nsrc (str tname "."))
+                                                                 (str/includes? nsrc (str "->" tname))))]
+                                              [nfk nf]))]
+                       (merge ef ctor-forms)))]
+    (vec (vals (merge (into {} (map (fn [[k [_ f]]] [k f])) (merge hop1-forms hop2-forms))
+                      expr-forms))))))
 
 (defn expand-overlay-rebinds
   "Expands an overlay `{:upserts [...] :retracted-keys #{...}}` using `db` so IPC recipients

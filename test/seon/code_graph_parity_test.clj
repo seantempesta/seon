@@ -259,3 +259,19 @@
           (when (find-ns 'demo.parity-b) (remove-ns 'demo.parity-b))
           (when (find-ns 'demo.parity-a) (remove-ns 'demo.parity-a))
           (store/rm-rf! (io/file repo-dir)))))))
+
+(deftest ^{:cost/ticks 60000000} expand-overlay-rebinds-catches-deftype-expr-and-constructors
+  (testing "expand-overlay-rebinds catches #expr# deftype forms calling an upserted var via :seon.code.form/deps AND their same-ns constructors"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data
+        (concat
+         (code/file-import-tx @conn "src/demo/ov_leaf.clj" "(ns demo.ov-leaf)\n(defn leaf-fn [] :v1)\n" false)
+         (code/file-import-tx @conn "src/demo/ov_box.clj"
+           "(ns demo.ov-box (:require [demo.ov-leaf :as leaf]))\n(deftype Box [] clojure.lang.IDeref (deref [_] (leaf/leaf-fn)))\n(defn make-box [] (Box.))\n" false))})
+      (let [db @conn
+            lf (dissoc (d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order :seon.code.form/src :seon.code.form/hash :seon.code.form/deps :seon.code.form/test?]
+                               [:seon.code.form/key "demo.ov-leaf/leaf-fn"]) :db/id)
+            ov (code/expand-overlay-rebinds db {:upserts [lf] :retracted-keys #{}})
+            ks (into #{} (map :seon.code.form/key) (:upserts ov))]
+        (is (some #(clojure.string/starts-with? (str %) "demo.ov-box#expr#") ks) "Must include deftype #expr# caller")
+        (is (contains? ks "demo.ov-box/make-box") "Must include same-ns Box. constructor")))))
