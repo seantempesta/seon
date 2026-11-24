@@ -141,7 +141,7 @@
                                  (not (str/blank? (str (:seon.agent.eval/reasoning %))))) eevals)]]
     [:div {:id (str prefix "-" idx) :class "ws-exchange"}
      (for [[mi m] (map-indexed vector emsgs)]
-       [:div {:id (str prefix "-" idx "-m-" mi) :class "ws-user-bubble"} (str (:seon.agent.message/body (:data m) ""))])
+       [:div {:id (str prefix "-" idx "-m-" mi) :class "ws-user-bubble"} (rmd/render-markdown-blocks (str (:seon.agent.message/body (:data m) "")))])
      (when (or (seq acts) (seq prose))
        [:div {:class (str "ws-agent-turn" (when (seq prose) " has-prose"))}
         (rmd/render-activity-fold acts (str prefix "-" idx))
@@ -228,7 +228,7 @@
          [:div {:id "cv-live-status" :class "session-live-status"}
           (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
        (when (and (seq earlier) (not pending-prompt))
-         [:details {:id "session-earlier" :class "activity-fold"}
+         [:details {:id "session-earlier" :class "activity-fold" :open true}
           [:summary {:class "mono tiny"} (str "Earlier exchanges (" (count earlier) ")")]
           [:div {:class "stack-sm" :style {:margin-top "8px"}} (render-exchanges-list "hx" earlier)]])
        (cond

@@ -78,7 +78,7 @@
            :title (str aid)
            :data-preview-ref (pr-str [:seon.agent/id aid])
            :interestfor "seon-hovercard"
-           :on-click (list 'seon.web/view-agent! aid :session)}
+           :on-click (list 'seon.web/view-agent! aid :canvas)}
        [:span {:class (str "dot " (if working? "pulsing" "live"))}]
        [:span {:class "tree-name"} (rdata/agent-label ag aid)]
        (when working?
@@ -144,7 +144,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
   [db _opts]
   (let [{:keys [viewing-id view-mode inspect-ref]} (user-view-state db)
-        show? (and (nil? inspect-ref) (= :session (rdata/canonical-view-mode view-mode)))
+        show? (and (nil? inspect-ref) (contains? #{:canvas :session} (rdata/canonical-view-mode view-mode)))
         label (rdata/agent-label db viewing-id)]
     [:section {:id "seon-composer-unit" :class (str "composer-dock" (if show? " active" " idle"))}
      (when show?
@@ -472,14 +472,21 @@
                 (when-not narrow? [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}]))
           (list svg-activity (when-not narrow? [:span {:class "status-label"} "Activity"])))]
        [:div {:class "mode-group"}
-        [:button {:type "button"
-                  :class (str "nav-pill" (when-not explain? " active"))
-                  :on-click '(seon.web/set-explain-lens! false)}
-         "Explore"]
-        [:button {:type "button"
-                  :class (str "nav-pill" (when explain? " active"))
-                  :on-click (list 'seon.web/set-explain-lens! true explain-ref)}
-         "Explain"]]]]]))
+       [:button {:type "button"
+                 :class (str "nav-pill" (when (and (not explain?) (nil? inspect-ref) (= canon :canvas)) " active"))
+                 :title "Spatial presentation Canvas (default)"
+                 :on-click '(seon.web/set-view-mode! :canvas)}
+        "Canvas"]
+       [:button {:type "button"
+                 :class (str "nav-pill" (when (and (not explain?) (nil? inspect-ref) (= canon :session)) " active"))
+                 :title "Traditional chronological Chat"
+                 :on-click '(seon.web/set-view-mode! :session)}
+        "Chat"]
+       [:button {:type "button"
+                 :class (str "nav-pill" (when explain? " active"))
+                 :title "Context, KV-cache & Upgrade Ladder Explain Lab"
+                 :on-click (list 'seon.web/set-explain-lens! true explain-ref)}
+        "Explain"]]]]]))
 
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`."
@@ -495,7 +502,7 @@
         agent-states (:agent-states st)
         active-count (if (map? agent-states) (count (filter #(= :active (val %)) agent-states)) 0)
         viewed-states (if (and vid (map? agent-states)) (select-keys agent-states [vid]) {})
-        viewed-stream (when (and (= canon :session) (not insp?) vid (map? (:live-streams st)))
+        viewed-stream (when (and (contains? #{:canvas :session} canon) (not insp?) vid (map? (:live-streams st)))
                         (get (:live-streams st) vid))
         sys-focus? (or (= canon :system) (= :seon.system/id (first (:inspect-ref vs))))
         base (assoc (select-keys st [:conn :branch-feedback]) :expert-mode? (boolean (:expert-mode? vs)))

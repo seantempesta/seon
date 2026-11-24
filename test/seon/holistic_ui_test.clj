@@ -179,10 +179,10 @@
                             :live-stream {:status :token :phase :writing :started-ms 1000 :last-ms 2000 :step-chars 160 :chars 160 :text "Streaming"}})]
         ;; 1. Header navigation + clickable signal pills + clickable agent breadcrumb
         (do
-        (doseq [needle ["Explore" "Explain" "Expert" "←" "→" "sig-pill-btn" "data-preview-ref"
-                        "data-canonical-url=" "data-expert-mode=\"false\"" "is-everyday"
-                        "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21"
-                        "seon.web%2Fset-explain-lens%21" "seon.web%2Ftoggle-expert-mode%21"]]
+        (doseq [needle ["Canvas" "Chat" "Explain" "Expert" "←" "→" "sig-pill-btn" "data-preview-ref"
+                       "data-canonical-url=" "data-expert-mode=\"false\"" "is-everyday"
+                       "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21"
+                       "seon.web%2Fset-explain-lens%21" "seon.web%2Ftoggle-expert-mode%21"]]
           (is (str/includes? hdr-desk needle) (str "Everyday desktop header missing " needle)))
         (is (not (str/includes? hdr-desk "Pressure")) "Everyday mode should tuck 5-signal strip behind Expert toggle")
         (let [db-exp (:db-after (d/with db2 {:tx-data [{:seon.user/id :user/default :seon.user/expert-mode? true}]}))
@@ -192,10 +192,15 @@
             (is (str/includes? hdr-exp needle) (str "Expert desktop header missing " needle)))))
         (is (str/includes? hdr-mob "is-narrow"))
         (is (not (str/includes? hdr-mob "sig-strip")))
-        (is (str/includes? hdr-mob "Explore"))
+        (is (str/includes? hdr-mob "Canvas"))
+        (is (str/includes? hdr-mob "Chat"))
         (is (str/includes? hdr-mob "Explain"))
 
         ;; 2. Strict < 40 ms warm frame budget across ALL 4 holistic views
+        (let [canv-d (timed {:viewing-id :agent/root :view-mode :canvas :viewport-w 1440 :viewport-h 900})]
+          (is (str/includes? (:html canv-d) "id=\"cv-canvas-stage\""))
+          (is (str/includes? (:html canv-d) "root-visuals"))
+          (is (< (:ms canv-d) 40.0) (str ":canvas exceeded 40 ms warm budget: " (:ms canv-d) " ms")))
         (doseq [[lbl r] [[:session sess-d] [:session-mobile sess-m] [:context ctx-d] [:system sys-d] [:inspect insp-d]]]
           (is (< (:ms r) 40.0) (str lbl " exceeded 40 ms warm budget: " (:ms r) " ms")))
 

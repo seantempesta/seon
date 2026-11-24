@@ -281,6 +281,7 @@
           (let [base (or (path-for db :seon.route/agent-tx {:slug slug :tx (str as-of-tx)}) "/")]
             (if explain? (str base "?explain=1") base))
           explain? (or (path-for db :seon.route/agent-explain {:slug slug}) "/")
+          (= canon :session) (or (path-for db :seon.route/agent-chat {:slug slug}) "/")
           :else (or (path-for db :seon.route/agent-session {:slug slug}) "/")))
 
       :else (if explain? "/context" "/"))))
@@ -357,7 +358,7 @@
 
       :seon.route/agent-session
       (when-let [aid (rdata/slug->agent-id (:slug path-params))]
-        {:op :show-user :viewing aid :mode (if explain? :context :session) :clear-inspect true :as-of-tx :live})
+        {:op :show-user :viewing aid :mode (if explain? :context :canvas) :clear-inspect true :as-of-tx :live})
 
       :seon.route/agent-canvas
       (when-let [aid (rdata/slug->agent-id (:slug path-params))]
@@ -382,7 +383,7 @@
       :seon.route/agent-tx
       (when-let [aid (rdata/slug->agent-id (:slug path-params))]
         (when-let [tx (parse-long-safe (:tx path-params))]
-          {:op :show-user :viewing aid :mode (if explain? :context :session) :as-of-tx tx :clear-inspect true}))
+          {:op :show-user :viewing aid :mode (if explain? :context :canvas) :as-of-tx tx :clear-inspect true}))
 
       :seon.route/var
       (when (and (seq (:ns path-params)) (seq (:name path-params)))

@@ -16,7 +16,8 @@
             [seon.render.wire :as rwire]
             [seon.signals :as sig]
             [seon.render.status :as rstatus]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.surface.canvas :as scanvas]))
 
 (defn project-entity-view
   "ONE general entity-surface engine for BOTH humans (`:target :html`) and agents (`:target :wire`).
@@ -115,7 +116,7 @@
          o (if (map? opts) opts {})
          vs (rdata/user-view-state main-db)
          aid (or (:viewing-id o) (:viewing-id vs) (:entry-id vs) :agent/root)
-         vm (or (:view-mode o) (:view-mode vs) :session)
+         vm (or (:view-mode o) (:view-mode vs) :canvas)
          canon (rdata/canonical-view-mode vm)
          insp-ref (if (contains? o :inspect-ref) (rdata/normalize-inspect-ref (:inspect-ref o)) (:inspect-ref vs))
          explaining? (and (= canon :context)
@@ -167,9 +168,9 @@
                              (first (d/datoms main-db :avet :seon.user/id :user/default)))
                     (:seon.user/expert-mode?
                      (d/pull main-db '[:seon.user/expert-mode?] [:seon.user/id :user/default])))))
-         agent-status (when (and (= canon :session) (not inspecting?) (not explaining?))
-                        (rstatus/latest-agent-status emdb ebdb aid))
-         conv (if (and (= canon :session) (not inspecting?) (not explaining?)) (ssess/extract-conversation emdb ebdb aid ag active? as-of) {})
+         agent-status (when (and (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?))
+         (rstatus/latest-agent-status emdb ebdb aid))
+         conv (if (and (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?)) (ssess/extract-conversation emdb ebdb aid ag active? as-of) {})
          errs (when (and explaining? (or (nil? insp-ref) (= :seon.agent/id (first insp-ref))) ((db-schema emdb) :seon.error/status))
                 (mapv #(d/pull emdb '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message
                                       :seon.error/agent :seon.error/var :seon.error/branch] (:e %))
@@ -203,12 +204,14 @@
          tl (when (and (not inspecting?) (not= canon-mode :system) (not (and explaining? inspect-ref)))
               (render-surface-timeline history-txs step-idx as-of-tx))
          cls (cond (or explaining? inspecting? (= canon-mode :system)) "debug-wrap"
-                   :else (if (>= (long (:avail-w slot-budget 1000)) 860) "workspace-grid" "workspace-grid surface-stack"))
+         (= canon-mode :canvas) "root-canvas-wrap"
+         :else (if (>= (long (:avail-w slot-budget 1000)) 860) "workspace-grid" "workspace-grid surface-stack"))
          body (cond explaining? (clab/render-context-lab-body m)
                     (and inspecting? (= :seon.system/id (first inspect-ref))) (sentity/render-system-entity-body m)
                     inspecting? (sinsp/render-inspector-body m)
                     (= canon-mode :system) (ssys/render-system-body m)
-                    :else (ssess/render-session-body m comp?))]
+                    (= canon-mode :session) (ssess/render-session-body m comp?)
+                    :else (scanvas/render-canvas-body m comp?))]
      [:div (cond-> {:id "seon-view-unit" :class cls :data-agent (str viewing-id) :data-view-mode (name view-mode) :data-viewport-w (str (:w viewport)) :data-slot-avail-w (str (:avail-w slot-budget)) :data-expert-mode (str (boolean (:expert-mode? m)))}
              inspect-ref (assoc :data-inspect-ref (pr-str inspect-ref)))
       tl body])))

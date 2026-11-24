@@ -10,11 +10,12 @@
   {:malli/schema [:=> [:cat [:maybe :keyword]] :keyword] :cost/ticks 50000}
   [mode]
   (case mode
-    (:session :canvas) :session
-    (:context :debug) :context
-    (:system :workspace) :system
-    :inspect :inspect
-    :session))
+  :canvas :canvas
+  :session :session
+  (:context :debug) :context
+  (:system :workspace) :system
+  :inspect :inspect
+  :canvas))
 
 (defn normalize-inspect-ref
   "Normalizes an entity lookup ref `[attr val]` (unwrapping quoted symbols), or returns nil."
@@ -194,7 +195,7 @@
     {:user-id (or (:seon.user/id u) :user/default)
      :entry-id entry-id
      :viewing-id viewing-id
-     :view-mode (or (:seon.user/view-mode u) :session)
+     :view-mode (or (:seon.user/view-mode u) :canvas)
      :sidebar-open? (boolean (:seon.user/sidebar-open? u))
      :expanded-agents (cond-> (set (:seon.user/expanded-agents u)) entry-id (conj entry-id))
      :selected-branch (:seon.user/selected-branch u)

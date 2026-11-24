@@ -77,13 +77,16 @@
         (is (= :system (:mode (router/path->show-user-op db "/"))))
         (is (= :system (:mode (router/path->show-user-op db "/system"))))
         (is (= :current (web/parse-deep-link db "/")))
-        (is (= {:op :show-user :viewing :agent/root :mode :session :clear-inspect true :as-of-tx :live}
+        (is (= {:op :show-user :viewing :agent/root :mode :canvas :clear-inspect true :as-of-tx :live}
                (router/path->show-user-op db "/agent/root")))
+        (is (= {:op :show-user :viewing :agent/root :mode :session :clear-inspect true :as-of-tx :live}
+               (router/path->show-user-op db "/agent/root/chat")))
         (is (= {:op :show-user :viewing :agent/root :mode :context :clear-inspect true :as-of-tx :live}
                (router/path->show-user-op db "/agent/root/explain")))
-        (is (= {:op :show-user :viewing :ns/seon.web :mode :session :as-of-tx 536879000 :clear-inspect true}
-               (router/path->show-user-op db "/agent/ns~seon.web/tx/536879000")))
-        (is (= "/agent/root" (router/user-state->path db {:viewing-id :agent/root :view-mode :session})))
+        (is (= {:op :show-user :viewing :ns/seon.web :mode :canvas :as-of-tx 536879000 :clear-inspect true}
+        (router/path->show-user-op db "/agent/ns~seon.web/tx/536879000")))
+        (is (= "/agent/root" (router/user-state->path db {:viewing-id :agent/root :view-mode :canvas})))
+        (is (= "/agent/root/chat" (router/user-state->path db {:viewing-id :agent/root :view-mode :session})))
         (is (= "/agent/root/explain" (router/user-state->path db {:viewing-id :agent/root :view-mode :context})))
         (is (= "/agent/root/tx/123" (router/user-state->path db {:viewing-id :agent/root :view-mode :session :as-of-tx 123})))
         (is (= "/system" (router/user-state->path db {:viewing-id :agent/root :view-mode :system})))
