@@ -45,7 +45,7 @@
 (defn sort-forms-topologically
   {:malli/schema [:=> [:cat [:sequential [:map [:seon.code.form/key :string] [:seon.code.form/ns :symbol] [:seon.code.form/order {:optional true} :int] [:seon.code.form/deps {:optional true} [:or [:set :qualified-symbol] [:sequential :qualified-symbol]]]]]] [:vector :map]], :cost/ticks 10000000}
   [forms]
-  (let [by-ns (group-by :seon.code.form/ns forms)
+  (let [by-ns (group-by :seon.code.form/ns (filter :seon.code.form/ns forms))
         ns-set (set (keys by-ns))
         ns-deps (into {}
                       (map (fn [[nsym fs]]
@@ -64,7 +64,7 @@
                        (visit-ns dep (conj path n)))
                      (vswap! visited conj n)
                      (vswap! ordered-nss conj n)))]
-    (doseq [n (sort-by (fn [s] [(if (str/ends-with? (name s) "-test") 1 0) (str s)]) ns-set)]
+    (doseq [n (sort-by (fn [s] [(if (str/ends-with? (str s) "-test") 1 0) (str s)]) ns-set)]
       (visit-ns n #{}))
     (vec
      (mapcat (fn [nsym]
@@ -347,7 +347,7 @@
                                   (let [f (d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
                                                        :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
                                                        :seon.code.form/test?] eid)]
-                                    (when (:seon.code.form/src f) f))))
+                                    (when (and (:seon.code.form/src f) (:seon.code.form/ns f) (:seon.code.form/key f)) f))))
                           sort-forms-topologically)
           live-keys (into #{} (map :seon.code.form/key) live-forms)
           boot-forms? (boolean (some #(contains? boot-root-keys %) (concat live-keys retracted-keys)))]
