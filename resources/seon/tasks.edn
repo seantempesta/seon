@@ -155,6 +155,13 @@
   :seon.task/tests #{seon.agent-test/repl-eval-keeps-worker-warm-and-persists-results},
   :seon.task/title "Keep REPL eval workers warm by default and normalize :agent/:context on /op :eval"}
  {:seon.task/done? false,
+  :seon.task/id :seon.rule/split-oversized-namespace,
+  :seon.task/plan "seon.rule is currently ~8.6k tokens (> 8k cap). Extract a cohesive child namespace so seon.rule stays cleanly under 8,000 tokens without breaking any callers or tests.",
+  :seon.task/scope seon.rule,
+  :seon.task/tests #{seon.datalog-rules-core-test/all-10-native-datalog-context-rules-test
+                     seon.datalog-rules-core-test/incremental-skip-reads-forwarding-and-recursive-rules-test},
+  :seon.task/title "Split seon.rule below the 8k token namespace budget"}
+ {:seon.task/done? false,
   :seon.task/id :seon.test-runner/end-of-eval-auto-proofs,
   :seon.task/plan "Automatically run declared :seon.task/tests and edited :malli/schema seed=42 generative checks at the end of an agent eval block (non-blocking, surfaced in the ephemeral tail), and add an ephemeral COW merge-preview delta test when :main moved since branch base.",
   :seon.task/scope seon.test,
