@@ -516,15 +516,18 @@
 (defn- normalize-svg-ratios [s]
   (if-not (str/includes? s "/")
     s
-    (str/replace s svg-ratio-attr-re
-                 (fn [[full pre num-s den-s suf]]
-                   (let [n (try (Double/parseDouble num-s) (catch NumberFormatException _ nil))
-                         d (try (Double/parseDouble den-s) (catch NumberFormatException _ nil))]
-                     (if (and n d (not (zero? d)))
-                       (let [v (/ (Math/round (* (/ n d) 100.0)) 100.0)
-                             fmt (if (== v (Math/floor v)) (str (long v)) (str v))]
-                         (str pre fmt suf))
-                       full))))))
+    (let [fmt-ratio (fn [[full num-s den-s]]
+                      (let [n (try (Double/parseDouble num-s) (catch NumberFormatException _ nil))
+                            d (try (Double/parseDouble den-s) (catch NumberFormatException _ nil))]
+                        (if (and n d (not (zero? d)))
+                          (let [v (/ (Math/round (* (/ n d) 100.0)) 100.0)]
+                            (if (== v (Math/floor v)) (str (long v)) (str v)))
+                          full)))]
+      (-> s
+          (str/replace svg-ratio-attr-re (fn [[full pre n d suf]] (str pre (fmt-ratio [full n d]) suf)))
+          (str/replace #"(?i)(\b(?:points|d|viewBox)\s*=\s*[\"'])([^\"']+)([\"'])"
+                       (fn [[_ pre body suf]]
+                         (str pre (str/replace body #"(-?\d+)/(\d+)" fmt-ratio) suf)))))))
 
 (defn sanitize-svg
   "Sanitizes an inline `<svg ...>` string by stripping `<script>`, active embedded elements,

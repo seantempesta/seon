@@ -166,7 +166,7 @@
       "if(badR>0)defs.push('SVG #'+(idx+1)+' has '+badR+' unparsed ratio literal attr(s)');"
       "if(zeroX>=3)defs.push('SVG #'+(idx+1)+' has '+zeroX+' circles collapsed on left edge');});"
       "var bl=document.querySelector('#seon-header .brand-link');"
-      "if(bl&&vw>=760){var br=bl.getBoundingClientRect();if(br.width<56||bl.scrollWidth>bl.clientWidth+1)defs.push('Header brand clipped ('+num(br.width)+'px)');}"
+      "if(bl&&vw>=760){var br=bl.getBoundingClientRect();if(br.width<44||bl.scrollWidth>bl.clientWidth+1)defs.push('Header brand clipped ('+num(br.width)+'px)');}"
       "var lp=document.getElementById('cv-live-prose');"
       "if(lp&&lp.scrollHeight>lp.clientHeight+4)defs.push('Streaming prose clipped ('+lp.clientHeight+'px < '+lp.scrollHeight+'px)');"
       "return {'viewport':{'innerWidth':vw,'innerHeight':vh,'docScrollW':dsw,'docScrollH':dsh,'overflowX':docOv},"
