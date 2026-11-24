@@ -384,3 +384,19 @@
             (str "- " (:seon.task/id t) " — " (:seon.task/title t)
                  " · use `(user/create-task! {:id :ns/topic :from-template " (:seon.task/id t) " :title \"...\" :scope 'ns :plan \"...\"})`")])
          [:span {:class "tiny muted mono"} "</task-templates>"]])]}))
+
+(defn render-bench-run-row
+  "Compact row (~180px) for `:seon.bench.run/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.bench.run/entity :seon.bench.run/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 400000}
+  [{{:seon.bench.run/keys [id title status total passed failed]} :seon.bench.run/entity}]
+  (let [st (or status :running)
+        cls (case st :passed "green" :failed "red" "amber")
+        tot (rtext/safe-long total 0)
+        pas (rtext/safe-long passed 0)
+        fld (rtext/safe-long failed 0)]
+    {:seon.ui/hiccup
+     [:div {:class "ent-row ent-bench" :data-min-width 180}
+      (badge cls (if (keyword? st) (name st) (str st)))
+      (ent-link [:seon.bench.run/id id] (one-line (or title "Bench Run") 42) "strong")
+      (mut (str pas "/" tot (when (pos? fld) (str " · " fld " fail"))))]}))

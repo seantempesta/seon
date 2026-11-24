@@ -287,3 +287,31 @@
                          :single-footprint single :rule-holes rule-holes)]
      (with-meta (if (false? (:include-atlas? opts)) base (assoc base :rule-atlas atlas))
                 {:seon/schema :seon.health/coverage}))))
+
+(defn- ^:seon.flow/edge repl-agent-db [opts]
+  (let [ctx-var (requiring-resolve (quote seon.fork.calls/*agent-ctx*))
+        conn (:conn (when ctx-var @ctx-var))]
+    (cond
+      (and (map? opts) (:db opts)) (if (= :main (:db opts)) (when conn (store/head conn :main)) (:db opts))
+      conn @conn
+      :else nil)))
+
+(defn ^:seon.flow/edge coverage
+  "REPL helper: runs NASA-style rule & renderer coverage check (`{:include-atlas? false}` by default for crisp <4k EDN). Pass `{:include-atlas? true}` for full Rule Atlas."
+  {:seon.repl/export true
+   :malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:maybe :map]] :map]]
+   :cost/ticks 60000000}
+  ([] (coverage nil))
+  ([opts]
+   (let [m (if (map? opts) opts {})
+         db (repl-agent-db m)]
+     (coverage-report db (merge {:include-atlas? false} (dissoc m :db))))))
+
+(defn ^:seon.flow/edge repl-rule-atlas
+  "REPL helper: returns deterministic stratum-sorted Rule Atlas of all `:seon.rule/*` entities."
+  {:seon.repl/export (quote rule-atlas)
+   :malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat [:maybe :map]] [:vector :map]]]
+   :cost/ticks 20000000}
+  ([] (repl-rule-atlas nil))
+  ([opts]
+   (rule-atlas (repl-agent-db (when (map? opts) opts)))))

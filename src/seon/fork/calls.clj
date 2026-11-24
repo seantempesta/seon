@@ -6,7 +6,8 @@
             [datahike.api :as d]
             [seon.ctx :as ctx]
             [seon.store :as store]
-            [seon.render.data :as rdata]))
+            [seon.render.data :as rdata]
+            [seon.health.coverage]))
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -371,7 +372,7 @@
   "Declaratively exports all `^:seon.repl/export` delegation, messaging, memory, and lifecycle helpers into `u`."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
-  (export-ns-helpers! u 'seon.fork.calls))
+  (+ (export-ns-helpers! u 'seon.fork.calls) (export-ns-helpers! u 'seon.health.coverage)))
 
 (defn- normalize-pin-ref [item]
   (cond
