@@ -275,3 +275,15 @@
             ks (into #{} (map :seon.code.form/key) (:upserts ov))]
         (is (some #(clojure.string/starts-with? (str %) "demo.ov-box#expr#") ks) "Must include deftype #expr# caller")
         (is (contains? ks "demo.ov-box/make-box") "Must include same-ns Box. constructor")))))
+
+(deftest ^{:cost/ticks 60000000} single-form-edit-resolves-real-ns-ref
+  (testing "enrich-var-with-account without batch-ctx resolves real :seon.code.ns/name entity instead of dangling string tempid"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data
+        (code/file-import-tx @conn "src/demo/nsref_mod.clj" "(ns demo.nsref-mod)\n(defn f [x] x)\n" false)})
+      (let [db @conn
+            ns-eid (:e (first (d/datoms db :avet :seon.code.ns/name (quote demo.nsref-mod))))
+            reparsed (seon.code.parse/read-clj "src/demo/nsref_mod.clj" "(ns demo.nsref-mod)\n(defn f [x] (inc x))\n" #{(quote f)})
+            v (seon.code.analyze/enrich-var-with-account db (first (:vars reparsed)) nil code/boot-root-keys)]
+        (is (integer? ns-eid))
+        (is (= ns-eid (:seon.code.var/ns-ref v)) "Must resolve real existing ns eid, never string tempid")))))

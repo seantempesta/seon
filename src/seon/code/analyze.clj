@@ -430,7 +430,9 @@
         catches (when (and (map? acct) (seq (:catches acct))) (vec (:catches acct)))
         mmeta (when (and vsym (:seon.code.var/macro? v) (nil? (:seon.code.var/doc v)))
                 (macro-var-meta vsym))
-        ns-eid (:ns-eid batch-ctx)]
+        ns-eid (or (:ns-eid batch-ctx)
+        (when (and db (contains? dh-sch :seon.code.ns/name) (:seon.code.var/ns v))
+          (:e (first (d/datoms db :avet :seon.code.ns/name (:seon.code.var/ns v))))))]
     (cond-> v
       (and (nil? existing-eid) (:assign-tempid? batch-ctx) vsym)
       (assoc :db/id (or (get var->ref vsym) (var-tempid vsym)))
