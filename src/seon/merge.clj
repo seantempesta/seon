@@ -444,46 +444,35 @@
    ordered-keys))
 
 (defn- bind-new-ref-tempids
-  "Rewrites lookup-refs pointing to entities *created in the same `tx-data`* into deterministic
-   string tempids so Datahike resolves new parent->child ref graphs atomically in one tx."
+  "Rewrites lookup-refs for new entities to tempids and drops dangling ref-set entries deleted on `ours-db`."
   [ours-db tx-data identity-attrs]
-  (let [new-lrefs
-        (into {}
-              (keep (fn [op]
-                      (when (map? op)
-                        (some (fn [ida]
-                                (when-let [v (get op ida)]
-                                  (when-not (lookup-datom ours-db ida v)
-                                  [[ida v] (str "new/" (namespace ida) "/" (name ida) "/" v)])))
-                              identity-attrs))))
-              tx-data)]
-    (if (empty? new-lrefs)
-      tx-data
-      (let [rewrite-v (fn rw [v]
-                        (cond
-                          (and (vector? v) (= 2 (count v)) (contains? new-lrefs v))
-                          (get new-lrefs v)
-                          (set? v) (into #{} (map rw) v)
-                          (vector? v) (mapv rw v)
-                          :else v))]
-        (mapv (fn [op]
-                (cond
-                  (map? op)
-                  (let [self-tid (some (fn [ida]
-                                         (when-let [v (get op ida)]
-                                           (get new-lrefs [ida v])))
-                                       identity-attrs)
-                        m' (reduce-kv (fn [a k v] (assoc a k (rewrite-v v))) {} op)]
-                    (cond-> m' self-tid (assoc :db/id self-tid)))
-
-                  (vector? op)
-                  (let [[cmd e a v] op]
-                    (if (= cmd :db/retractEntity)
-                      [cmd (rewrite-v e)]
-                      [cmd (rewrite-v e) a (rewrite-v v)]))
-
-                  :else op))
-              tx-data)))))
+  (let [id-set (set identity-attrs) dh (:schema ours-db)
+        new-lrefs (into {} (keep (fn [op] (when (map? op) (some (fn [ida] (when-let [v (get op ida)] (when-not (lookup-datom ours-db ida v) [[ida v] (str "new/" (namespace ida) "/" (name ida) "/" v)]))) identity-attrs)))) tx-data)
+        lref? (fn [x] (and (vector? x) (= 2 (count x)) (contains? id-set (first x))))
+        live? (fn [lr] (or (contains? new-lrefs lr) (some? (lookup-datom ours-db (first lr) (second lr)))))
+        rw (fn rw [v ref?]
+             (cond (lref? v) (get new-lrefs v v)
+                   (set? v) (into #{} (keep #(when (or (not ref?) (not (lref? %)) (live? %)) (rw % ref?))) v)
+                   (vector? v) (into [] (keep #(when (or (not ref?) (not (lref? %)) (live? %)) (rw % ref?))) v)
+                   :else v))]
+    (into [] (keep (fn [op]
+                     (cond
+                       (map? op)
+                       (let [tid (some #(when-let [v (get op %)] (get new-lrefs [% v])) identity-attrs)
+                             m' (reduce-kv (fn [a k v]
+                                             (let [r? (= :db.type/ref (get-in dh [k :db/valueType])) v' (rw v r?)]
+                                               (if (and r? (or (set? v') (vector? v')) (empty? v')) a (assoc a k v'))))
+                                           {} op)]
+                         (cond-> m' tid (assoc :db/id tid)))
+                       (vector? op)
+                       (let [[cmd e a v] op]
+                         (if (= cmd :db/retractEntity)
+                           [cmd (rw e false)]
+                           (let [r? (= :db.type/ref (get-in dh [a :db/valueType]))]
+                             (when (or (not= cmd :db/add) (not r?) (not (lref? v)) (live? v))
+                               [cmd (rw e false) a (rw v r?)]))))
+                       :else op)))
+          tx-data)))
 
 (defn three-way
   {:malli/schema [:function
