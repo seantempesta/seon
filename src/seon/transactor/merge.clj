@@ -9,7 +9,8 @@
             [seon.store :as store]
             [seon.task.gate :as gate]
             [clojure.string :as str]
-            [seon.error :as err]))
+            [seon.error :as err]
+            [seon.ctx.touches :as ctouches]))
 
 (defn reply!
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -420,6 +421,7 @@
             r (d/transact conn {:tx-data main-tx})
             db (:db-after r)
             cid (d/commit-id db)
+            _ (ctouches/clear-live-reads! (get-in cfg [:store :id]) branch agent-id)
             _ (store/prune-merged-branches! conn)
             _ (store/sync! cfg)
             ans {:ok? true :fork-merged? true :branch branch :target-branch target-branch :target target-id
@@ -493,6 +495,8 @@
         {:keys [boot-affected?]} (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
         boot-touched? (or boot-affected? (boolean (some code/boot-file-path? (:touched-paths plan))))
         _ (sync-coordinator-branches! conn cfg plan branch)
+        _ (doseq [a (distinct (keep identity (cons eff-aid repl-aids)))]
+            (ctouches/clear-live-reads! (get-in cfg [:store :id]) branch a))
         _ (store/prune-merged-branches! conn)
         _ (store/sync! cfg)
         ans (cond-> {:ok? true

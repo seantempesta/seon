@@ -13,7 +13,8 @@
             [seon.rule.seed :as rseed]
             [seon.store :as store]
             [seon.ctx.tree :as tree]
-            [seon.ctx.touches :as ctouches]))
+            [seon.ctx.touches :as ctouches]
+            [seon.health :as health]))
 
 (defonce ^:private ^:seon.flow/edge ctx-rules-cache (store/lru-cache 16))
 
@@ -37,7 +38,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :any]] :any] :cost/ticks 25000000}
   [db' tx-datoms]
   (when (and ctx (satisfies? ICtxAtom ctx) (seq (.getWatches ^clojure.lang.IRef ctx)))
-  (-advance! ctx db' tx-datoms)))
+  (store/without-agent-eval-reads #(-advance! ctx db' tx-datoms))))
 
 (defn agent-world-datoms
   "Generic 2-read agent world discovery."
@@ -78,25 +79,122 @@
                              all)))]
       (if (and ms bs) (store/lru-get! ctx-rules-cache 16 [ms bs] load*) (load*)))))
 
+(defn diff-entity-tx
+  "Diffs pulled 2-index tree maps `old-m`/`new-m` for `eid` into Datahike tx-data (delegates to `seon.ctx.tree/diff-entity-tx`)."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map :map] [:vector :any]]
+   :cost/ticks 10000000}
+  [db eid old-m new-m]
+  (tree/diff-entity-tx db eid old-m new-m))
+
+(defn tail-rules-with-producers
+  "Returns the ordered subset of `all-rs` needed to evaluate `:ephemeral-tail` rules on Turn 2+, including transitive `$wm` fact producers."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :map]]] :cost/ticks 500000}
+  [all-rs]
+  (let [tail-rs (filterv (fn [r]
+                           (let [as (:seon.rule/assert r)]
+                             (and (sequential? as) (seq as)
+                                  (some #(and (map? %) (= :ephemeral-tail (:zone %))) as))))
+                         all-rs)
+        asserted-attrs (fn [r]
+                         (into #{} (keep #(when (and (vector? %) (>= (count %) 2) (keyword? (second %))) (second %)))
+                               (:seon.rule/assert r)))
+        by-attr (reduce (fn [m r]
+                          (reduce (fn [acc a] (update acc a (fnil conj []) r)) m (asserted-attrs r)))
+                        {} all-rs)]
+    (when (seq tail-rs)
+      (loop [chosen (into {} (map (juxt :seon.rule/id identity)) tail-rs)
+             frontier tail-rs]
+        (let [need-attrs (into #{} (mapcat rules/rule-wm-read-attrs) frontier)
+              add-rs (into [] (comp (mapcat #(get by-attr %))
+                                    (remove #(contains? chosen (:seon.rule/id %))))
+                           need-attrs)]
+          (if (empty? add-rs)
+            (vec (sort-by (juxt #(or (:seon.rule/stratum %) 0) #(str (:seon.rule/id %))) (vals chosen)))
+            (recur (into chosen (map (juxt :seon.rule/id identity)) add-rs) add-rs)))))))
+
+(defonce ^:private ^:seon.flow/edge branch-health-delta-cache (store/lru-cache 16))
+
+(defn- branch-caused-health-facts [main-db branch-db derived-touches]
+  (let [wnss (:written-nss derived-touches)]
+    (when (and main-db branch-db (seq wnss) (not (proj/same-db? main-db branch-db)))
+      (let [mc (live-cid main-db)
+            bc (live-cid branch-db)
+            sid (get-in branch-db [:config :store :id])
+            compute
+            (fn []
+              (store/without-agent-eval-reads
+               (fn []
+                 (let [dh (store/db-schema branch-db)
+                       struct-errs (try (health/caused-by-branch main-db branch-db {} wnss) (catch Throwable _ []))
+                       eff-errs (try
+                                  (let [p-key (juxt :class :subject)
+                                        base-keys (into #{} (map p-key)
+                                                        (mapcat #(health/static-efficiency-warnings main-db %) wnss))]
+                                    (into [] (comp (mapcat #(health/static-efficiency-warnings branch-db %))
+                                                   (filter (fn [p] (and (= :error (:severity p))
+                                                                        (not (contains? base-keys (p-key p)))))))
+                                          wnss))
+                                  (catch Throwable _ []))
+                       resolve-p (fn [p]
+                                   (or (when (and (:var p) (dh :seon.code.var/name))
+                                         (:e (first (d/datoms branch-db :avet :seon.code.var/name (:var p)))))
+                                       (when (and (:ns p) (dh :seon.code.ns/name))
+                                         (:e (first (d/datoms branch-db :avet :seon.code.ns/name (:ns p)))))
+                                       (when (and (:schema p) (dh :seon.schema/key))
+                                         (:e (first (d/datoms branch-db :avet :seon.schema/key (:schema p)))))))]
+                   (into []
+                         (keep (fn [p]
+                                 (when-let [e (resolve-p p)]
+                                   [e :world/branch-caused-issue (or (:class p) :health-error)])))
+                         (concat struct-errs eff-errs))))))]
+        (if (and sid mc bc)
+          (store/lru-get! branch-health-delta-cache 16 [sid mc (:max-tx main-db) bc (:max-tx branch-db) wnss] compute)
+          (compute))))))
+
 (defn- seed-world-wm
-([world] (seed-world-wm world nil))
-([world derived-touches]
- (let [conn-facts (mapcat (fn [[e tx]]
-                            (cond-> [[e :world/connected true]]
-                              (pos? (long tx)) (conj [e :world/tx (long tx)])))
-                          (:connected world))
-       pin-facts (map (fn [e] [e :world/pinned true]) (:pinned world))
-       ex-facts (map (fn [e] [e :world/extra-ns true]) (:extra-nss world))
-       max-tx-m (or (:max-tx derived-touches) {})
-       written-s (or (:written derived-touches) #{})
-       touch-facts (mapcat (fn [[e cnt]]
-                             (let [tx (long (get max-tx-m e 0))]
-                               (cond-> [[e :world/touched true]
-                                      [e :world/touches (long cnt)]
-                                      [e :world/touched-tx tx]]
-                               (contains? written-s e) (conj [e :world/written? true]))))
-                           (:counts derived-touches))]
-   (rules/add-facts (rules/empty-wm) (concat conn-facts pin-facts ex-facts touch-facts) {:rule :seed/world :stratum 0}))))
+  ([world] (seed-world-wm world nil nil nil))
+  ([world derived-touches] (seed-world-wm world derived-touches nil nil))
+  ([world derived-touches main-db branch-db]
+   (let [aeid (:agent-eid world)
+         conn-facts (mapcat (fn [[e tx]]
+                              (cond-> [[e :world/connected true]]
+                                (pos? (long tx)) (conj [e :world/tx (long tx)])))
+                            (:connected world))
+         pin-facts (map (fn [e] [e :world/pinned true]) (:pinned world))
+         ex-facts (map (fn [e] [e :world/extra-ns true]) (:extra-nss world))
+         max-tx-m (or (:max-tx derived-touches) {})
+         written-s (or (:written derived-touches) #{})
+         touch-facts (mapcat (fn [[e cnt]]
+                               (let [tx (long (get max-tx-m e 0))]
+                                 (cond-> [[e :world/touched true]
+                                          [e :world/touches (long cnt)]
+                                          [e :world/touched-tx tx]]
+                                   (contains? written-s e) (conj [e :world/written? true]))))
+                             (:counts derived-touches))
+         energy-facts (keep (fn [[e eng]]
+                              (when (and (integer? e) (number? eng) (pos? (double eng)))
+                                [e :world/energy (double eng)]))
+                            (:energy derived-touches))
+         frontier-facts (keep (fn [[e sc]]
+                                (when (and (integer? e) (number? sc) (pos? (double sc)))
+                                  [e :world/frontier (double sc)]))
+                              (:novel-frontier derived-touches))
+         cont-facts (keep (fn [[e sc]]
+                            (when (and (integer? e) (number? sc) (pos? (double sc)))
+                              [e :world/continuation true]))
+                          (:continuation derived-touches))
+         te (:turn-events derived-touches)
+         err-sch-facts (keep (fn [s] (when (integer? s) [s :turn/error-schema true]))
+                             (:error-schemas te))
+         turn-flags (cond-> []
+                      (and aeid (:has-error? te)) (conj [aeid :turn/has-error? true])
+                      (and aeid (:large-result? te)) (conj [aeid :turn/large-result? true]))
+         caused-facts (branch-caused-health-facts main-db branch-db derived-touches)]
+     (rules/add-facts (rules/empty-wm)
+                      (concat conn-facts pin-facts ex-facts touch-facts
+                              energy-facts frontier-facts cont-facts
+                              err-sch-facts turn-flags caused-facts)
+                      {:rule :seed/world :stratum 0}))))
 
 (defn related-updates
   "Normal `ns-map -> ns-map` incremental context engine over native Datahike `d/q` + `d/pull` + `datahike.reads`."
@@ -127,7 +225,7 @@
         budget (long (or token-budget 16000))
         ctx-rules (load-context-rules main eff-branch (:seon.ctx/rules req))
         world (or (:seon.ctx/world req) (agent-world-datoms main eff-branch id))
-        base-wm (seed-world-wm world (ctouches/derived-agent-touches main eff-branch id))
+        base-wm (seed-world-wm world (ctouches/derived-agent-touches main eff-branch id) main eff-branch)
         step-res (rules/step-rules (:rule-state prev-session) dbs {:agent-id id :base-wm base-wm} ctx-rules tx-datoms eff-target)
         merged (merge-projections dbs (:projections step-res))
         {:keys [projections shown]} (compute-shown-delta (:shown prev-session) merged)
@@ -187,7 +285,7 @@
                     {:projs [] :trace {:agent agent-id :target target :rules-total (count all-rs)
                                        :fired-rules [] :skipped-rules [] :recomputed 0 :skipped (count all-rs)}}
                     (let [dbs {:main main-db :branch bdb :code bdb :task tdb}
-                          sr (rules/step-rules nil dbs {:agent-id agent-id :base-wm (seed-world-wm world derived-t)} eff-rs nil target)
+                          sr (rules/step-rules nil dbs {:agent-id agent-id :base-wm (seed-world-wm world derived-t main-db bdb)} eff-rs nil target)
                           runs-s (sort-by (juxt :stratum #(str (:rule-id %))) (vals (:runs sr)))]
                       {:projs (proj/collapse-rule-projections (if-let [zf (:zone-filter o)] (filterv #(= zf (:zone %)) (:projections sr)) (:projections sr)))
                        :trace {:agent agent-id :target target :rules-total (count all-rs)
@@ -407,39 +505,6 @@
    :cost/ticks 25000000}
   ([conn eid] (ctx-atom conn eid nil))
   ([conn eid pattern] (CtxAtom. conn (build @conn eid pattern conn) {} nil)))
-
-(defn diff-entity-tx
-  "Diffs pulled 2-index tree maps `old-m`/`new-m` for `eid` into Datahike tx-data (delegates to `seon.ctx.tree/diff-entity-tx`)."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map :map] [:vector :any]]
-   :cost/ticks 10000000}
-  [db eid old-m new-m]
-  (tree/diff-entity-tx db eid old-m new-m))
-
-(defn tail-rules-with-producers
-  "Returns the ordered subset of `all-rs` needed to evaluate `:ephemeral-tail` rules on Turn 2+, including transitive `$wm` fact producers."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :map]]] :cost/ticks 500000}
-  [all-rs]
-  (let [tail-rs (filterv (fn [r]
-                           (let [as (:seon.rule/assert r)]
-                             (and (sequential? as) (seq as)
-                                  (some #(and (map? %) (= :ephemeral-tail (:zone %))) as))))
-                         all-rs)
-        asserted-attrs (fn [r]
-                         (into #{} (keep #(when (and (vector? %) (>= (count %) 2) (keyword? (second %))) (second %)))
-                               (:seon.rule/assert r)))
-        by-attr (reduce (fn [m r]
-                          (reduce (fn [acc a] (update acc a (fnil conj []) r)) m (asserted-attrs r)))
-                        {} all-rs)]
-    (when (seq tail-rs)
-      (loop [chosen (into {} (map (juxt :seon.rule/id identity)) tail-rs)
-             frontier tail-rs]
-        (let [need-attrs (into #{} (mapcat rules/rule-wm-read-attrs) frontier)
-              add-rs (into [] (comp (mapcat #(get by-attr %))
-                                    (remove #(contains? chosen (:seon.rule/id %))))
-                           need-attrs)]
-          (if (empty? add-rs)
-            (vec (sort-by (juxt #(or (:seon.rule/stratum %) 0) #(str (:seon.rule/id %))) (vals chosen)))
-            (recur (into chosen (map (juxt :seon.rule/id identity)) add-rs) add-rs)))))))
 
 (deftype CtxAtom [conn ^:volatile-mutable snap ^:volatile-mutable watches ^:volatile-mutable validator]
   clojure.lang.IDeref

@@ -381,8 +381,8 @@ rtails/fallback-entity-renderers)
     (when (seq tail-rs)
       (let [{:keys [candidates]} (ctx/gather-agent-candidates
                                   main-db branch-db (:seon.agent/id ag)
-                                  (cond-> {:agent ag :target :wire :rules tail-rs :rules-tag :ephemeral-tail :minimal? true
-                                          :zone-filter :ephemeral-tail :enrich? true
+                                  (cond-> {:agent ag :target :wire :rules tail-rs :rules-tag :ephemeral-tail :minimal? true :use-live-touches? true
+                                                                                                             :zone-filter :ephemeral-tail :enrich? true
                                           :include-evals? false :include-ctx-snapshot? false}
                                     (seq (:disabled-rules opts)) (assoc :disabled-rules (:disabled-rules opts))))
             tail-cands (filterv #(= :ephemeral-tail (:zone %)) candidates)]
@@ -439,7 +439,7 @@ rtails/fallback-entity-renderers)
                             :now-ms (:now-ms opts) :messages msgs :unread unread}))
               live-tail (when inc-tail?
                           (if (and (not explain?) (or (not= walk-main-cid (live-cid main-db)) (not= (live-cid walk-db) (live-cid branch-db))))
-                            (live-rule-tail-blocks main-db branch-db ag opts)
+                            (live-rule-tail-blocks main-db branch-db ag (assoc opts :already-shown (merge (:parent-shown pfx) already-shown shown)))
                             tail-tile-blocks))
               tail-blocks (when inc-tail? (vec (concat (:blocks tail-res) live-tail)))
               activity-text (when inc-tail? (not-empty (str/join "\n\n" (keep :text tail-blocks))))

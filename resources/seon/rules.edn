@@ -610,7 +610,13 @@
                       [$main ?e :seon.error/status :open ?tx])
                      (and
                       [$branch ?e :seon.code.doc/path "docs/rules-of-thumb.md" ?tx]
-                      [$branch ?e :seon.code.doc/order 0]))],
+                      [$branch ?e :seon.code.doc/order 0])
+                     (and
+                      [$main
+                       ?e
+                       :seon.code.doc/id
+                       "docs/primers.md#writing-general-rules-renderers"
+                       ?tx]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [[?t :wm/review-target true]
@@ -632,7 +638,7 @@
                       :zone :static-prefix,
                       :priority 94,
                       :tx ?tx}],
-  :seon.rule/doc "When an agent links another agent via :seon.agent/forked-from or :seon.agent/target, assert [?t :wm/review-target true] and surface target's task(s), open errors, and docs/rules-of-thumb.md overview (order 0).",
+  :seon.rule/doc "When an agent links another agent via :seon.agent/forked-from or :seon.agent/target, assert [?t :wm/review-target true] and surface target's task(s), open errors, docs/rules-of-thumb.md overview, and docs/primers.md#writing-general-rules-renderers.",
   :seon.rule/stratum 18,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/review-target}
@@ -770,6 +776,44 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/review-diagnosis}
  {:seon.rule/query [:find
+                    ?e
+                    ?cls
+                    ?fix
+                    :in
+                    $main
+                    $wm
+                    :where
+                    [$wm ?e :world/branch-caused-issue ?cls]
+                    (or-join
+                     [?cls ?fix]
+                     [$main ?fix :seon.fix/error-class ?cls]
+                     (and
+                      (not-join [?cls] [$main ?f1 :seon.fix/error-class ?cls])
+                      [(ground :seon.rule/nil) ?fix]))],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?e :wm/active-var :branch-health]
+                     [?e :ctx/touched-entity true]
+                     {:entity ?e,
+                      :zone :ephemeral-tail,
+                      :priority 96,
+                      :rank/boost 0.25,
+                      :params {:seon.ui/branch-issue ?cls, :rank/boost 0.25}}
+                     {:entity ?fix,
+                      :parent ?e,
+                      :pull [:seon.fix/id
+                             :seon.fix/error-class
+                             :seon.fix/symptom
+                             :seon.fix/root-cause
+                             :seon.fix/change-summary
+                             :seon.fix/regression-test],
+                      :zone :ephemeral-tail,
+                      :priority 95}],
+  :seon.rule/doc "Surface ONLY structural/efficiency health issues introduced by this branch (`branch \\ main`) plus any matching `:seon.fix/*` lessons, never dragging in pre-existing `:main` issues.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/branch-caused-health}
+ {:seon.rule/query [:find
                     ?v
                     ?form
                     ?tx
@@ -845,6 +889,54 @@
   :seon.rule/stratum 20,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/error-neighborhood}
+ {:seon.rule/query [:find
+                    ?s
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    $wm
+                    :where
+                    [$wm ?s :turn/error-schema true]
+                    [$branch ?s :seon.schema/key _ ?tx]
+                    (or-join
+                     [?s ?doc]
+                     [$main ?doc :seon.code.doc/references ?s]
+                     [$branch ?doc :seon.code.doc/references ?s]
+                     (and
+                      (not-join [?s] [$main ?d1 :seon.code.doc/references ?s])
+                      (not-join [?s] [$branch ?d2 :seon.code.doc/references ?s])
+                      [(ground :seon.rule/nil) ?doc]))],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?s :wm/active-schema :error]
+                     [?s :ctx/touched-entity true]
+                     {:entity ?s,
+                      :pull [:seon.schema/key
+                             :seon.schema/doc
+                             :seon.schema/form
+                             {:seon.schema/keys [:seon.schema/key]}
+                             {:seon.schema/optional-keys [:seon.schema/key]}
+                             :seon.schema/examples],
+                      :zone :ephemeral-tail,
+                      :priority 95,
+                      :rank/boost 0.2,
+                      :params {:rank/boost 0.2},
+                      :tx ?tx}
+                     {:entity ?doc,
+                      :parent ?s,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :ephemeral-tail,
+                      :priority 92,
+                      :tx ?tx}],
+  :seon.rule/doc "When latest-turn failing eval touches or references schemas (`[$wm ?s :turn/error-schema true]`), surface those schema docs/forms/examples and citing docs in `:ephemeral-tail`.",
+  :seon.rule/stratum 20,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/error-schema-docs-and-examples}
  {:seon.rule/query [:find
                     ?t
                     ?need
@@ -1265,6 +1357,31 @@
   :seon.rule/stratum 22,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/fix-regression-test-var}
+ {:seon.rule/query [:find
+                    ?e
+                    ?sc
+                    ?tx
+                    :in
+                    $branch
+                    $wm
+                    :where
+                    [$wm ?e :world/frontier ?sc]
+                    (not [$branch ?e :seon.code.var/private? true])
+                    (or-join
+                     [?e ?tx]
+                     [$wm ?e :world/touched-tx ?tx]
+                     (and (not [$wm ?e :world/touched-tx _]) [(ground 0) ?tx]))],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e,
+                      :zone :ephemeral-tail,
+                      :priority 76,
+                      :params {:seon.ui/frontier-score ?sc},
+                      :tx ?tx}],
+  :seon.rule/doc "Surface novel working-frontier entities derived via Turn t-1 continuation + ACL Local-Push PPR + Weighted RRF (`[$wm ?e :world/frontier ?sc]`) into `:ephemeral-tail`.",
+  :seon.rule/stratum 22,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/novel-working-frontier}
  {:seon.rule/query [:find
                     ?doc
                     ?tx

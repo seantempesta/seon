@@ -177,14 +177,21 @@
                        (-> prev
                            (assoc :priority (max (long (:priority prev 50)) (long (:priority it 50)))
                                   :tx (max (long (:tx prev 0)) (long (:tx it 0)))
-                                  :zone (cond (or (= :agent-prefix (:zone prev)) (= :agent-prefix (:zone it))) :agent-prefix (= :ephemeral-tail (:zone it)) :ephemeral-tail :else (or (:zone prev) (:zone it)))
+                                  :zone (cond (or (= :agent-prefix (:zone prev)) (= :agent-prefix (:zone it))) :agent-prefix
+                                              (= :ephemeral-tail (:zone it)) :ephemeral-tail
+                                              :else (or (:zone prev) (:zone it)))
                                   :pinned? (boolean (or (:pinned? prev) (:pinned? it)))
                                   :rules (vec (distinct (concat (:rules prev) (:rules it))))
                                   :tags (into (set (:tags prev)) (:tags it))
                                   :params (merge (:params prev) (:params it)))
                            (cond-> (:ctx.match/score it) (assoc :ctx.match/score (:ctx.match/score it))
-                           (or (:touches prev) (:touches it)) (assoc :touches (max (long (:touches prev 0)) (long (:touches it 0))))
-                           (or (:written? prev) (:written? it)) (assoc :written? true))))
+                             (or (:touches prev) (:touches it))
+                             (assoc :touches (max (long (:touches prev 0)) (long (:touches it 0))))
+                             (or (:touch-energy prev) (:touch-energy it))
+                             (assoc :touch-energy (max (double (or (:touch-energy prev) 0.0)) (double (or (:touch-energy it) 0.0))))
+                             (or (:frontier-score prev) (:frontier-score it))
+                             (assoc :frontier-score (max (double (or (:frontier-score prev) 0.0)) (double (or (:frontier-score it) 0.0))))
+                             (or (:written? prev) (:written? it)) (assoc :written? true))))
                 (assoc acc e it))))
           {} all-raw))
 
@@ -264,7 +271,7 @@
       (and (not errs?) (not evs?)) (conj :rule.ctx/error-neighborhood)
       (or same? (and (some? (:seon.agent/forked-from ag)) (not evs?))) (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
       (not has-task?) (conj :rule.ctx/active-task-and-lineage)
-      (and (not has-scope?) (not has-extra?)) (conj :rule.ctx/scope-and-extra-namespaces)
+      (and (not has-scope?) (not has-extra?) (not has-task?)) (conj :rule.ctx/scope-and-extra-namespaces)
       (and (not has-scope?) (or has-task? (not (:seon.agent/router? ag))))
       (conj :rule.ctx/scope-task-history-and-fixes)
       (not any-docs?) (conj :rule.ctx/citing-docs)
@@ -272,7 +279,8 @@
       (and (not (:seon.agent/target ag)) (not (:seon.agent/forked-from ag))) (conj :rule.ctx/review-target)
       (and (not (:seon.agent/forked-from ag)) (empty? (:seon.agent/example-refs ag)) (empty? (:seon.agent/examples ag)) (not has-task?)) (conj :rule.ctx/agent-prefix-sessions)
       (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?) (empty? (ctouches/live-reads-for bdb aid)))
-      (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
+      (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns :rule.ctx/novel-working-frontier :rule.ctx/error-schema-docs-and-examples)
+      same? (conj :rule.ctx/branch-caused-health))))
 
 (def ^:private volatile-rev-ref-attrs
   #{:seon.agent/parent-ref :seon.agent/forked-from :seon.agent/target :seon.agent/example-refs :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.agent.eval/agent-ref :seon.error/agent-ref})
@@ -424,6 +432,8 @@
                       (when (opt-bool :use-live-touches? (not minimal?))
                         (ctouches/derived-agent-touches main-db branch-db aid)))
         touch-counts (or (:counts derived-t) {})
+        touch-energy (or (:energy derived-t) {})
+        frontier-scores (or (:novel-frontier derived-t) {})
         written-set (or (:written derived-t) #{})
         touch-max-tx (or (:max-tx derived-t) {})
         base-ru (into [] (comp (remove #(and (not inc-evals?)
@@ -449,11 +459,13 @@
                    (when-let [e (some->> (:seon.agent/scope ag) (vector :seon.code.ns/name) res-eid)]
                      [{:entity e :priority 90 :zone :static-prefix :tags #{:scope-ns} :rules [:seed/scope]}]))
                  (for [[e cnt] (sort-by (comp - val) touch-counts) :when (and (integer? e) (not= e aeid))]
-                 (let [w? (contains? written-set e)]
+                 (let [w? (contains? written-set e)
+                       eng (double (get touch-energy e 0.0))]
                    (cond-> {:entity e :priority (if w? 82 72) :zone :workspace :touches (long cnt)
                             :tx (long (get touch-max-tx e 0))
                             :tags (if w? #{:touched :edited} #{:touched})
                             :rules (if w? [:signal/eval-touched :signal/branch-written] [:signal/eval-touched])}
+                     (pos? eng) (assoc :touch-energy eng)
                      w? (assoc :written? true))))
                  (for [tid (rdata/agent-task-ids (or task-db branch-db) ag) :let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid]) (res-eid [:seon.task/id tid]))] :when e] {:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]})
                  (for [item (:seon.agent/pinned ag)
@@ -485,11 +497,15 @@
                      :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
         combined (mapv (fn [c]
                    (let [e (:entity c)
-                         tc (long (get touch-counts e 0))
-                         w? (contains? written-set e)]
-                     (cond-> c
-                       (pos? tc) (assoc :touches (max tc (long (:touches c 0))))
-                       w? (assoc :written? true))))
+                       tc (long (get touch-counts e 0))
+                       eng (double (get touch-energy e 0.0))
+                       fs (double (get frontier-scores e 0.0))
+                       w? (contains? written-set e)]
+                   (cond-> c
+                     (pos? tc) (assoc :touches (max tc (long (:touches c 0))))
+                     (pos? eng) (assoc :touch-energy (max eng (double (or (:touch-energy c) 0.0))))
+                     (pos? fs) (assoc :frontier-score (max fs (double (or (:frontier-score c) 0.0))))
+                     w? (assoc :written? true))))
                  (concat ctx-item h-items hydrated))]
     (if sem? (ground/attach-semantic-scores main-db branch-db ag combined) combined)))
 

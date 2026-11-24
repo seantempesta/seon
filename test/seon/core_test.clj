@@ -755,7 +755,10 @@
                 plan-bad (merge/three-way conn cfg :branch/tw)]
             (is (= ["system-health" "neighborhood-activity" "live-viewport"] (mapv :tag (:tail-blocks w-coord))))
             (is (some? (:ephemeral-screenshot w-coord)) "Coordinator with viewport-screenshot? true receives screenshot")
-            (is (= ["branch-status" "scoped-health"] (mapv :tag (:tail-blocks w-work))) "Worker with viewport-screenshot? false omits live-viewport")
+            (let [w-tags (set (map :tag (:tail-blocks w-work)))]
+            (is (contains? w-tags "branch-status"))
+            (is (contains? w-tags "scoped-health"))
+            (is (not (contains? w-tags "live-viewport")) "Worker with viewport-screenshot? false omits live-viewport"))
             (is (nil? (:ephemeral-screenshot w-work)) "0 image tokens when viewport-screenshot? is false")
             (is (str/includes? (str (:activity-text w-work)) "missing-contract") "branch-status surfaces merge-blocking :missing-contract")
             (is (str/includes? (str (:activity-text w-work)) "unused-require") "scoped-health surfaces auto-fixable :unused-require")

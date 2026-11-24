@@ -104,7 +104,7 @@
           (try
             (let [w-wire (rwire/build-live-wire-request @conn @wconn :w/stalled {:conn conn :vision? false})
                   r-wire (rwire/build-live-wire-request @conn @rconn :review/w-stalled {:conn conn :vision? false})
-                  w-core (butlast (:messages w-wire))
+                  w-core (if (= "user" (:role (last (:messages w-wire)))) (butlast (:messages w-wire)) (:messages w-wire))
                   matched (count (take-while true? (map #(= (select-keys %1 [:role :content :tool_calls :tool_call_id])
                                                             (select-keys %2 [:role :content :tool_calls :tool_call_id]))
                                                         w-core (:messages r-wire))))

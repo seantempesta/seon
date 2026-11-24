@@ -226,8 +226,10 @@
   (let [f (:frame msg)
         aid (:agent-id msg)
         pid (:pid msg)
-        _ (when-let [eids (seq (mapcat :touched-eids (:tool-results f)))]
-            (ctouches/record-live-reads-by-key! (get-in st [:cfg :store :id]) (:branch f) aid (long (or (:turn f) 1)) eids))
+        _ (doseq [tr (:tool-results f)
+                :let [eids (:touched-eids tr)]
+                :when (seq eids)]
+          (ctouches/record-live-reads-by-key! (get-in st [:cfg :store :id]) (:branch f) aid (long (or (:turn f) 1)) eids))
         st' (-> st
                 (update :turns-done inc)
                 (cond-> (contains? (:live st) aid)
@@ -413,7 +415,7 @@
       :eval-done
       (handle-eval-done st tick msg)
 
-      :child-exception
+      (:child-exception :agent-error)
       (handle-child-exception st msg)
 
       [st nil])))

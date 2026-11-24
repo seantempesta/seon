@@ -437,8 +437,8 @@
           epull '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/status :seon.error/agent :seon.error/var :seon.error/message :seon.error/data]
           seen (volatile! #{})
           err-a (vec (for [db (distinct (remove nil? [branch-db main-db])) :let [dh (:schema db)] :when (contains? dh :seon.error/status)
-                           eid (distinct (concat (when (and aid (contains? dh :seon.error/agent)) (map :e (take 8 (d/datoms db :avet :seon.error/agent aid))))
-                                                 (map :e (take 16 (d/datoms db :avet :seon.error/status :open)))))
+                           eid (distinct (concat (when (and aid (contains? dh :seon.error/agent)) (map :e (d/datoms db :avet :seon.error/agent aid)))
+                                                 (map :e (d/datoms db :avet :seon.error/status :open))))
                            :let [e (d/pull db epull eid) k (or (:seon.error/id e) eid) v (:seon.error/var e)
                                  ens (or (when (and (symbol? v) (namespace v)) (symbol (namespace v))) (get-in e [:seon.error/data :ns]))]
                            :when (and (= :open (:seon.error/status e)) (not (@seen k)) (or (= aid (:seon.error/agent e)) (and ens (ns-in-scope? scope ens))))]
@@ -447,14 +447,19 @@
                             :subject (str (or (get-in e [:seon.error/data :subject]) v (:seon.error/agent e) scope))
                             :message (str (:seon.error/message e))})))
           edit-a (when (and branch-db (seq branch-edited))
-                   (if (= scope 'seon)
-                   (let [nss (distinct (keep #(let [p (first (str/split (str %) #"[#/]" 2))]
-                                                (when-not (str/blank? p) (symbol p)))
-                                             (take 6 branch-edited)))]
+                   (let [nss (if (= scope 'seon)
+                               (distinct (keep #(let [p (first (str/split (str %) #"[#/]" 2))]
+                                                  (when-not (str/blank? p) (symbol p)))
+                                               branch-edited))
+                               [scope])
+                         p-key (juxt :class :subject)
+                         base-keys (if (and main-db (not= main-db branch-db))
+                                     (into #{} (map p-key) (mapcat #(eff/static-efficiency-warnings main-db %) nss))
+                                     #{})]
                      (into [] (comp (mapcat #(eff/static-efficiency-warnings branch-db %))
-                                    (filter #(or (= :error (:severity %)) (:fix %))))
-                           nss))
-                   (filterv #(or (= :error (:severity %)) (:fix %)) (eff/static-efficiency-warnings branch-db scope))))]
+                                    (filter (fn [x] (and (or (= :error (:severity x)) (:fix x))
+                                                         (not (contains? base-keys (p-key x)))))))
+                           nss)))]
       (vec (take 8 (distinct (concat err-a edit-a (fast-scoped-test-alerts main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals {:main-db main-db :branch-edited branch-edited}) sig-a)))))))
 
 (defonce ^:private ^:seon.flow/edge branch-base-health-cache (store/lru-cache 8))

@@ -394,30 +394,28 @@
                                    (jolt.host/run-interruptible
                                     (jolt.host/make-interrupt)
                                     (fn []
-                                      (binding [jolt.analyzer/*unit-tap* (analyze/make-tap tap-acc)]
-                                        (eval form-val)))
+                                      (binding [jolt.analyzer/*unit-tap* (analyze/make-tap tap-acc)
+                                              store/*capturing-agent-eval-reads?* true]
+                                      (eval form-val)))
                                     eff-ticks
                                     eff-bytes)))]
-                (when (< (count @touched-all) 512)
                 (let [seen-e (volatile! #{})
-                      deduped (persistent!
-                               (reduce (fn [acc pair]
-                                         (if (>= (count acc) (- 512 (count @touched-all)))
-                                           (reduced acc)
-                                           (let [lo (when (vector? pair) (nth pair 0 nil))
-                                                 hi (when (vector? pair) (nth pair 1 nil))
-                                                 e1 (when lo (:e lo))
-                                                 e2 (when hi (:e hi))]
-                                             (if (and (integer? e1) (pos? (long e1)) (= e1 e2))
-                                               (if (contains? @seen-e e1)
-                                                 acc
-                                                 (do (vswap! seen-e conj e1) (conj! acc pair)))
-                                               (if (and (or (when lo (:a lo)) (when hi (:a hi))) (< (count acc) 64))
-                                                 (conj! acc pair)
-                                                 acc)))))
-                                       (transient [])
-                                       rset))]
-                  (vswap! touched-all into deduped)))
+                    deduped (persistent!
+                             (reduce (fn [acc pair]
+                                       (let [lo (when (vector? pair) (nth pair 0 nil))
+                                             hi (when (vector? pair) (nth pair 1 nil))
+                                             e1 (when lo (:e lo))
+                                             e2 (when hi (:e hi))]
+                                         (if (and (integer? e1) (pos? (long e1)) (= e1 e2))
+                                           (if (contains? @seen-e e1)
+                                             acc
+                                             (do (vswap! seen-e conj e1) (conj! acc pair)))
+                                           (if (or (when lo (:a lo)) (when hi (:a hi)))
+                                             (conj! acc pair)
+                                             acc))))
+                                     (transient [])
+                                     rset))]
+                (vswap! touched-all into deduped))
                 val)
             ns-after (ns-name *ns*)
             is-ns? (= (quote ns) form-head)
@@ -551,7 +549,7 @@
                     (:e (first (d/datoms db :avet :seon.agent/id agent-id))))
             eids (analyze/extract-domain-touched-eids db @touched-all persist-tx ag-eid nil)]
         (when (seq eids)
-          (ctouches/record-live-reads! db (or agent-id :repl) (long (or turn 1)) eids))
+          (ctouches/record-live-reads! db (or agent-id :repl) (long (or turn 1)) eids {:code code-str}))
         eids)
         eval-ent (build-eval-entity db {:agent-id agent-id :turn turn :call-index call-index
                                         :call-id call-id :seen-messages seen-messages

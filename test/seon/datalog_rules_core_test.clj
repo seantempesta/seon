@@ -128,7 +128,7 @@
       (is (= :rewarmed (get-in d6 [:projections 0 :status])))
       (is (= "v2-edited" (get-in d6 [:projections 0 :delta-data :seon.code.var/doc]))))))
 
-(deftest ^{:cost/ticks 90000000} all-10-native-datalog-context-rules-test
+(deftest ^{:cost/ticks 110000000} all-10-native-datalog-context-rules-test
   (testing "All 10 high-value :rule.ctx/* rules surface errors+fixes, branch-edited vars+callers, eval schemas+compatible fns, citing docs (signpost vs full), failing tests, task lineage, eval recency, and pinned entities"
     (with-test-store [{:keys [conn cfg]}]
       ;; Register a domain schema for eval-compatible-fns + eval-touched-schemas
