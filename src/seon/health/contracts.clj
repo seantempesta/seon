@@ -6,8 +6,7 @@
             [malli.core :as m]
             [seon.store :as store]
             [malli.registry :as mr]
-            [seon.health.static :as static]
-            [seon.health.branch :as hbranch]))
+            [seon.health.static :as static]))
 
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.render/hiccup`
@@ -456,9 +455,3 @@
                                        "or built-ins :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db.")}))))))
             (sort-by :subject)
             vec)))))
-
-(defn broken-doc-refs-for-nss [& args] (apply hbranch/broken-doc-refs-for-nss args))
-
-(defn ^:seon.flow/edge impure-generatable-fns-for-nss [& args] (apply hbranch/impure-generatable-fns-for-nss args))
-
-(defn touched-ns-var-delta [& args] (apply hbranch/touched-ns-var-delta args))
