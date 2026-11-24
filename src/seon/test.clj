@@ -184,148 +184,30 @@
                        :body (str "Test batch failed on " branch ": " emsg
                                   "\nInspect your branch and call (user/ready!) again.")}]))]))
 
-(defn- test-batch-plan
-  {:cost/ticks 5000000}
-  [st ours-conn db b merge-plan vars force? fork-relative?]
-  (let [theirs-db (if (= b :main) db (d/branch-as-db (:store db) b))
-        branch-cid (d/commit-id theirs-db)
-        overlay (when merge-plan (build-branch-overlay ours-conn merge-plan b))
-        cand-reach (if overlay
-                     (reach/apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
-                     (:reach st))
-        deleted-main-tests (when (and overlay (empty? vars))
-                             (vec (sort (remove #(contains? (:tests cand-reach) %)
-                                                (keys (get-in st [:reach :tests]))))))
-        main-tests (get-in st [:reach :tests])
-        main-digests (get-in st [:reach :digests])
-        all-tests (:tests cand-reach)
-        target-tests (cond
-                       (seq vars) (select-keys all-tests vars)
-                       (and overlay (not force?))
-                       (into {} (filter (fn [[sym dg]] (not= dg (get main-tests sym)))) all-tests)
-                       :else all-tests)
-        uncached-tests (vec
-                        (keep (fn [[sym dg]]
-                                (when (or force? (not (cached-green? db dg)))
-                                  {:var sym :digest dg :ns (symbol (namespace sym))
-                                   :est-ms (last-known-ms db sym)}))
-                              (sort-by first target-tests)))
-        contracted-map (if (seq vars) {} (:contracted-vars cand-reach))
-        uncached-gens (vec
-                       (keep (fn [[vsym fk]]
-                               (when-let [dg (get-in cand-reach [:digests fk])]
-                                 (when (or force? (not overlay) (not= dg (get main-digests fk)))
-                                   (let [gdg (str "gen:" dg)]
-                                     (when (or force? (not (cached-green? db gdg)))
-                                       {:var vsym :digest gdg :ns (symbol (namespace vsym))
-                                        :est-ms 5.0})))))
-                             (sort-by first contracted-map)))
-        cached-n (+ (- (count (if (seq vars) target-tests all-tests)) (count uncached-tests))
-                    (- (count contracted-map) (count uncached-gens)))
-        plat-reached (vec (sort (filter #(contains? (:platform-tests cand-reach) %)
-                                        (map :var uncached-tests))))
-        boot-affected? (boolean (:boot-affected? overlay))]
-    {:b b :branch-cid branch-cid :overlay overlay :deleted-main-tests deleted-main-tests
-    :uncached-tests uncached-tests :uncached-gens uncached-gens :cached-n cached-n
-    :plat-reached plat-reached :boot-affected? boot-affected? :fork-relative? (boolean fork-relative?)}))
+(defn- test-batch-blocked [st b branch-cid deleted-main-tests cached-n agent-id reply-ch]
+  (let [del-results (attach-var-refs @(:conn st)
+                      (mapv (fn [sym]
+                              {:seon.test/digest (str "deleted:" sym ":" (subs (str branch-cid) 0 8))
+                               :seon.test/var sym :seon.test/kind :deftest :seon.test/pass? false
+                               :seon.test/ms 0.0 :seon.test/ticks 0 :seon.test/bytes 0
+                               :seon.test/report (str "Refused: branch " b " deleted existing :main test " sym
+                                                      ". Accretion requires preserving existing callers & proofs.")})
+                            deleted-main-tests))
+        ans {:ok? false :branch b :ran (count del-results) :cached cached-n
+             :deleted-main-tests deleted-main-tests :results del-results :generative-failures []}
+        tx-ops (cond-> [{:op :record-test-results :branch b :commit branch-cid :results del-results
+                         :ran (count del-results) :cached cached-n :reply-ch reply-ch :reply-val ans}]
+                 agent-id (conj {:op :send-message :from :test :to agent-id :type :test-failure
+                                 :body (str "Refused: deleted existing :main tests " (pr-str deleted-main-tests))}))] 
+    [st {:tx tx-ops ::flow/report [(str "[:test] REFUSED " b ": deleted :main tests " (pr-str deleted-main-tests))]}]))
 
-(defn- test-batch-blocked
-  [st b branch-cid deleted-main-tests cached-n agent-id reply-ch]
-  (let [del-results (attach-var-refs
-                      @(:conn st)
-                      (mapv
-                        (fn [sym]
-                          {:seon.test/digest
-                           (str
-                             "deleted:"
-                             sym
-                             ":"
-                             (subs (str branch-cid) 0 8)),
-                           :seon.test/var sym,
-                           :seon.test/kind :deftest,
-                           :seon.test/pass? false,
-                           :seon.test/ms 0.0,
-                           :seon.test/ticks 0,
-                           :seon.test/bytes 0,
-                           :seon.test/report
-                           (str
-                             "Refused: branch "
-                             b
-                             " deleted existing :main test "
-                             sym
-                             ". Accretion requires preserving existing callers & proofs.")})
-                        deleted-main-tests))
-        ans {:ok? false,
-             :branch b,
-             :ran (count del-results),
-             :cached cached-n,
-             :deleted-main-tests deleted-main-tests,
-             :results del-results,
-             :generative-failures []}
-        tx-ops (cond->
-                 [{:op :record-test-results,
-                   :branch b,
-                   :commit branch-cid,
-                   :results del-results,
-                   :ran (count del-results),
-                   :cached cached-n,
-                   :reply-ch reply-ch,
-                   :reply-val ans}]
-                 agent-id
-                 (conj
-                   {:op :send-message,
-                    :from :test,
-                    :to agent-id,
-                    :type :test-failure,
-                    :body
-                    (str
-                      "Refused: deleted existing :main tests "
-                      (pr-str deleted-main-tests))}))]
-    [st
-     {:tx tx-ops,
-      :clojure.core.async.flow/report
-      [(str
-         "[:test] REFUSED "
-         b
-         ": deleted :main tests "
-         (pr-str deleted-main-tests))]}]))
-
-(defn- test-batch-cached
-  [st
-   b
-   branch-cid
-   cached-n
-   boot-affected?
-   plat-reached
-   agent-id
-   branch-tx
-   reply-ch]
-  (let [ans {:ok? true,
-             :branch b,
-             :ran 0,
-             :cached cached-n,
-             :boot-affected? boot-affected?,
-             :platform-tests-reached plat-reached,
-             :results []}]
+(defn- test-batch-cached [st b branch-cid cached-n boot-affected? plat-reached agent-id branch-tx reply-ch]
+  (let [ans {:ok? true :branch b :ran 0 :cached cached-n :boot-affected? boot-affected?
+             :platform-tests-reached plat-reached :results []}]
     [(update st :cached-hits + cached-n)
-     {:tx
-      [{:reply-ch reply-ch,
-        :cached cached-n,
-        :agent-id agent-id,
-        :reply-val ans,
-        :op :record-test-results,
-        :commit branch-cid,
-        :tested-tx branch-tx,
-        :branch b,
-        :ran 0,
-        :results []}],
-      :clojure.core.async.flow/report
-      [(str
-         "[:test] 100% reach-cache hit on "
-         b
-         " ("
-         cached-n
-         " green)")]}]))
+     {:tx [{:op :record-test-results :branch b :commit branch-cid :tested-tx branch-tx :agent-id agent-id
+            :results [] :ran 0 :cached cached-n :reply-ch reply-ch :reply-val ans}]
+      ::flow/report [(str "[:test] 100% reach-cache hit on " b " (" cached-n " green)")]}]))
 
 (defn- test-batch-dispatch
   [st plan agent-id branch-tx reply-ch]
@@ -446,101 +328,6 @@
                                                              reply-ch)
       :else (test-batch-dispatch st plan agent-id branch-tx reply-ch))))
 
-(defn- test-batch
-  [st msg]
-  (let [{:keys [branch agent-id branch-tx vars force? reply-ch]} msg]
-    (try
-      (let [conn (:conn st)
-            st (assoc st :reach (code/update-reach-graph (:reach st) conn))
-            db @conn
-            b (or branch :main)
-            fpt (when (not= b :main) (store/fork-parent-target db b agent-id))]
-        (if (and fpt (not (store/branch? conn (:target-branch fpt))))
-          (test-batch-conflict st b agent-id
-            {:ok? false :conflicts [{:entity [:seon.agent/id (:target-id fpt)] :reason :missing-target-branch
-                                     :message (str "Fork parent branch " (:target-branch fpt) " no longer exists")}]}
-            reply-ch)
-          (let [tconn (when fpt (store/connect (:cfg st) (:target-branch fpt)))]
-            (try
-              (let [ours-conn (or tconn conn)
-                    merge-plan (when (not= b :main)
-                                 (if fpt
-                                   (merge/three-way tconn (:cfg st) b {:exclude-agent (:agent-id fpt) :include-session-for (:target-id fpt)})
-                                   (merge/three-way conn (:cfg st) b)))]
-                (if (and merge-plan (not (:ok? merge-plan)))
-                  (test-batch-conflict st b agent-id merge-plan reply-ch)
-                  (let [plan (test-batch-plan st ours-conn db b merge-plan vars force? (boolean fpt))]
-                    (test-batch-run st plan agent-id branch-tx reply-ch))))
-              (finally (when tconn (d/release tconn)))))))
-      (catch Throwable ex
-        (test-batch-crash st branch agent-id reply-ch ex)))))
-
-(defn- test-fork-child-exception
-  [st sub-id parent-id error]
-  (let [pinfo (get-in st [:parents parent-id])
-        err-msg (str error)
-        st1 (-> st
-             (update :active-subs dissoc sub-id)
-             (update :parents dissoc parent-id)
-             (update
-               :sub-queue
-               #(filterv (fn [s] (not= parent-id (:parent-id s))) %))
-             drain-sub-queue)]
-    (reply! (:reply-ch pinfo) {:ok? false, :error err-msg})
-    [st1
-     (cond->
-       {:clojure.core.async.flow/report
-        [(str
-           "[:test] load/compile failure on "
-           (:branch pinfo)
-           ": "
-           err-msg)]}
-       (:agent-id pinfo)
-       (assoc
-         :tx
-         [{:op :send-message,
-           :from :test,
-           :to (:agent-id pinfo),
-           :type :test-failure,
-           :body
-           (str
-             "Branch failed to load in isolated test worker: "
-             err-msg
-             "\nFix the missing namespace `:require` or unresolved var on your branch, verify it, and call (user/ready!) again.")}])
-       (not (:agent-id pinfo))
-       (assoc
-         :clojure.core.async.flow/error
-         [{:proc :test, :batch-id sub-id, :error err-msg}]))]))
-
-(defn- test-fork-child-exited
-  [st msg]
-  (let [sub-id (:batch-id msg)]
-    (if-let [parent-id (get-in st [:active-subs sub-id])]
-      (let [pinfo (get-in st [:parents parent-id])
-            err-msg (str
-                      "Test worker crashed: status "
-                      (:raw-status msg))]
-        (reply! (:reply-ch pinfo) {:ok? false, :error err-msg})
-        [(-> st
-          (update :active-subs dissoc sub-id)
-          (update :parents dissoc parent-id)
-          drain-sub-queue)
-         (cond->
-           {:clojure.core.async.flow/error
-            [{:proc :test, :batch-id sub-id, :crashed-pid (:pid msg)}]}
-           (:agent-id pinfo)
-           (assoc
-             :tx
-             [{:op :send-message,
-               :from :test,
-               :to (:agent-id pinfo),
-               :type :test-failure,
-               :body
-               (str
-                 err-msg
-                 "\nInspect your branch changes and call (user/ready!) again.")}]))])
-      [st nil])))
-
 (defn- test-fork-slow-tier
   [st1 parent-id pinfo]
   (let [slow (:deferred-slow pinfo)
@@ -641,27 +428,141 @@
          (:cached-count pinfo 0)
          " cached)")]}]))
 
-(defn- test-fork-batch-done
-  [st sub-id parent-id f]
-  (let [pinfo (-> (get-in st [:parents parent-id])
-               (update :pending-subs disj sub-id)
-               (update :results into (:results f))
-               (update :gen-failures into (:generative-failures f))
-               (update :worker-pids conj (:worker-pid f)))
-        st1 (-> st
-             (update :active-subs dissoc sub-id)
-             (assoc-in [:parents parent-id] pinfo)
-             drain-sub-queue)]
-    (cond
-      (seq (:pending-subs pinfo)) [st1 nil]
-      (and
-        (every? :seon.test/pass? (:results pinfo))
-        (empty? (:gen-failures pinfo))
-        (seq (:deferred-slow pinfo))) (test-fork-slow-tier
-                                        st1
-                                        parent-id
-                                        pinfo)
-      :else (test-fork-finish st1 parent-id pinfo))))
+(defn- test-fork-batch-done [st sub-id parent-id f]
+  (if-let [p0 (get-in st [:parents parent-id])]
+    (let [pinfo (-> p0
+                    (update :pending-subs disj sub-id)
+                    (update :results into (:results f))
+                    (update :gen-failures into (:generative-failures f))
+                    (update :worker-pids conj (:worker-pid f)))
+          st1 (-> st (update :active-subs dissoc sub-id) (assoc-in [:parents parent-id] pinfo) drain-sub-queue)]
+      (cond
+        (seq (:pending-subs pinfo)) [st1 nil]
+        (and (every? :seon.test/pass? (:results pinfo)) (empty? (:gen-failures pinfo)) (seq (:deferred-slow pinfo)))
+        (test-fork-slow-tier st1 parent-id pinfo)
+        :else (test-fork-finish st1 parent-id pinfo)))
+    [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil]))
+
+(defn- branch-cand-reach [conn db reach b plan]
+  (let [tdb (d/branch-as-db (:store db) b)
+        cand-db (candidate-merged-db db tdb plan)
+        ov (build-branch-overlay conn plan b cand-db)]
+    {:overlay ov
+     :reach (reach/apply-overlay-to-reach-graph cand-db reach ov)}))
+
+(defn- test-batch-plan
+  {:cost/ticks 5000000}
+  [st conn db b runtime-plan vars force? fpt]
+  (let [theirs-db (if (= b :main) db (d/branch-as-db (:store db) b))
+        branch-cid (d/commit-id theirs-db)
+        {:keys [overlay reach]} (if runtime-plan
+                                  (branch-cand-reach conn db (:reach st) b runtime-plan)
+                                  {:overlay nil :reach (:reach st)})
+        cand-reach reach
+        base-reach (if fpt
+                     (:reach (branch-cand-reach conn db (:reach st) (:target-branch fpt)
+                                                (merge/three-way conn (:cfg st) (:target-branch fpt) {:skip-health? true})))
+                     (:reach st))
+        deleted-main-tests (when (and overlay (empty? vars))
+                             (vec (sort (remove #(contains? (:tests cand-reach) %)
+                                                (keys (get-in st [:reach :tests]))))))
+        base-tests (:tests base-reach)
+        base-digests (:digests base-reach)
+        all-tests (:tests cand-reach)
+        target-tests (cond
+                       (seq vars) (select-keys all-tests vars)
+                       (and overlay (not force?))
+                       (into {} (filter (fn [[sym dg]] (not= dg (get base-tests sym)))) all-tests)
+                       :else all-tests)
+        uncached-tests (vec
+                        (keep (fn [[sym dg]]
+                                (when (or force? (not (cached-green? db dg)))
+                                  {:var sym :digest dg :ns (symbol (namespace sym))
+                                   :est-ms (last-known-ms db sym)}))
+                              (sort-by first target-tests)))
+        contracted-map (if (seq vars) {} (:contracted-vars cand-reach))
+        uncached-gens (vec
+                       (keep (fn [[vsym fk]]
+                               (when-let [dg (get-in cand-reach [:digests fk])]
+                                 (when (or force? (not overlay) (not= dg (get base-digests fk)))
+                                   (let [gdg (str "gen:" dg)]
+                                     (when (or force? (not (cached-green? db gdg)))
+                                       {:var vsym :digest gdg :ns (symbol (namespace vsym))
+                                        :est-ms 5.0})))))
+                             (sort-by first contracted-map)))
+        cached-n (+ (- (count (if (seq vars) target-tests all-tests)) (count uncached-tests))
+                    (- (count contracted-map) (count uncached-gens)))
+        plat-reached (vec (sort (filter #(contains? (:platform-tests cand-reach) %)
+                                        (map :var uncached-tests))))
+        boot-affected? (boolean (:boot-affected? overlay))]
+    {:b b :branch-cid branch-cid :overlay overlay :deleted-main-tests deleted-main-tests
+     :uncached-tests uncached-tests :uncached-gens uncached-gens :cached-n cached-n
+     :plat-reached plat-reached :boot-affected? boot-affected? :fork-relative? (boolean fpt)}))
+
+(defn- test-batch
+  [st msg]
+  (let [{:keys [branch agent-id branch-tx vars force? reply-ch]} msg]
+    (try
+      (let [conn (:conn st)
+            st (assoc st :reach (code/update-reach-graph (:reach st) conn))
+            db @conn
+            b (or branch :main)
+            fpt (when (not= b :main) (store/fork-parent-target db b agent-id))]
+        (if (and fpt (not (store/branch? conn (:target-branch fpt))))
+          (test-batch-conflict st b agent-id
+            {:ok? false :conflicts [{:entity [:seon.agent/id (:target-id fpt)] :reason :missing-target-branch
+                                     :message (str "Fork parent branch " (:target-branch fpt) " no longer exists")}]} reply-ch)
+          (let [tconn (when fpt (store/connect (:cfg st) (:target-branch fpt)))]
+            (try
+              (let [merge-plan (when (not= b :main)
+                                 (if fpt
+                                   (merge/three-way tconn (:cfg st) b {:exclude-agent (:agent-id fpt) :include-session-for (:target-id fpt)})
+                                   (merge/three-way conn (:cfg st) b)))]
+                (if (and merge-plan (not (:ok? merge-plan)))
+                  (test-batch-conflict st b agent-id merge-plan reply-ch)
+                  (let [runtime-plan (if fpt
+                                       (merge/three-way conn (:cfg st) b {:skip-health? true :exclude-agent (:agent-id fpt)})
+                                       merge-plan)
+                        plan (test-batch-plan st conn db b runtime-plan vars force? fpt)]
+                    (test-batch-run st plan agent-id branch-tx reply-ch))))
+              (finally (when tconn (d/release tconn)))))))
+      (catch Throwable ex
+        (test-batch-crash st branch agent-id reply-ch ex)))))
+
+(defn- purge-parent-subs [st parent-id]
+  (-> st
+      (update :active-subs (fn [m] (into {} (remove #(= parent-id (val %))) m)))
+      (update :parents dissoc parent-id)
+      (update :sub-queue #(filterv (fn [s] (not= parent-id (:parent-id s))) %))
+      drain-sub-queue))
+
+(defn- test-fork-child-exited [st msg]
+  (let [sub-id (:batch-id msg)]
+    (if-let [parent-id (get-in st [:active-subs sub-id])]
+      (if-let [pinfo (get-in st [:parents parent-id])]
+        (let [err-msg (str "Test worker crashed: status " (:raw-status msg))
+              st1 (purge-parent-subs st parent-id)]
+          (reply! (:reply-ch pinfo) {:ok? false :error err-msg})
+          [st1 (cond-> {::flow/error [{:proc :test :batch-id sub-id :crashed-pid (:pid msg)}]}
+                 (:agent-id pinfo)
+                 (assoc :tx [{:op :send-message :from :test :to (:agent-id pinfo) :type :test-failure
+                              :body (str err-msg "\nInspect your branch changes and call (user/ready!) again.")}]))])
+        [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil])
+      [st nil])))
+
+(defn- test-fork-child-exception [st sub-id parent-id error]
+  (if-let [pinfo (get-in st [:parents parent-id])]
+    (let [err-msg (str error)
+          st1 (purge-parent-subs st parent-id)]
+      (reply! (:reply-ch pinfo) {:ok? false :error err-msg})
+      [st1 (cond-> {::flow/report [(str "[:test] load/compile failure on " (:branch pinfo) ": " err-msg)]}
+             (:agent-id pinfo)
+             (assoc :tx [{:op :send-message :from :test :to (:agent-id pinfo) :type :test-failure
+                          :body (str "Branch failed to load in isolated test worker: " err-msg
+                                     "\nFix the missing namespace `:require` or unresolved var on your branch, verify it, and call (user/ready!) again.")}])
+             (not (:agent-id pinfo))
+             (assoc ::flow/error [{:proc :test :batch-id sub-id :error err-msg}]))])
+    [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil]))
 
 (defn- test-fork-child-frame
   [st f]
@@ -681,15 +582,41 @@
                                      f)
       :else [st nil])))
 
-(defn- test-fork-ev
-  [st msg]
-  (case
-    (:ev msg)
-    :child-frame
-    (test-fork-child-frame st (:frame msg))
-    :child-exited
-    (test-fork-child-exited st msg)
+(defn- test-fork-refused [st msg]
+  (let [sub-id (:batch-id msg)
+        pids (if-let [p (and sub-id (get-in st [:active-subs sub-id]))] [p] (vec (distinct (vals (:active-subs st)))))
+        err-msg (str "Test fork refused (code " (:code msg) ")")]
+    (if (empty? pids)
+      [st {::flow/error [{:proc :test :ev :fork-refused :batch-id sub-id :code (:code msg) :error err-msg}]}]
+      (reduce (fn [[s out] parent-id]
+                (if-let [pinfo (get-in s [:parents parent-id])]
+                  (do (reply! (:reply-ch pinfo) {:ok? false :error err-msg})
+                      [(purge-parent-subs s parent-id)
+                       (cond-> (update out ::flow/report (fnil conj []) (str "[:test] fork refused on " (:branch pinfo) ": " err-msg))
+                         (:agent-id pinfo)
+                         (update :tx (fnil conj []) {:op :send-message :from :test :to (:agent-id pinfo) :type :test-failure
+                                                     :body (str err-msg "\nCall (user/ready!) again to retry tests.")})
+                         (not (:agent-id pinfo))
+                         (update ::flow/error (fnil conj []) {:proc :test :ev :fork-refused :batch-id (or sub-id parent-id) :code (:code msg) :error err-msg}))])
+                  [s out]))
+              [st {}] pids))))
+
+(defn- test-fork-ev [st msg]
+  (case (:ev msg)
+    :child-frame (test-fork-child-frame st (:frame msg))
+    :child-exited (test-fork-child-exited st msg)
+    :fork-refused (test-fork-refused st msg)
     [st nil]))
+
+(defn- reach-relevant-tx? [db tx-data]
+  (let [rm (:ref-ident-map db)]
+    (boolean
+     (some (fn [dt]
+             (let [a (:a dt) kw (if (keyword? a) a (get rm a))]
+               (when (keyword? kw)
+                 (let [ns (str (namespace kw))]
+                   (or (str/starts-with? ns "seon.code.") (= ns "seon.schema") (= ns "seon.rule"))))))
+           tx-data))))
 
 (defn test-proc
   {:malli/schema
@@ -746,7 +673,7 @@
       [st nil]
       (case
         cid
-        :db (let [reach' (code/update-reach-graph (:reach st) (:conn st))] [(assoc st :reach reach') nil])
+        :db (let [c (:conn st) tds (:tx-data msg) reach' (if (and (:commit msg) (seq tds) (not (reach-relevant-tx? @c tds))) (assoc (:reach st) :commit (:commit msg)) (code/update-reach-graph (:reach st) c))] [(assoc st :reach reach') nil])
         :batch
         (test-batch st msg)
         :fork-ev

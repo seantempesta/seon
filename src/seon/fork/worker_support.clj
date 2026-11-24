@@ -243,33 +243,33 @@
         (d/transact conn {:tx-data missing-ents})))))
 
 (defn sync-conn-to-latest-branch-head!
-  "Lazily syncs a warm agent worker ONLY when it wakes for `:eval` or `:run-turn`:
-   - If `:main` moved since last wake: installs any new `:main` schema attrs & loads `:main` form delta,
-     then re-overlays this branch's own edits on top.
-   - If this branch moved externally: refreshes `conn`, loads branch delta, and refreshes `@ctx`."
+  "Lazily syncs a warm agent worker on wake: adopts external branch moves via `store/adopt-head!` BEFORE `:main` schema sync (no dual-move rollback race), then loads deltas."
   {:malli/schema [:=> [:cat :seon.host/conn :keyword :any :any] :any]}
   [conn branch last-cid last-main-cid]
   (let [latest-db (store/head conn branch)
         latest-cid (d/commit-id latest-db)
         latest-main-cid (d/commit-id (store/head conn :main))
-        main-moved? (and (not= branch :main)
-                         last-main-cid latest-main-cid
-                         (not= last-main-cid latest-main-cid))
-        branch-moved? (and last-cid latest-cid (not= last-cid latest-cid))]
+        main-moved? (and (not= branch :main) last-main-cid latest-main-cid (not= last-main-cid latest-main-cid))
+        cur-cid0 (d/commit-id @conn)
+        branch-moved? (and last-cid latest-cid (not= last-cid latest-cid))
+        head-behind? (and latest-cid (not= cur-cid0 latest-cid))
+        ds (when branch-moved? (try (d/changes conn last-cid latest-cid) (catch Throwable _ nil)))]
+    (when (or branch-moved? head-behind?)
+      (store/adopt-head! conn latest-db)
+      (when (and branch-moved? (not main-moved?))
+        (code/load-delta! conn last-cid latest-cid true)))
     (when main-moved?
       (sync-missing-main-schema! conn branch)
       (try
         (code/load-delta! conn last-main-cid latest-main-cid)
         (when-let [base-cid (d/merge-base conn :main branch)]
-          (when (not= base-cid latest-cid)
-            (code/load-delta! conn base-cid latest-cid true)))
+          (let [cur-cid (d/commit-id @conn)]
+            (when (not= base-cid cur-cid)
+              (code/load-delta! conn base-cid cur-cid true))))
         (catch Throwable _ nil)))
     (when branch-moved?
-      (let [ds (try (d/changes conn last-cid latest-cid) (catch Throwable _ nil))]
-        (swap! (:wrapped-atom conn) (fn [cur] (let [w (:writer cur)] (cond-> latest-db w (assoc :writer w)))))
-        (code/load-delta! conn last-cid latest-cid true)
-        (ctx/refresh-active! latest-db ds)))
-    {:branch-cid latest-cid :main-cid latest-main-cid}))
+      (ctx/refresh-active! @conn ds))
+    {:branch-cid (d/commit-id @conn) :main-cid latest-main-cid}))
 
 (defonce ^:private ^:seon.flow/edge spliced-rebound-tx (atom nil))
 

@@ -75,7 +75,7 @@
    :seon.config/ai-thinking              :enabled
    :seon.config/ai-reasoning-effort      :low
    :seon.config/max-tool-turns           32
-   :seon.config/viewport-screenshot?     false
+   :seon.config/viewport-screenshot?     true
    :seon.config/ns-outline-tokens        6000
    :seon.config/eval-out-chars           10000})
 
@@ -229,9 +229,7 @@
     (d/commit-as-db conn cid)))
 
 (defn agent-seen-message-ids
-  "Returns the set of `:seon.agent.message/id` UUIDs ever seen by `agent-id` on `branch-db`,
-   reading Datahike's native `(d/history branch-db)` so retracted/compacted evals never replay
-   already-processed inbox messages. Respects `d/as-of` time points automatically."
+  "Returns `:seon.agent.message/id` UUIDs ever seen by `agent-id` across `(d/history branch-db)`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:set :any]]}
   [branch-db agent-id]
   (if (and branch-db agent-id
@@ -349,7 +347,7 @@
   (cw/lru-cache-factory {} :threshold (long threshold)))
 
 (defn lru-get!
-"Hot-reload-safe bounded LRU lookup-or-miss that composes transparently with `datahike.reads/with-reads`:\n   when `datahike.index.interface/*reads*` is bound, cached entries retain and replay the exact index\n   read ranges of `compute-fn` so incremental UI walks never lose reactive dependencies on cache hits."
+"Bounded LRU lookup-or-miss that replays recorded `datahike.reads` ranges on cache hits."
   {:malli/schema [:=> [:cat :any :int :any :seon.host/fn] :any]}
 [cache-atom threshold k compute-fn]
 (when-not (satisfies? cache/CacheProtocol @cache-atom)
@@ -709,9 +707,7 @@
  (when (and db (instance? datahike.db.DB db)) (d/commit-id db)))
 
 (defn db-cache-sig
- "Stable, cross-store-safe cache key for live `DB` / `AsOfDB` handles:
-  `[store-id branch commit-id max-tx time-point]` (nil for un-cacheable values).
-  Centralizing here guarantees keys never collide across distinct LMDB stores or branches."
+ "Cross-store cache key `[store-id branch commit-id max-tx time-point]` for live DB/AsOfDB."
  {:malli/schema [:=> [:cat :any] :any]
   :cost/ticks 50000}
  [db]
@@ -729,10 +725,7 @@
   :else nil))
 
 (defn cache-key
- "Builds a cross-store-safe LRU cache key from `db`'s stable signature plus `extra`
-  (e.g. `[nsym max-n]`). Returns nil when `db` is not cacheable so callers fall back to
-  computing. Prefer this over hand-rolled `[store-id ...]` vectors to avoid collisions
-  across distinct stores/branches."
+ "Cross-store LRU cache key from `(db-cache-sig db)` plus optional `extra`."
  {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat :any [:sequential :any]] :any]]
   :cost/ticks 50000}
  ([db] (db-cache-sig db))
@@ -830,8 +823,7 @@
   false)
 
 (defn without-agent-eval-reads
-  "Invokes 0-arg `f`, temporarily binding `di/*reads*` nil ONLY when `*capturing-agent-eval-reads?*` is true.
-   Preserves 100% of UI walk and Datalog rule `datahike.reads` invalidation while eliminating self-inflicted plumbing noise."
+  "Invokes `f` with `di/*reads*` nil when `*capturing-agent-eval-reads?*` is true."
   {:malli/schema [:=> [:cat [:=> [:cat] :any]] :any]
    :cost/ticks 100000}
   [f]
@@ -900,10 +892,10 @@
                              ags))
        _ (when (seq archive-tx)
            (d/transact conn archive-tx))
-       deleted (volatile! 0)]
+       deleted (volatile! [])]
    (doseq [b to-del]
-     (try (d/delete-branch! conn b) (vswap! deleted inc) (catch Throwable _ nil)))
-   {:ok? true :deleted @deleted :archived (count archive-tx) :kept (min (count merged) (long keep-n))})))
+     (try (d/delete-branch! conn b) (vswap! deleted conj b) (catch Throwable _ nil)))
+   (with-meta {:ok? true :deleted (count @deleted) :archived (count archive-tx) :kept (min (count merged) (long keep-n))} {:pruned-branches @deleted}))))
 
 (defn ^:seon.flow/edge gc-store!
   "Prunes merged branches beyond `:seon.config/gc-keep-merged-branches` and runs `d/gc-storage` with cutoff `:seon.config/gc-history-hours` ago (preserving active branch merge-bases)."
@@ -924,4 +916,17 @@
          cutoff (java.util.Date. (- (System/currentTimeMillis) (* hrs 3600 1000)))
          swept @(d/gc-storage conn cutoff)
          n-swept (if (coll? swept) (count swept) swept)]
-     {:ok? true :pruned pruned :swept n-swept :history-hours hrs})))
+     {:ok? true :pruned pruned :pruned-branches (:pruned-branches (meta pruned) []) :swept n-swept :history-hours hrs})))
+
+(defn ^:seon.flow/edge adopt-head!
+  "Atomically adopts `db` onto `conn`, preserving live `(:writer cur)` and monotonic `:max-tx`."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db] :seon.host/db]
+   :cost/ticks 200000}
+  [conn db]
+  (swap! (:wrapped-atom conn)
+         (fn [cur]
+           (if (and (= (get-in cur [:config :branch]) (get-in db [:config :branch]))
+                    (> (long (:max-tx cur 0)) (long (:max-tx db 0))))
+             cur
+             (let [w (:writer cur)]
+               (cond-> db w (assoc :writer w)))))))

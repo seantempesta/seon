@@ -453,7 +453,7 @@
                      (if (seq m-fs) m-fs b-fs))
         added-b (when (seq m-fs)
                   (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                          (when-not (contains? m-keys key) src))
+                          (when (and (not (contains? m-keys key)) (not (contains? base-by-k key))) src))
                         b-fs))]
     (str/join "\n\n" (concat kept-m added-b))))
 
