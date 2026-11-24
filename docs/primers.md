@@ -1,15 +1,17 @@
 # Seon Agent Primers
 Just-in-time behavioral primers projected dynamically into agent context via declarative `:seon.rule/*` Datalog rules.
 ## Messaging
-- When the user says "Hello" or asks a question you can answer directly from context, reply immediately in clear, warm plain prose with **0 tool calls**.
+
+- When the user says "Hello" or asks a question you can answer directly from context, reply immediately in clear, warm Markdown with **0 tool calls**.
 - Do not invent tasks, edit files, or run speculative REPL lookups for simple greetings or questions.
 - For complex or multi-step work, update live visual progress via `user/set-status!` and delegate or research cleanly.
-- Always finish with a clear plain-prose reply summarizing the answer or outcome for the user.
+- Always finish with a clear Markdown reply (headings, tables, diffs, backtick entity links, or live `hiccup` / `seon-view` blocks when helpful) summarizing the answer or outcome.
 ## Live Progress
+
 - Whenever multi-step work takes more than a quick step, keep the human informed with a live visual status card instead of a long blank spinner:
   `(user/set-status! {:label "Inspecting schemas" :detail "Checking live Datahike edges" :pct 40 :stage :researching :svg "<svg viewBox=\"0 0 120 24\" width=\"120\" height=\"24\"><rect x=\"2\" y=\"6\" width=\"48\" height=\"12\" rx=\"6\" fill=\"#f0b429\"/></svg>"})`
 - Updates upsert `:seon.ui.status/entity` cleanly and render through `seon.render.status/render-status-card` (with safe SVG sanitization and progress bar) right in the human's Session view.
-- Call `(user/clear-status!)` (or set `:pct 100 :stage :done`) when done, then send your final plain-prose answer.
+- Call `(user/clear-status!)` (or set `:pct 100 :stage :done`) when done, then send your final Markdown answer.
 ## Data Modeling
 
 - Follow `docs/rules-of-thumb.md`: fix the data model first (true `:db.type/ref` edges, all real datoms preserved on entities, zero process flags), write declarative `:seon.rule/*` Datalog rules to derive signals/projections, use multiple pure `ns-map -> ns-map` renderers (`-chip`/`-row`/`-card`/`-full`) for distinct footprints, and use rule `:params` for situational detail on one card.
@@ -62,3 +64,7 @@ Just-in-time behavioral primers projected dynamically into agent context via dec
   - Define pure, non-private, non-`^:seon.flow/edge` `defn`s with `:malli/schema [:=> [:cat [:map [:my.ns/entity :my.ns/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]` (declare any situational rule `:params` as optional keys in the input map, and set realistic `:cost/ticks`).
   - Provide compact, medium, and full footprints (`-chip` ~180px, `-row` ~220px, `-card` ~360px, `-full` ~540px) with `:data-min-width` / `:seon.ui/min-width` hints so `seon.render.fit/discover-renderers` and `seon.render.fit/upgrade-ladder` auto-discover and fit them in **both** LLM wire context (`:target :wire`) and the Web UI (`:target :html`) with zero manual wiring.
 - **Core invariant:** Always fix the underlying data model, general rule, or pure renderer so every future agent benefits — never patch a single agent instance or add caller guards. Verify green with `(user/run-tests!)` and `(user/health)` (`0` errors, `0` `:broken-doc-ref`, `0` `:unused-require`), then finish cleanly via `(user/finish-review! summary)` (or `(user/ready!)`).
+## Interactive Markdown & Canvas
+- Replies render through `seon.render.markdown/render-markdown-blocks` with full CommonMark/GFM support: headings, pipe tables, blockquotes & GitHub alerts (`> [!NOTE]`/`[!TIP]`/`[!WARNING]`), task checklists (`- [x]`/`- [ ]`), strikethrough, and safe links/images.
+- **Backtick deep-links:** citing a var (`` `seon.web/eval-snippet!` ``), namespace (`` `seon.web.router` ``), task, rule, agent, schema keyword, or doc path in backticks automatically renders a hovercard-enabled bookmarkable link.
+- **Interactive fenced blocks:** use `` ```diff `` for colorized diffs, `` ```clojure `` / `` ```repl `` for Copy + 1-click **Run in REPL** (`seon.web/eval-snippet!`), `` ```hiccup `` for live sanitized inline HTML/SVG cards, and `` ```seon-view `` (e.g. `{:var seon.render.status/render-status-card :data {...}}` or `{:ref [:seon.task/id ...]}`) for live reactive cards.

@@ -1,10 +1,5 @@
 (ns seon.web
-  "The `:web` Flow proc (`:io` workload) — 100% Inside-Out, Non-Blocking HTTP/SSE Edge +
-   120fps Incremental `datahike.reads` Walk + Live MCP:
-   - ZERO ephemeral UI navigation state in `web-proc`: all view mode, viewing agent,
-     inspector stack, and lab prefs live exclusively in Datahike (`:user/default`).
-   - ZERO blocking calls inside `web-proc` (`seon.health` verified).
-   - Serves live MCP JSON-RPC 2.0 at `POST /mcp`."
+  "The `:web` Flow proc (`:io` workload): non-blocking HTTP/SSE edge, incremental `datahike.reads` walk, `/call` & `/mcp` dispatch."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
@@ -562,3 +557,8 @@
   "Toggles `:seon.user/expert-mode?` on `:user/default` between Everyday and Expert modes."
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map] :cost/ticks 200000}
   [& args] (apply actions/toggle-expert-mode! args))
+
+(defn ^:seon/callable eval-snippet!
+  "Evaluates Clojure snippet `code` on the viewed agent branch."
+  {:malli/schema [:=> [:cat :map :string] :map] :cost/ticks 500000}
+  [& args] (apply actions/eval-snippet! args))
