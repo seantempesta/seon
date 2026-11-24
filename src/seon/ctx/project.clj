@@ -265,7 +265,7 @@
       (not any-docs?) (conj :rule.ctx/citing-docs)
       (not evs?) (conj :rule.ctx/recent-eval-results)
       (and (not (:seon.agent/target ag)) (not (:seon.agent/forked-from ag))) (conj :rule.ctx/review-target)
-      (and (not (:seon.agent/forked-from ag)) (empty? (:seon.agent/example-refs ag)) (empty? (:seon.agent/examples ag))) (conj :rule.ctx/agent-prefix-sessions)
+      (and (not (:seon.agent/forked-from ag)) (empty? (:seon.agent/example-refs ag)) (empty? (:seon.agent/examples ag)) (not has-task?)) (conj :rule.ctx/agent-prefix-sessions)
       (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?))
       (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
 

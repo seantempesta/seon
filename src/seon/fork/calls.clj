@@ -129,13 +129,12 @@
     {:sent-to to :type msg-type}))
 
 (defn ^:seon.flow/edge spawn-agent!
-  "Spawns a child agent on a new branch from `{:id :branch :scope :role :goal :task}`."
+  "Spawns a normal or COW-forked agent on a branch via unified `:op :spawn-agent`. Supports `:id`, `:branch`, `:scope`, `:goal`, `:task`, `:tasks`, `:fork-from`, `:prefix-mode` (`:continue`/`:example`/`:fresh`), `:merge-target` (`:main`, `:none`, branch kw, or `[:seon.agent/id parent]`), `:auto-merge?`, `:pause-parent?`, `:examples`, `:target`."
   {:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [{:keys [id branch scope role goal task]}]
-  (when-let [{:keys [out agent-id]} *agent-ctx*]
-    (let [b (or branch (keyword "branch" (str (namespace id) "." (name id))))]
-      (a/>!! out {:ev :tx-main :op :spawn-agent :parent agent-id :id id :branch b :scope scope :role (or role :worker) :goal (or goal "") :task task})
-      {:spawned id :branch b :scope scope})))
+  [{:keys [id branch] :as spec}]
+  (when-let [{:keys [agent-id]} *agent-ctx*]
+    (let [b (or branch (keyword "branch" (str (or (namespace id) "agent") "." (name id))))]
+      (tx-main-sync! (merge {:op :spawn-agent :parent agent-id :branch b} spec)))))
 
 (defn ^:seon.flow/edge pin!
   "Pins an entity ref or map into `:seon.agent/pinned` on `@ctx`."

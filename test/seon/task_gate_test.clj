@@ -13,7 +13,8 @@
             [seon.render.wire :as wire]
             [clojure.string :as str]
             [seon.transactor.spawn :as tspawn]
-            [seon.fork.calls :as fcalls]))
+            [seon.fork.calls :as fcalls]
+            [seon.transactor.calls :as tcalls]))
 
 (defn- setup-demo-vars! [conn]
   (let [src (str "(ns demo.gate-test (:require [clojure.test :refer [deftest is]]))\n"
@@ -298,3 +299,65 @@
       ;; 3. make-reexport-src emits :seon.code/reexport and stress-var follows it transparently
       (let [src ((requiring-resolve 'seon.code.rewrite.move/make-reexport-src) 'demo.from/adder 'child "(defn adder {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))" false 'demo.child)]
         (is (str/includes? src ":seon.code/reexport 'demo.child/adder"))))))
+
+(deftest unified-fork-subagent-competing-branches-and-rule-examples-test
+  (testing "1. Organic graph-driven :example/* matching via shared :seon.agent/tasks (zero hardcoded :examples on spawn)"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data [{:seon.task/id :template/review-and-improve :seon.task/title "Review & improve" :seon.task/done? false}
+                                  {:seon.agent/id :example/clean-fork-review :seon.agent/branch :main :seon.agent/role :worker
+                                   :seon.agent/paused? true :seon.agent/goal "Clean fork review"
+                                   :seon.agent/tasks #{[:seon.task/id :template/review-and-improve]}}]})
+      (let [ex-eid (:e (first (d/datoms @conn :avet :seon.agent/id :example/clean-fork-review)))]
+        (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :example/clean-fork-review
+                                     :seon.agent.eval/agent-ref ex-eid :seon.agent.eval/turn 1
+                                     :seon.agent.eval/code "(user/health)" :seon.agent.eval/value "{:ok? true}"}]}))
+      (let [st {:conn conn :cfg cfg :msg-seq 0 :writes 0 :last-commit (d/commit-id @conn) :last-tx (:max-tx @conn)}
+            [st1 _] (tspawn/handle-spawn-agent! st {:op :spawn-agent :id :w/parent :branch :branch/parent :scope 'demo.comp :goal "Parent work"} (d/commit-id @conn))
+            _ (let [pconn (store/connect cfg :branch/parent)]
+                (try
+                  (let [tx (code/file-import-tx @pconn "src/demo/comp.clj" "(ns demo.comp)\n(defn f [] :base)\n" false)
+                        pe (:e (first (d/datoms @pconn :avet :seon.agent/id :w/parent)))]
+                    (d/transact pconn {:tx-data (conj tx {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/parent
+                                                          :seon.agent.eval/agent-ref pe :seon.agent.eval/turn 1
+                                                          :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/value "2"})}))
+                  (finally (d/release pconn))))
+            ;; Spawn reviewer WITHOUT passing :examples — rule must match :example/clean-fork-review via shared :seon.agent/tasks!
+            [st2 _] (tspawn/handle-spawn-agent! st1 {:op :spawn-agent :id :rev/auto :branch :branch/rev-auto
+                                                     :fork-from :w/parent :prefix-mode :continue
+                                                     :merge-target [:seon.agent/id :w/parent]
+                                                     :tasks [:template/review-and-improve] :goal "Review parent"} (d/commit-id @conn))
+            rconn (store/connect cfg :branch/rev-auto)]
+        (try
+          (let [w (wire/build-live-wire-request @conn @rconn :rev/auto {:conn conn :vision? false})
+                txt (str/join "\n" (keep :content (:messages w)))]
+            (is (str/includes? txt "<agent id=\":w/parent\""))
+            (is (str/includes? txt "<agent id=\":example/clean-fork-review\" kind=\"example\""))
+            (is (= :branch/parent (:target-branch (store/fork-parent-target @conn :branch/rev-auto :rev/auto)))))
+          (finally (d/release rconn)))
+        (testing "2. :prefix-mode :fresh omits parent transcript while keeping COW branch inheritance"
+          (let [[st3 _] (tspawn/handle-spawn-agent! st2 {:op :spawn-agent :id :w/fresh-fork :branch :branch/fresh-fork
+                                                         :fork-from :w/parent :prefix-mode :fresh :merge-target :none
+                                                         :goal "Fresh look"} (d/commit-id @conn))
+                fconn (store/connect cfg :branch/fresh-fork)]
+            (try
+              (let [w (wire/build-live-wire-request @conn @fconn :w/fresh-fork {:conn conn :vision? false})
+                    txt (str/join "\n" (keep :content (:messages w)))]
+                (is (not (str/includes? txt "<agent id=\":w/parent\"")))
+                (is (nil? (store/fork-parent-target @conn :branch/fresh-fork :w/fresh-fork)))
+                (is (false? (:seon.agent/auto-merge? (d/pull @conn '[:seon.agent/auto-merge?] [:seon.agent/id :w/fresh-fork])))))
+              (finally (d/release fconn)))
+            (testing "3. Competing COW forks via :create-call (ask!) stay isolated with :merge-target :none"
+              (let [helpers {:reply! tmerge/reply! :db-notice tmerge/db-notice :focus-tx (fn [_] [])}
+                    [st4 _] (tcalls/handle-call-op! st3 {:op :create-call :caller :w/parent :callee :w/approach-a
+                                                         :prompt "Try A" :fork-from :w/parent :merge-target :none} (d/commit-id @conn) helpers)
+                    [_ _] (tcalls/handle-call-op! st4 {:op :create-call :caller :w/parent :callee :w/approach-b
+                                                       :prompt "Try B" :fork-from :w/parent :merge-target :none} (d/commit-id @conn) helpers)
+                    a-br (:seon.agent/branch (d/pull @conn '[:seon.agent/branch] [:seon.agent/id :w/approach-a]))
+                    b-br (:seon.agent/branch (d/pull @conn '[:seon.agent/branch] [:seon.agent/id :w/approach-b]))]
+                (is (store/branch? conn a-br))
+                (is (store/branch? conn b-br))
+                (is (nil? (store/fork-parent-target @conn a-br :w/approach-a)))
+                (is (nil? (store/fork-parent-target @conn b-br :w/approach-b)))
+                ;; Both branches inherited demo.comp/f from :branch/parent via COW fork!
+                (is (some? (first (d/datoms (store/head conn a-br) :avet :seon.code.var/name 'demo.comp/f))))
+                (is (some? (first (d/datoms (store/head conn b-br) :avet :seon.code.var/name 'demo.comp/f))))))))))))

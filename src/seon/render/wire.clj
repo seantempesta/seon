@@ -308,7 +308,7 @@ rtails/fallback-entity-renderers)
                  msig bsig
                  (:seon.agent/role ag) (:seon.agent/scope ag) task-ids (:seon.agent/goal ag)
                  (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
-                 (:seon.agent/context-prefs ag) (:seon.agent/forked-from ag) (:seon.agent/fork-commit ag)
+                 (:seon.agent/context-prefs ag) (:seon.agent/forked-from ag) (:seon.agent/fork-commit ag) (:seon.agent/prefix-mode ag)
                  (vec (sort-by pr-str (:seon.agent/examples ag))) (vec (sort-by pr-str (:seon.agent/example-refs ag)))
                  anchor-turn task? dis-key])
       cached (store/lru-get!

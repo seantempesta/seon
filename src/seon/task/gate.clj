@@ -349,14 +349,11 @@
                           (and (empty? rule-reasons) (>= (long (or tool-streak 0)) rev-every))
                           (conj [:periodic-review (long tool-streak)]))]
             (if (seq reasons)
-              (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))
-                  has-ex? (boolean (first (d/datoms main-db :avet :seon.agent/id :example/clean-fork-review)))
-                  spawn-op (cond-> {:op :spawn-agent :id rid :parent aid :forked-from aid
-                                    :tasks [:template/review-and-improve] :auto-merge? true
-                                    :goal (str "Review " aid " (triggered by " (pr-str reasons) ")")}
-                             has-ex? (assoc :examples [:example/clean-fork-review]))]
+              (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))]
               [{:op :transact :tx-data [{:seon.agent/id aid :seon.agent/paused? true}] :reason [:review-pause aid]}
-               spawn-op])
+               {:op :spawn-agent :id rid :parent aid :forked-from aid :prefix-mode :continue
+                :merge-target [:seon.agent/id aid] :tasks [:template/review-and-improve] :auto-merge? true
+                :goal (str "Review " aid " (triggered by " (pr-str reasons) ")")}] )
               []))))
 
       :else [])))

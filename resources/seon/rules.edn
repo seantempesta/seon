@@ -262,7 +262,7 @@
                      [?agent ?other-id ?mode ?pri ?tx]
                      (and
                       (or-join
-                       [?agent ?other-id ?tx]
+                       [?agent ?ag ?other-id ?tx]
                        (and
                         [$branch ?ag :seon.agent/id ?agent]
                         [$branch ?ag :seon.agent/forked-from ?other ?tx]
@@ -271,7 +271,25 @@
                         [$main ?ag :seon.agent/id ?agent]
                         [$main ?ag :seon.agent/forked-from ?other ?tx]
                         [$main ?other :seon.agent/id ?other-id]))
-                      [(ground :continue) ?mode]
+                      (or-join
+                       [?agent ?mode]
+                       (and
+                        [$branch ?a1 :seon.agent/id ?agent]
+                        [$branch ?a1 :seon.agent/prefix-mode ?mode])
+                       (and
+                        [$main ?a2 :seon.agent/id ?agent]
+                        [$main ?a2 :seon.agent/prefix-mode ?mode])
+                       (and
+                        (not-join
+                         [?agent]
+                         [$branch ?a3 :seon.agent/id ?agent]
+                         [$branch ?a3 :seon.agent/prefix-mode _])
+                        (not-join
+                         [?agent]
+                         [$main ?a4 :seon.agent/id ?agent]
+                         [$main ?a4 :seon.agent/prefix-mode _])
+                        [(ground :continue) ?mode]))
+                      [(not= ?mode :fresh)]
                       [(ground 100) ?pri])
                      (and
                       (or-join
@@ -291,7 +309,23 @@
                        (and
                         [$main ?ag :seon.agent/id ?agent]
                         [$main ?ag :seon.agent/examples ?other-id ?tx]
-                        [$main ?other :seon.agent/id ?other-id]))
+                        [$main ?other :seon.agent/id ?other-id])
+                       (and
+                        (or-join
+                         [?agent ?tid ?tx]
+                         (and
+                          [$branch ?ag :seon.agent/id ?agent]
+                          [$branch ?ag :seon.agent/tasks ?t ?tx]
+                          [$branch ?t :seon.task/id ?tid])
+                         (and
+                          [$main ?ag :seon.agent/id ?agent]
+                          [$main ?ag :seon.agent/tasks ?t ?tx]
+                          [$main ?t :seon.task/id ?tid]))
+                        [$main ?mt :seon.task/id ?tid]
+                        [$main ?ex :seon.agent/tasks ?mt]
+                        [$main ?ex :seon.agent/paused? true]
+                        [$main ?ex :seon.agent/id ?other-id]
+                        [(not= ?other-id ?agent)]))
                       [(ground :example) ?mode]
                       [(ground 90) ?pri]))],
   :seon.rule/target :wire,
@@ -301,7 +335,7 @@
                       :priority ?pri,
                       :tx ?tx,
                       :params {:seon.agent.prefix/mode ?mode, :seon.agent.prefix/agent-id ?other-id}}],
-  :seon.rule/doc "Unified agent-prefix projection: surfaces :seon.agent/forked-from (:mode :continue) and :seon.agent/example-refs / :seon.agent/examples (:mode :example) into :zone :agent-prefix for mechanical recursive <agent> rendering.",
+  :seon.rule/doc "Unified agent-prefix projection: surfaces :seon.agent/forked-from (honoring :seon.agent/prefix-mode, default :continue, skipped when :fresh), explicit :example-refs/:examples, AND paused :example/* sessions sharing an assigned :seon.agent/tasks entity.",
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/agent-prefix-sessions}
