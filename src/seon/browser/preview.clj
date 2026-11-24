@@ -323,7 +323,13 @@
              (when-not (:no-cache? o) (lru-store! ck r))
              (assoc r :cached? false))))))))
 
-(defn- normalize-ephemeral-frame [var-sym source f]
+(defn normalize-ephemeral-frame
+  "Normalizes a raw WKWebView frame map into a compact ephemeral preview map (0 DB writes)."
+  {:malli/schema [:=> {:examples [[['demo/card :db {:seon.media/mime "image/jpeg" :seon.media/base64 "AA==" :seon.media/width 360 :seon.media/height 120 :seon.media/label "card · 360px" :seon.media/dom {:overflow-x? false}}]
+                                   {:mime "image/jpeg" :base64 "AA==" :label "card · 360px" :width 360 :height 120 :dom {:overflow-x? false} :var 'demo/card :source :db}]]}
+                  [:cat :qualified-symbol [:maybe :keyword] :map] :map]
+   :cost/ticks 500000 :cost/bytes 131072}
+  [var-sym source f]
   (let [w (let [v (or (:seon.media/width f) (:width f))] (if (number? v) (max 0 (long v)) 0))
         h (let [v (or (:seon.media/height f) (:height f))] (if (number? v) (max 0 (long v)) 0))
         mime (let [v (or (:seon.media/mime f) (:mime f))]

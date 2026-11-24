@@ -295,12 +295,13 @@
   (let [dh (store/db-schema main-db)
         u (when (and main-db (contains? dh :seon.user/id)
                      (first (datahike.api/datoms main-db :avet :seon.user/id :user/default)))
-            (datahike.api/pull main-db (quote [:seon.user/viewport-w :seon.user/viewport-h :seon.user/theme])
+            (datahike.api/pull main-db (quote [:seon.user/viewport-w :seon.user/viewport-h :seon.user/theme
+                                               {:seon.user/viewing [:seon.agent/id]}])
                                [:seon.user/id :user/default]))
         vw (let [v (:seon.user/viewport-w u)] (if (and (number? v) (pos? (long v))) (long v) 1280))
         vh (let [v (:seon.user/viewport-h u)] (if (and (number? v) (pos? (long v))) (long v) 820))
         th (if (= :light (:seon.user/theme u)) :light :dark)]
-    {:width vw :height vh :theme th}))
+    {:width vw :height vh :theme th :viewing-agent (get-in u [:seon.user/viewing :seon.agent/id])}))
 
 (defn- finish-model-request [st main-db bdb aid pid frame snap preview-frames]
   (let [vis? (boolean (:vision? st))
@@ -328,6 +329,66 @@
             {:cached-frames [] :to-render []}
             edited-vars)))
 
+(defn- maybe-complete-pending-browser [st req-id entry]
+  (if (and (:shot-done? entry) (zero? (long (or (:pending-previews entry) 0))))
+    (let [{:keys [pid aid frame snap preview-frames]} entry
+          main-db @(:conn st)
+          b (or (:branch frame) :main)
+          bdb (rdata/branch-db-for main-db (:conn st) b)]
+      (finish-model-request (update st :pending-browser dissoc req-id)
+                            main-db bdb aid pid frame snap preview-frames))
+    [(assoc-in st [:pending-browser req-id] entry) nil]))
+
+(defn- handle-browser-res
+  [st msg]
+  (let [req-id (:req-id msg)]
+    (if-let [entry (get-in st [:pending-browser req-id])]
+      (maybe-complete-pending-browser st req-id (assoc entry :shot-done? true :snap (:snapshot msg)))
+      [st nil])))
+
+(defn- handle-preview-res
+  [st {:keys [req-id var form-hash input-hash source widths theme res]}]
+  (if-let [entry (get-in st [:pending-browser req-id])]
+    (let [frames (when (and (map? res) (:ok? res) (seq (:frames res)))
+                   (let [fs (mapv #(preview/normalize-ephemeral-frame var source %) (:frames res))]
+                     (preview/cache-preview-frames! var form-hash input-hash widths theme fs)
+                     fs))
+          entry1 (-> entry
+                     (update :pending-previews #(max 0 (dec (long (or % 1)))))
+                     (cond-> (seq frames) (update :preview-frames (fnil into []) frames)))]
+      (maybe-complete-pending-browser st req-id entry1))
+    [st nil]))
+
+(defn should-capture-viewport?
+  "Pure viewport-screenshot gating policy: honors explicit per-agent `:agent-override` (`true`/`false`),
+   otherwise when `:browser-enabled?` and `:global-enabled?` are true, captures only for `:agent/root`,
+   the `:viewing-agent` shown to `:user/default`, or an agent with `:has-ui-previews?`."
+  {:malli/schema [:=> {:examples [[[{:browser-enabled? true :global-enabled? true :agent-override nil :agent-id :agent/root :viewing-agent :agent/other :has-ui-previews? false}] true]
+                                  [[{:browser-enabled? true :global-enabled? true :agent-override nil :agent-id :agent/ui :viewing-agent :agent/ui :has-ui-previews? false}] true]
+                                  [[{:browser-enabled? true :global-enabled? true :agent-override nil :agent-id :agent/ui :viewing-agent :agent/root :has-ui-previews? true}] true]
+                                  [[{:browser-enabled? true :global-enabled? true :agent-override nil :agent-id :ns/seon.store :viewing-agent :agent/root :has-ui-previews? false}] false]
+                                  [[{:browser-enabled? true :global-enabled? true :agent-override false :agent-id :agent/root :viewing-agent :agent/root :has-ui-previews? true}] false]
+                                  [[{:browser-enabled? true :global-enabled? false :agent-override true :agent-id :ns/seon.store :viewing-agent :agent/root :has-ui-previews? false}] true]
+                                  [[{:browser-enabled? false :global-enabled? true :agent-override true :agent-id :agent/root :viewing-agent :agent/root :has-ui-previews? true}] false]]}
+                  [:cat [:map
+                         [:browser-enabled? {:optional true} [:maybe :boolean]]
+                         [:global-enabled? {:optional true} [:maybe :boolean]]
+                         [:agent-override {:optional true} [:maybe :boolean]]
+                         [:agent-id {:optional true} [:maybe :keyword]]
+                         [:viewing-agent {:optional true} [:maybe :keyword]]
+                         [:has-ui-previews? {:optional true} [:maybe :boolean]]]]
+                  :boolean]
+   :cost/ticks 500000 :cost/bytes 131072}
+  [{:keys [browser-enabled? global-enabled? agent-override agent-id viewing-agent has-ui-previews?]}]
+  (boolean
+   (and browser-enabled?
+        (cond
+          (some? agent-override) agent-override
+          (not global-enabled?) false
+          :else (or (= :agent/root agent-id)
+                    (and (some? viewing-agent) (= viewing-agent agent-id))
+                    has-ui-previews?)))))
+
 (defn- handle-model-request
   {:seon.flow/edge true}
   [st msg]
@@ -337,12 +398,22 @@
         main-db @(:conn st)
         b (or (:branch f) :main)
         bdb (rdata/branch-db-for main-db (:conn st) b)
-        {:keys [width height theme]} (user-viewport-dims main-db)
-        want-shot? (and (:browser-enabled? st)
-                        (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?)))
+        {:keys [width height theme viewing-agent]} (user-viewport-dims main-db)
         {:keys [cached-frames to-render]} (if (:browser-enabled? st)
                                             (plan-derived-previews main-db bdb aid theme)
                                             {:cached-frames [] :to-render []})
+        dh (store/db-schema main-db)
+        agent-ov (when (and main-db aid (contains? dh :seon.config/viewport-screenshot?)
+                            (first (datahike.api/datoms main-db :avet :seon.agent/id aid)))
+                   (:seon.config/viewport-screenshot?
+                    (datahike.api/pull main-db (quote [:seon.config/viewport-screenshot?]) [:seon.agent/id aid])))
+        want-shot? (should-capture-viewport?
+                    {:browser-enabled? (:browser-enabled? st)
+                     :global-enabled? (boolean (store/config-val main-db nil :seon.config/viewport-screenshot?))
+                     :agent-override agent-ov
+                     :agent-id aid
+                     :viewing-agent viewing-agent
+                     :has-ui-previews? (boolean (or (seq cached-frames) (seq to-render)))})
         preview-ch (:preview-res-ch st)
         preview-reqs (when (and (seq to-render) preview-ch)
                        (mapv (fn [{:keys [var ev widths theme]}]
@@ -426,45 +497,6 @@
     :forked (handle-forked st msg)
     :child-frame (handle-child-frame st tick msg)
     :child-exited (handle-child-exited st msg)
-    [st nil]))
-
-(defn- maybe-complete-pending-browser [st req-id entry]
-  (if (and (:shot-done? entry) (zero? (long (or (:pending-previews entry) 0))))
-    (let [{:keys [pid aid frame snap preview-frames]} entry
-          main-db @(:conn st)
-          b (or (:branch frame) :main)
-          bdb (rdata/branch-db-for main-db (:conn st) b)]
-      (finish-model-request (update st :pending-browser dissoc req-id)
-                            main-db bdb aid pid frame snap preview-frames))
-    [(assoc-in st [:pending-browser req-id] entry) nil]))
-
-(defn- handle-browser-res
-  [st msg]
-  (let [req-id (:req-id msg)]
-    (if-let [entry (get-in st [:pending-browser req-id])]
-      (maybe-complete-pending-browser st req-id (assoc entry :shot-done? true :snap (:snapshot msg)))
-      [st nil])))
-
-(defn- handle-preview-res
-  [st {:keys [req-id var form-hash input-hash source widths theme res]}]
-  (if-let [entry (get-in st [:pending-browser req-id])]
-    (let [norm-f (fn [f]
-                   {:mime (or (:seon.media/mime f) (:mime f) "image/jpeg")
-                    :base64 (str (or (:seon.media/base64 f) (:base64 f) ""))
-                    :label (or (:seon.media/label f) (:label f) (str (name var)))
-                    :width (long (or (:seon.media/width f) (:width f) 0))
-                    :height (long (or (:seon.media/height f) (:height f) 0))
-                    :dom (let [d (or (:seon.media/dom f) (:dom f))] (if (map? d) d {}))
-                    :var var
-                    :source source})
-          frames (when (and (map? res) (:ok? res) (seq (:frames res)))
-                   (let [fs (mapv norm-f (:frames res))]
-                     (preview/cache-preview-frames! var form-hash input-hash widths theme fs)
-                     fs))
-          entry1 (-> entry
-                     (update :pending-previews #(max 0 (dec (long (or % 1)))))
-                     (cond-> (seq frames) (update :preview-frames (fnil into []) frames)))]
-      (maybe-complete-pending-browser st req-id entry1))
     [st nil]))
 
 (defn agents-proc

@@ -50,34 +50,33 @@
          (if (and (true? (:persist? o)) eff-conn (contains? (:schema @eff-conn) :seon.media/id))
            (let [r (d/transact eff-conn {:tx-data img-ents})]
              (when (:conn *agent-ctx*) (ctx/refresh-active! (:db-after r) (:tx-data r)))
-             (cond-> (assoc (comp-fn img-ents) :persisted? true) (:source derived) (assoc :source (:source derived) :var vsym)))
-           (cond-> (assoc (comp-fn (mapv #(dissoc % :seon.media/id) img-ents)) :persisted? false)
+             (cond-> (assoc (comp-fn img-ents) :ok? true :persisted? true) (:source derived) (assoc :source (:source derived) :var vsym)))
+           (cond-> (assoc (comp-fn (mapv #(dissoc % :seon.media/id) img-ents)) :ok? true :persisted? false)
              (:source derived) (assoc :source (:source derived) :var vsym)
              (some? (:cached? derived)) (assoc :cached? (:cached? derived)))))))))
 
 (defn ^:seon.flow/edge install-agent-helpers!
-  "Installs all `user/*` REPL helpers via declarative `^:seon.repl/export` plus module installers."
+  "Installs all `user/*` REPL helpers and `d`/`str`/`fs`/`proc` aliases into `user` and `repl`."
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [u (create-ns 'user)
-        ctx-fn (fn [] *agent-ctx*)]
+        ctx-fn (fn [] *agent-ctx*)
+        opt (fn [s] (try (requiring-resolve s) (catch Throwable _ nil)))]
     (binding [*ns* u]
       (refer-clojure)
-      (require '[datahike.api :as d] '[clojure.string :as str] '[jolt.fs :as fs])
+      (require '[datahike.api :as d] '[clojure.string :as str] '[jolt.fs :as fs] '[jolt.process :as proc])
       (fcalls/export-ns-helpers! u 'seon.fork.helpers)
       (fcalls/install-call-and-ui-helpers! u)
       (repl/install-repl-helpers! u)
       (fcontainer/install-container-helpers! u)
       (ctx/install-ctx-helpers! u ctx-fn)
-      (when-let [imh (try (requiring-resolve 'seon.code.migrate/install-user-helpers!) (catch Throwable _ nil))]
-        (imh u ctx-fn ctx/refresh-active!))
-      (doseq [sym ['seon.task.gate/install-user-helpers!
-                   'seon.render.print/install-user-helpers!
-                   'seon.signals.scoreboard/install-user-helpers!]]
-        (when-let [f (try (requiring-resolve sym) (catch Throwable _ nil))]
-          (f u ctx-fn)))
-      (when-let [ist (try (requiring-resolve 'seon.render.status/install-user-helpers!) (catch Throwable _ nil))]
-        (ist u)))))
+      (when-let [f (opt 'seon.code.migrate/install-user-helpers!)] (f u ctx-fn ctx/refresh-active!))
+      (doseq [s ['seon.task.gate/install-user-helpers! 'seon.render.print/install-user-helpers!
+                 'seon.signals.scoreboard/install-user-helpers!]]
+        (when-let [f (opt s)] (f u ctx-fn)))
+      (when-let [f (opt 'seon.render.status/install-user-helpers!)] (f u)))
+    (binding [*ns* (create-ns 'repl)]
+      (require '[jolt.fs :as fs] '[jolt.process :as proc]))))
 
 (defn ^:seon.flow/edge conn
   "Returns the current agent branch Datahike connection."
