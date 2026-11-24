@@ -195,7 +195,7 @@
       (when active? (badge "amber" "Working…"))]
      (feedback-banner branch-feedback)
      [:div {:class "ws-timeline" :data-agent (str viewing-id)}
-      (when (and (map? agent-status) (:seon.ui.status/label agent-status))
+      (when (and (map? agent-status) (:seon.ui.status/label agent-status) (or (not= :done (:seon.ui.status/stage agent-status)) (and (not pending-prompt) (not prose))))
         [:div {:id "cv-live-status" :class "session-live-status"}
          (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
       (when (and (seq earlier) (not pending-prompt))
@@ -208,7 +208,7 @@
            [:div {:class "canvas-pending-status"}
             [:span {:class "dot pulsing"}]
             [:span {:class "muted sm-copy"} "Working…"]]
-           (when text [:div {:id "cv-live-prose" :class "live-prose"} text [:span {:class "cursor"} "▍"]])])
+           (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text) [:span {:class "cursor"} "▍"]])])
         prose
         [:section {:class "canvas-reply"}
          (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} reply-prompt])
@@ -268,7 +268,7 @@
                 [:div {:class "canvas-pending-status"}
                  [:span {:class "dot pulsing"}] [:span {:class (str "stream-phase-badge " css-class)} pl]
                  (when rate [:span {:class "stream-rate"} rate])]
-                (when text [:div {:id "cv-live-prose" :class "live-prose"} text [:span {:class "cursor"} "▍"]])
+                (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text) [:span {:class "cursor"} "▍"]])
                 (when reasoning
                   [:details {:id "cv-live-reasoning" :class "activity-fold"}
                    [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]

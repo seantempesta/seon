@@ -402,17 +402,18 @@
            (:push :index-forks)
            [st' (handle-fork-op! st req reply-ch)]
 
-           (:render-hiccup-frames :measure-dom)
+           (:render-hiccup-frames :measure-dom :snapshot :browser-reload)
            (if (and (:browser-connected? st)
                     (nil? (:binary-path req))
                     (nil? (:url req))
-                    (or (= op :render-hiccup-frames) (empty? (:snippets req))))
-             [st' {:browser [(cond-> (assoc req :reply-ch reply-ch)
+                    (or (not= op :measure-dom) (empty? (:snippets req))))
+             [st' {:browser [(cond-> (assoc req :reply-ch reply-ch :op (if (= op :browser-reload) :reload op))
                                (= op :measure-dom) (assoc :envelope? true)
                                (and (= op :render-hiccup-frames) (not (string? (:html req))) (contains? req :hiccup))
                                (assoc :html (render/hiccup->html (:hiccup req))))]}]
-             (do (handle-browser-op! st req reply-ch)
-                 [st' nil]))
+             (if (#{:snapshot :browser-reload} op)
+               (do (reply! reply-ch {:ok? false :error :browser-unavailable}) [st' nil])
+               (do (handle-browser-op! st req reply-ch) [st' nil])))
 
            :hand-over
            (if-let [ho (:on-hand-over st)]

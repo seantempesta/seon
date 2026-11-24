@@ -326,85 +326,6 @@
 
 (def ^:private svg-data-html-re #"(?i)data\s*:\s*text/html")
 
-(defn sanitize-svg
-  "Sanitizes an inline `<svg ...>` string by stripping `<script>`, active embedded elements,
-   `on*` event attributes, and `javascript:`/`vbscript:`/`data:text/html` URIs. Returns `nil`
-   if `s` does not start with `<svg`."
-  {:malli/schema [:=> {:examples [[["<svg width=\"40\"><script>alert(1)</script><circle onclick=\"evil()\" cx=\"10\" cy=\"10\" r=\"5\"/></svg>"]
-                                   "<svg width=\"40\"><circle cx=\"10\" cy=\"10\" r=\"5\"/></svg>"]
-                                  [["not-svg"] nil]]}
-                  [:cat [:maybe :string]] [:maybe :string]]
-   :cost/ticks 500000 :cost/bytes 2097152}
-  [s]
-  (when-let [trimmed (rtext/nonblank s true)]
-    (when (and (re-find svg-open-re trimmed) (str/includes? trimmed ">"))
-      (let [lo (str/lower-case trimmed)
-            dirty? (or (str/includes? lo "<script") (str/includes? lo "<foreignobject")
-                       (str/includes? lo "<iframe") (str/includes? lo "<object")
-                       (str/includes? lo "<embed") (str/includes? lo " on")
-                       (str/includes? lo "javascript:") (str/includes? lo "vbscript:")
-                       (str/includes? lo "text/html"))
-            cleaned (if-not dirty?
-                      trimmed
-                      (-> trimmed
-                          (str/replace svg-script-re "")
-                          (str/replace svg-script-self-re "")
-                          (str/replace svg-active-re "")
-                          (str/replace svg-active-self-re "")
-                          (str/replace svg-on-attr-re "")
-                          (str/replace svg-proto-re "")
-                          (str/replace svg-data-html-re "")
-                          str/trim))]
-        (when (and (re-find svg-open-re cleaned) (str/includes? cleaned ">"))
-          cleaned)))))
-
-(defn render-status-card
-  "Polished visual progress card (`:data-min-width 320`) for `:seon.ui.status/entity` with stage
-   badge, label, detail, smooth progress bar (`pct%`), and sanitized inline SVG graphic."
-  {:malli/schema [:=> [:cat [:map [:seon.ui.status/entity :seon.ui.status/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]], :cost/ticks 1000000, :cost/bytes 2097152}
-  [{{:seon.ui.status/keys [id label detail pct stage svg]} :seon.ui.status/entity}]
-  (let [[bcls slbl] (stage-meta stage)
-        p (clamp-pct-int pct)
-        done? (or (= :done stage) (= 100 p))
-        lbl (one-line (or (rtext/nonblank label true) "Working…") 120)
-        det (when-let [d (rtext/nonblank detail true)] (one-line d 240))
-        safe-svg (sanitize-svg svg)
-        fill-color (if done? "var(--success,#34d399)" "var(--signal,#f0b429)")]
-    {:seon.ui/hiccup
-     (into
-      [:div {:class "card ent-card ent-status status-live-card"
-             :data-min-width 320
-             :data-status-id (when id (str id))
-             :style {:display "flex" :flex-direction "column" :gap "10px"
-                     :border-left (str "3px solid " fill-color)}}
-       [:div {:class "card-head ent-head"
-              :style {:display "flex" :align-items "center" :justify-content "space-between" :gap "8px"}}
-        [:div {:class "pill-row"}
-         (when-not done? [:span {:class "dot pulsing"}])
-         (rlinks/badge bcls slbl)
-         [:strong {:class "sm-copy"} lbl]]
-        (when (some? p)
-          [:span {:class "mono tiny muted" :style {:font-variant-numeric "tabular-nums"}} (str p "%")])]]
-      (remove nil?
-              [(when det
-                 [:p {:class "sm-copy muted" :style {:margin "0"}} det])
-               (when (some? p)
-                 [:div {:class "status-progress-track"
-                        :role "progressbar"
-                        :aria-valuenow p :aria-valuemin 0 :aria-valuemax 100
-                        :style {:width "100%" :height "6px" :border-radius "999px"
-                                :background "var(--base-850,rgba(128,128,128,.22))"
-                                :overflow "hidden"}}
-                  [:div {:class "status-progress-fill"
-                         :style {:width (str p "%") :height "100%" :border-radius "999px"
-                                 :background fill-color
-                                 :transition "width .3s ease"}}]])
-               (when safe-svg
-                 [:div {:class "status-svg-wrap"
-                        :style {:display "flex" :justify-content "center" :align-items "center"
-                                :padding "6px 0" :max-width "100%" :overflow "hidden"}}
-                  (render/raw-html safe-svg)])]))}))
-
 (defn branch-reset-tx
   "Purely derives the latest session-reset transaction on `branch-db` for `agent-id`:
    `max(retract-tx, sync-tx)` where `retract-tx` is max `:tx` of retracted evals in `(d/history branch-db)`
@@ -583,3 +504,98 @@
                             (:max-tx branch-db)
                             1)))))))
             (reverse recent)))))
+
+(def ^:private svg-ratio-attr-re
+  #"(?i)(\b(?:cx|cy|x|y|x1|y1|x2|y2|r|rx|ry|dx|dy|width|height|stroke-width|font-size)\s*=\s*[\"'])(-?\d+)/(\d+)([\"'])")
+
+(defn- normalize-svg-ratios [s]
+  (if-not (str/includes? s "/")
+    s
+    (str/replace s svg-ratio-attr-re
+                 (fn [[full pre num-s den-s suf]]
+                   (let [n (try (Double/parseDouble num-s) (catch NumberFormatException _ nil))
+                         d (try (Double/parseDouble den-s) (catch NumberFormatException _ nil))]
+                     (if (and n d (not (zero? d)))
+                       (let [v (/ (Math/round (* (/ n d) 100.0)) 100.0)
+                             fmt (if (== v (Math/floor v)) (str (long v)) (str v))]
+                         (str pre fmt suf))
+                       full))))))
+
+(defn sanitize-svg
+  "Sanitizes an inline `<svg ...>` string by stripping `<script>`, active embedded elements,
+   `on*` event attributes, and `javascript:`/`vbscript:`/`data:text/html` URIs. Returns `nil`
+   if `s` does not start with `<svg`."
+  {:malli/schema [:=> {:examples [[["<svg width=\"40\"><script>alert(1)</script><circle onclick=\"evil()\" cx=\"10\" cy=\"10\" r=\"5\"/></svg>"]
+                                   "<svg width=\"40\"><circle cx=\"10\" cy=\"10\" r=\"5\"/></svg>"]
+                                  [["not-svg"] nil]]}
+                  [:cat [:maybe :string]] [:maybe :string]]
+   :cost/ticks 500000 :cost/bytes 2097152}
+  [s]
+  (when-let [trimmed (rtext/nonblank s true)]
+    (when (and (re-find svg-open-re trimmed) (str/includes? trimmed ">"))
+      (let [lo (str/lower-case trimmed)
+            dirty? (or (str/includes? lo "<script") (str/includes? lo "<foreignobject")
+                       (str/includes? lo "<iframe") (str/includes? lo "<object")
+                       (str/includes? lo "<embed") (str/includes? lo " on")
+                       (str/includes? lo "javascript:") (str/includes? lo "vbscript:")
+                       (str/includes? lo "text/html"))
+            cleaned (if-not dirty?
+                      trimmed
+                      (-> trimmed
+                          (str/replace svg-script-re "")
+                          (str/replace svg-script-self-re "")
+                          (str/replace svg-active-re "")
+                          (str/replace svg-active-self-re "")
+                          (str/replace svg-on-attr-re "")
+                          (str/replace svg-proto-re "")
+                          (str/replace svg-data-html-re "")
+                          str/trim))]
+        (when (and (re-find svg-open-re cleaned) (str/includes? cleaned ">"))
+        (normalize-svg-ratios cleaned))))))
+
+(defn render-status-card
+  "Polished visual progress card (`:data-min-width 320`) for `:seon.ui.status/entity` with stage
+   badge, label, detail, smooth progress bar (`pct%`), and sanitized inline SVG graphic."
+  {:malli/schema [:=> [:cat [:map [:seon.ui.status/entity :seon.ui.status/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]], :cost/ticks 1000000, :cost/bytes 2097152}
+  [{{:seon.ui.status/keys [id label detail pct stage svg]} :seon.ui.status/entity}]
+  (let [[bcls slbl] (stage-meta stage)
+        p (clamp-pct-int pct)
+        done? (or (= :done stage) (= 100 p))
+        lbl (one-line (or (rtext/nonblank label true) "Working…") 120)
+        det (when-let [d (rtext/nonblank detail true)] (one-line d 240))
+        safe-svg (sanitize-svg svg)
+        fill-color (if done? "var(--success,#34d399)" "var(--signal,#f0b429)")]
+    {:seon.ui/hiccup
+     (into
+      [:div {:class "card ent-card ent-status status-live-card"
+             :data-min-width 320
+             :data-status-id (when id (str id))
+             :style {:display "flex" :flex-direction "column" :gap "10px"
+                     :border-left (str "3px solid " fill-color)}}
+       [:div {:class "card-head ent-head"
+              :style {:display "flex" :align-items "center" :justify-content "space-between" :gap "8px"}}
+        [:div {:class "pill-row"}
+         (when-not done? [:span {:class "dot pulsing"}])
+         (rlinks/badge bcls slbl)
+         [:strong {:class "sm-copy"} lbl]]
+        (when (some? p)
+          [:span {:class "mono tiny muted" :style {:font-variant-numeric "tabular-nums"}} (str p "%")])]]
+      (remove nil?
+              [(when det
+                 [:p {:class "sm-copy muted" :style {:margin "0"}} det])
+               (when (some? p)
+                 [:div {:class "status-progress-track"
+                        :role "progressbar"
+                        :aria-valuenow p :aria-valuemin 0 :aria-valuemax 100
+                        :style {:width "100%" :height "6px" :border-radius "999px"
+                                :background "var(--base-850,rgba(128,128,128,.22))"
+                                :overflow "hidden"}}
+                  [:div {:class "status-progress-fill"
+                         :style {:width (str p "%") :height "100%" :border-radius "999px"
+                                 :background fill-color
+                                 :transition "width .3s ease"}}]])
+               (when safe-svg
+                 [:div {:class "status-svg-wrap"
+                        :style {:display "flex" :justify-content "center" :align-items "center"
+                                :padding "6px 0" :max-width "100%" :overflow "hidden"}}
+                  (render/raw-html safe-svg)])]))}))

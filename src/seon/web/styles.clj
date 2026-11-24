@@ -118,7 +118,10 @@
    ["main,#seon-main,.workspace-grid,.surface-stack,.ws-left,.ws-right,.tiles-scroll,.ctx-group,.debug-wrap,.root-canvas,.user-chat-wrap,.surface-entities,.surface-entity-item,.surface-signals,.card,.stack,.stack-sm,.canvas-timeline-bar,.tl-track,.tl-meta,.ws-head,.wire-summary,.wire-summary .flex-1,.debug-tile-pair,.grid-2>*,.debug-tile-pair>*,.debug-tile-col" {:min-width "0"}]
    ["main,#seon-main" {:overflow-x "hidden"}]
    [".sidebar.closed,.sidebar.sidebar-collapsed" {:display "none"}]
-   [".topbar.is-dev-mode" {:border-top "2px solid var(--signal)" :background "linear-gradient(180deg,rgba(240,180,41,.07),var(--base-950) 60%)"}]
+   [".topbar.is-dev-mode" {:height :auto :min-height "48px" :padding "6px 16px" :border-top "2px solid var(--signal)" :background "linear-gradient(180deg,rgba(240,180,41,.07),var(--base-950) 60%)"}]
+   [".topbar.is-dev-mode .brand-row" {:flex-wrap :wrap :row-gap "6px"}]
+   [".topbar.is-dev-mode .brand" {:flex "0 0 auto" :overflow :visible}]
+   [".topbar.is-dev-mode .stats-strip" {:flex-wrap :wrap :row-gap "5px" :justify-content :flex-end}]
    [".nav-pill.is-dev-pill" {:background "rgba(240,180,41,.18)" :color "var(--signal)" :border "1px solid rgba(240,180,41,.55)" :font-weight 600}]
    [".topbar.is-narrow" {:padding "4px 8px" :height "auto" :min-height "44px"}] [".topbar.is-narrow .brand-row" {:gap "6px" :flex-wrap "wrap"}]
    [".topbar.is-narrow .brand" {:gap "5px"}] [".topbar.is-narrow .stats-strip" {:gap "4px" :min-width 0 :max-width "100%"}]
@@ -152,7 +155,8 @@
    [".surface-entity-item" {:view-transition-class "surface-card"}]
    ["::view-transition-group(.surface-card)" {:animation-duration "0.24s" :animation-timing-function "cubic-bezier(.22,1,.36,1)"}]
    ["#seon-app #cv-live-reasoning[open] .live-reasoning" {:display "block" :margin-top "8px"}]
-   ["#cv-live-prose" {:margin-top "4px"}]])
+   ["#cv-live-prose,.canvas-pending .live-prose" {:max-height :none :overflow :visible :white-space :normal :margin-top "4px"}]
+   [".composer-inp" {:field-sizing :content :min-height "30px" :max-height "220px" :overflow-y :auto}]])
 
 (def ambient-rules
   [[".crumb-bar,.ent-chip,.ent-row,.kv-bar,.lab-chip,.lab-panel,.sig-cell,.sig-panel,.sig-pill,.var-card,.starter-chip" {:border "1px solid var(--base-800)"}]

@@ -206,7 +206,7 @@
                                                      (when-not (str/blank? (str (:mode dom))) (str "mode=" (:mode dom)))
                                                      (when (:theme dom) (str "theme=" (:theme dom)))
                                                      (when (some? (:overflowX dom)) (str "overflowX=" (:overflowX dom)))
-                                                     (when (some? (:svgCount dom)) (str "svgs=" (:svgCount dom)))]))))]
+                                                     (when (some? (:svgCount dom)) (str "svgs=" (:svgCount dom))) (when-let [ds (seq (or (:visual-defects dom) (:defects dom)))] (str "DEFECTS(" (count ds) "): " (str/join "; " (take 4 ds))))]))))]
       (cond-> {:tag "live-viewport"
                :attrs {:route (:route snapshot "/") :size (str (:width snapshot 1280) "x" (:height snapshot 820))}
                :seon.ui/hiccup

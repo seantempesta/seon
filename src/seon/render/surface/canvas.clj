@@ -161,7 +161,7 @@
                  (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")))]])
      (feedback-banner branch-feedback)
      (render-presence-slot model)
-     (when (and (map? agent-status) (:seon.ui.status/label agent-status))
+     (when (and (map? agent-status) (:seon.ui.status/label agent-status) (or (not= :done (:seon.ui.status/stage agent-status)) (and (not pending-prompt) (or exp? (not prose)))))
        [:div {:id "cv-live-status" :class "session-live-status"}
         (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
      (cond
