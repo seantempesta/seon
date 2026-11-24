@@ -421,8 +421,11 @@
       (into {} (keep (fn [part]
                        (when (str/includes? part "=")
                          (let [[k v] (str/split part #"=" 2)]
-                           (when (seq k) [(keyword (java.net.URLDecoder/decode k "UTF-8"))
-                                          (java.net.URLDecoder/decode (or v "") "UTF-8")])))))
+                           (when (seq k)
+                           (let [dec (fn [x] (try (java.net.URLDecoder/decode (or x "") "UTF-8")
+                                             (catch IllegalArgumentException _ (or x ""))
+                                             (catch IndexOutOfBoundsException _ (or x ""))))]
+                             [(keyword (dec k)) (dec v)]))))))
             (str/split s #"&"))))
 
 (defn parse-multipart-fields
@@ -463,9 +466,13 @@
   ([st explain?] (set-explain-lens! st explain? nil))
   ([st explain? focus-ref]
    (let [nr (when focus-ref (rdata/normalize-inspect-ref focus-ref))
-         req (cond-> {:op :show-user :mode (if explain? :context :session) :keep-inspect? true}
-               nr (assoc :inspect-ref nr))]
-     (async-action (assoc st :branch-feedback nil) req nil nil))))
+       cur-vs (when-let [c (:conn st)] (ui/user-view-state @c))
+       sys-exit? (and (not explain?) (nil? nr) (= [:seon.system/id :root] (:inspect-ref cur-vs)))
+       req (cond
+             sys-exit? {:op :show-user :mode :system :clear-inspect true}
+             :else (cond-> {:op :show-user :mode (if explain? :context :session) :keep-inspect? true}
+                     nr (assoc :inspect-ref nr)))]
+   (async-action (assoc st :branch-feedback nil) req nil nil))))
 
 (defn ^:seon/callable spawn-on-entity-form!
   "Spawns a dedicated worker agent focused on `focus-ref` with optional `:prompt`/`:text` from `form`."

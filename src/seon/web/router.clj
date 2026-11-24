@@ -33,10 +33,15 @@
   []
   [{:seon.route/name :seon.route/home          :seon.route/pattern "/"                     :seon.route/method :get  :seon.route/handler 'seon.web/navigate-url!       :seon.route/doc "Home view (System root / active session)."}
    {:seon.route/name :seon.route/system        :seon.route/pattern "/system"               :seon.route/method :get  :seon.route/handler 'seon.web/set-view-mode!      :seon.route/doc "Seon Runtime system entity view."}
+   {:seon.route/name :seon.route/canvas        :seon.route/pattern "/canvas"               :seon.route/method :get  :seon.route/handler 'seon.web/set-view-mode!      :seon.route/doc "Active agent Canvas view."}
+   {:seon.route/name :seon.route/chat          :seon.route/pattern "/chat"                 :seon.route/method :get  :seon.route/handler 'seon.web/set-view-mode!      :seon.route/doc "Active agent Chat view."}
    {:seon.route/name :seon.route/session       :seon.route/pattern "/session"              :seon.route/method :get  :seon.route/handler 'seon.web/set-view-mode!      :seon.route/doc "Active agent session view."}
    {:seon.route/name :seon.route/context       :seon.route/pattern "/context"              :seon.route/method :get  :seon.route/handler 'seon.web/set-view-mode!      :seon.route/doc "Context & Cache explain view."}
    {:seon.route/name :seon.route/root-debug    :seon.route/pattern "/root/debug"           :seon.route/method :get  :seon.route/handler 'seon.web/set-view-mode!      :seon.route/doc "Root agent Context & Debug view."}
-   {:seon.route/name :seon.route/agent-session :seon.route/pattern "/agent/{slug}"         :seon.route/method :get  :seon.route/handler 'seon.web/view-agent!         :seon.route/doc "Agent session view for {slug}."}
+   {:seon.route/name :seon.route/agent-session :seon.route/pattern "/agent/{slug}"         :seon.route/method :get  :seon.route/handler 'seon.web/view-agent!         :seon.route/doc "Agent default view for {slug}."}
+   {:seon.route/name :seon.route/agent-canvas  :seon.route/pattern "/agent/{slug}/canvas"  :seon.route/method :get  :seon.route/handler 'seon.web/view-agent!         :seon.route/doc "Agent Canvas view for {slug}."}
+   {:seon.route/name :seon.route/agent-chat    :seon.route/pattern "/agent/{slug}/chat"    :seon.route/method :get  :seon.route/handler 'seon.web/view-agent!         :seon.route/doc "Agent Chat view for {slug}."}
+   {:seon.route/name :seon.route/agent-inspect :seon.route/pattern "/agent/{slug}/inspect" :seon.route/method :get  :seon.route/handler 'seon.web/inspect-entity!     :seon.route/doc "Inspect agent entity [:seon.agent/id aid]."}
    {:seon.route/name :seon.route/agent-explain :seon.route/pattern "/agent/{slug}/explain" :seon.route/method :get  :seon.route/handler 'seon.web/set-explain-lens!   :seon.route/doc "Agent Explain / Context Lab view for {slug}."}
    {:seon.route/name :seon.route/agent-context :seon.route/pattern "/agent/{slug}/context" :seon.route/method :get  :seon.route/handler 'seon.web/view-agent!         :seon.route/doc "Agent Context view for {slug}."}
    {:seon.route/name :seon.route/agent-debug   :seon.route/pattern "/agent/{slug}/debug"   :seon.route/method :get  :seon.route/handler 'seon.web/view-agent!         :seon.route/doc "Agent Debug view for {slug}."}
@@ -156,6 +161,16 @@
       (str/blank? s) nil
       (= attr :db/id) (parse-long-safe s)
       :else
+      (cond
+      (= vt :db.type/string)
+      (if (and (>= (count s) 2) (str/starts-with? s "\"") (str/ends-with? s "\""))
+        (try (let [p (binding [*read-eval* false] (edn/read-string s))] (if (string? p) p s)) (catch Throwable _ s))
+        s)
+
+      (parse-uuid-safe s)
+      (parse-uuid-safe s)
+
+      :else
       (let [parsed (try (binding [*read-eval* false] (edn/read-string s)) (catch Throwable _ ::unparsed))]
         (cond
           (not= parsed ::unparsed)
@@ -163,11 +178,10 @@
             (and (= vt :db.type/uuid) (string? parsed)) (or (parse-uuid-safe parsed) parsed)
             (and (= vt :db.type/uuid) (symbol? parsed)) (or (parse-uuid-safe s) s)
             (and (= vt :db.type/keyword) (symbol? parsed)) (keyword (namespace parsed) (name parsed))
-            (and (= vt :db.type/string) (symbol? parsed)) s
             :else parsed)
           (= vt :db.type/uuid) (parse-uuid-safe s)
           (= vt :db.type/keyword) (keyword s)
-          :else s)))))
+          :else s))))))
 
 (defn- inspect-op [ref explain?]
   (when ref
@@ -205,7 +219,7 @@
        :seon.agent/id
        (when (keyword? v)
          (when-let [slug (rdata/agent-id->slug v)]
-           (path-for db :seon.route/agent-session {:slug slug})))
+           (path-for db :seon.route/agent-inspect {:slug slug})))
 
        :seon.code.var/name
        (when (qualified-symbol? v)
@@ -238,7 +252,7 @@
          (path-for db :seon.route/doc {:id v}))
 
        nil)
-     (path-for db :seon.route/entity {:attr (kw->attr-slug a) :val (pr-str v)})
+     (path-for db :seon.route/entity {:attr (kw->attr-slug a) :val (if (uuid? v) (str v) (pr-str v))})
      "/")
     "/"))
 
@@ -253,13 +267,8 @@
         nref (rdata/normalize-inspect-ref inspect-ref)]
     (cond
       nref
-      (if (= :seon.agent/id (first nref))
-        (let [slug (when (keyword? (second nref)) (rdata/agent-id->slug (second nref)))]
-          (if slug
-            (or (path-for db (if explain? :seon.route/agent-explain :seon.route/agent-session) {:slug slug}) "/")
-            (let [p (entity-ref->path db nref)] (if explain? (str p "?explain=1") p))))
-        (let [p (entity-ref->path db nref)]
-          (if explain? (str p "?explain=1") p)))
+      (let [p (entity-ref->path db nref)]
+      (if explain? (str p "?explain=1") p))
 
       (= canon :system)
       (or (path-for db :seon.route/system {}) "/system")
@@ -282,19 +291,22 @@
    :cost/ticks 1000000}
   [db uri]
   (let [[path qs] (split-uri uri)
-        rt (db->routes (live-db db))]
-    (when-let [m (r/match-by-path rt path)]
-      (let [d (:data m)]
-        {:route/name (:name d)
-         :route/pattern (:template m)
-         :route/method (:method d)
-         :route/handler (:handler d)
-         :route/doc (:doc d)
-         :route/id (:route/id d)
-         :path-params (or (:path-params m) {})
-         :query-string qs
-         :explain? (explain-query? qs)
-         :path path}))))
+      safe-path (str/replace path "+" "%2B")
+      rt (db->routes (live-db db))]
+  (when-let [m (try (r/match-by-path rt safe-path)
+               (catch IllegalArgumentException _ nil)
+               (catch IndexOutOfBoundsException _ nil))]
+    (let [d (:data m)]
+      {:route/name (:name d)
+       :route/pattern (:template m)
+       :route/method (:method d)
+       :route/handler (:handler d)
+       :route/doc (:doc d)
+       :route/id (:route/id d)
+       :path-params (or (:path-params m) {})
+       :query-string qs
+       :explain? (explain-query? qs)
+       :path path}))))
 
 (defn match-http-route
   "Matches Ring request `req` against infrastructure HTTP routes in `db` (or optional custom `routes` vector)."
@@ -330,7 +342,10 @@
         (inspect-op [:seon.system/id :root] true)
         {:op :show-user :mode :system :clear-inspect true :as-of-tx :live})
 
-      :seon.route/session
+      :seon.route/canvas
+      {:op :show-user :mode (if explain? :context :canvas) :clear-inspect true :as-of-tx :live}
+
+      (:seon.route/session :seon.route/chat)
       {:op :show-user :mode (if explain? :context :session) :clear-inspect true :as-of-tx :live}
 
       :seon.route/context
@@ -343,6 +358,18 @@
       :seon.route/agent-session
       (when-let [aid (rdata/slug->agent-id (:slug path-params))]
         {:op :show-user :viewing aid :mode (if explain? :context :session) :clear-inspect true :as-of-tx :live})
+
+      :seon.route/agent-canvas
+      (when-let [aid (rdata/slug->agent-id (:slug path-params))]
+        {:op :show-user :viewing aid :mode (if explain? :context :canvas) :clear-inspect true :as-of-tx :live})
+
+      :seon.route/agent-chat
+      (when-let [aid (rdata/slug->agent-id (:slug path-params))]
+        {:op :show-user :viewing aid :mode (if explain? :context :session) :clear-inspect true :as-of-tx :live})
+
+      :seon.route/agent-inspect
+      (when-let [aid (rdata/slug->agent-id (:slug path-params))]
+        (inspect-op [:seon.agent/id aid] explain?))
 
       (:seon.route/agent-explain :seon.route/agent-context :seon.route/agent-debug)
       (when-let [aid (rdata/slug->agent-id (:slug path-params))]
@@ -384,8 +411,21 @@
       (inspect-op (when-let [u (parse-uuid-safe (:id path-params))] [:seon.error/id u]) explain?)
 
       :seon.route/doc
-      (when (seq (:id path-params))
-        (inspect-op [:seon.code.doc/id (:id path-params)] explain?))
+      (when-let [raw-id (not-empty (:id path-params))]
+        (let [ldb (live-db db)
+              dh (db-schema ldb)
+              resolved (if (and ldb (contains? dh :seon.code.doc/id)
+                                (not (str/includes? raw-id "#"))
+                                (nil? (first (d/datoms ldb :avet :seon.code.doc/id raw-id)))
+                                (contains? dh :seon.code.doc/path))
+                         (or (->> (d/datoms ldb :avet :seon.code.doc/path raw-id)
+                                  (map #(d/pull ldb '[:seon.code.doc/id :seon.code.doc/order] (:e %)))
+                                  (filter :seon.code.doc/id)
+                                  (sort-by #(long (or (:seon.code.doc/order %) 0)))
+                                  first :seon.code.doc/id)
+                             raw-id)
+                         raw-id)]
+          (inspect-op [:seon.code.doc/id resolved] explain?)))
 
       :seon.route/entity
       (when-let [a (attr-slug->kw (:attr path-params))]

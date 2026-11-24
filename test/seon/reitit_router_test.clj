@@ -18,7 +18,8 @@
             [seon.web :as web]
             [seon.web.actions :as actions]
             [seon.web.css :as wcss]
-            [seon.web.router :as router]))
+            [seon.web.router :as router]
+            [seon.render.surface.entity]))
 
 (deftest ^{:cost/ticks 90000000} seon-route-seeding-db-projection-and-roundtrip-test
   (testing "Idempotent :seon.route/* seeding, db->routes projection, real handler vars, and forward/reverse round-trips for EVERY route type"
@@ -244,3 +245,46 @@
                       seon.web/match-http-route]]
           (let [st (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (or (:ok? st) (:skipped? st)) (str sym " failed seed=42 generative check: " (pr-str st)))))))))
+
+(deftest ^{:cost/ticks 90000000} reitit-encoding-agent-inspect-and-hovercard-security-test
+  (testing "Agent Inspector URL no longer collides with Session, malformed % never throws 500, + with %XX preserves +, unencoded /doc/path resolves opening section, and hovercard escapes 404 HTML + renders per-signal preview"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (router/core-routes-tx)})
+      (d/transact conn {:tx-data [{:seon.code.doc/id "docs/render.md#intro"
+                                   :seon.code.doc/path "docs/render.md"
+                                   :seon.code.doc/order 1
+                                   :seon.code.doc/heading "Intro"
+                                   :seon.code.doc/body "Doc body"}]})
+      (let [db @conn]
+        ;; 1. Agent Inspector vs Session URL distinction
+        (is (= "/agent/root/inspect" (router/entity-ref->path db [:seon.agent/id :agent/root])))
+        (is (= "/agent/root/inspect" (router/user-state->path db {:viewing-id :agent/root :inspect-ref [:seon.agent/id :agent/root]})))
+        (is (= "/agent/root/inspect?explain=1" (router/user-state->path db {:viewing-id :agent/root :view-mode :context :inspect-ref [:seon.agent/id :agent/root]})))
+        (is (= [:seon.agent/id :agent/root] (:inspect-ref (router/path->show-user-op db "/agent/root/inspect"))))
+        ;; 2. Literal + alongside %XX does NOT turn into space
+        (is (= [:seon.code.var/name 'my.ns/foo+bar?]
+               (:inspect-ref (router/path->show-user-op db "/var/my.ns/foo+bar%3F"))))
+        ;; 3. Malformed % in path or query never throws 500
+        (is (nil? (router/match-path db "/var/my.ns/100%")))
+        (is (nil? (router/path->show-user-op db "/doc/a%ZZ")))
+        (is (= {:ref "%ZZ"} (actions/parse-kv-pairs "ref=%ZZ")))
+        ;; 4. Unencoded /doc/docs/render.md (browser stripped #slug) resolves opening section
+        (is (= [:seon.code.doc/id "docs/render.md#intro"]
+               (:inspect-ref (router/path->show-user-op db "/doc/docs/render.md"))))
+        ;; 5. Clean bare UUID in /entity/{attr}/{*val}
+        (let [u (random-uuid)
+              p (router/entity-ref->path db [:seon.agent.eval/id u])]
+          (is (= (str "/entity/seon.agent.eval~id/" u) p))
+          (is (= [:seon.agent.eval/id u] (:inspect-ref (router/path->show-user-op db p)))))
+        ;; 6. Hovercard escapes 404 XSS and renders specific signal kind
+        (let [r404 (seon.render.surface.entity/render-entity-preview-html db db [:seon.code.doc/id "<script>alert(1)</script>"])
+              rsig (seon.render.surface.entity/render-entity-preview-html db db [:seon.signal/kind :pressure])]
+          (is (= 404 (:status r404)))
+          (is (not (str/includes? (:html r404) "<script>")))
+          (is (str/includes? (:html r404) "&lt;script&gt;"))
+          (is (= 200 (:status rsig)))
+          (is (= :signal-preview (:chosen-fn rsig)))
+          (is (str/includes? (:html rsig) "Pressure")))
+        ;; 7. url-sync-js uses replaceState on boot and filters datastar-patch-elements
+        (is (str/includes? wcss/url-sync-js "history.replaceState"))
+        (is (str/includes? wcss/url-sync-js "datastar-patch-elements"))))))
