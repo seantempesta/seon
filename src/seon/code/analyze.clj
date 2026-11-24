@@ -203,7 +203,7 @@
     (let [m (meta v)]
       (cond-> {}
         (string? (:doc m)) (assoc :doc (:doc m))
-        (seq (:arglists m)) (assoc :arglists (vec (:arglists m)))
+        (seq (:arglists m)) (assoc :arglists (mapv (fn [al] (vec (filter symbol? (tree-seq coll? seq al)))) (:arglists m)))
         (:macro m) (assoc :macro? true)))
     {}))
 
