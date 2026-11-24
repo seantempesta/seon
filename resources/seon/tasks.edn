@@ -17,6 +17,13 @@
   :seon.task/scope seon.transactor.spawn,
   :seon.task/tests #{seon.task.gate-test/multi-task-steering-surfaces-all-scopes-and-gates-all-proofs},
   :seon.task/title "Complete multi-task :seon.agent/tasks steering across spawn, wire cache keys, scope rules, and REPL helpers"}
+ {:seon.task/done? false,
+  :seon.task/id :seon.agent/unified-agent-prefix-wire,
+  :seon.task/needs #{:seon.agent/multi-task-steering},
+  :seon.task/plan "Unify example agents and forked-from agents into ONE mechanical rule+renderer mechanism using <agent> XML tags everywhere (no separate <session> wrapper or new entity type). Upgrade :seon.agent/examples to :db.type/ref -> :seon.agent/entity; add :seon.agent/forked-from (:db.type/ref -> :seon.agent/entity), :seon.agent/fork-commit (:uuid), :seon.agent/summary (:string), and Malli options schema :seon.agent.prefix/opts (:mode :continue|:example, :commit, :include-walk?, :share-shown?). Project linked agents via :zone :agent-prefix rules (:rule.ctx/forked-agent-prefix, :rule.ctx/example-agents, :rule.ctx/forked-agent-audit) and render recursively in build-live-wire-request: :mode :example closes <agent kind=\"example\">...</agent>; :mode :continue replays parent verbatim at fork-commit, closes </agent>, opens <agent id=\":self\" forked-from=\":parent\"> with :already-shown delta from parent (>95% KV-cache hit, 0 duplicated entities). Delete superseded build-wire-examples and render-example-sessions.",
+  :seon.task/scope seon.render.wire,
+  :seon.task/tests #{seon.render.wire-test/unified-agent-prefix-fork-preserves-kv-cache-and-renders-examples},
+  :seon.task/title "Unify forked-agent and example-agent wire rendering into ONE rule-driven :agent-prefix mechanism"}
  {:seon.task/done? true,
   :seon.task/id :seon.bench/multi-instance-and-harbor,
   :seon.task/plan "Add --port 0, --headless, --seed-store, --model-base-url via clojure.tools.cli, build seon.bench.proxy, and wire thin BaseInstalledAgent for harbor run.",
