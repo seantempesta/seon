@@ -137,24 +137,6 @@
     (let [b (or branch (keyword "branch" (str (or (namespace id) "agent") "." (name id))))]
       (tx-main-sync! (merge {:op :spawn-agent :parent agent-id :branch b} spec)))))
 
-(defn ^:seon.flow/edge pin!
-  "Pins an entity ref or map into `:seon.agent/pinned` on `@ctx`."
-  {:seon.repl/export true :malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [item]
-  (when-let [{:keys [conn]} *agent-ctx*]
-    (let [cur (vec (or (:seon.agent/pinned @ctx/ctx) []))
-          ref-val (cond
-                    (and (map? item) (:seon.code.var/name item)) [:seon.code.var/name (:seon.code.var/name item)]
-                    (and (map? item) (:seon.code.ns/name item))  [:seon.code.ns/name (:seon.code.ns/name item)]
-                    (and (map? item) (:seon.code.doc/id item))   [:seon.code.doc/id (:seon.code.doc/id item)]
-                    (and (map? item) (:seon.schema/key item))    [:seon.schema/key (:seon.schema/key item)]
-                    (and (map? item) (:seon.task/id item))       [:seon.task/id (:seon.task/id item)]
-                    (and (map? item) (:seon.agent/id item))      [:seon.agent/id (:seon.agent/id item)]
-                    :else item)
-          nxt (if (some #(= % ref-val) cur) cur (conj cur ref-val))]
-      (swap! ctx/ctx assoc :seon.agent/pinned nxt)
-      {:pinned ref-val :count (count nxt)})))
-
 (defn ^:seon.flow/edge unpin!
   "Removes `item` from `:seon.agent/pinned` on `@ctx`."
   {:seon.repl/export true :malli/schema [:=> [:cat :any] [:maybe :map]]}
@@ -384,6 +366,17 @@
     (and (map? item) (:seon.agent/id item))      [:seon.agent/id (:seon.agent/id item)]
     :else item))
 
+(defn ^:seon.flow/edge pin!
+  "Pins an entity ref or map into `:seon.agent/pinned` on `@ctx`."
+  {:seon.repl/export true :malli/schema [:=> [:cat :any] [:maybe :map]]}
+  [item]
+  (when (:conn *agent-ctx*)
+    (let [cur (vec (or (:seon.agent/pinned @ctx/ctx) []))
+          ref-val (normalize-pin-ref item)
+          nxt (if (some #(= % ref-val) cur) cur (conj cur ref-val))]
+      (swap! ctx/ctx assoc :seon.agent/pinned nxt)
+      {:pinned ref-val :count (count nxt)})))
+
 (defn- compute-tune-patch
   "Pure shared patch builder for `:summary`, `:pinned`, `:context-prefs`, and `:seon.ctx/pattern`."
   {:malli/schema [:=> [:cat :map [:sequential :any] [:maybe :map]] :map]}
@@ -495,27 +488,28 @@
               :turns (when turn-set (vec (sort turn-set))) :memories-saved (count notes)})))))))
 
 (defn ^:seon.flow/edge set-canvas!
-  "Paints live Canvas with Hiccup `[:div ...]` or `'ns/fn` (`(fn [db agent])` or 1-arg `:seon.ui/hiccup`)."
+  "Paints live Canvas with Hiccup `[:div ...]` or `'ns/fn` (`(fn [db agent])` or 1-arg `:seon.ui/hiccup`), returning immediate `:visual-ok?` / `:visual-defects` / `:dropped` / `:eval-error` feedback."
   {:seon.repl/export true
-   :malli/schema [:=> [:cat [:or [:vector :any] :qualified-symbol]] [:maybe :map]]}
-  [hiccup-or-fn]
-  (when-let [{:keys [conn agent-id]} *agent-ctx*]
-    (let [db @conn
-          aeid (:e (first (d/datoms db :avet :seon.agent/id agent-id)))
-          cur (when aeid (d/pull db (quote [:seon.agent/canvas-hiccup :seon.agent/canvas-fn]) aeid))
-          tx (cond
-               (vector? hiccup-or-fn)
-               (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-hiccup hiccup-or-fn}]
-                 (and aeid (some? (:seon.agent/canvas-fn cur)))
-                 (conj [:db/retract aeid :seon.agent/canvas-fn (:seon.agent/canvas-fn cur)]))
-
-               (qualified-symbol? hiccup-or-fn)
-               (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-fn hiccup-or-fn}]
-                 (and aeid (some? (:seon.agent/canvas-hiccup cur)))
-                 (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])))
-          r (d/transact conn {:tx-data tx})]
-      (ctx/refresh-active! (:db-after r) (:tx-data r))
-      {:ok? true :agent-id agent-id :mode (if (vector? hiccup-or-fn) :hiccup :fn) :tx (:max-tx (:db-after r))})))
+   :malli/schema [:function [:=> [:cat [:or [:vector :any] :qualified-symbol]] [:maybe :map]]
+                  [:=> [:cat [:or [:vector :any] :qualified-symbol] [:maybe :map]] [:maybe :map]]]}
+  ([hiccup-or-fn] (set-canvas! hiccup-or-fn nil))
+  ([hiccup-or-fn opts]
+   (when-let [{:keys [conn agent-id]} *agent-ctx*]
+     (let [db @conn
+           aeid (:e (first (d/datoms db :avet :seon.agent/id agent-id)))
+           cur (when aeid (d/pull db (quote [:seon.agent/canvas-hiccup :seon.agent/canvas-fn]) aeid))
+           tx (cond
+                (vector? hiccup-or-fn)
+                (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-hiccup hiccup-or-fn}]
+                  (and aeid (some? (:seon.agent/canvas-fn cur))) (conj [:db/retract aeid :seon.agent/canvas-fn (:seon.agent/canvas-fn cur)]))
+                (qualified-symbol? hiccup-or-fn)
+                (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-fn hiccup-or-fn}]
+                  (and aeid (some? (:seon.agent/canvas-hiccup cur))) (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])))
+           r (d/transact conn {:tx-data tx})
+           _ (ctx/refresh-active! (:db-after r) (:tx-data r))
+           aud ((requiring-resolve (quote seon.browser.preview/audit-canvas-entry!)) (:db-after r) agent-id hiccup-or-fn opts)]
+       (merge {:ok? true :agent-id agent-id :mode (if (vector? hiccup-or-fn) :hiccup :fn) :tx (:max-tx (:db-after r))}
+              (select-keys aud [:visual-checked? :visual-ok? :visual-defects :dropped :eval-error]))))))
 
 (defn ^:seon.flow/edge clear-canvas!
   "Clears custom `:seon.agent/canvas-hiccup` / `:seon.agent/canvas-fn` override."

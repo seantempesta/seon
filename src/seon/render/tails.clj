@@ -194,25 +194,50 @@
        (sig-li :proof "Proof" proof)]]}))
 
 (defn render-viewport-tail
-  "Pure `ns-map -> ns-map` Hiccup renderer for live WKWebView screenshot & DOM metadata."
+  "Pure `ns-map -> ns-map` Hiccup renderer for live WKWebView screenshot & DOM metadata,
+   surfacing numbered `VISUAL DEFECTS (N) — FIX BEFORE ANSWERING:` alerts even when `vision? = false`."
   {:malli/schema [:=> [:cat [:map [:seon.tail/viewport :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 500000}
   [{{:keys [snapshot enabled? vision?]} :seon.tail/viewport}]
   (when (and (map? snapshot) enabled?)
-    (let [dom (:dom snapshot)
-          dom-s (when (map? dom)
-                  (not-empty (str/join " · "
-                                       (remove nil? [(when-not (str/blank? (str (:viewing dom))) (str "viewing=" (:viewing dom)))
-                                                     (when-not (str/blank? (str (:mode dom))) (str "mode=" (:mode dom)))
-                                                     (when (:theme dom) (str "theme=" (:theme dom)))
-                                                     (when (some? (:overflowX dom)) (str "overflowX=" (:overflowX dom)))
-                                                     (when (some? (:svgCount dom)) (str "svgs=" (:svgCount dom))) (when-let [ds (seq (or (:visual-defects dom) (:defects dom)))] (str "DEFECTS(" (count ds) "): " (str/join "; " (take 4 ds))))]))))]
+    (let [dom (when (map? (:dom snapshot)) (:dom snapshot))
+          ov? (boolean (or (:overflowX dom) (:overflow-x? dom)))
+          clipped-n (let [c (:clipped-count dom)] (if (number? c) (max 0 (long c)) 0))
+          clipped-sels (when (sequential? (:clipped-selectors dom))
+                         (vec (keep #(when (and (string? %) (not (str/blank? %))) (str/trim %)) (:clipped-selectors dom))))
+          raw-defs (let [v (or (:visual-defects dom) (:defects dom))]
+                     (if (sequential? v)
+                       (vec (keep #(when (and (string? %) (not (str/blank? %))) (str/trim %)) v))
+                       []))
+          defects (vec (distinct
+                        (cond-> raw-defs
+                          (and ov? (not (some #(str/includes? (str/lower-case %) "overflow") raw-defs)))
+                          (conj "Horizontal document overflow (overflowX=true)")
+                          (and (pos? clipped-n) (not (some #(str/includes? (str/lower-case %) "clip") raw-defs)))
+                          (conj (str clipped-n " clipped element(s)"
+                                     (when (seq clipped-sels) (str ": " (str/join ", " (take 4 clipped-sels)))))))))
+          clean? (and (empty? defects) (not ov?) (zero? clipped-n))
+          dom-s (when dom
+                  (not-empty
+                   (str/join " · "
+                             (remove nil? [(when-not (str/blank? (str (:viewing dom))) (str "viewing=" (:viewing dom)))
+                                           (when-not (str/blank? (str (:mode dom))) (str "mode=" (:mode dom)))
+                                           (when (:theme dom) (str "theme=" (:theme dom)))
+                                           (when (some? (:overflowX dom)) (str "overflowX=" (:overflowX dom)))
+                                           (when (some? (:svgCount dom)) (str "svgs=" (:svgCount dom)))
+                                           (when clean? "0 defects")]))))]
       (cond-> {:tag "live-viewport"
                :attrs {:route (:route snapshot "/") :size (str (:width snapshot 1280) "x" (:height snapshot 820))}
                :seon.ui/hiccup
-               [:section {:class "tail-block" :data-min-width 220}
-                [:p "Current live WKWebView screenshot (ephemeral end-of-context frame)."]
-                (when dom-s [:p (str "DOM: " dom-s)])]}
+               (cond-> [:section {:class "tail-block" :data-min-width 220}
+                        [:p "Current live WKWebView screenshot (ephemeral end-of-context frame)."]]
+                 dom-s (conj [:p (str "DOM: " dom-s)])
+                 (seq defects)
+                 (conj [:div
+                        [:p (str "VISUAL DEFECTS (" (count defects) ") — FIX BEFORE ANSWERING:")]
+                        (into [:ul]
+                              (map-indexed (fn [i d] [:li (str "[" (inc i) "] " (one-line d 220))])
+                                           (take 8 defects)))]))}
         (and vision? (:base64 snapshot))
         (assoc :image {:mime (or (:mime snapshot) "image/jpeg") :base64 (:base64 snapshot) :raw snapshot})))))
 
