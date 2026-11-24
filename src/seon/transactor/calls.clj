@@ -278,7 +278,7 @@
 
 (defn resolve-fork-spec
   "Resolves `:fork-from` / `:forked-from`, `:prefix-mode`, and `:merge-target` against `conn` / `db0` into `{:fork-eid :fork-parent :src-branch :fork-commit :prefix-mode :merge-target :auto-merge? :resolve-eid}`."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map] :map]}
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map] :map], :seon.flow/edge true}
   [conn db0 msg]
   (let [dh (:schema db0)
         raw-fork (or (:fork-from msg) (:forked-from msg))

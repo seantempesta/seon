@@ -30,8 +30,9 @@ A fork's checkout under `reference-code/` is also what Seon builds from. `bin/bu
 A pin bump runs the forks' own tests on Jolt, so a fork commit cannot change semantics unseen. `bin/check`'s `forks` step (`bin/forks`, whose header is its manual) runs each unit `test/forks/baseline.edn` names (a Datahike test namespace, a konserve or persistent-sorted-set test file) in a few Jolt processes (`test/forks/run.jolt`, on the `:dhtest` alias), and is red when a unit's counts differ from the baseline's. A unit with no counts, or right alone and wrong beside others, is run again alone and its log kept under `target/forks-died/`. Its key is `:pins` (```seon.proofs/check-steps```): every submodule's pin and the checkout's `:env`, so a bump of jolt, datahike, konserve or persistent-sorted-set runs it and a change to Seon's `.clj` does not. A commit that moves a unit's counts records the new ones in the baseline.
 
 ## jolt
+## jolt
 
-`reference-code/jolt` at `e47047a5` (``seon/upstream-sync``), **9 atomic commits** over upstream ``jolt-lang/jolt`` main `3b06f3c4` (0 behind: includes B+tree `#1757`, inline HAMT `#1798`, shared-subtrie `set/difference` `#1779`, plus full Seon runtime/fork/fiber/budget support). Seon's agents run on one OS thread with fibers ([processes](processes.md)), fork from root, and are measured by ticks and bytes ([cost](cost.md#what-is-measured)); most of what we carry serves those three. Every Jolt gate is green on the pin; catching up with upstream is task `jolt.host/jolt-is-at-upstreams-head`.
+`reference-code/jolt` at `ecaa5da8` (``seon/upstream-sync``), **10 atomic commits** over upstream ``jolt-lang/jolt`` main `3b06f3c4` (0 behind: includes B+tree `#1757`, inline HAMT `#1798`, shared-subtrie `set/difference` `#1779`, plus full Seon runtime/fork/fiber/budget support). Seon's agents run on one OS thread with fibers ([processes](processes.md)), fork from root, and are measured by ticks and bytes ([cost](cost.md#what-is-measured)); most of what we carry serves those three. Every Jolt gate is green on the pin; catching up with upstream is task `jolt.host/jolt-is-at-upstreams-head`.
 
 - **The main carrier** (Jolt): a program and its fibers on its one thread; it wakes on a fiber another thread queues, on a timer, on signals; decides it is stuck only under the lock its wakers take; `main-carrier-run!` returns into an ordinary process, so root boots there and then starts its threads. A process nothing can wake tells each waiter `{:jolt/deadlock true :parked dump}` in its own frame ([failure points](failure-points.md)). A FIFO's or device's open, read and write on a fiber run collect-safe on an OS thread while the fiber parks (``io-elsewhere``, io-streams.ss), so the carrier runs on; not the poller, which on macOS sees no FIFO writer leave.
 - **Fork safety** (Generic): ``jolt.host/fork-alone`` is the one way to fork; `jolt-after-fork-child!` drops the bookkeeping of threads fork(2) did not copy, remakes every process lock and object monitor, and runs none of the parent's fibers or shutdown hooks; a forked child re-protects MAP_JIT code (chez-patches 0006, 0007, macOS arm64). The parent's parked fibers' channel takes are retired in the child, so a put there is never taken by a fiber that will not run.
@@ -58,8 +59,9 @@ An agent's eval is a fiber on the agent's one OS thread, so Jolt keeps each fibe
 The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.host/a-scoped-construct-has-no-entry-hook` and `jolt.host/a-shared-table-is-frozen-swapped-or-locked-inside`.
 
 ## chez
+## chez
 
-`reference-code/chez` at `9e2a4868` (``jolt/deps``), upstream ``cisco/ChezScheme`` v10.4.1 `e95a7ef`; fork ``seantempesta/ChezScheme``. All Generic.
+`reference-code/chez` at `f13d1b56` (``seon/upstream-sync``), upstream ``cisco/ChezScheme`` 10.5.0 `2303c215` (0 behind; Jolt patches 0008-0011 + Seon patches 0012-0014); fork ``seantempesta/ChezScheme``. All Generic.
 
 - Jolt's chez-patches 0001–0007, as Jolt's CI builds Chez (lock-free thread activation, fork re-protects MAP_JIT, static code leaves MAP_JIT so forks share it).
 - vfasl fixes for negative bignums and fxvectors, with mats.
@@ -71,8 +73,9 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 - Open: the fork's ``jolt/main`` (`fdd1e1e`) is under the pin.
 
 ## datahike
+## datahike
 
-`reference-code/datahike` at `6ac4e413`, on ``seon/jolt-diff-buf`` (adds PSS `:diff-buf-size` & `:edge-append?` + GC/out-of-line/node-cache `Branch._slots` support): upstream ``replikativ/datahike`` history with our changes as fresh commits on top. The fork's ``jolt/main`` (`fde9f89`) is the old pre-rebuild line and is not under the pin.
+`reference-code/datahike` at `d6ed3ccc`, on ``seon/upstream-sync`` (PSS `:diff-buf-size` & `:edge-append?` + upstream `#1089`/`#1154`/`#1156`/`#1177`/`#1181` `recount!` + `#1182`): upstream ``replikativ/datahike`` history with our changes as fresh commits on top. The fork's ``jolt/main`` (`fde9f89`) is the old pre-rebuild line and is not under the pin.
 
 - **The `:sync` writer** (Jolt, our design): group commit by `transact-batch!`; run-ahead writes (`apply!`, `commit-pending!`, `abandon-pending!`), a run-ahead value shown on the connection ([storage](storage.md#a-run-ahead-value-shown-on-the-connection)); a streaming writer's deref reads no store; merges go through the writer's own transact, so Seon's `transact-checked` sees every one ([storage](storage.md#the-write-checks-every-entity-it-touches)); a writer waits for its connection on a watch; a released connection says `:connection-has-been-released`; `force-branch!` moves a live `:sync` connection to the new head ([storage](storage.md#a-moved-head-moves-its-live-connection)).
 - **Ids** (Generic): entity and transaction ids issued once across every branch; content entity ids (`:db/contentId`) partitioned from counter and tx ids; a compact branch head carries its ids ([storage](storage.md#ids)).
@@ -86,8 +89,9 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 - Tests changed so the core suites load and run on Jolt, as [own suites](#own-suites).
 
 ## persistent-sorted-set
+## persistent-sorted-set
 
-`reference-code/persistent-sorted-set` at `b483901` (``seon/diff-buffering-and-edge-append`` — full upstream `0.5.145` Diff Buffering + opt-in `:edge-append?`). Written fresh as Jolt deftypes (no upstream history); upstream ``replikativ/persistent-sorted-set``. An overlay: `deps.edn` puts its `src` on `:paths` ahead of the mvn 0.4.137 jar Datahike depends on, which supplies the other namespaces. Jolt.
+`reference-code/persistent-sorted-set` at `1ce16e61` (``seon/diff-buffering-and-edge-append`` — upstream `0.5.145` Diff Buffering + `0.5.146`-`0.5.148` stored branch subtree counts + opt-in `:edge-append?`). Written fresh as Jolt deftypes (no upstream history); upstream ``replikativ/persistent-sorted-set``. An overlay: `deps.edn` puts its `src` on `:paths` ahead of the mvn 0.4.137 jar Datahike depends on, which supplies the other namespaces. Jolt.
 
 - The JVM core as Jolt deftypes, with EDN node forms and `forwardCursor` taking a `java.util.Comparator`.
 - A `:weak` ref type: a branch keeps no child it restored, so the node cache is the one holder of nodes read back.
@@ -108,20 +112,23 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 - Open: `konserve.jolt.fasl-store` names persistent-sorted-set node types; its cleaner home may be that fork.
 
 ## malli
+## malli
 
-`reference-code/malli` at `4dc9e305`, upstream ``metosin/malli`` master `80138076` plus ours. All Generic.
+`reference-code/malli` at `06a2e4a1` (``jolt/upstream-sync``), **15 ahead / 0 behind** upstream ``metosin/malli`` master `77db2206`. All Generic.
 
 - Instrument: a throwing validator is an `::invalid-schema-at-call` report; a passing call allocates nothing; a one-fixed-arity schema gets a wrapper of that arity; an arm whose validator cannot throw (`-total?`) is checked without a `try`; `-strument!` passes `:registry`.
 - Validators: a registry pointer and an outermost ref share their target's cached validator; a nested `:ref` compiles on first use (upstream #1270); recursive ref transformers are reused (upstream #1250).
 - `::mg/=>seed` seeds quick-check and a failure carries its seed; sci and generator fixes; eval returns a loaded Var; `levenshtein` public and on int arrays.
 
 ## crypto
+## crypto
 
-`reference-code/crypto` at `990293d` (``jolt/deps``), upstream ``jolt-lang/crypto`` main `e6981b8`. Arms claim host tables only (`{:kind :table}`); a digest is one allocation for its input, the digest and its length. Generic.
+`reference-code/crypto` at `9a542310` (``seon/upstream-sync``), **2 ahead / 0 behind** upstream ``jolt-lang/crypto`` main `5f99b52d`. Arms claim host tables only (`{:kind :table}`); a digest is one allocation for its input, the digest and its length. Generic.
 
 ## jolt-fressian
+## jolt-fressian
 
-`reference-code/jolt-fressian` at `8f3eb5d`, upstream ``jolt-lang/jolt-fressian`` `7e7922a`. One commit: decode fixes (leaf decode 8.6× faster). Generic. Off the default path: the `deps.edn` alias `:fressian`, for opening a JVM-written store.
+`reference-code/jolt-fressian` at `51bd5135` (``seon/upstream-sync``), **1 ahead / 0 behind** upstream ``jolt-lang/jolt-fressian`` `2cae9975`. One commit: decode fixes (leaf decode 8.6× faster). Generic. Off the default path: the `deps.edn` alias `:fressian`, for opening a JVM-written store.
 
 ## jolt-overlay
 
@@ -132,8 +139,9 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 - hasch's digests in fewer host calls, every id still hasch's on the JVM (`seon.db-test/hasch-ids-are-the-jvms`). Jolt.
 
 ## http-client
+## http-client
 
-Pinned in `deps.edn` at `e866277d` (``jolt/fiber-aware-read``), upstream ``jolt-lang/http-client``. A read from a fiber parks the fiber, not its carrier: it waits through `jolt.io-poller/wait-ready` with a fixed deadline and receives without blocking, so a server fiber in the same main-carrier process still answers. Generic.
+Pinned in `deps.edn` at `99f4a0c5` (``seon/upstream-sync``), **3 ahead / 0 behind** upstream ``jolt-lang/http-client`` `bf1485eb` (+ `jolt.http.sse`, TLS fixes). A read from a fiber parks the fiber, not its carrier: it waits through `jolt.io-poller/wait-ready` with a fixed deadline and receives without blocking, so a server fiber in the same main-carrier process still answers. Generic.
 
 ## lmdb
 
