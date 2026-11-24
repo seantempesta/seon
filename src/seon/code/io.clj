@@ -164,6 +164,9 @@
     (files/agent-file-path? path)
     (files/render-agent-file db path)
 
+    (files/ledger-file-path? path)
+    (files/render-ledger-file db path)
+
     :else
     (:seon.code.file/text (d/pull db '[:seon.code.file/text] [:seon.code.file/path path]))))
 
@@ -397,6 +400,7 @@
      (files/task-file-path? path)   (files/import-tasks-tx db path text)
      (files/rule-file-path? path)   (files/import-rules-tx db path text batch-ctx)
      (files/agent-file-path? path)  (files/import-agents-tx db path text)
+     (files/ledger-file-path? path) (files/import-ledger-tx db path text)
      :else [{:seon.code.file/path path :seon.code.file/text text :seon.code.file/exec? (boolean exec?)}])))
 
 (defn batch-ref-ctx

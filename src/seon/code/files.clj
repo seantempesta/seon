@@ -457,3 +457,43 @@
                     [:db/retractEntity [:seon.rule/id rid]]))
           enriched (mapcat #(enrich-rule-tx db % batch-ctx) items)]
       (vec (concat stale enriched)))))
+
+(def ledger-files
+  "Declarative append-only EDN ledgers serialized to disk on merge and re-imported on fresh store boot."
+  {"resources/seon/fixes.edn"     {:id-attr :seon.fix/id     :header ";; Declarative Seon class-fix ledger (resources/seon/fixes.edn — loaded on fresh install, written back on green merge).\n"}
+   "resources/seon/summaries.edn" {:id-attr :seon.summary/id :header ";; Declarative Seon Chronicle summaries (resources/seon/summaries.edn — loaded on fresh install, written back on green merge).\n"}})
+
+(defn ledger-file-path?
+  "True for declarative EDN ledger paths (`resources/seon/fixes.edn`, `resources/seon/summaries.edn`)."
+  {:malli/schema [:=> [:cat :string] :boolean] :cost/ticks 20000}
+  [^String path]
+  (contains? ledger-files path))
+
+(defn render-ledger-file
+  "Renders all entities for a declarative EDN ledger (`fixes.edn` or `summaries.edn`) deterministically."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]] :cost/ticks 15000000}
+  [db path]
+  (when-let [{:keys [id-attr header]} (get ledger-files path)]
+    (when (contains? (:schema db) id-attr)
+      (let [ents (->> (d/datoms db :aevt id-attr)
+                      (map #(dissoc (d/pull db '[*] (:e %)) :db/id))
+                      (sort-by (fn [e] [(long (or (:seon.fix/created-ms e) (:seon.summary/created-ms e) 0))
+                                        (str (get e id-attr))]))
+                      vec)]
+        (when (seq ents)
+          (str header (pprint-edn ents)))))))
+
+(defn import-ledger-tx
+  "Parses a declarative EDN ledger file (`fixes.edn` or `summaries.edn`) into Datahike tx-data."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :string] [:vector :any]] :cost/ticks 15000000}
+  [db path text]
+  (if-let [{:keys [id-attr]} (get ledger-files path)]
+    (let [raw (edn/read-string text)
+          items (cond (vector? raw) raw (map? raw) [raw] :else [])
+          new-ids (into #{} (keep id-attr) items)
+          stale (when (and db (contains? (:schema db) id-attr))
+                  (for [dt (d/datoms db :aevt id-attr)
+                        :when (not (contains? new-ids (:v dt)))]
+                    [:db/retractEntity [id-attr (:v dt)]]))]
+      (vec (concat stale items)))
+    []))
