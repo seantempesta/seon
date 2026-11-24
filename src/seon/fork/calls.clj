@@ -269,18 +269,22 @@
       {:incoming (pull-all :seon.agent.call/callee) :outgoing (pull-all :seon.agent.call/caller)})))
 
 (defn ^:seon.flow/edge show-user!
-  "Steers the human's live UI viewport (`:viewing`, `:mode`, `:sidebar?`, `:expand`, `:as-of-tx`)."
+  "Steers UI viewport (`:viewing`, `:mode`, `:sidebar?`, `:expand`, `:as-of-tx`, `:inspect-ref`, `:nav-back`, `:nav-forward`, `:expert-mode?`, `:lab-prefs`)."
   {:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [{:keys [user-id viewing mode sidebar? expand selected-branch as-of-tx] :as arg}]
+  [arg]
   (when-let [{:keys [out]} *agent-ctx*]
-    (a/>!! out (cond-> {:ev :tx-main :op :show-user :user-id (or user-id :user/default)}
-                 viewing (assoc :viewing viewing)
-                 mode (assoc :mode mode)
-                 (some? sidebar?) (assoc :sidebar? (boolean sidebar?))
-                 (seq expand) (assoc :expand (set expand))
-                 selected-branch (assoc :selected-branch selected-branch)
-                 (contains? arg :as-of-tx) (assoc :as-of-tx as-of-tx)))
-    {:ok? true :viewing viewing :mode mode :sidebar? sidebar? :as-of-tx as-of-tx}))
+    (let [lp (cond-> (if (map? (:lab-prefs arg)) (:lab-prefs arg) {})
+               (contains? arg :expert-mode?) (assoc :expert-mode? (boolean (:expert-mode? arg))))
+          req (cond-> (merge {:ev :tx-main :op :show-user :user-id (or (:user-id arg) :user/default)}
+                             (select-keys arg [:viewing :mode :selected-branch :as-of-tx :inspect-ref :push-inspect]))
+                (some? (:sidebar? arg)) (assoc :sidebar? (boolean (:sidebar? arg)))
+                (seq (:expand arg)) (assoc :expand (set (:expand arg)))
+                (:clear-inspect arg) (assoc :clear-inspect true)
+                (:nav-back arg) (assoc :nav-back true :pop-inspect true)
+                (:nav-forward arg) (assoc :nav-forward true :forward-inspect true)
+                (seq lp) (assoc :lab-prefs lp))]
+      (a/>!! out req)
+      (merge {:ok? true} (select-keys arg [:viewing :mode :sidebar? :as-of-tx :inspect-ref :push-inspect :expert-mode?])))))
 
 (defn ^:seon.flow/edge start-bench-run!
   "Starts a parallel isolated benchmark run via the coordinator's `:start-bench-run` op."
@@ -490,15 +494,14 @@
               :turns (when turn-set (vec (sort turn-set))) :memories-saved (count notes)})))))))
 
 (defn ^:seon.flow/edge set-canvas!
-  "Paints this agent's live Canvas directly with either a static Hiccup vector `[:div ...]` (`:seon.agent/canvas-hiccup`)
-   or a qualified symbol `'ns/fn` of a pure 2-arg `(fn [db agent])` reactive renderer (`:seon.agent/canvas-fn`)."
+  "Paints live Canvas with Hiccup `[:div ...]` or `'ns/fn` (`(fn [db agent])` or 1-arg `:seon.ui/hiccup`)."
   {:seon.repl/export true
    :malli/schema [:=> [:cat [:or [:vector :any] :qualified-symbol]] [:maybe :map]]}
   [hiccup-or-fn]
   (when-let [{:keys [conn agent-id]} *agent-ctx*]
     (let [db @conn
           aeid (:e (first (d/datoms db :avet :seon.agent/id agent-id)))
-          cur (when aeid (d/pull db '[:seon.agent/canvas-hiccup :seon.agent/canvas-fn] aeid))
+          cur (when aeid (d/pull db (quote [:seon.agent/canvas-hiccup :seon.agent/canvas-fn]) aeid))
           tx (cond
                (vector? hiccup-or-fn)
                (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-hiccup hiccup-or-fn}]
@@ -508,23 +511,26 @@
                (qualified-symbol? hiccup-or-fn)
                (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-fn hiccup-or-fn}]
                  (and aeid (some? (:seon.agent/canvas-hiccup cur)))
-                 (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])))]
-      (d/transact conn {:tx-data tx})
-      {:ok? true :agent-id agent-id :mode (if (vector? hiccup-or-fn) :hiccup :fn)})))
+                 (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])))
+          r (d/transact conn {:tx-data tx})]
+      (ctx/refresh-active! (:db-after r) (:tx-data r))
+      {:ok? true :agent-id agent-id :mode (if (vector? hiccup-or-fn) :hiccup :fn) :tx (:max-tx (:db-after r))})))
 
 (defn ^:seon.flow/edge clear-canvas!
-  "Clears any custom `:seon.agent/canvas-hiccup` or `:seon.agent/canvas-fn` override so Canvas returns to auto-derived presence."
+  "Clears custom `:seon.agent/canvas-hiccup` / `:seon.agent/canvas-fn` override."
   {:seon.repl/export true
    :malli/schema [:=> [:cat] [:maybe :map]]}
   []
   (when-let [{:keys [conn agent-id]} *agent-ctx*]
     (let [db @conn
           aeid (:e (first (d/datoms db :avet :seon.agent/id agent-id)))
-          cur (when aeid (d/pull db '[:seon.agent/canvas-hiccup :seon.agent/canvas-fn] aeid))
+          cur (when aeid (d/pull db (quote [:seon.agent/canvas-hiccup :seon.agent/canvas-fn]) aeid))
           tx (cond-> []
                (and aeid (some? (:seon.agent/canvas-hiccup cur)))
                (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])
                (and aeid (some? (:seon.agent/canvas-fn cur)))
                (conj [:db/retract aeid :seon.agent/canvas-fn (:seon.agent/canvas-fn cur)]))]
-      (when (seq tx) (d/transact conn {:tx-data tx}))
+      (when (seq tx)
+        (let [r (d/transact conn {:tx-data tx})]
+          (ctx/refresh-active! (:db-after r) (:tx-data r))))
       {:ok? true :agent-id agent-id :cleared (count tx)})))

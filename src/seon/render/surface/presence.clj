@@ -7,76 +7,16 @@
             [seon.ctx.touches :as ctouches]
             [seon.render.data :as rdata]
             [seon.render.links :as rlinks :refer [badge ent-link kicker]]
-            [seon.store :as store :refer [db-schema]]))
-
-(def ^:private forbidden-tags
-  #{"script" "iframe" "style" "object" "embed" "link" "meta" "base" "foreignobject"})
-
-(def ^:private url-attr-names
-  #{"href" "src" "action" "formaction" "xlink:href" "poster"})
-
-(defn- tag-base-name [t]
-  (let [s (str/lower-case (if (keyword? t) (name t) (str t)))
-        i1 (or (str/index-of s "#") (count s))
-        i2 (or (str/index-of s ".") (count s))]
-    (subs s 0 (min i1 i2))))
-
-(defn- unsafe-url? [v]
-  (when (string? v)
-    (let [s (-> v str/trim str/lower-case (str/replace #"[\x00-\x20]+" ""))]
-      (or (str/starts-with? s "javascript:")
-          (str/starts-with? s "vbscript:")
-          (str/starts-with? s "data:text/html")
-          (str/starts-with? s "data:image/svg")))))
-
-(defn- sanitize-attrs [attrs]
-  (reduce-kv
-   (fn [m k v]
-     (let [kn (str/lower-case (if (keyword? k) (name k) (str k)))]
-       (cond
-         ;; Allow Seon quoted data actions (symbol/seq) for :on-click, strip all raw JS string event handlers
-         (and (str/starts-with? kn "on") (not (or (symbol? v) (seq? v))))
-         m
-
-         (and (contains? url-attr-names kn) (unsafe-url? v))
-         m
-
-         :else
-         (assoc m k v))))
-   {}
-   attrs))
+            [seon.store :as store :refer [db-schema]]
+            [seon.render.sanitize :as sanitize]))
 
 (defn sanitize-canvas-hiccup
-  "Pure recursive XSS sanitizer for agent-supplied Canvas Hiccup: strips forbidden tags
-   (`<script>`, `<iframe>`, `<style>`, `<object>`, `<embed>`, etc.), raw JS string `on*`
-   event handlers, and `javascript:`/`vbscript:`/`data:text/html` URLs."
+  "Pure recursive allowlist XSS sanitizer for agent-supplied Canvas Hiccup via `seon.render.sanitize/sanitize-hiccup`
+   (`:allow-seon-actions? true` permits `:button` and strictly allowlisted `(seon.web/...)` `:on-click` actions)."
   {:malli/schema [:=> [:cat :any] :any]
    :cost/ticks 5000000}
   [node]
-  (cond
-    (nil? node) nil
-    (or (string? node) (number? node) (boolean? node) (keyword? node)) node
-    (vector? node)
-    (if (empty? node)
-      nil
-      (let [tag (first node)]
-        (cond
-          (not (or (keyword? tag) (symbol? tag) (string? tag)))
-          (vec (keep sanitize-canvas-hiccup node))
-
-          (contains? forbidden-tags (tag-base-name tag))
-          nil
-
-          :else
-          (let [s2 (second node)
-                has-attrs? (map? s2)
-                attrs (when has-attrs? (sanitize-attrs s2))
-                children (if has-attrs? (subvec node 2) (subvec node 1))
-                clean-kids (keep sanitize-canvas-hiccup children)]
-            (into (if has-attrs? [tag attrs] [tag]) clean-kids)))))
-    (sequential? node)
-    (doall (keep sanitize-canvas-hiccup node))
-    :else (str node)))
+  (sanitize/sanitize-hiccup node {:allow-seon-actions? true}))
 
 (defn- eval-canvas-fn [branch-db agent fn-sym]
   (when (qualified-symbol? fn-sym)
@@ -84,7 +24,15 @@
       (when-let [ns-obj (find-ns (symbol (namespace fn-sym)))]
         (when-let [v (ns-resolve ns-obj (symbol (name fn-sym)))]
           (when (and (var? v) (bound? v))
-            (sanitize-canvas-hiccup (@v branch-db agent)))))
+            (let [als (:arglists (meta v))
+                  one-arg-only? (and (seq als) (every? #(= 1 (count %)) als))
+                  raw (if one-arg-only?
+                        (@v {:seon.agent/entity agent :db branch-db})
+                        (@v branch-db agent))
+                  node (if (and (map? raw) (contains? raw :seon.ui/hiccup))
+                         (:seon.ui/hiccup raw)
+                         raw)]
+              (sanitize-canvas-hiccup node)))))
       (catch Throwable ex
         [:div {:class "card mono tiny muted"}
          (str "Canvas renderer " fn-sym " error: " (or (.getMessage ex) (str ex)))]))))

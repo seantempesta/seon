@@ -2,7 +2,8 @@
   "Zero-dependency pure-Clojure CommonMark + GFM AST parser, safe URL classifier,
    and strict HTML/SVG Hiccup sanitizer. Never emits raw HTML."
   (:require [clojure.edn :as edn]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.render.sanitize :as sanitize]))
 
 (def ^:private punct (set "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"))
 
@@ -547,26 +548,15 @@
       (parse-blocks lines))))
 
 (defn classify-url
-  "Classifies a Markdown link/image URL into `:internal`, `:external`, `:mailto`, `:fragment`, or `:unsafe`
-   (stripping control characters and neutralizing `javascript:`, `data:`, `vbscript:`, and `//...`)."
+  "Classifies a Markdown link/image URL into `:internal`, `:external`, `:mailto`, `:fragment`, or `:unsafe` via `seon.render.sanitize/classify-url`."
   {:malli/schema [:=> {:examples [[["/var/seon.web/web-proc"] {:kind :internal :href "/var/seon.web/web-proc"}]
                                   [["https://example.com"] {:kind :external :href "https://example.com"}]
                                   [["javascript:alert(1)"] {:kind :unsafe :href ""}]
                                   [["data:text/html,<h1>x</h1>"] {:kind :unsafe :href ""}]]}
                   [:cat [:maybe :string]] [:map [:kind :keyword] [:href :string]]]
-   :cost/ticks 200000 :cost/bytes 131072}
+   :cost/ticks 250000 :cost/bytes 131072}
   [raw-url]
-  (let [cleaned (-> (str (or raw-url ""))
-                    (str/replace #"[\u0000-\u001f\u007f]+" "")
-                    str/trim)
-        lo (str/lower-case cleaned)]
-    (cond
-      (str/blank? cleaned) {:kind :unsafe :href ""}
-      (and (str/starts-with? cleaned "/") (not (str/starts-with? cleaned "//"))) {:kind :internal :href cleaned}
-      (str/starts-with? cleaned "#") {:kind :fragment :href cleaned}
-      (or (str/starts-with? lo "https://") (str/starts-with? lo "http://")) {:kind :external :href cleaned}
-      (str/starts-with? lo "mailto:") {:kind :mailto :href cleaned}
-      :else {:kind :unsafe :href ""})))
+  (sanitize/classify-url raw-url))
 
 (defn safe-read-edn
   "Safely parses pure EDN string `s` with `*read-eval* false`, returning `{:ok? true :val v}` or `{:ok? false :error msg}`."
@@ -579,82 +569,13 @@
     (catch Throwable ex
       {:ok? false :error (or (.getMessage ex) (str ex))})))
 
-(def ^:private safe-hiccup-tags
-  #{:div :span :p :a :h1 :h2 :h3 :h4 :h5 :h6 :ul :ol :li :dl :dt :dd
-    :table :thead :tbody :tfoot :tr :th :td :caption :blockquote :pre :code
-    :strong :b :em :i :del :s :u :small :sub :sup :mark :br :hr
-    :details :summary :figure :figcaption :section :article :header :footer
-    :nav :aside :meter :progress :time :kbd :abbr :img
-    :svg :g :path :circle :ellipse :rect :line :polyline :polygon :text :tspan
-    :defs :linearGradient :radialGradient :stop :clipPath :title :desc :marker})
-
-(def ^:private safe-hiccup-attrs
-  #{:class :id :title :role :colspan :rowspan :open :width :height :alt
-    :value :min :max :low :high :optimum :datetime :href :src :target :rel :style
-    :aria-label :aria-valuenow :aria-valuemin :aria-valuemax :aria-hidden
-    :viewBox :viewbox :xmlns :fill :fill-opacity :fill-rule :stroke :stroke-width
-    :stroke-linecap :stroke-linejoin :stroke-dasharray :stroke-opacity :opacity
-    :x :y :x1 :y1 :x2 :y2 :cx :cy :r :rx :ry :dx :dy :d :points :transform
-    :text-anchor :dominant-baseline :font-size :font-family :font-weight
-    :letter-spacing :offset :stop-color :stop-opacity :gradientUnits :preserveAspectRatio})
-
-(defn- safe-style-str? [s]
-  (let [lo (str/lower-case (str (or s "")))]
-    (not (or (str/includes? lo "javascript:") (str/includes? lo "vbscript:")
-             (str/includes? lo "expression(") (str/includes? lo "url(")
-             (str/includes? lo "@import")))))
-
 (defn sanitize-hiccup
-  "Sanitizes an untrusted pure-EDN Hiccup tree against a strict HTML/SVG tag and attribute whitelist:
-   drops `<script>`, `<iframe>`, `on*`/`data-on*` event attrs, `javascript:`/`data:` URLs, and raw HTML maps."
+  "Sanitizes an untrusted pure-EDN Hiccup tree via `seon.render.sanitize/sanitize-hiccup`."
   {:malli/schema [:=> {:examples [[[[ :div {:class "box" :onclick "evil()"} [:script "x"] "ok"]]
                                    [:div {:class "box"} "ok"]]
                                   [[[:a {:href "javascript:alert(1)"} "click"]]
                                    [:a "click"]]]}
                   [:cat :any] :any]
-   :cost/ticks 2000000 :cost/bytes 4194304}
+   :cost/ticks 2500000 :cost/bytes 4194304}
   [node]
-  (letfn [(clean-attrs [m]
-            (reduce-kv
-             (fn [acc k v]
-               (if (and (simple-keyword? k) (contains? safe-hiccup-attrs k) (some? v))
-                 (case k
-                   :href (let [{:keys [kind href]} (classify-url (str v))]
-                           (case kind
-                             :external (assoc acc :href href :target "_blank" :rel "noopener noreferrer")
-                             (:internal :fragment :mailto) (assoc acc :href href)
-                             acc))
-                   :src (let [{:keys [kind href]} (classify-url (str v))]
-                          (if (#{:external :internal} kind) (assoc acc :src href) acc))
-                   :style (cond
-                            (string? v) (if (safe-style-str? v) (assoc acc :style v) acc)
-                            (map? v) (let [sm (into {} (keep (fn [[sk sv]]
-                                                               (when (and (or (simple-keyword? sk) (string? sk))
-                                                                          (or (string? sv) (number? sv) (keyword? sv))
-                                                                          (safe-style-str? (str sv)))
-                                                                 [sk sv]))) v)]
-                                       (if (seq sm) (assoc acc :style sm) acc))
-                            :else acc)
-                   (if (or (string? v) (number? v) (boolean? v) (keyword? v)) (assoc acc k v) acc))
-                 acc))
-             {} m))
-          (walk [n depth]
-            (cond
-              (or (nil? n) (false? n) (> depth 24)) nil
-              (or (string? n) (number? n) (boolean? n)) n
-              (or (keyword? n) (symbol? n)) (str n)
-              (map? n) nil
-              (seq? n) (let [xs (vec (keep #(walk % (inc depth)) n))] (when (seq xs) xs))
-              (vector? n)
-              (let [hd (first n)]
-                (cond
-                  (and (simple-keyword? hd) (contains? safe-hiccup-tags hd))
-                  (let [has-attrs? (map? (second n))
-                        attrs (when has-attrs? (clean-attrs (second n)))
-                        kids (keep #(walk % (inc depth)) (if has-attrs? (drop 2 n) (rest n)))]
-                    (into (if (seq attrs) [hd attrs] [hd]) kids))
-                  (not (keyword? hd))
-                  (let [xs (vec (keep #(walk % (inc depth)) n))] (when (seq xs) xs))
-                  :else nil))
-              :else nil))]
-    (walk node 0)))
+  (sanitize/sanitize-hiccup node))
