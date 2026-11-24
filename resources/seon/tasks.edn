@@ -445,6 +445,11 @@
   :seon.task/scope seon.render.tails,
   :seon.task/title "Remove dead :role leftovers and pre-sort index caps in seon.render.tails"}
  {:seon.task/done? false,
+  :seon.task/id :task.dogfood/close-3-missing-renderers,
+  :seon.task/plan "Run (user/coverage) to see entity schemas missing pure :seon.ui/hiccup renderers. Pick 3 of them and add multi-footprint (compact chip/row + richer card) pure renderers with tests so (user/coverage) reports 0 ambiguity and 0 single-footprint holes.",
+  :seon.task/scope seon.render.entities,
+  :seon.task/title "Add multi-footprint pure renderers for 3 missing entity schemas"}
+ {:seon.task/done? false,
   :seon.task/id :task.dogfood/split-transactor-calls,
   :seon.task/plan "Refactor seon.transactor.calls below both the 8,000-token namespace budget and the :large-function size limit on handle-call-op! by extracting cohesive helpers into a clean child namespace. Keep all call-delegation, subtask, and merge tests green.",
   :seon.task/scope seon.transactor.calls,
