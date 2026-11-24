@@ -96,15 +96,23 @@
 
 (defn unschemed-attributes
   "Flags any `:seon.*/*` attribute installed in Datahike (`(:schema db)`) that lacks a registered
-   Malli `:seon.schema/key` entity in `db` — guaranteeing 100% Malli-derived schema discipline."
+   Malli `:seon.schema/key` entity in `db`, ignoring cleanly retired attributes (previously registered
+   in `d/history` with zero remaining live datoms in `db`)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
   [db]
   (let [br (get-in db [:config :branch] :main)
-        registered (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))]
+        registered (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
+        hdb (when (get-in db [:config :keep-history?]) (d/history db))
+        cleanly-retired? (fn [attr]
+                           (boolean
+                            (and hdb
+                                 (nil? (first (d/datoms db :aevt attr)))
+                                 (some? (first (d/datoms hdb :avet :seon.schema/key attr))))))]
     (->> (keys (:schema db))
          (filter #(and (qualified-keyword? %)
                        (str/starts-with? (namespace %) "seon.")
-                       (not (contains? registered %))))
+                       (not (contains? registered %))
+                       (not (cleanly-retired? %))))
          sort
          (mapv (fn [attr]
                  {:class :unschemed-attribute

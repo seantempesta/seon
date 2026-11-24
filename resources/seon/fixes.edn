@@ -250,4 +250,12 @@
   :seon.fix/error-class :seon.agent/unified-fork-and-trace-root-causes,
   :seon.fix/root-cause "Parallel review/example mechanisms, missing ns-eid fallback in enrich-var-with-account, unpruned deleted lookup-refs in bind-new-ref-tempids, #expr# dep exclusion in spliced-caller-forms, silent run-tests! return, missing 2-arg remember!, missing :seon.code/reexport follow in stress-var, and missing parent :last-proofs fallback in gather-branch-status-data.",
   :seon.fix/regression-test seon.task-gate-test/trace-audit-root-cause-fixes-test,
-  :seon.fix/id #uuid "20261124-0001-4000-8000-000000000001"}]
+  :seon.fix/id #uuid "20261124-0001-4000-8000-000000000001"}
+ {:seon.fix/created-ms 1795500341438,
+  :seon.fix/symptom "JOLT_COMPILER_OPTIONS evaluated to empty string during bin/build seon, causing Chez 10.5.0 to inline seon.* vars across namespaces and fail host-predicates-and-core-contracts-test; cleanly retired Malli attributes also raised false :unschemed-attribute errors on in-place stores.",
+  :seon.fix/change-summary "Fixed bin/env trailing-comma & EDN-map parsing for JOLT_COMPILER_OPTIONS/JOLT_NO_WP_INFER/JOLT_CACHE_MB, bumped reference-code/datahike to 81a11916, rebuilt target/seon, and updated seon.health.static/unschemed-attributes to allow cleanly retired Malli attributes.",
+  :seon.fix/before-after "JOLT_COMPILER_OPTIONS '' -> {:image-fn-forms false, :no-inline-ns-prefixes [seon my]}; full :main test suite 100% green; :unschemed-attribute errors 1 -> 0.",
+  :seon.fix/error-class :seon.build/inlined-var-and-retired-schema-health,
+  :seon.fix/root-cause "bin/env sed regexes lacked trailing-comma tolerance and expected quotes around :jolt-compiler-options in resources/seon/config/default.edn; seon.health.static/unschemed-attributes scanned all Datahike :db/ident keys without checking whether retired attributes had 0 live datoms and prior Malli registration in d/history.",
+  :seon.fix/regression-test seon.stress-test/cleanly-retired-unschemed-attribute-check-test,
+  :seon.fix/id #uuid "33c418bb-574c-56e2-a0c5-a6025ed7106f"}]

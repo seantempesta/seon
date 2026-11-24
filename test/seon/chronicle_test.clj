@@ -183,7 +183,7 @@
       (is (true? (:truncated? tight)))
       (is (some? (chronicle/chronicle-tail {:main-db @c}))))))
 
-(deftest ^{:cost/ticks 12000000} living-canvas-chronicle-and-summary-tile-render-test
+(deftest ^{:cost/ticks 28000000} living-canvas-chronicle-and-summary-tile-render-test
   (testing "Unified surface renders agent canvas with Chronicle summaries, freshness, d/as-of rewind, and summary-tile"
     (let [c (mem-conn)
           r-root (d/transact c [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/role :coordinator

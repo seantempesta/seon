@@ -619,3 +619,22 @@
           (is (= ref-contracted (:contracted-vars g)) "Contracted vars must match reference")
           (is (contains? (:tests g) 'demo.reach.b-test/f2-test))
           (is (= "demo.reach.a/f1" (get (:contracted-vars g) 'demo.reach.a/f1))))))))
+
+(deftest cleanly-retired-unschemed-attribute-check-test
+  (let [db0 (datahike.db/empty-db nil {:schema-flexibility :write :keep-history? true})
+        db (:db-after (d/with db0 [{:db/ident :seon.schema/key :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                                   {:db/ident :seon.schema/form :db/valueType :db.type/data :db/cardinality :db.cardinality/one}]))
+        db1 (:db-after (d/with db [{:db/ident :seon.test/raw-unschemed
+                                    :db/valueType :db.type/string
+                                    :db/cardinality :db.cardinality/one}]))
+        db2 (:db-after (d/with db1 [{:db/ident :seon.test/retired-clean
+                                     :db/valueType :db.type/string
+                                     :db/cardinality :db.cardinality/one}
+                                    {:seon.schema/key :seon.test/retired-clean
+                                     :seon.schema/form [:string {:seon.db/type :db.type/string}]}]))
+        db3 (:db-after (d/with db2 [[:db/retractEntity [:seon.schema/key :seon.test/retired-clean]]]))
+        db4 (:db-after (d/with db3 [{:seon.test/retired-clean "leftover"}]))
+        subs-of (fn [d*] (into #{} (map :subject) (health/unschemed-attributes d*)))]
+    (is (contains? (subs-of db1) ":seon.test/raw-unschemed"))
+    (is (not (contains? (subs-of db3) ":seon.test/retired-clean")))
+    (is (contains? (subs-of db4) ":seon.test/retired-clean"))))
