@@ -17,7 +17,8 @@
             [seon.fork.helpers :as helpers]
             [seon.fork.worker-support :as wsup]
             [seon.schema :as schema]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.fork.sandbox :as sandbox]))
 
 (ffi/load-library)
 
@@ -43,44 +44,50 @@
 
 (defn apply-form-overlay! [& args] (apply wsup/apply-form-overlay! args))
 
-(defn- run-test-worker! [end {:keys [batch-id cfg branch overlay test-items gen-items samples seed]}]
+(defn- run-test-worker!
+  {:doc " (catches up warm-commit before overlay)."}
+  [end {:keys [batch-id cfg branch overlay test-items gen-items samples seed warm-commit]}]
   (let [conn (when (and cfg branch)
                (store/after-fork! cfg)
                (store/connect (store/child-cfg cfg 4) branch))]
     (try
-      (let [db (when conn @conn)]
+      (let [db (when conn @conn)
+            main-cid (when conn (d/commit-id (store/head conn :main)))]
+        (when (and conn warm-commit main-cid (not= warm-commit main-cid)
+                   (d/commit-graph-record (:store db) warm-commit))
+          (code/load-delta! conn warm-commit main-cid true))
         (when overlay
           (apply-form-overlay! db overlay))
         (wsup/call-with-candidate-overrides db
-        (fn [_]
-          (let [test-results (mapv (fn [{:keys [var digest]}]
-                                     (wsup/run-single-test-var db var digest))
-                                   test-items)
-                gen-results (vec
-                             (keep (fn [{:keys [var digest]}]
-                                     (when-let [r (schema/stress-var db var {:samples (or samples 100)
-                                                                             :seed (or seed 42)
-                                                                             :measure-fn code/measure-call})]
-                                       {:seon.test/digest digest
-                                        :seon.test/var var
-                                        :seon.test/kind :generative
-                                        :seon.test/pass? (boolean (:ok? r))
-                                        :seon.test/ms (double (:ms r 0.0))
-                                        :seon.test/ticks (long (:max-ticks r 0))
-                                        :seon.test/bytes (long (:max-bytes r 0))
-                                        :seon.test/report (if (:ok? r)
-                                                            (str "PASS (" (:ran r) " samples, seed=" (or seed 42) ")")
-                                                            (str (:reason r)))
-                                        :detail r}))
-                                   gen-items))
-                gen-failures (vec (keep #(when-not (:seon.test/pass? %) (:detail %)) gen-results))
-                all-results (into test-results (map #(dissoc % :detail) gen-results))]
-            (a/>!! (:out end) {:ev :test-batch-done
-                               :batch-id batch-id
-                               :worker-pid (c-getpid)
-                               :mem-mb (mem-mb)
-                               :results all-results
-                               :generative-failures gen-failures})))))
+          (fn [_]
+            (let [test-results (mapv (fn [{:keys [var digest]}]
+                                       (wsup/run-single-test-var db var digest))
+                                     test-items)
+                  gen-results (vec
+                               (keep (fn [{:keys [var digest]}]
+                                       (when-let [r (schema/stress-var db var {:samples (or samples 100)
+                                                                               :seed (or seed 42)
+                                                                               :measure-fn code/measure-call})]
+                                         {:seon.test/digest digest
+                                          :seon.test/var var
+                                          :seon.test/kind :generative
+                                          :seon.test/pass? (boolean (:ok? r))
+                                          :seon.test/ms (double (:ms r 0.0))
+                                          :seon.test/ticks (long (:max-ticks r 0))
+                                          :seon.test/bytes (long (:max-bytes r 0))
+                                          :seon.test/report (if (:ok? r)
+                                                              (str "PASS (" (:ran r) " samples, seed=" (or seed 42) ")")
+                                                              (str (:reason r)))
+                                          :detail r}))
+                                     gen-items))
+                  gen-failures (vec (keep #(when-not (:seon.test/pass? %) (:detail %)) gen-results))
+                  all-results (into test-results (map #(dissoc % :detail) gen-results))]
+              (a/>!! (:out end) {:ev :test-batch-done
+                                 :batch-id batch-id
+                                 :worker-pid (c-getpid)
+                                 :mem-mb (mem-mb)
+                                 :results all-results
+                                 :generative-failures gen-failures})))))
       (finally
         (when conn (d/release conn))))))
 
@@ -335,6 +342,67 @@
         (a/>!! ev-out {:ev :image-advance-error :commit (:commit v) :error msg})
         prev-commit))))
 
+(defn image-advance-fault-req
+  "Builds the `:server-in-ch` `:record-fault` or `:retract-fault` request map for ForkParent
+   `:image-advance-error` and `:image-advanced` events."
+  {:malli/schema [:=> [:cat :map :uuid] [:maybe :map]]
+   :cost/ticks 500000}
+  [ev fault-id]
+  (case (:ev ev)
+    :image-advance-error
+    {:req {:op :record-fault
+           :id fault-id
+           :class :image-advance-error
+           :severity :error
+           :proc :fork
+           :ns (quote seon.fork)
+           :subject "seon.fork/advance-image"
+           :data {:commit (str (:commit ev))}
+           :message (str "ForkParent :advance-image failed at commit " (:commit ev) ": "
+                         (or (:error ev) "unknown error"))}}
+    :image-advanced
+    {:req {:op :retract-fault :id fault-id}}
+    nil))
+
+(defn ^:seon.flow/edge dispatch-router-control-event!
+  "Handles non-child ForkParent events (`:killed-all-9`, `:image-advance-error`, `:image-advanced`),
+   surfacing overlay advance failures as typed `:seon.error/*` faults and clearing them on recovery."
+  {:malli/schema [:=> [:cat :map :map :any] :any]}
+  [targets ev adv-err-vol]
+  (let [{:keys [kill-ack server-in-ch report-chan error-chan on-image-event]} targets
+        ek (:ev ev)]
+    (cond
+      (= ek :killed-all-9) (when kill-ack (deliver kill-ack (:pids ev)))
+      (= ek :image-advance-error)
+      (let [fid (or @adv-err-vol (random-uuid))]
+        (vreset! adv-err-vol fid)
+        (when server-in-ch (a/put! server-in-ch (image-advance-fault-req ev fid)))
+        (when error-chan (a/put! error-chan (assoc ev :proc :fork)))
+        (when report-chan (a/put! report-chan (str "[:fork] :image-advance-error @ " (:commit ev) ": " (:error ev))))
+        (when on-image-event (on-image-event ev)))
+      (= ek :image-advanced)
+      (do (when-let [fid @adv-err-vol]
+            (vreset! adv-err-vol nil)
+            (when server-in-ch (a/put! server-in-ch (image-advance-fault-req ev fid))))
+          (when report-chan (a/put! report-chan (str "[:fork] image advanced -> " (:commit ev))))
+          (when on-image-event (on-image-event ev))))))
+
+(defn- run-child-worker! [cfd child-type v warm-commit]
+  (remote/close-streams-but! #{cfd})
+  (let [mine (remote/open cfd {:pump :fiber :buf 32})]
+    (try
+      (sandbox/apply-worker-sandbox! v)
+      (if (= child-type :agent)
+        (run-agent-worker! mine (assoc v :base-commit (or (:base-commit v) warm-commit)))
+        (run-test-worker! mine (assoc v :warm-commit (or (:warm-commit v) warm-commit))))
+      (catch Throwable ex
+        (a/>!! (:out mine) {:ev :child-exception :type child-type
+                            :agent-id (:agent-id v) :batch-id (:batch-id v)
+                            :error (or (.getMessage ex) (str ex))})))
+    (a/close! (:out mine))
+    (a/<!! (:sent mine))
+    (System/exit 0)))
+
 (defn- run-fork-parent-loop! [fd]
   (remote/close-streams-but! #{fd})
   (promote-heap!)
@@ -379,21 +447,7 @@
                   pid (jolt.host/fork-alone 1000)]
               (cond
                 (zero? pid)
-                (do (remote/close-streams-but! #{cfd})
-                    (let [mine (remote/open cfd {:pump :fiber :buf 32})]
-                      (try
-                        (if (= child-type :agent)
-                          (run-agent-worker! mine (assoc v :base-commit (or (:base-commit v) warm-commit)))
-                          (run-test-worker! mine v))
-                        (catch Throwable ex
-                          (a/>!! (:out mine) {:ev :child-exception
-                                              :type child-type
-                                              :agent-id (:agent-id v)
-                                              :batch-id (:batch-id v)
-                                              :error (.getMessage ex)})))
-                      (a/close! (:out mine))
-                      (a/<!! (:sent mine))
-                      (System/exit 0)))
+                (run-child-worker! cfd child-type v warm-commit)
 
                 (neg? pid)
                 (do (remote/close! cend)

@@ -1,5 +1,12 @@
 ;; Declarative Seon class-fix ledger (resources/seon/fixes.edn — loaded on fresh install, written back on green merge).
-[{:seon.fix/before-after "4 GB hard ceiling (MDB_MAP_FULL at 170 branches) -> 1 TB sparse Malli-defaulted config + rolling 16-branch retention + 954,075 dead blocks reclaimed",
+[{:seon.fix/before-after "Before: host repo writable by workers, 495 leaked trial refs, hot-reload skipped write-back. After: kernel EPERM on repo/.git writes, 0 ref leaks, nil-safe write-back, 5/5 fork-sandbox-test green.",
+  :seon.fix/change-summary "Added in-process macOS Seatbelt sandbox_init via jolt.ffi blocking repo/.git writes while keeping LMDB writable; run-test-worker! warm-commit catch-up; nil-safe :git :commit-git? gate and delete-branch-ref!; :image-advance-error fault routing.",
+  :seon.fix/error-class :host-repo-isolation,
+  :seon.fix/id #uuid "0dc7d9ef-1196-5697-8c3b-93691d180877",
+  :seon.fix/regression-test seon.fork-sandbox-test/live-kernel-worker-sandbox-blocks-repo-and-git-allows-store-test,
+  :seon.fix/root-cause "Forked COW workers inherited unrestricted host write perms; :git proc lacked :commit-git? gate and ref cleanup; hot-loaded git-proc checked (if-not (:commit-git? st)) instead of (if (false? (:commit-git? st))).",
+  :seon.fix/symptom "Runaway COW worker ran spit/git commit on host repo; isolated bench trials leaked 495 refs/heads/seon/*; hot-reloaded git-proc with nil :commit-git? skipped write-back."}
+ {:seon.fix/before-after "4 GB hard ceiling (MDB_MAP_FULL at 170 branches) -> 1 TB sparse Malli-defaulted config + rolling 16-branch retention + 954,075 dead blocks reclaimed",
   :seon.fix/change-summary "Added Malli-defaulted configs (:seon.config/store-map-bytes 1 TB sparse, :gc-keep-merged-branches 16, :gc-history-hours 168), rolling post-merge branch pruning, single-writer :op :gc-store protecting active branch merge-bases, and nil-safe branch-delta-info fallback.",
   :seon.fix/error-class :mdb-map-full,
   :seon.fix/id #uuid "7fa61152-e4dc-4505-bab2-70eab0a37c06",

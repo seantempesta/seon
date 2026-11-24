@@ -335,25 +335,19 @@
         max-tx (when (int? (:max-tx summary)) (:max-tx summary))
         agent-id (when (keyword? (:agent-id summary)) (:agent-id summary))
         task (when (map? (:task summary)) (:task summary))
-        fixes (if (and (coll? (:fixes summary)) (not (map? (:fixes summary))))
-                (filterv map? (:fixes summary))
-                [])
+        seq-of (fn [pred x] (if (and (coll? x) (not (map? x))) (filterv pred x) []))
+        fixes (seq-of map? (:fixes summary))
         schemas (safe-bucket (:schemas summary))
         rules (safe-bucket (:rules summary))
         routes (safe-bucket (:routes summary))
         vars (safe-bucket (:vars summary))
-        var-nss (let [raw (when (map? (:vars summary)) (:namespaces (:vars summary)))]
-                  (if (and (coll? raw) (not (map? raw))) (filterv symbol? raw) []))
+        var-nss (seq-of symbol? (when (map? (:vars summary)) (:namespaces (:vars summary))))
         all-vars (concat (:added vars) (:modified vars) (:deleted vars))
         inferred-nss (if (seq var-nss)
                        var-nss
                        (vec (keep #(when (and (symbol? %) (namespace %)) (symbol (namespace %))) all-vars)))
-        docs (if (and (coll? (:docs summary)) (not (map? (:docs summary))))
-               (vec (distinct (filter string? (:docs summary))))
-               [])
-        paths (if (and (coll? (:touched-paths summary)) (not (map? (:touched-paths summary))))
-                (vec (distinct (sort (filter string? (:touched-paths summary)))))
-                [])
+        docs (vec (distinct (seq-of string? (:docs summary))))
+        paths (vec (distinct (sort (seq-of string? (:touched-paths summary)))))
         doc-path? #(or (= % "AGENTS.md") (str/starts-with? % "docs/"))
         test-path? #(str/starts-with? % "test/")
         ctype (cond
@@ -373,16 +367,17 @@
                 (or (seq (:modified vars)) (seq (:deleted vars)) (some #(str/starts-with? % "src/") paths)) "refactor"
                 :else "chore")
         scope (infer-commit-scope inferred-nss paths schemas rules routes docs branch)
+        pl (fn [verb xs noun] (when (seq xs) (str verb " " (count xs) " " noun (when (> (count xs) 1) "s"))))
         mech-parts (remove nil?
-                           [(when (seq (:added schemas)) (str "add " (count (:added schemas)) " schema" (when (> (count (:added schemas)) 1) "s")))
-                            (when (seq (:modified schemas)) (str "update " (count (:modified schemas)) " schema" (when (> (count (:modified schemas)) 1) "s")))
-                            (when (seq (:added rules)) (str "add " (count (:added rules)) " rule" (when (> (count (:added rules)) 1) "s")))
-                            (when (seq (:modified rules)) (str "update " (count (:modified rules)) " rule" (when (> (count (:modified rules)) 1) "s")))
-                            (when (seq (:added routes)) (str "add " (count (:added routes)) " route" (when (> (count (:added routes)) 1) "s")))
-                            (when (seq (:added vars)) (str "add " (count (:added vars)) " var" (when (> (count (:added vars)) 1) "s")))
-                            (when (seq (:modified vars)) (str "update " (count (:modified vars)) " var" (when (> (count (:modified vars)) 1) "s")))
-                            (when (seq (:deleted vars)) (str "remove " (count (:deleted vars)) " var" (when (> (count (:deleted vars)) 1) "s")))
-                            (when (seq docs) (str "update " (count docs) " doc" (when (> (count docs) 1) "s")))])
+                           [(pl "add" (:added schemas) "schema")
+                            (pl "update" (:modified schemas) "schema")
+                            (pl "add" (:added rules) "rule")
+                            (pl "update" (:modified rules) "rule")
+                            (pl "add" (:added routes) "route")
+                            (pl "add" (:added vars) "var")
+                            (pl "update" (:modified vars) "var")
+                            (pl "remove" (:deleted vars) "var")
+                            (pl "update" docs "doc")])
         mech-sum (or (when (seq mech-parts) (str/join ", " (take 3 mech-parts)))
                      (when (seq paths) (str "update " (count paths) " file" (when (> (count paths) 1) "s")))
                      (str "merge " (if (keyword? branch) (name branch) "branch")))
@@ -570,3 +565,19 @@
      {:ref ref-name
       :sha (ref-commit repo-dir ref-name)
       :touched-paths (:touched-paths plan)}))))
+
+(defn delete-branch-ref!
+  "Deletes `refs/heads/seon/<clean>` in `repo-dir` via `git update-ref -d` (no-op for `:main` or absent ref)."
+  {:seon.flow/edge true, :malli/schema [:=> [:cat :string :keyword] :map], :doc "Deletes `refs/heads/seon/<clean>` in `repo-dir` via `git update-ref -d` (no-op for `:main` or absent ref). (idempotent ref cleanup)."}
+  [repo-dir branch]
+  (if (= branch :main)
+    {:deleted? false :ref nil :branch branch :reason :protected-main}
+    (let [ref-name (branch-git-ref branch)
+          prev-sha (ref-commit repo-dir ref-name)]
+      (if-not prev-sha
+        {:deleted? false :ref ref-name :branch branch :reason :not-found}
+        (let [{:keys [exit err]} (sh-fiber "git" "-C" repo-dir "update-ref" "-d" ref-name)]
+          (when-not (zero? exit)
+            (throw (ex-info (str "git update-ref -d failed for " ref-name ": " err)
+                            {:branch branch :ref ref-name :exit exit :err err})))
+          {:deleted? true :ref ref-name :branch branch :prev-sha prev-sha})))))

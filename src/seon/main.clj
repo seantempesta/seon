@@ -22,7 +22,8 @@
             [seon.transactor :as transactor]
             [seon.web :as web]
             [clojure.tools.cli :as cli]
-            [seon.vector.flow :as vectors-flow]))
+            [seon.vector.flow :as vectors-flow]
+            [seon.fork.sandbox :as sandbox]))
 
 (defmacro ^{:private true} compile-epoch-ms []
   (System/currentTimeMillis))
@@ -30,65 +31,51 @@
 (def ^{:private true} aot-build-ms (compile-epoch-ms))
 
 (defn- sync-cold-boot-forms!
-  "Overlays non-test `:seon.code.form/*` entities on `db0` written after `aot-build-ms`\n              into the coordinator runtime and ForkParent so cold-booted binaries (reboot or\n              `--seed-store` benchmark instances) never run stale AOT code against newer `:main`."
+  "Overlays non-test `:seon.code.form/*` entities on `db0` written after `aot-build-ms` into the
+   coordinator runtime and ForkParent so cold-booted binaries never run stale AOT code against `:main`."
   [db0 router]
   (when (and db0 (contains? (:schema db0) :seon.code.form/src))
     (let [cutoff (- (long aot-build-ms) 60000)
-          fresh-txs (into
-                      #{}
-                      (keep
-                        (fn [dt]
-                          (let [v (:v dt)]
-                            (when (and
-                                    (instance? java.util.Date v)
-                                    (>=
-                                      (.getTime
-                                        ^{:tag java.util.Date} v)
-                                      cutoff))
-                              (:e dt)))))
-                      (d/datoms db0 :aevt :db/txInstant))]
+          fresh-txs (into #{}
+                          (keep (fn [dt]
+                                  (let [v (:v dt)]
+                                    (when (and (instance? java.util.Date v) (>= (.getTime ^java.util.Date v) cutoff))
+                                      (:e dt)))))
+                          (d/datoms db0 :aevt :db/txInstant))]
       (when (seq fresh-txs)
-        (let [upserts (->>
-                        (d/datoms db0 :aevt :seon.code.form/src)
-                        (keep
-                          (fn [dt]
-                            (when (contains? fresh-txs (:tx dt))
-                              (let [f
-                                    (d/pull
-                                      db0
-                                      '[:seon.code.form/key
-                                      :seon.code.form/ns
-                                      :seon.code.form/src
-                                      :seon.code.form/order
-                                      :seon.code.form/deps]
-                                      (:e dt))
-                                    nsym (:seon.code.form/ns f)]
-                                (when
-                                  (and nsym (not= nsym 'seon.main))
-                                  f)))))
-                        vec)]
+        (let [upserts (->> (d/datoms db0 :aevt :seon.code.form/src)
+                           (keep (fn [dt]
+                                   (when (contains? fresh-txs (:tx dt))
+                                     (let [f (d/pull db0 '[:seon.code.form/key :seon.code.form/ns :seon.code.form/src
+                                                           :seon.code.form/order :seon.code.form/deps] (:e dt))
+                                           nsym (:seon.code.form/ns f)]
+                                       (when (and nsym (not= nsym 'seon.main)) f)))))
+                           vec)]
           (when (seq upserts)
             (code/apply-overlay! db0 {:upserts upserts} true)
             (when-let [fo (:fork-out router)]
-              (a/put!
-                fo
-                {:op :advance-image,
-                 :upserts upserts,
-                 :commit (d/commit-id db0)}))))))))
+              (a/put! fo {:op :advance-image :upserts upserts :commit (d/commit-id db0)}))))))))
 
-(defn make-fork-router [fork-parent]
-  (let [targets (volatile! {:agent-ch nil :test-ch nil :kill-ack nil})]
+(defn make-fork-router
+  {:seon.flow/edge true, :malli/schema [:=> [:cat :map] :map], :doc " (routes image-advance faults)."}
+  [fork-parent]
+  (let [targets (volatile! {:agent-ch nil :test-ch nil :kill-ack nil
+                            :server-in-ch nil :report-chan nil :error-chan nil :on-image-event nil})
+        adv-err-id (volatile! nil)]
     (a/go-loop []
       (when-let [ev (a/<! (:in (:end fork-parent)))]
-        (let [{:keys [agent-ch test-ch kill-ack]} @targets]
+        (let [{:keys [agent-ch test-ch] :as t} @targets]
           (cond
-            (= (:ev ev) :killed-all-9) (when kill-ack (deliver kill-ack (:pids ev)))
-            (= (:type ev) :agent)      (when agent-ch (a/>! agent-ch ev))
-            (= (:type ev) :test)       (when test-ch (a/>! test-ch ev))))
+            (= (:type ev) :agent) (when agent-ch (a/>! agent-ch ev))
+            (= (:type ev) :test)  (when test-ch (a/>! test-ch ev))
+            :else (fork/dispatch-router-control-event! t ev adv-err-id)))
         (recur)))
     {:fork-parent fork-parent
      :fork-out (:out (:end fork-parent))
-     :set-targets! (fn [m] (vreset! targets m))}))
+     :set-targets! (fn [m]
+                     (when (not= (:server-in-ch @targets) (:server-in-ch m))
+                       (vreset! adv-err-id nil))
+                     (vreset! targets m))}))
 
 (defn call!
   ([sys req] (call! sys req 30000))
@@ -99,14 +86,18 @@
        (or ans {:ok? false :error :timeout :req req})))))
 
 (defn stop!
+  {:seon.flow/edge true, :malli/schema [:function [:=> [:cat :map] :any] [:=> [:cat :map :map] :any]]}
   ([sys] (stop! sys {:close-fork-parent? false}))
-  ([{:keys [flow conn cfg router]} {:keys [close-fork-parent?]}]
+  ([{:keys [flow conn cfg router inst-fork-out]} {:keys [close-fork-parent?]}]
    (let [ack (promise)]
-     ((:set-targets! router) {:agent-ch nil :test-ch nil :kill-ack ack})
+     ((:set-targets! router) {:agent-ch nil :test-ch nil :kill-ack ack
+                              :server-in-ch nil :report-chan nil :error-chan nil :on-image-event nil})
      (a/>!! (:fork-out router) {:op :kill-all-9!})
      (deref ack 2000 [])
      (when flow
        (try (flow/stop flow) (catch Throwable _)))
+     (when inst-fork-out
+       (try (a/close! inst-fork-out) (catch Throwable _)))
      (store/close! {:conn conn :cfg cfg})
      (when close-fork-parent?
        (try (a/close! (:fork-out router)) (catch Throwable _))))))
@@ -263,7 +254,7 @@
 
 (defn start-flow-instance!
   {:malli/schema [:=> [:cat [:map [:fork-out :seon.host/chan]] :map] :map]}
-  [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser? disable-vectors? vectors-opts]
+  [router {:keys [store-path seed-store repo-dir commit-git? sandbox? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser? disable-vectors? vectors-opts]
           :or {port 0 boot-seq 1}}]
   (let [{:keys [cfg conn created?]} (store/open! store-path (cond-> {} repo-dir (assoc :repo-dir repo-dir) seed-store (assoc :seed-store seed-store)))
         _ (when repo-dir
@@ -304,8 +295,10 @@
         fork-test-in (a/chan 128)
         report-chan (a/chan (a/sliding-buffer 128))
         error-chan (a/chan (a/sliding-buffer 64))
+        inst-fork-out (sandbox/wrap-fork-out (:fork-out router) conn repo-dir sandbox?)
         flow-holder (volatile! nil)
-        _ ((:set-targets! router) {:agent-ch fork-agent-in :test-ch fork-test-in :kill-ack nil})
+        _ ((:set-targets! router) {:agent-ch fork-agent-in :test-ch fork-test-in :kill-ack nil
+                                   :server-in-ch server-in-ch :report-chan report-chan :error-chan error-chan})
         g (flow/create-flow
            {:procs
             {:server     {:proc (flow/process #'server/server-proc)
@@ -318,10 +311,10 @@
                                 :browser-connected? browser-on?}}
             :transactor {:proc (flow/process #'transactor/transactor-proc)
                          :args {:conn conn
-                                :cfg cfg
-                                :repo-dir repo-dir
-                                :commit-git? auto-git?
-                                :fork-out (:fork-out router)}
+                               :cfg cfg
+                               :repo-dir repo-dir
+                               :commit-git? auto-git?
+                               :fork-out inst-fork-out}
                          :chan-opts {:tx {:buf-or-n 64}}}
             :reconciler {:proc (flow/process #'reconciler/reconciler-proc)
                          :args {:conn conn}
@@ -329,7 +322,7 @@
             :agents     {:proc (flow/process #'agents/agents-proc)
                          :args {:conn conn
                                 :cfg cfg
-                                :fork-out (:fork-out router)
+                                :fork-out inst-fork-out
                                 :fork-agent-in fork-agent-in
                                 :max-os-procs os-procs
                                 :browser-enabled? browser-on?
@@ -350,18 +343,19 @@
                          :chan-opts {:request {:buf-or-n 16}}}
             :test       {:proc (flow/process #'test-runner/test-proc)
                          :args {:conn conn
-                                :cfg cfg
-                                :fork-out (:fork-out router)
-                                :fork-test-in fork-test-in
-                                :max-workers test-workers}
+                               :cfg cfg
+                               :fork-out inst-fork-out
+                               :fork-test-in fork-test-in
+                               :max-workers test-workers}
                          :chan-opts {:db {:buf-or-n 32} :batch {:buf-or-n 32}}}
             :git        {:proc (flow/process #'git-proc/git-proc)
             :args {:conn conn
-                   :cfg cfg
-                   :repo-dir repo-dir
-                   :store-path store-path
-                   :port eff-port
-                   :auto-switch-over? auto-switch-over?}
+                  :cfg cfg
+                  :repo-dir repo-dir
+                  :store-path store-path
+                  :port eff-port
+                  :commit-git? auto-git?
+                  :auto-switch-over? auto-switch-over?}
             :chan-opts {:in {:buf-or-n 32}}}
             :web        {:proc (flow/process #'web/web-proc)
                          :args {:port port
@@ -388,13 +382,14 @@
     (wire-flow-chans! (flow/start g) report-chan error-chan)
     (flow/resume g)
     {:flow g
-     :conn conn
-     :cfg cfg
-     :created? created?
-     :server-in-ch server-in-ch
-     :report-chan report-chan
-     :error-chan error-chan
-     :router router}))
+    :conn conn
+    :cfg cfg
+    :created? created?
+    :server-in-ch server-in-ch
+    :report-chan report-chan
+    :error-chan error-chan
+    :inst-fork-out inst-fork-out
+    :router router}))
 
 (defn -main
   "CLI entrypoint for Seon (`--self-test`, `--port 0`, `--headless`, `--seed-store`, `--model-base-url`, `--auto-switch-over`, `--take-over`)."
@@ -417,26 +412,27 @@
              fp (fork/start-fork-parent!)
              router (make-fork-router fp)]
          (if self-test?
-           (let [tmp-dir (str "/tmp/seon-selftest-" (System/nanoTime))
-                 sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0 :disable-vectors? true})]
-             (try
-               (let [st (call! sys {:op :status})
-                     ev (call! sys {:op :eval :branch :branch/smoke :code "(+ 20 22)"})]
-                 (if (and (:ok? st) (:ok? ev) (= "42" (:value ev)))
-                   (do (println "SEON SELF-TEST PASS" (pr-str {:fork-parent-pid (:pid fp) :eval (:value ev)}))
-                       (flush)
-                       (stop! sys {:close-fork-parent? true})
-                       (rm-rf! (io/file tmp-dir))
-                       (System/exit 0))
-                   (do (println "SEON SELF-TEST FAIL" (pr-str {:status st :eval ev}))
-                       (flush)
-                       (stop! sys {:close-fork-parent? true})
-                       (rm-rf! (io/file tmp-dir))
-                       (System/exit 1))))
-               (catch Throwable ex
-                 (println "SEON SELF-TEST ERROR" (.getMessage ex))
-                 (flush)
-                 (System/exit 1))))
+           (let [sb (sandbox/self-test-sandbox!)
+               tmp-dir (str "/tmp/seon-selftest-" (System/nanoTime))
+               sys (start-flow-instance! router {:store-path tmp-dir :commit-git? false :port 0 :disable-vectors? true})]
+           (try
+             (let [st (call! sys {:op :status})
+                   ev (call! sys {:op :eval :branch :branch/smoke :code "(+ 20 22)"})]
+               (if (and (:ok? sb) (:ok? st) (:ok? ev) (= "42" (:value ev)))
+                 (do (println "SEON SELF-TEST PASS" (pr-str {:fork-parent-pid (:pid fp) :eval (:value ev) :sandbox (:ok? sb)}))
+                     (flush)
+                     (stop! sys {:close-fork-parent? true})
+                     (rm-rf! (io/file tmp-dir))
+                     (System/exit 0))
+                 (do (println "SEON SELF-TEST FAIL" (pr-str {:sandbox sb :status st :eval ev}))
+                     (flush)
+                     (stop! sys {:close-fork-parent? true})
+                     (rm-rf! (io/file tmp-dir))
+                     (System/exit 1))))
+             (catch Throwable ex
+               (println "SEON SELF-TEST ERROR" (.getMessage ex))
+               (flush)
+               (System/exit 1))))
 
            (let [repo-dir (or (:repo options) (System/getenv "SEON_REPO") (System/getProperty "user.dir"))
                  store-path (or (:store options) (System/getenv "SEON_STORE") (str repo-dir "/runs/store"))
