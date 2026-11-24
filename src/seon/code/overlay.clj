@@ -33,7 +33,7 @@
                 [:=> [:cat :any :map :boolean] [:vector :map]]]}
 ([overlay] (apply-overlay! nil overlay false))
 ([db delta] (apply-overlay! db delta false))
-([db {:keys [upserts retracted-keys]} tolerant?]
+([db {:keys [upserts retracted-keys schema-upserts retracted-schemas]} tolerant?]
  (let [retracted-by-ns
        (reduce (fn [acc k]
                  (let [[ns-str var-str] (str/split k #"/" 2)]
@@ -136,12 +136,27 @@
    (doseq [old-ns retracted-nss]
      (when (and (not (contains? @touched-nss old-ns)) (find-ns old-ns))
        (remove-ns old-ns)))
+   (let [arm-db (when-not (seq schema/*base-forms-override*) db)
+       changed-schemas (into (set retracted-schemas) (keep :seon.schema/key) schema-upserts)]
    (doseq [nsym @touched-nss]
-   (when-let [ns-obj (find-ns nsym)]
-     (doseq [[_ v] (ns-interns ns-obj)]
-       (let [m (meta v)]
-         (when (and (not (:private m)) (not (:seon/instrumented? m)) (:malli/schema m))
-           (schema/arm-var! db v))))))
+     (when-let [ns-obj (find-ns nsym)]
+       (doseq [[_ v] (ns-interns ns-obj)]
+         (let [m (meta v)]
+           (when (and (not (:private m))
+                      (or (not (:seon/instrumented? m)) (seq changed-schemas))
+                      (:malli/schema m))
+             (schema/arm-var! arm-db v))))))
+   (when (seq changed-schemas)
+     (doseq [ns-obj (all-ns)
+             :let [nsym (ns-name ns-obj)]
+             :when (and (not (contains? @touched-nss nsym))
+                        (str/starts-with? (name nsym) "seon."))]
+       (doseq [[_ v] (ns-interns ns-obj)]
+         (let [m (meta v) sch (:malli/schema m)]
+           (when (and (:seon/instrumented? m)
+                      (vector? sch)
+                      (some changed-schemas (schema/schema-refs-in-form sch)))
+             (schema/arm-var! arm-db v)))))))
    @errors)))
 
 (defn load-delta!

@@ -348,3 +348,24 @@
               (lmdb-ffi/close-env db4)
               (lmdb-ffi/close-env db4))))
         (finally (store/rm-rf! tmp))))))
+
+(deftest apply-overlay-arms-against-candidate-schema-override-test
+  (let [db0 (datahike.db/empty-db nil {:schema-flexibility :write})
+        base-db (:db-after (d/with db0 [{:db/ident :seon.schema/key :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                                        {:db/ident :seon.schema/form :db/valueType :db.type/data :db/cardinality :db.cardinality/one}
+                                        {:seon.schema/key :seon.test.cand/item :seon.schema/form [:map [:old-req :int]]}]))
+        cand-forms (assoc @seon.schema/disk-base-forms :seon.test.cand/item [:map [:new-req :string]])]
+    (binding [seon.schema/*base-forms-override* cand-forms]
+      (let [errs (seon.code.overlay/apply-overlay!
+                   base-db
+                   {:upserts [{:seon.code.form/key "seon.cand-demo/check-item"
+                               :seon.code.form/ns 'seon.cand-demo
+                               :seon.code.form/order 1
+                               :seon.code.form/src "(defn check-item {:malli/schema [:=> [:cat :seon.test.cand/item] :string]} [m] (:new-req m))"}]
+                    :retracted-keys #{}
+                    :schema-upserts [{:seon.schema/key :seon.test.cand/item :seon.schema/form [:map [:new-req :string]]}]
+                    :retracted-schemas #{}}
+                   false)]
+        (is (empty? errs))
+        (is (= "ok" ((resolve 'seon.cand-demo/check-item) {:new-req "ok"})))
+        (is (thrown? clojure.lang.ExceptionInfo ((resolve 'seon.cand-demo/check-item) {:old-req 1})))))))

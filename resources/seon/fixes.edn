@@ -258,4 +258,12 @@
   :seon.fix/error-class :seon.build/inlined-var-and-retired-schema-health,
   :seon.fix/root-cause "bin/env sed regexes lacked trailing-comma tolerance and expected quotes around :jolt-compiler-options in resources/seon/config/default.edn; seon.health.static/unschemed-attributes scanned all Datahike :db/ident keys without checking whether retired attributes had 0 live datoms and prior Malli registration in d/history.",
   :seon.fix/regression-test seon.stress-test/cleanly-retired-unschemed-attribute-check-test,
-  :seon.fix/id #uuid "33c418bb-574c-56e2-a0c5-a6025ed7106f"}]
+  :seon.fix/id #uuid "33c418bb-574c-56e2-a0c5-a6025ed7106f"}
+ {:seon.fix/created-ms 1795501476150,
+  :seon.fix/symptom "Branch tests failed with stale Malli schema violations when modifying or retiring a required key on an entity schema while :main had advanced past merge-base.",
+  :seon.fix/change-summary "Made seon.code.overlay/apply-overlay! pass nil to schema/arm-var! when schema/*base-forms-override* is bound, and re-arm any already-instrumented seon.* vars whose :malli/schema references changed or retracted schemas.",
+  :seon.fix/before-after "Branch schema retirement failed test workers with stale required-key violations -> 0 stale schema contract violations during branch testing.",
+  :seon.fix/error-class :seon.code.overlay/stale-main-schema-arming,
+  :seon.fix/root-cause "apply-form-overlay! passed main-db to code/apply-overlay! inside call-with-candidate-overrides, so arm-var! called registry-for-db on main-db whose old :seon.schema/* entities overwrote schema/*base-forms-override*, and untouched already-instrumented vars referencing modified schemas were never re-armed.",
+  :seon.fix/regression-test seon.alloc-guard-test/apply-overlay-arms-against-candidate-schema-override-test,
+  :seon.fix/id #uuid "1e48e321-ba02-5494-aa6a-20947ed311f9"}]
