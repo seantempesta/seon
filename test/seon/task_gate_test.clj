@@ -353,3 +353,77 @@
                 ;; Both branches inherited demo.comp/f from :branch/parent via COW fork!
                 (is (some? (first (d/datoms (store/head conn a-br) :avet :seon.code.var/name 'demo.comp/f))))
                 (is (some? (first (d/datoms (store/head conn b-br) :avet :seon.code.var/name 'demo.comp/f))))))))))))
+
+(deftest ^{:cost/ticks 120000000} review-outcome-proofs-anti-hijack-and-turn-cutoff-auto-merge-test
+  (testing "Verifiable review proofs block empty no-ops and target :ready? hijacking, pass genuine cleanups, stamp 6-turn cap, and auto-merge or safely unpause parent at turn cutoff"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data
+        (concat
+         (code/file-import-tx @conn "src/demo/rp_mod.clj" "(ns demo.rp-mod)\n(defn f [x] x)\n" false)
+         [{:seon.config/key :seon.config/root :seon.config/review-every-turns 2}
+          {:seon.task/id :task/rp-work :seon.task/title "Work" :seon.task/done? false}
+          {:seon.task/id :template/review-and-improve :seon.task/title "Review" :seon.task/template? true :seon.task/done? false}
+          {:db/id "w1" :seon.agent/id :w/rp :seon.agent/branch :branch/w-rp :seon.agent/goal "Work" :seon.agent/tasks #{[:seon.task/id :task/rp-work]} :seon.agent/paused? false}])})
+      (store/branch! conn :main :branch/w-rp)
+      (let [wconn (store/connect cfg :branch/w-rp)]
+        (try
+          (let [we (:e (first (d/datoms @wconn :avet :seon.agent/id :w/rp)))]
+            (d/transact wconn {:tx-data
+              [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/rp :seon.agent.eval/agent-ref we :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(a)" :seon.agent.eval/value "1"}
+               {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/rp :seon.agent.eval/agent-ref we :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(err)" :seon.agent.eval/error "boom"}]}))
+          ;; 1. compute-review-ops stamps :config {:seon.config/max-tool-turns 6}
+          (let [ma (d/pull @conn '[*] [:seon.agent/id :w/rp])
+                rops (gate/compute-review-ops @conn @wconn ma {:agent-eid (:db/id ma) :active? true :raw-ready? false :waiting? false :merged? false :tool-streak 2 :head-tx (:max-tx @wconn)})
+                spawn-op (second rops)]
+            (is (= :spawn-agent (:op spawn-op)))
+            (is (= 6 (get-in spawn-op [:config :seon.config/max-tool-turns]))))
+          ;; Pause parent & spawn bounded reviewer (max-tool-turns 2 for fast test)
+          (d/transact conn {:tx-data [{:seon.agent/id :w/rp :seon.agent/paused? true}]})
+          (let [st0 {:conn conn :cfg cfg :msg-seq 0 :writes 0 :commit-git? false}
+                _ (tspawn/handle-spawn-agent! st0
+                    {:op :spawn-agent :id :review/rp :branch :branch/rev-rp :parent :w/rp
+                     :forked-from :w/rp :merge-target [:seon.agent/id :w/rp] :auto-merge? true
+                     :config {:seon.config/max-tool-turns 2}
+                     :tasks [:template/review-and-improve] :goal "Review :w/rp"}
+                    (d/commit-id @conn))
+                rconn (store/connect cfg :branch/rev-rp)]
+            (try
+              ;; 2. Empty no-op review is BLOCKED by :review-no-op
+              (let [g0 (gate/evaluate-agent-gate @conn @rconn :review/rp)]
+                (is (false? (:ok? g0)))
+                (is (some #(= :review-no-op (:reason %)) (:blockers g0))))
+              ;; 3. If reviewer hits 2-turn cutoff while still a no-op -> review-cutoff-ops pauses reviewer & unpauses parent safely!
+              (let [seen-mids (into #{} (keep #(:seon.agent.message/id (d/pull @conn '[:seon.agent.message/id] (:e %))))
+                                    (d/datoms @conn :avet :seon.agent.message/to :review/rp))]
+              (d/transact rconn {:tx-data
+                [(cond-> {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :review/rp :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c1" :seon.agent.eval/code "(inspect)" :seon.agent.eval/value "ok"}
+                   (seq seen-mids) (assoc :seon.agent.eval/seen-messages seen-mids))
+                 {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :review/rp :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c2" :seon.agent.eval/code "(inspect2)" :seon.agent.eval/value "ok"}]}))
+              (let [st-noop (seon.reconciler/derive-agent-status @conn (:store @conn) {} #{} #{} #{} #{} :review/rp)]
+                (is (false? (:needs-turn? st-noop)))
+                (is (false? (:needs-merge? st-noop)))
+                (is (seq (:review-ops st-noop)) "No-op reviewer at turn cutoff must emit safe unpause + review-note ops")
+                (is (some #(= :review-note (:type %)) (:review-ops st-noop))))
+              ;; 4. Hijacking target :seon.agent/ready? true is BLOCKED by :review-hijacked-ready
+              (d/transact rconn {:tx-data [{:seon.agent/id :w/rp :seon.agent/ready? true}]})
+              (let [g-hijack (gate/evaluate-agent-gate @conn @rconn :review/rp)]
+                (is (false? (:ok? g-hijack)))
+                (is (some #(= :review-hijacked-ready (:reason %)) (:blockers g-hijack))))
+              ;; 5. Retract hijack + genuinely compact noisy turn 2 -> gate PASSES AND turn-cutoff auto-triggers test -> merge!
+              (d/transact rconn {:tx-data [[:db/retract [:seon.agent/id :w/rp] :seon.agent/ready? true]]})
+              (binding [fcalls/*agent-ctx* {:conn rconn :agent-id :review/rp :branch :branch/rev-rp}]
+                (fcalls/compact! {:agent-id :w/rp :turns #{2} :summary "Removed error turn 2"}))
+              (let [g-ok (gate/evaluate-agent-gate @conn @rconn :review/rp)
+                    st-cut (seon.reconciler/derive-agent-status @conn (:store @conn) {} #{} #{} #{} #{} :review/rp)]
+                (is (true? (:ok? g-ok)) (str "Genuine cleanup must pass review gate: " (pr-str g-ok)))
+                (is (contains? (get-in g-ok [:review-outcome :actions]) :compacted-evals))
+                (is (false? (:needs-turn? st-cut)))
+                (is (true? (:needs-test? st-cut)) "Green review at turn cutoff must auto-trigger test -> merge!")
+                (is (= :testing (:status st-cut)))
+                ;; Once tested-tx matches head-tx -> needs-merge? automatically fires!
+                (d/transact conn {:tx-data [{:seon.agent/id :review/rp :seon.agent/tested-tx (:max-tx @rconn)}]})
+                (let [st-m (seon.reconciler/derive-agent-status @conn (:store @conn) {} #{} #{} #{} #{} :review/rp)]
+                  (is (true? (:needs-merge? st-m)) "Tested green review at turn cutoff must auto-merge!")
+                  (is (= :merging (:status st-m)))))
+              (finally (d/release rconn))))
+          (finally (d/release wconn)))))))

@@ -296,8 +296,8 @@
                              (or (nil? store) (nil? br) (= br :main) (store/branch? store br))))
                   eid))]
      (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
-              {:seon.agent/tasks [:seon.task/id]} :seon.agent/target :seon.agent/forked-from :seon.agent/router? :seon.agent/interactive? :seon.agent/goal :seon.agent/paused?
-              :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/awaiting]) e)
+                              {:seon.agent/tasks [:seon.task/id]} :seon.agent/target :seon.agent/forked-from :seon.agent/merge-target :seon.agent/router? :seon.agent/interactive? :seon.agent/goal :seon.agent/paused?
+                              :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/awaiting]) e)
            b (:seon.agent/branch ma)
            branch-db (safe-branch-head store main-db b)
            be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
@@ -319,24 +319,30 @@
            auto-merge? (if (some? (:seon.agent/auto-merge? ma))
                          (boolean (:seon.agent/auto-merge? ma))
                          (boolean (store/config-val main-db agent-id :seon.config/auto-merge?)))
-           eligible-to-merge? (and (not= b :main) ready? auto-merge?)
            gate (agent-gate-summary main-db branch-db agent-id)
            gate-ok? (boolean (:ok? gate true))
-           merged? (and raw-ready? (empty? unread) (some? merged-tx) (= tested-tx head-tx) (= merged-tx head-tx))
+           merged? (and (or raw-ready? (some? (:seon.agent/merge-target ma))) (empty? unread) (some? merged-tx) (= tested-tx head-tx) (= merged-tx head-tx))
            {:keys [live-pid busy? needs-release?]} (live-release-state (get live-map agent-id) cur-eval-eids paused? merged?)
            active? (and (not paused?) (not busy?) (not awaiting-blocked?))
            max-tool-turns (let [v (when (contains? (:schema main-db) :seon.config/max-tool-turns) (store/config-val main-db agent-id :seon.config/max-tool-turns))] (if (number? v) (long v) 24))
            under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
-           review-ops (if (or (contains? gate-notified-set [agent-id head-tx :review]) (some #(= :review-note (:seon.agent.message/type %)) unread))
-                      []
-                      (gate/compute-review-ops main-db branch-db ma
-                        {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?
-                         :merged? merged? :tool-streak tool-streak :head-tx head-tx}))
-           wrapup-notify-op (when (and active? (empty? review-ops) (pos? max-tool-turns) (= tool-streak max-tool-turns)
+           cutoff-reached? (and (some? (:seon.agent/merge-target ma)) (not= b :main) auto-merge? (pos? max-tool-turns) (>= tool-streak max-tool-turns) (not raw-ready?) (not waiting?) (not merged?))
+           cutoff-ops (if (and active? cutoff-reached? (not (contains? gate-notified-set [agent-id head-tx :review])))
+                        (gate/review-cutoff-ops main-db ma {:cutoff-reached? cutoff-reached? :gate-ok? gate-ok? :blockers (:blockers gate) :unread unread})
+                        [])
+           cutoff-auto-merge? (and cutoff-reached? (empty? cutoff-ops) (empty? unread))
+           eligible-to-merge? (and (not= b :main) (or ready? cutoff-auto-merge?) auto-merge?)
+           review-ops (cond
+                        (seq cutoff-ops) cutoff-ops
+                        (or (contains? gate-notified-set [agent-id head-tx :review]) (some #(= :review-note (:seon.agent.message/type %)) unread)) []
+                        :else (gate/compute-review-ops main-db branch-db ma
+                                {:agent-eid e :active? active? :raw-ready? raw-ready? :waiting? waiting?
+                                 :merged? merged? :tool-streak tool-streak :head-tx head-tx}))
+           wrapup-notify-op (when (and (not cutoff-reached?) active? (empty? review-ops) (pos? max-tool-turns) (= tool-streak max-tool-turns)
                                        (not raw-ready?) (not waiting?) last-was-tool? (empty? unread))
                               (gate/wrapup-grace-notify-op main-db branch-db b agent-id head-tx inbox gate-notified-set))
            post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents (and (str/blank? (str (:seon.agent/summary ba))) (boolean (or (:seon.agent/target ma) (:seon.agent/forked-from ma)))))
-           needs-turn? (boolean (and active? (empty? review-ops)
+           needs-turn? (boolean (and active? (empty? review-ops) (not cutoff-reached?)
                                      (or (seq unread) post-ready-reply?
                                          (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?))))
            ready-idle? (and active? (empty? unread) (not post-ready-reply?) eligible-to-merge?)
