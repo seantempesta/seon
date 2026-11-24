@@ -5,9 +5,12 @@
   (:require [clojure.core.async :as a]
             [clojure.data.json :as json]
             [clojure.string :as str]
-            [jolt.http.core :as http]
+            [clojure.java.io :as io]
+            [jolt.http-client :as http]
+            [jolt.http.sse :as sse]
+            [jolt.io-poller :as poller]
+            [ring-chez.sse :as rsse]
             [ring-chez.adapter :as adapter]
-            [seon.model :as model]
             [seon.model.wire :as mwire]))
 
 (defn stop!
@@ -48,75 +51,63 @@
    the upstream returns `text/event-stream` and recording token usage into `stats-atom`."
   {:malli/schema [:=> [:cat :string :map :string :seon.host/atom :seon.host/chan] :map]}
   [upstream-url req-headers body-str stats-atom sem-ch]
-  (let [u (http/parse-url upstream-url)
-        auth (or (get req-headers "authorization") (get req-headers "Authorization"))
-        accept (or (get req-headers "accept") (get req-headers "Accept") "text/event-stream")
-        hdrs (cond-> [["Content-Type" "application/json"]
-                      ["Accept" accept]]
-               auth (conj ["Authorization" auth]))
-        s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
-    (try
-      (http/s-write s (http/build-request "POST" u hdrs body-str))
-      (let [r (http/read-response s nil "POST" nil true true)
-            status (long (or (:status r) 502))
-            ct (or (some (fn [[k v]] (when (= "content-type" (str/lower-case (str k))) (str v)))
-                         (:header-pairs r))
-                   "application/json")
-            sse? (and (= 200 status) (str/includes? (str/lower-case ct) "text/event-stream"))]
-        (if sse?
-          (let [out-ch (a/chan 64)
-                pull (or (:body-pull r)
-                         (let [b (volatile! (:body r))]
-                           (fn [] (let [x @b] (vreset! b nil) x))))]
-            (a/go
-              (try
-                (loop [carry ""]
-                  (if-let [chunk-bytes (pull)]
-                    (let [text (String. ^bytes chunk-bytes "UTF-8")
-                          combined (str carry text)
-                          lines (str/split combined #"\r?\n" -1)
-                          complete (pop lines)
-                          rem-carry (peek lines)]
-                      (doseq [line complete]
-                        (when-let [parsed (model/parse-sse-line line)]
-                          (when-let [usage (:usage parsed)]
-                            (record-usage! stats-atom usage))))
-                      (a/>! out-ch text)
-                      (recur rem-carry))
-                    (when-let [parsed (model/parse-sse-line carry)]
-                      (when-let [usage (:usage parsed)]
-                        (record-usage! stats-atom usage)))))
-                (catch Throwable _
-                  (swap! stats-atom update :errors inc))
-                (finally
-                  (http/s-close s)
-                  (a/close! out-ch)
-                  (swap! stats-atom update :in-flight #(max 0 (dec %)))
-                  (a/put! sem-ch :permit))))
-            {:status 200
-             :headers {"Content-Type" "text/event-stream"
-                       "Cache-Control" "no-cache"}
-             :body out-ch})
-          (let [bs (if-let [pull (:body-pull r)]
-                     (http/concat-bas (loop [acc []] (if-let [b (pull)] (recur (conj acc b)) acc)))
-                     (or (:body r) (byte-array 0)))
-                resp-str (String. ^bytes bs "UTF-8")]
-            (http/s-close s)
-            (swap! stats-atom update :in-flight #(max 0 (dec %)))
-            (a/put! sem-ch :permit)
-            (when (= 200 status)
-              (when-let [parsed (try (json/read-str resp-str :key-fn keyword) (catch Throwable _ nil))]
-                (record-usage! stats-atom (:usage parsed))))
-            {:status status
-             :headers {"Content-Type" ct}
-             :body resp-str})))
-      (catch Throwable ex
-        (try (http/s-close s) (catch Throwable _))
-        (swap! stats-atom #(-> % (update :errors inc) (update :in-flight (fn [n] (max 0 (dec n))))))
-        (a/put! sem-ch :permit)
-        {:status 502
-         :headers {"Content-Type" "application/json"}
-         :body (json/write-str {:error {:message (str "Upstream proxy error: " (or (.getMessage ex) (str ex)))}})}))))
+  (let [auth (or (get req-headers "authorization") (get req-headers "Authorization"))
+      accept (or (get req-headers "accept") (get req-headers "Accept") "text/event-stream")
+      hdrs (cond-> {"Content-Type" "application/json" "Accept" accept}
+             auth (assoc "Authorization" auth))]
+  (try
+    (let [resp (http/post upstream-url {:headers hdrs :body body-str :as :stream :throw false})
+          status (long (or (:status resp) 502))
+          ct (or (some (fn [[k v]] (when (= "content-type" (str/lower-case (str k))) (str v)))
+                       (:headers resp))
+                 "application/json")
+          body (:body resp)
+          sse? (and (= 200 status) (str/includes? (str/lower-case ct) "text/event-stream"))]
+      (if sse?
+        (let [out-ch (a/chan 64)
+              client-gone? (volatile! false)]
+          (a/go
+            (try
+              (when body
+                (with-open [rdr (io/reader body :encoding "UTF-8")]
+                  (sse/read-events!
+                   rdr
+                   {:on-event (fn [{:keys [event data id]}]
+                                (when-let [parsed (mwire/decode-sse-data data)]
+                                  (when-let [usage (:usage parsed)]
+                                    (record-usage! stats-atom usage)))
+                                (let [ev-map (cond-> {:data data}
+                                               (and event (not= event "message")) (assoc :event event)
+                                               id (assoc :id id))]
+                                  (when-not (a/>!! out-ch ev-map)
+                                    (vreset! client-gone? true)
+                                    (try (.close ^java.io.InputStream body) (catch Throwable _)))))})))
+              (catch Throwable _
+                (when-not @client-gone?
+                  (swap! stats-atom update :errors inc)))
+              (finally
+                (a/close! out-ch)
+                (swap! stats-atom update :in-flight #(max 0 (dec %)))
+                (a/put! sem-ch :permit))))
+          (rsse/event-response out-ch))
+        (let [resp-str (cond
+                         (nil? body) ""
+                         (string? body) body
+                         :else (with-open [in ^java.io.InputStream body] (slurp in :encoding "UTF-8")))]
+          (swap! stats-atom update :in-flight #(max 0 (dec %)))
+          (a/put! sem-ch :permit)
+          (when (= 200 status)
+            (when-let [parsed (try (json/read-str resp-str :key-fn keyword) (catch Throwable _ nil))]
+              (record-usage! stats-atom (:usage parsed))))
+          {:status status
+           :headers {"Content-Type" ct}
+           :body resp-str})))
+    (catch Throwable ex
+      (swap! stats-atom #(-> % (update :errors inc) (update :in-flight (fn [n] (max 0 (dec n))))))
+      (a/put! sem-ch :permit)
+      {:status 502
+       :headers {"Content-Type" "application/json"}
+       :body (json/write-str {:error {:message (str "Upstream proxy error: " (or (.getMessage ex) (str ex)))}})}))))
 
 (defn- read-req-body [req]
   (let [b (:body req)]
@@ -201,7 +192,7 @@
                        {:status 404
                         :headers {"Content-Type" "application/json"}
                         :body (json/write-str {:error {:message (str "Not found: " uri)}})})))
-         srv (adapter/run-server handler {:port (long port) :host "127.0.0.1"})
+         srv (adapter/run-server handler (cond-> {:port (long port) :host "127.0.0.1"} (poller/available?) (assoc :strategy :fibers)))
          bound-port (:port srv)]
      {:server srv
       :port bound-port

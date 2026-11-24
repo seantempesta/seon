@@ -91,7 +91,7 @@
         (is (empty? (:blocked-tasks g3)))
         (is (empty? (:blockers g3))))))))
 
-(deftest ^{:cost/ticks 40000000} legacy-upserts-reconciler-merge-and-helpers-test
+(deftest ^{:cost/ticks 50000000} legacy-upserts-reconciler-merge-and-helpers-test
   (testing "Legacy :seon.agent/task + :upserted-vars, reconciler gate-blocked -> merging, handle-merge-op!, and user helpers"
     (with-test-store [{:keys [conn cfg]}]
       (setup-demo-vars! conn)

@@ -7,7 +7,8 @@
             [jolt.host]
             [jolt.ir :as ir]
             [seon.schema :as schema]
-            [seon.code.reach :as reach]))
+            [seon.code.reach :as reach]
+            [seon.store :as store]))
 
 (defn parent-ns-sym
   "Returns the parent namespace symbol for `nsym` (e.g. `'seon.schema.datahike` -> `'seon.schema`), or nil."
@@ -220,14 +221,7 @@
   [& args] (apply reach/clean-edn-for-hash args))
 
 (defn- sha256-hex16 [^String s]
-  (let [md (java.security.MessageDigest/getInstance "SHA-256")
-        bs (.digest md (.getBytes (or s "") "UTF-8"))
-        sb (StringBuilder. 16)]
-    (dotimes [i 8]
-      (let [b (bit-and (aget bs i) 0xff)]
-        (when (< b 16) (.append sb \0))
-        (.append sb (Integer/toHexString b))))
-    (.toString sb)))
+  (store/sha256-hex (or s "") 16))
 
 (defn semantic-hash
   {:malli/schema [:=> [:cat :symbol :any] [:string {:min 16, :max 16}]], :cost/ticks 3000000, :cost/bytes 3000000}

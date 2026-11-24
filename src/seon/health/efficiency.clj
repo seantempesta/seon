@@ -396,14 +396,7 @@
         (.append sb (str key))
         (.append sb \:)
         (.append sb (str hash)))
-      (let [md (java.security.MessageDigest/getInstance "SHA-256")
-            bs (.digest md (.getBytes (.toString sb) "UTF-8"))
-            hx (StringBuilder. 16)]
-        (dotimes [i 8]
-          (let [b (bit-and (aget bs i) 0xff)]
-            (when (< b 16) (.append hx \0))
-            (.append hx (Integer/toHexString b))))
-        (.toString hx)))))
+      (store/sha256-hex (.toString sb) 16))))
 
 (defn- load-persisted-ns-unused [db]
   (let [sm (:schema db)]

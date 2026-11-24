@@ -13,7 +13,9 @@
             [clojure.core.async.flow :as flow]
             [clojure.data.json :as json]
             [clojure.string :as str]
-            [jolt.http.core :as http]
+            [clojure.java.io :as io]
+            [jolt.http-client :as http]
+            [jolt.http.sse :as sse]
             [seon.model.wire :as wire]
             [seon.error :as error]
             [seon.model.messages :as messages]))
@@ -66,52 +68,44 @@
        (throw (ex-info (str "Missing model API key in env var " api-key-env)
                        {:error :seon.model/missing-api-key :env api-key-env})))
      (let [base-url (or (:base-url prov) "https://api.deepseek.com")
-           url (str (str/replace base-url #"/+$" "") "/chat/completions")
-           req-body (json/write-str (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
-                                                        system-prompt history user-prompt))
-          headers [["Authorization" (str "Bearer " api-key)]
-                   ["Content-Type" "application/json"]
-                   ["Accept" "text/event-stream"]]
-          u (http/parse-url url)
-          s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
-      (try
-        (http/s-write s (http/build-request "POST" u headers req-body))
-        (let [r (http/read-response s nil "POST" nil true true)]
-          (if (not= 200 (:status r))
-            (let [bs (if-let [pull (:body-pull r)]
-                       (http/concat-bas (loop [acc []] (if-let [b (pull)] (recur (conj acc b)) acc)))
-                       (or (:body r) (byte-array 0)))
-                  body-str (String. ^bytes bs "UTF-8")
-                  retry-after (some (fn [[k v]]
-                                      (when (= "retry-after" (str/lower-case (str k)))
-                                        (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
-                                    (:header-pairs r))]
-              (throw (ex-info (str "Model HTTP " (:status r) ": " (subs body-str 0 (min 300 (count body-str)))) {:error (if (= 429 (:status r)) :seon.model/rate-limited :seon.model/provider-error) :status (:status r) :retry-after-ms retry-after :headers (:header-pairs r) :body body-str})))
-            (let [pull (or (:body-pull r)
-                           (let [b (volatile! (:body r))]
-                             (fn [] (let [x @b] (vreset! b nil) x))))]
-              (loop [st (make-stream-state)
-                     carry ""]
-                (if-let [chunk-bytes (pull)]
-                  (let [text (str carry (String. ^bytes chunk-bytes "UTF-8"))
-                        lines (str/split text #"\r?\n" -1)
-                        complete (pop lines)
-                        rem-carry (peek lines)
-                        st' (reduce (fn [acc line]
-                                      (if-let [parsed (parse-sse-line line)]
-                                        (let [[acc' delta] (process-sse-chunk parsed acc)]
-                                          (when (and delta on-delta) (on-delta delta))
-                                          acc')
-                                        acc))
-                                    st
-                                    complete)]
-                    (recur st' rem-carry))
-                  (let [final-st (if-let [parsed (parse-sse-line carry)]
-                                   (first (process-sse-chunk parsed st))
-                                   st)]
-                    (finalize-stream-state final-st)))))))
-        (finally
-          (http/s-close s)))))))
+         url (str (str/replace base-url #"/+$" "") "/chat/completions")
+         req-body (json/write-str (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
+                                                      system-prompt history user-prompt))
+         resp (http/post url {:headers {"Authorization" (str "Bearer " api-key)
+                                        "Content-Type" "application/json"
+                                        "Accept" "text/event-stream"}
+                              :body req-body
+                              :as :stream
+                              :throw false})
+         status (long (or (:status resp) 0))
+         body (:body resp)]
+     (if (not= 200 status)
+       (let [body-str (cond
+                        (nil? body) ""
+                        (string? body) body
+                        :else (with-open [in ^java.io.InputStream body] (slurp in :encoding "UTF-8")))
+             hdrs (:headers resp)
+             retry-after (some (fn [[k v]]
+                                 (when (= "retry-after" (str/lower-case (str k)))
+                                   (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
+                               hdrs)]
+         (throw (ex-info (str "Model HTTP " status ": " (subs body-str 0 (min 300 (count body-str))))
+                         {:error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error)
+                          :status status
+                          :retry-after-ms retry-after
+                          :headers hdrs
+                          :body body-str})))
+       (let [st-vol (volatile! (make-stream-state))]
+         (when body
+           (with-open [rdr (io/reader body :encoding "UTF-8")]
+             (sse/read-events!
+              rdr
+              {:on-event (fn [ev]
+                           (when-let [parsed (wire/decode-sse-data (:data ev))]
+                             (let [[st' delta] (process-sse-chunk parsed @st-vol)]
+                               (vreset! st-vol st')
+                               (when (and delta on-delta) (on-delta delta)))))})))
+         (finalize-stream-state @st-vol)))))))
 
 (defn- built-in-agent-synthesis
   [{:keys [agent-id scope router? goal parent unread turn]}]

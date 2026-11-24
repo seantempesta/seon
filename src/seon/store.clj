@@ -879,3 +879,22 @@
                 tb (:seon.agent/branch pa)]
             (when (and (:seon.agent/id ag) (:seon.agent/id pa) tb (not= tb :main) (not= tb branch))
               {:agent-id (:seon.agent/id ag) :target-id (:seon.agent/id pa) :target-branch tb})))))))
+
+(defn sha256-hex
+  "Deterministic lowercase SHA-256 hex digest of UTF-8 string `s` (full 64 chars, or first `n` chars)."
+  {:malli/schema [:=> {:examples [[["hello"] "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"]
+                                  [["hello" 16] "2cf24dba5fb0a30e"]]}
+                  [:cat :string [:? [:int {:min 1 :max 64}]]] :string]
+   :cost/ticks 200000
+   :cost/bytes 131072}
+  ([^String s] (sha256-hex s 64))
+  ([^String s n]
+   (let [bs (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes (str s) "UTF-8"))
+         nb (min (alength bs) (quot (inc (long n)) 2))
+         sb (StringBuilder. (* 2 nb))]
+     (dotimes [i nb]
+       (let [b (bit-and 0xff (aget bs i))]
+         (when (< b 16) (.append sb \0))
+         (.append sb (Integer/toHexString b))))
+     (let [hx (.toString sb)]
+       (if (< (long n) (count hx)) (subs hx 0 (long n)) hx)))))

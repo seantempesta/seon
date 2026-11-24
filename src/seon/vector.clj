@@ -8,8 +8,8 @@
             [jolt.ffi :as ffi]
             [seon.store :as store])
   (:import [java.io InputStream OutputStream]
-           [java.security MessageDigest]
            [java.util.concurrent TimeUnit]))
+
 {}
 
 (def default-coarse-dims 128)
@@ -244,13 +244,7 @@
   "Deterministic 64-char lowercase SHA-256 hex digest of UTF-8 string `s`."
   {:malli/schema [:=> [:cat :string] :string] :cost/ticks 200000}
   [^String s]
-  (let [bs (.digest (MessageDigest/getInstance "SHA-256") (.getBytes s "UTF-8"))
-        sb (StringBuilder. 64)]
-    (dotimes [i (alength bs)]
-      (let [b (bit-and 0xff (aget bs i))]
-        (when (< b 16) (.append sb \0))
-        (.append sb (Integer/toHexString b))))
-    (.toString sb)))
+  (store/sha256-hex s))
 
 (defn model-id
   "Derives stable `:seon.vector/model` id from model file path + `texts-version`."

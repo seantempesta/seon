@@ -21,6 +21,12 @@
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]
             [seon.web.css :as wcss]
+            [jolt.http.sse :as jsse]
+            [ring-chez.zstd :as rzstd]
+            [seon.store :as store]
+            [seon.vector :as svec]
+            [seon.web :as web]
+            [seon.web.actions :as actions]
             [seon.web.styles :as styles]))
 
 (def ^:private renderer-index-stubs
@@ -315,8 +321,8 @@
           ev-sig   (render/datastar-patch-signals {:aggRate "· 72 tok/s" :statusOpen true})
           sig-line (second (str/split-lines ev-sig))]
       (is (not (str/includes? ev-no-vt "useViewTransition")))
-      (is (str/includes? ev-vt "data: useViewTransition true\n"))
-      (is (str/starts-with? ev-sig "event: datastar-patch-signals\n"))
+      (is (str/includes? ev-vt "data: useViewTransition true\r\n"))
+      (is (str/starts-with? ev-sig "event: datastar-patch-signals\r\n"))
       (is (str/starts-with? sig-line "data: signals "))
       (is (= {:aggRate "· 72 tok/s" :statusOpen true}
              (json/read-str (subs sig-line (count "data: signals ")) :key-fn keyword)))
@@ -418,3 +424,50 @@
                 "Consecutive turns on :main MUST keep identical :prefix-hash (0 KV-cache prefix busts!)")
             (is (= open-1 open-2 open-3)
                 "Static <walk-context> message must be byte-identical across turns 1, 2, 3 on :main")))))))
+
+(deftest ^{:cost/ms 2000} web-compression-sse-multipart-and-sha256-regression-test
+  (testing "ring-chez.sse/format-event round-trips through jolt.http.sse/parse-lines"
+    (let [ev (render/datastar-patch-event "<div id=\"x\">a</div>\n<div>b</div>" "#main" "inner" true)
+          parsed (jsse/parse-lines (conj (vec (str/split-lines ev)) ""))]
+      (is (= "datastar-patch-elements" (:event (first parsed))))
+      (is (str/includes? (:data (first parsed)) "selector #main"))
+      (is (str/includes? (:data (first parsed)) "useViewTransition true"))
+      (is (str/includes? (:data (first parsed)) "elements <div id=\"x\">a</div>"))))
+  (testing "seon.web/start-http-listener! negotiates zstd Content-Encoding via wrap-compress"
+    (let [listener (web/start-http-listener! 0)
+          big-html (apply str (repeat 200 "<div class=\"card\">Seon → 🚀</div>\n"))]
+      (try
+        ((:set-page! listener) big-html)
+        (let [plain ((:handler listener) {:request-method :get :uri "/"})
+              zresp ((:handler listener) {:request-method :get :uri "/"
+                                          :headers {"accept-encoding" "gzip, deflate, br, zstd"}})]
+          (is (= 200 (:status plain)))
+          (is (= big-html (:body plain)))
+          (is (= 200 (:status zresp)))
+          (when (rzstd/available?)
+            (is (= "zstd" (get-in zresp [:headers "Content-Encoding"])))
+            (is (< (alength ^bytes (:body zresp)) (count big-html)))
+            (is (= big-html (String. (rzstd/decompress (:body zresp)) "UTF-8")))))
+        (finally ((:stop! listener))))))
+  (testing "seon.web.actions/parse-form-body & parse-multipart-fields preserve case-sensitive WebKit & quoted boundaries via multipart.core"
+    (let [webkit-body (str "------WebKitFormBoundaryAbCd123\r\n"
+                           "Content-Disposition: form-data; name=\"text\"\r\n\r\n"
+                           "line1 → 🚀\nline2\r\n"
+                           "------WebKitFormBoundaryAbCd123\r\n"
+                           "Content-Disposition: form-data; name=\"target\"\r\n\r\n"
+                           ":agent/root\r\n"
+                           "------WebKitFormBoundaryAbCd123--\r\n")
+          quoted-body (str "--MixedCaseBoundary99\r\n"
+                           "Content-Disposition: form-data; name=\"prompt\"\r\n\r\n"
+                           "fix --not-a-boundary bug\r\n"
+                           "--MixedCaseBoundary99--\r\n")]
+      (is (= {:text "line1 → 🚀\nline2" :target ":agent/root"}
+             (actions/parse-form-body {:headers {"Content-Type" "multipart/form-data; boundary=----WebKitFormBoundaryAbCd123"}
+                                       :body webkit-body})))
+      (is (= {:prompt "fix --not-a-boundary bug"}
+             (actions/parse-multipart-fields "multipart/form-data; boundary=\"MixedCaseBoundary99\"" quoted-body)))))
+  (testing "Shared seon.store/sha256-hex matches callers and passes seed=42 generative checks"
+    (is (= (store/sha256-hex "hello" 16) (mwire/prefix-sha256 "hello")))
+    (is (= (store/sha256-hex "hello") (svec/text-digest "hello")))
+    (let [res (schema/stress-var nil (quote seon.store/sha256-hex) {:samples 50 :seed 42})]
+      (is (:ok? res) (pr-str res)))))

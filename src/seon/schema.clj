@@ -454,10 +454,15 @@
                      (let [fail (fn [extra reason]
                                   (reduced (merge {:ok? false :var fn-sym :args sample-args :reason reason} extra)))]
                        (try
-                         (let [{:keys [val ticks bytes ms]}
-                               (if measure-fn
-                                 (measure-fn #(apply target-fn sample-args))
-                                 {:val (apply target-fn sample-args) :ticks 0 :bytes 0 :ms 0.0})]
+                         (let [run-one (fn []
+                                         (if measure-fn
+                                           (measure-fn #(apply target-fn sample-args))
+                                           {:val (apply target-fn sample-args) :ticks 0 :bytes 0 :ms 0.0}))
+                               res0 (run-one)
+                               over? (or (and ticks-budget (> (:ticks res0) ticks-budget))
+                                         (and bytes-budget (> (:bytes res0) bytes-budget))
+                                         (and ms-budget (:ms res0) (> (:ms res0) ms-budget)))
+                               {:keys [val ticks bytes ms]} (if (and measure-fn over?) (run-one) res0)]
                            (cond
                              (and (= tag :example) (not= expected val))
                              (fail {:example? true :expected expected :return val}

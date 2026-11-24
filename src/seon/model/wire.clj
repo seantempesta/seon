@@ -3,7 +3,9 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
-            [jolt.http.core :as http]
+            [jolt.http-client :as http]
+            [jolt.http.sse :as sse]
+            [seon.store :as store]
             [seon.render :as render]
             [seon.render.fit :as fit]
             [seon.schema :as schema]
@@ -20,15 +22,6 @@
    :tool-calls {}
    :finish-reason nil
    :usage nil})
-
-(defn parse-sse-line
-  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :map]], :cost/ticks 200, :cost/bytes 400}
-  [^String line]
-  (when (and line (str/starts-with? line "data:"))
-    (let [payload (str/trim (subs line 5))]
-      (when (and (not (str/blank? payload)) (not= payload "[DONE]"))
-        (try (json/read-str payload :key-fn keyword)
-             (catch Throwable _ nil))))))
 
 (defn process-sse-chunk
   "Purely accumulates one decoded SSE JSON chunk into `state`, returning `[state' delta-event-or-nil]`."
@@ -119,22 +112,6 @@
       (pos? (count reasoning-str)) (assoc :reasoning reasoning-str)
       (seq norm-usage) (assoc :usage norm-usage))))
 
-(defn http-post!
-  "Pure fiber-parking HTTP POST via `jolt.http.core` (`headers` is `[[k v] ...]`)."
-  {:malli/schema [:function [:=> [:cat :string [:sequential [:tuple :string :string]] :string] :map]]}
-  [url headers ^String body]
-  (let [u (http/parse-url url)
-        s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
-    (try
-      (http/s-write s (http/build-request "POST" u headers body))
-      (let [r (http/read-response s nil "POST" nil true false)
-            bs (if-let [pull (:body-pull r)]
-                 (http/concat-bas (loop [acc []] (if-let [b (pull)] (recur (conj acc b)) acc)))
-                 (or (:body r) (byte-array 0)))]
-        {:status (:status r) :headers (:header-pairs r) :body (String. ^bytes bs "UTF-8")})
-      (finally
-        (http/s-close s)))))
-
 (defn prefix-sha256
   "Returns a 16-char lowercase hex SHA-256 digest of string `s` for deterministic KV-cache prefix hashing."
   {:malli/schema [:=> {:examples [[["hello"] "2cf24dba5fb0a30e"]]}
@@ -142,52 +119,7 @@
    :cost/ticks 200000
    :cost/bytes 131072}
   [s]
-  (let [md (java.security.MessageDigest/getInstance "SHA-256")
-        bs (.digest md (.getBytes (str s) "UTF-8"))
-        sb (StringBuilder. 16)]
-    (dotimes [i 8]
-      (let [b (bit-and 0xff (aget bs i))]
-        (when (< b 16) (.append sb \0))
-        (.append sb (Integer/toHexString b))))
-    (.toString sb)))
-
-(defn http-get!
-  "Pure fiber-parking HTTP GET via `jolt.http.core` (`headers` is `[[k v] ...]`)."
-  {:malli/schema [:function [:=> [:cat :string [:sequential [:tuple :string :string]]] :map]], :seon.gen/skip true}
-  [url headers]
-  (let [u (http/parse-url url)
-        s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
-    (try
-      (http/s-write s (http/build-request "GET" u headers nil))
-      (let [r (http/read-response s nil "GET" nil true false)
-            bs (if-let [pull (:body-pull r)]
-                 (http/concat-bas (loop [acc []] (if-let [b (pull)] (recur (conj acc b)) acc)))
-                 (or (:body r) (byte-array 0)))]
-        {:status (:status r) :headers (:header-pairs r) :body (String. ^bytes bs "UTF-8")})
-      (finally
-        (http/s-close s)))))
-
-(defn fetch-model-context-window!
-  "Queries OpenAI-compat `GET <base-url>/models` to dynamically discover the active model's
-   `context_window` / `context_length` (returns positive long or nil; never hardcoded)."
-  {:malli/schema [:=> [:cat :map] [:maybe :int]], :seon.gen/skip true}
-  [{:keys [base-url model api-key-env]}]
-  (when (and (string? base-url) (not (str/blank? base-url)) (string? model))
-    (try
-      (let [api-key (when api-key-env (System/getenv (str api-key-env)))
-            url (str (str/replace base-url #"/+$" "") "/models")
-            hdrs (cond-> [["Accept" "application/json"]]
-                   (and api-key (not (str/blank? api-key)))
-                   (conj ["Authorization" (str "Bearer " api-key)]))
-            resp (http-get! url hdrs)]
-        (when (= 200 (:status resp))
-          (let [parsed (json/read-str (:body resp) :key-fn keyword)
-                models (:data parsed)
-                m (some #(when (= model (:id %)) %) models)
-                cw (or (:context_window m) (:context_length m) (:max_context_length m) (:input_token_limit m))]
-            (when (and (number? cw) (pos? (long cw)))
-              (long cw)))))
-      (catch Throwable _ nil))))
+  (store/sha256-hex (str s) 16))
 
 (defn- edn-tag-val [tag v]
   (case tag
@@ -585,3 +517,70 @@
     (str hdr
          (when out-s (str "\n" out-s))
          "\n" body)))
+
+(defn decode-sse-data
+  "Decodes an SSE event `data` payload into a keywordized JSON map, returning nil for blank/`[DONE]`/non-map JSON."
+  {:malli/schema [:=> {:examples [[["{\"choices\":[]}"] {:choices []}] [["[DONE]"] nil] [[""] nil] [[nil] nil]]}
+                  [:cat [:maybe :string]] [:maybe :map]]
+   :cost/ticks 100000 :cost/bytes 131072}
+  [payload]
+  (let [s (some-> payload str/trim)]
+    (when (and (seq s) (not= s "[DONE]"))
+      (try (let [v (json/read-str s :key-fn keyword)]
+             (when (map? v) v))
+           (catch Throwable _ nil)))))
+
+(defn parse-sse-line
+"Parses a single SSE `data:` line via `jolt.http.sse/parse-line` into a keywordized JSON map (or nil)."
+{:malli/schema [:=> {:examples [[["data: {\"a\":1}"] {:a 1}] [["data: [DONE]"] nil] [[": keepalive"] nil] [[nil] nil]]}
+                [:cat [:maybe :string]] [:maybe :map]]
+ :cost/ticks 100000 :cost/bytes 131072}
+[^String line]
+(when (string? line)
+  (let [[st _] (sse/parse-line sse/initial-state line)
+        [_ ev] (sse/parse-line st "")]
+    (when ev (decode-sse-data (:data ev))))))
+
+(defn- headers->map [headers]
+  (cond
+    (map? headers) headers
+    (sequential? headers) (into {} (keep (fn [[k v]] (when (and k (some? v)) [(str k) (str v)]))) headers)
+    :else {}))
+
+(defn http-get!
+"Fiber-aware HTTP GET via `jolt.http-client` (keep-alive pooled, gzip/deflate, redirects)."
+{:malli/schema [:function [:=> [:cat :string [:or :map [:sequential [:tuple :string :string]]]] :map]]
+ :seon.gen/skip true}
+[url headers]
+(let [r (http/get url {:headers (headers->map headers) :throw false})]
+  {:status (:status r) :headers (:headers r) :body (or (:body r) "")}))
+
+(defn fetch-model-context-window!
+  "Queries OpenAI-compat `GET <base-url>/models` to dynamically discover the active model's
+   `context_window` / `context_length` (returns positive long or nil; never hardcoded)."
+  {:malli/schema [:=> [:cat :map] [:maybe :int]], :seon.gen/skip true}
+  [{:keys [base-url model api-key-env]}]
+  (when (and (string? base-url) (not (str/blank? base-url)) (string? model))
+    (try
+      (let [api-key (when api-key-env (System/getenv (str api-key-env)))
+            url (str (str/replace base-url #"/+$" "") "/models")
+            hdrs (cond-> [["Accept" "application/json"]]
+                   (and api-key (not (str/blank? api-key)))
+                   (conj ["Authorization" (str "Bearer " api-key)]))
+            resp (http-get! url hdrs)]
+        (when (= 200 (:status resp))
+          (let [parsed (json/read-str (:body resp) :key-fn keyword)
+                models (:data parsed)
+                m (some #(when (= model (:id %)) %) models)
+                cw (or (:context_window m) (:context_length m) (:max_context_length m) (:input_token_limit m))]
+            (when (and (number? cw) (pos? (long cw)))
+              (long cw)))))
+      (catch Throwable _ nil))))
+
+(defn http-post!
+"Fiber-aware HTTP POST via `jolt.http-client` (keep-alive pooled, gzip/deflate, redirects)."
+{:malli/schema [:function [:=> [:cat :string [:or :map [:sequential [:tuple :string :string]]] :string] :map]]
+ :seon.gen/skip true}
+[url headers ^String body]
+(let [r (http/post url {:headers (headers->map headers) :body body :throw false})]
+  {:status (:status r) :headers (:headers r) :body (or (:body r) "")}))

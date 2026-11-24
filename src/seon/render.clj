@@ -22,7 +22,8 @@
             [seon.schema :as schema]
             [seon.schema.index :as six]
             [seon.render.print.schema :as pschema]
-            [seon.render.text :as rtext]))
+            [seon.render.text :as rtext]
+            [ring-chez.sse :as rsse]))
 
 (defn esc
   {:malli/schema [:=> [:cat :any] :string], :cost/ticks 20000}
@@ -425,14 +426,15 @@
   ([html] (datastar-patch-event html nil nil false))
   ([html selector mode] (datastar-patch-event html selector mode false))
   ([html selector mode use-vt?]
-   (let [s (if (string? html) html (hiccup->html html))]
-     (str "event: datastar-patch-elements\n"
-          (when selector (str "data: selector " selector "\n"))
-          (when mode (str "data: mode " mode "\n"))
-          (when use-vt? "data: useViewTransition true\n")
-          (apply str (for [line (str/split-lines s) :when (not (str/blank? line))]
-                       (str "data: elements " line "\n")))
-          "\n"))))
+   (let [s (if (string? html) html (hiccup->html html))
+       lines (cond-> []
+               selector (conj (str "selector " selector))
+               mode (conj (str "mode " mode))
+               use-vt? (conj "useViewTransition true")
+               true (into (keep #(when-not (str/blank? %) (str "elements " %))
+                                (str/split-lines s))))]
+   (rsse/format-event {:event "datastar-patch-elements"
+                       :data (str/join "\n" lines)}))))
 
 (defn datastar-patch-signals
   "Formats a Datastar v1 `datastar-patch-signals` SSE event from signal map `signals-map`."
@@ -440,8 +442,8 @@
    :cost/ticks 500000
    :cost/bytes 1048576}
   [signals-map]
-  (str "event: datastar-patch-signals\n"
-       "data: signals " (json/write-str (or signals-map {}) :escape-unicode false :escape-slash false) "\n\n"))
+  (rsse/format-event {:event "datastar-patch-signals"
+  :data (str "signals " (json/write-str (or signals-map {}) :escape-unicode false :escape-slash false))}))
 
 (defn empty-walk
   "Initial empty incremental render walk value (held inside `:web` Flow proc state — zero atoms!)."

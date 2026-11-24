@@ -4,7 +4,9 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [jolt.http.core :as http]
+            [jolt.http-client :as http]
+            [jolt.http.sse :as jsse]
+            [seon.model.wire :as mwire]
             [ring-chez.adapter :as adapter]
             [seon.bench.cluster :as cluster]
             [seon.bench.proxy :as proxy]
@@ -14,19 +16,6 @@
             [seon.fork.container :as fcontainer]
             [seon.render.entities.work :as rwork]
             [seon.bench.helpers]))
-
-(defn- http-get! [url]
-  (let [u (http/parse-url url)
-        s (http/connect-stream (http/tget u :host) (http/effective-port u) (= "https" (http/tget u :protocol)) false nil nil)]
-    (try
-      (http/s-write s (http/build-request "GET" u [["Accept" "application/json"]] ""))
-      (let [r (http/read-response s nil "GET" nil true false)
-            bs (if-let [pull (:body-pull r)]
-                 (http/concat-bas (loop [acc []] (if-let [b (pull)] (recur (conj acc b)) acc)))
-                 (or (:body r) (byte-array 0)))]
-        {:status (:status r) :body (String. ^bytes bs "UTF-8")})
-      (finally
-        (http/s-close s)))))
 
 (deftest ^{:cost/ms 3000} bench-proxy-streaming-usage-and-budget-cap-test
   (let [upstream-handler
@@ -76,7 +65,7 @@
 
       (testing "Proxy stats & GET /stats match accumulated usage with 0 in-flight"
         (let [st (proxy/stats p)
-              http-st (http-get! (str (:base-url p) "/stats"))
+              http-st (http/get (str (:base-url p) "/stats") {:headers {"Accept" "application/json"} :throw false})
               parsed (json/read-str (:body http-st) :key-fn keyword)]
           (is (= 2 (:requests st)))
           (is (= 0 (:in-flight st)))
@@ -252,3 +241,53 @@
     (is (= {:status :working :evals 3 :alive? true :last-snippet "(+ 1 2)"}
            (cluster/trial-progress :bench/t1 {:agents [{:id :bench/t1 :status :working :evals 3}]}
                                    {:last-snippet "(+ 1 2)"})))))
+
+(deftest ^{:cost/ms 3000} sse-utf8-chunk-boundary-and-multiline-streaming-test
+  (testing "jolt.http.sse/read-events! decodes multi-byte UTF-8 split across TCP chunks, comments, BOM, and multi-line data in both seon.model and seon.bench.proxy"
+    (let [payload-str (str "\uFEFF: keepalive comment\n"
+                           "data: {\"choices\":[{\"delta\":{\"content\":\"hi → 🚀 日本語\"}}]}\n\n"
+                           "data: {\"choices\":[{\"delta\":{\"content\":\" ok\"}}],\n"
+                           "data: \"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,\"total_tokens\":20}}\n\n"
+                           "data: [DONE]\n\n")
+          payload-bytes (.getBytes payload-str "UTF-8")
+          split-at-1 (let [i (.indexOf payload-str "→")]
+                       (+ (alength (.getBytes (subs payload-str 0 i) "UTF-8")) 1))
+          split-at-2 (+ split-at-1 5)
+          upstream (adapter/run-server
+                    (fn [_req]
+                      (let [ch (a/chan 8)]
+                        (a/go
+                          (a/>! ch (java.util.Arrays/copyOfRange payload-bytes 0 split-at-1))
+                          (a/<! (a/timeout 5))
+                          (a/>! ch (java.util.Arrays/copyOfRange payload-bytes split-at-1 split-at-2))
+                          (a/<! (a/timeout 5))
+                          (a/>! ch (java.util.Arrays/copyOfRange payload-bytes split-at-2 (alength payload-bytes)))
+                          (a/close! ch))
+                        {:status 200
+                         :headers {"Content-Type" "text/event-stream" "Cache-Control" "no-cache"}
+                         :body ch}))
+                    {:port 0 :host "127.0.0.1"})
+          up-url (str "http://127.0.0.1:" (:port upstream))
+          p (proxy/start! {:upstream-url up-url :port 0 :max-in-flight 2})]
+      (try
+        (let [deltas (atom [])
+              res (model/openai-stream-chat!
+                   {:base-url (:base-url p) :api-key "test-key" :model "test"}
+                   "sys" [] "hi" #(swap! deltas conj %))]
+          (is (= "hi → 🚀 日本語 ok" (:thought res)))
+          (is (not (str/includes? (:thought res) "\uFFFD")))
+          (is (= 12 (get-in res [:usage :prompt-tokens])))
+          (is (= 8 (get-in res [:usage :completion-tokens])))
+          (is (= 20 (:total-tokens (proxy/stats p))))
+          (is (= 2 (count @deltas))))
+        (finally
+          (proxy/stop! p)
+          (try (adapter/stop-server upstream {:drain-timeout-ms 500}) (catch Throwable _))))))
+  (testing "decode-sse-data and parse-sse-line handle standard WHATWG SSE and pass seed=42 generative checks"
+    (is (= {:a 1} (mwire/parse-sse-line "data: {\"a\":1}")))
+    (is (nil? (mwire/parse-sse-line "data: [DONE]")))
+    (is (nil? (mwire/parse-sse-line ": comment")))
+    (is (= [{:event "message" :data "a\nb" :id nil}] (jsse/parse-lines ["data: a" "data: b" ""])))
+    (doseq [sym [(quote seon.model.wire/decode-sse-data) (quote seon.model.wire/parse-sse-line)]]
+      (let [res (schema/stress-var nil sym {:samples 50 :seed 42})]
+        (is (:ok? res) (str sym " failed seed=42: " (pr-str res)))))))

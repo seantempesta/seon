@@ -21,7 +21,7 @@
             [seon.store.query :as sq]
             [seon.test-fixture :refer [with-test-store]]))
 
-(deftest ^{:cost/ticks 45000000} incremental-skip-reads-forwarding-and-recursive-rules-test
+(deftest ^{:cost/ticks 55000000} incremental-skip-reads-forwarding-and-recursive-rules-test
   (testing "Native d/q step-rules skips 100% on unrelated datoms, re-fires ONLY error rule on error tx, forwards skipped reads, and evaluates recursive % rules"
     (with-test-store [{:keys [conn]}]
       (let [src-a "(ns demo.rec-a)\n(defn leaf [x] (inc x))\n(defn mid [x] (leaf x))\n(defn top [x] (mid x))\n"

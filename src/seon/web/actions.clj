@@ -11,7 +11,8 @@
             [seon.render.ui :as ui]
             [seon.store :as store]
             [seon.model.wire :as mwire]
-            [seon.web.router :as router]))
+            [seon.web.router :as router]
+            [multipart.core :as multipart]))
 
 (defn parse-kw-input
   "Parses a keyword string (with or without leading `:`) falling back to `default-kw`."
@@ -425,32 +426,39 @@
             (str/split s #"&"))))
 
 (defn parse-multipart-fields
-  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :map], :cost/ticks 1000000, :cost/bytes 1048576}
-  [^String ct ^String body]
-  (if-let [[_ boundary] (re-find #"boundary=([^\s;]+)" (str ct))]
-    (let [parts (str/split body (re-pattern (str "--" (java.util.regex.Pattern/quote boundary))))]
-      (into {} (keep (fn [part]
-                       (when-let [[_ fname] (re-find #"name=\"([^\"]+)\"" part)]
-                         (let [sep (or (str/index-of part "\r\n\r\n") (str/index-of part "\n\n"))
-                               offset (if (str/index-of part "\r\n\r\n") 4 2)]
-                           (when sep [(keyword fname) (str/replace (subs part (+ sep offset)) #"(?:\r?\n)$" "")])))))
-            parts))
-    {}))
+"Parses `multipart/form-data` text fields via `jolt-lang/multipart` (`multipart.core/parse-form-data`, RFC 7578)."
+{:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :map], :cost/ticks 2000000, :cost/bytes 2097152}
+[^String ct ^String body]
+(if (or (str/blank? ct) (nil? body))
+  {}
+  (let [{:keys [params]} (multipart/parse-form-data
+                          {:content-type ct :body (.getBytes body "UTF-8")}
+                          {:check-complete false :ignore-errors true})]
+    (into {} (map (fn [[k v]] [(keyword k) v])) params))))
 
 (defn parse-form-body
-  {:malli/schema [:=> [:cat :map] :map]}
-  [req]
-  (let [hdrs (:headers req)
-        raw-ct (when (map? hdrs)
-                 (some (fn [[k v]] (when (= "content-type" (str/lower-case (str k))) v)) hdrs))
-        ct (str/lower-case (str (or raw-ct "")))
-        body-str (cond (nil? (:body req)) "" (string? (:body req)) (:body req) :else (slurp (:body req)))
-        trimmed (str/trim body-str)]
-    (cond (str/blank? trimmed) {}
-          (str/includes? ct "multipart/form-data") (parse-multipart-fields ct body-str)
-          (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
-          (or (str/includes? ct "application/json") (str/starts-with? trimmed "{") (str/starts-with? trimmed "[")) {}
-          :else (parse-kv-pairs body-str))))
+{:malli/schema [:=> [:cat :map] :map]}
+[req]
+(let [hdrs (:headers req)
+      raw-ct (when (map? hdrs)
+               (some (fn [[k v]] (when (= "content-type" (str/lower-case (str k))) v)) hdrs))
+      ct (str/lower-case (str (or raw-ct "")))
+      raw-body (:body req)]
+  (cond
+    (nil? raw-body) {}
+    (str/includes? ct "multipart/form-data")
+    (let [b (if (string? raw-body) (.getBytes ^String raw-body "UTF-8") raw-body)
+          {:keys [params]} (multipart/parse-form-data
+                            {:content-type (str raw-ct) :body b}
+                            {:check-complete false :ignore-errors true})]
+      (into {} (map (fn [[k v]] [(keyword k) v])) params))
+    :else
+    (let [body-str (if (string? raw-body) raw-body (slurp raw-body))
+          trimmed (str/trim body-str)]
+      (cond (str/blank? trimmed) {}
+            (str/includes? ct "application/x-www-form-urlencoded") (parse-kv-pairs body-str)
+            (or (str/includes? ct "application/json") (str/starts-with? trimmed "{") (str/starts-with? trimmed "[")) {}
+            :else (parse-kv-pairs body-str))))))
 
 (defn ^:seon/callable set-explain-lens!
   "Switches between Explore (`explain? false`) and Explain (`explain? true`, `:context`)

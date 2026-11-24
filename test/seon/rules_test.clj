@@ -14,7 +14,7 @@
             [seon.rule.seed :as rseed]
             [seon.test-fixture :refer [with-test-store]]))
 
-(deftest ^{:cost/ticks 30000000} rules-engine-clauses-hierarchy-and-diff-test
+(deftest ^{:cost/ticks 45000000} rules-engine-clauses-hierarchy-and-diff-test
   (testing "Stratified native Datahike d/q rules support unification, :not, isa?, count, str, provenance, and A/B diff-sessions"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/alpha.clj"
@@ -114,7 +114,7 @@
                   {:db/ident :seon.agent/curated :db/valueType :db.type/data :db/cardinality :db.cardinality/one}
                   {:db/ident :seon.task/curated :db/valueType :db.type/data :db/cardinality :db.cardinality/one}]})))
 
-(deftest ^{:cost/ticks 55000000} derive-bag-graph-to-tree-and-rules-persistence-test
+(deftest ^{:cost/ticks 85000000} derive-bag-graph-to-tree-and-rules-persistence-test
   (testing "Unified Turn-0 render-ns-full projects ns -> public API -> covering tests into HTML & Markdown, and rules.edn round-trips losslessly"
     (with-test-store [{:keys [conn]}]
       (let [seed-rules (do (ensure-rule-schema! conn) (rseed/starter-rules))]

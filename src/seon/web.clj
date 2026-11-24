@@ -20,7 +20,10 @@
             [seon.render.data :as rdata]
             [seon.render.walk :as rwalk]
             [seon.render.surface.entity :as sentity]
-            [seon.web.router :as router]))
+            [seon.web.router :as router]
+            [jolt.io-poller :as poller]
+            [ring-chez.middleware.compress :as compress]
+            [ring-chez.sse :as rsse]))
 
 (defn parse-deep-link
   "Translates browser URL deep-links via `seon.web.router/path->show-user-op` (`/` -> `:current`)."
@@ -142,7 +145,9 @@
           "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
           "<div id=\"seon-hovercard\" popover=\"hint\" role=\"tooltip\" class=\"hovercard\"></div></body></html>"))))
 
-(defn ^:seon.flow/edge start-http-listener! [port]
+(defn ^:seon.flow/edge start-http-listener!
+  {:malli/schema [:=> [:cat :int] :map], :seon.gen/skip true}
+  [port]
   (let [delegate (volatile! nil)
         latest-page (volatile! nil)
         sse-tabs (volatile! {})
@@ -184,11 +189,7 @@
                           tid (vswap! tab-seq inc)]
                       (vswap! sse-tabs assoc tid ch)
                       (when d ((:on-new-tab! d) ch))
-                      {:status 200
-                       :headers {"Content-Type" "text/event-stream"
-                                 "Cache-Control" "no-cache"
-                                 "Connection" "keep-alive"}
-                       :body ch})
+                      (rsse/event-response ch))
 
                     dl
                     (if (= :current dl)
@@ -204,8 +205,11 @@
                     (if d
                       ((:handle d) req)
                       {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."}))))
+        handler (compress/wrap-compress handler)
         srv (when (not= 0 port)
-              (adapter/run-server handler {:port (if (neg? port) 0 port) :host "127.0.0.1"}))
+              (adapter/run-server handler
+                                  (cond-> {:port (if (neg? port) 0 port) :host "127.0.0.1"}
+                                    (poller/available?) (assoc :strategy :fibers))))
         bound-port (if srv (:port srv) 0)]
     {:server srv
      :port bound-port

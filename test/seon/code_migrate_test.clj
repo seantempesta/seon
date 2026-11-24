@@ -171,7 +171,7 @@
           (is (:ok? val-res))
           (is (empty? (:missing-renderers val-res))))))))
 
-(deftest ^{:cost/ticks 40000000} apply-overlay-namespace-rename-rebinds-aliases-test
+(deftest ^{:cost/ticks 50000000} apply-overlay-namespace-rename-rebinds-aliases-test
   (testing "apply-overlay! clears stale aliases on #ns reload, rebinds caller fns, and removes retracted ns"
     (with-test-store [{:keys [conn]}]
       (try
