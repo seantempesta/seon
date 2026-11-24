@@ -1,14 +1,15 @@
 (ns seon.render.fit
   "Pure 4-signal self-balancing candidate ranking (urgency, recency, convergence, optional semantic)
-   with rule boost/suppress modifiers, commit-cached Datahike `:avet` renderer discovery,
+   with rule boost/suppress modifiers, batched `code-db-sig` Datahike `:avet` renderer discovery,
    unified 2-pass Upgrade Ladder, and candidate/variation explainer."
   (:require [datahike.api :as d]
             [malli.core :as m]
+            [seon.ctx.diff :as diff]
             [seon.render.fit.measure :as fmeas]
+            [seon.render.text :as rtext]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store :as store :refer [db-cache-sig db-schema]]
-            [seon.render.text :as rtext]))
+            [seon.store :as store :refer [db-schema]]))
 
 (def default-rank-weights
   "Default tunable weights for the native Datahike ranking signals."
@@ -17,7 +18,7 @@
 (def ^:private zone-order
   {:static 0 :static-prefix 0 :canvas 1 :workspace 2 :debug 3 :ephemeral-tail 4})
 
-(defonce ^:private ^:seon.flow/edge discover-renderers-cache (store/lru-cache 256))
+(defonce ^:private ^:seon.flow/edge discover-all-renderers-cache (store/lru-cache 32))
 
 (defonce ^:private ^:seon.flow/edge validator-cache (store/lru-cache 256))
 
@@ -26,8 +27,7 @@
 
 (defn cached-registry-info
   "Returns commit-anchored `schema/registry-for-db` enriched with `:reg-sig`, replaying `datahike.reads`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :map]
-   :cost/ticks 2000000}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :map] :cost/ticks 2000000}
   [db]
   (let [ri (schema/registry-for-db db)]
     (if (:reg-sig ri)
@@ -56,27 +56,24 @@
          wc (max 0.0 (fmeas/finite-double (or (:convergence wm) (:touches wm)) (:convergence default-rank-weights)))
          has-wsem? (number? (:semantic wm))
          wsem (cond (not has-sem?) 0.0 has-wsem? (max 0.0 (fmeas/finite-double (:semantic wm) 0.0)) :else 0.5)
-         base (if (pos? (+ wu wr wc wsem))
-                {:urgency wu :recency wr :convergence wc}
-                default-rank-weights)]
+         base (if (pos? (+ wu wr wc wsem)) {:urgency wu :recency wr :convergence wc} default-rank-weights)]
      (cond-> base
        (or has-sem? has-wsem?)
        (assoc :semantic (if has-sem? wsem (max 0.0 (fmeas/finite-double (:semantic wm) 0.0))))))))
 
 (defn read-rank-weights
   "Reads `:seon.config/rank-weights` from `db` (falling back to `default-rank-weights`)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :seon.config/rank-weights]
-   :cost/ticks 500000}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :seon.config/rank-weights] :cost/ticks 500000}
   [db]
   (store/without-agent-eval-reads
-  (fn []
-    (let [dh (db-schema db)]
-      (if-not (and db (contains? dh :seon.config/rank-weights))
-        default-rank-weights
-        (let [root-w (when (contains? dh :seon.config/key)
-                       (:seon.config/rank-weights
-                        (d/pull db '[:seon.config/rank-weights] [:seon.config/key :seon.config/root])))]
-          (normalize-weights (or root-w (:v (first (d/datoms db :aevt :seon.config/rank-weights)))) false)))))))
+   (fn []
+     (let [dh (db-schema db)]
+       (if-not (and db (contains? dh :seon.config/rank-weights))
+         default-rank-weights
+         (let [root-w (when (contains? dh :seon.config/key)
+                        (:seon.config/rank-weights
+                         (d/pull db '[:seon.config/rank-weights] [:seon.config/key :seon.config/root])))]
+           (normalize-weights (or root-w (:v (first (d/datoms db :aevt :seon.config/rank-weights)))) false)))))))
 
 (defn- to-set [x]
   (cond (set? x) x (coll? x) (set x) (some? x) #{x} :else #{}))
@@ -94,7 +91,7 @@
                        (tags :failing-test) (rules :rule.ctx/failing-reach-tests)) 0.95
                    (or (some? (:seon.fix/id data)) (:matching-fix? c) (tags :fix)) 0.90
                    (or (:edited? c) (:branch-edited? c) (:written? c)
-                   (tags :edited) (rules :rule.ctx/edited-var-on-branch)) 0.85
+                       (tags :edited) (rules :rule.ctx/edited-var-on-branch)) 0.85
                    (or (and (some? (:seon.task/id data)) (not (:seon.task/done? data)))
                        (:active-task? c) (tags :active-task) (rules :rule.ctx/active-task-and-lineage)) 0.75
                    (or (:pinned? c) (tags :pinned) (rules :rule.ctx/pinned-entities)) 0.70
@@ -112,9 +109,7 @@
 
 (defn- candidate-raw-convergence [c]
   (let [te (when (number? (:touch-energy c)) (max 0.0 (fmeas/finite-double (:touch-energy c) 0.0)))
-        raw-t (if (some? te)
-                (* 2.5 te)
-                (double (max 0 (fmeas/safe-long (or (:touches c) (:eval-touches c)) 0))))
+        raw-t (if (some? te) (* 2.5 te) (double (max 0 (fmeas/safe-long (or (:touches c) (:eval-touches c)) 0))))
         paths (double (max 0 (fmeas/safe-long (or (:converging-paths c) (:convergence c)
                                                   (when (coll? (:rules c)) (count (:rules c)))) 0)))]
     (+ raw-t paths)))
@@ -141,8 +136,7 @@
 
 (defn rank-candidates
   "Pure 4-signal self-balancing rank over candidate entity maps: urgency/anchor, native `?tx`/turn
-   recency, cumulative touches/convergence, and optional `:semantic` signal, plus rule-emitted
-   `:rank/boost` and `:rank/suppress` modifiers and optional `:turn` phase preset."
+   recency, cumulative touches/convergence, and optional `:semantic` signal."
   {:malli/schema [:=> [:cat [:vector :map] [:? [:maybe :map]]] [:vector :map]]
    :cost/ticks 10000000}
   ([candidates] (rank-candidates candidates nil))
@@ -154,17 +148,12 @@
            has-sem? (boolean (some some? sems))
            raw-w (or (:weights o) (when (integer? (:turn o)) (phase-rank-weights (:turn o))))
            ws (normalize-weights raw-w has-sem?)
-           wu (double (:urgency ws))
-           wr (double (:recency ws))
-           wc (double (:convergence ws))
+           wu (double (:urgency ws)) wr (double (:recency ws)) wc (double (:convergence ws))
            wsem (if has-sem? (double (:semantic ws 0.0)) 0.0)
            w-sum (let [s (+ wu wr wc wsem)] (if (pos? s) s 1.0))
-           txs (mapv candidate-tx candidates)
-           turns (mapv candidate-turn candidates)
-           tx-ns (pool-norm txs)
-           turn-ns (pool-norm turns)
-           has-tx? (boolean (some pos? txs))
-           has-turn? (boolean (some pos? turns))
+           txs (mapv candidate-tx candidates) turns (mapv candidate-turn candidates)
+           tx-ns (pool-norm txs) turn-ns (pool-norm turns)
+           has-tx? (boolean (some pos? txs)) has-turn? (boolean (some pos? turns))
            convs (mapv candidate-raw-convergence candidates)
            max-conv (reduce max 0 convs)
            conv-denom (if (pos? max-conv) (Math/log1p (double max-conv)) 1.0)]
@@ -175,8 +164,7 @@
                              has-tx? (nth tx-ns idx) has-turn? (nth turn-ns idx) :else 0.0)
                      cv (if (pos? max-conv) (/ (Math/log1p (double (nth convs idx))) conv-denom) 0.0)
                      sem (double (or (nth sems idx) 0.0))
-                     boost (candidate-boost c)
-                     supp (candidate-suppress c)
+                     boost (candidate-boost c) supp (candidate-suppress c)
                      base (/ (+ (* wu u) (* wr r) (* wc cv) (* wsem sem)) w-sum)
                      score (rtext/round4 (clamp01 (+ base boost (- supp))))
                      sigs (cond-> {:urgency (rtext/round4 u) :recency (rtext/round4 r) :convergence (rtext/round4 cv)}
@@ -192,58 +180,75 @@
 
 (defn measure-hiccup
   "Pure Hiccup measurement returning `{:tokens :chars :min-width :area :lines}`."
-  {:malli/schema [:=> [:cat :any]
-                  [:map [:tokens :int] [:chars :int] [:min-width :int] [:area :int] [:lines :int]]]
+  {:malli/schema [:=> [:cat :any] [:map [:tokens :int] [:chars :int] [:min-width :int] [:area :int] [:lines :int]]]
    :cost/ticks 5000000}
-  [node]
-  (fmeas/measure-hiccup node))
+  [node] (fmeas/measure-hiccup node))
 
 (defn resolve-slot-budget
   "Computes `{:avail-w :avail-h :max-items :area-budget}` from `{:viewport-w :viewport-h :sidebar-open? :slot}`."
-  {:malli/schema [:=> [:cat [:maybe :map]]
-                  [:map [:avail-w :int] [:avail-h :int] [:max-items :int] [:area-budget :int]]]
+  {:malli/schema [:=> [:cat [:maybe :map]] [:map [:avail-w :int] [:avail-h :int] [:max-items :int] [:area-budget :int]]]
    :cost/ticks 500000}
-  [spec]
-  (fmeas/resolve-slot-budget spec))
+  [spec] (fmeas/resolve-slot-budget spec))
 
-(defn- compute-discovered-renderers [db ks]
+(defn- compute-all-renderers-map [db]
   (let [dh (db-schema db)]
-    (if-not (and (seq ks) (dh :seon.schema/key) (dh :seon.code.var/input)
+    (if-not (and db (dh :seon.schema/key) (dh :seon.code.var/input)
                  (dh :seon.code.var/output) (dh :seon.code.var/name))
-      []
+      {}
       (if-let [h-eid (:e (first (d/datoms db :avet :seon.schema/key :seon.ui/hiccup)))]
-        (let [out-vs (into #{} (map :e) (d/datoms db :avet :seon.code.var/output h-eid))
-              eids (reduce (fn [acc sk]
-                             (if-let [se (:e (first (d/datoms db :avet :seon.schema/key sk)))]
-                               (reduce #(if (out-vs (:e %2)) (conj %1 (:e %2)) %1)
-                                       acc (d/datoms db :avet :seon.code.var/input se))
-                               acc))
-                           #{} ks)
+        (let [has-ops? (boolean (dh :seon.code.var/ops))
+              has-priv? (boolean (dh :seon.code.var/private?))
+              has-test? (boolean (dh :seon.code.var/test?))
+              has-edge? (boolean (dh :seon.code.var/flow-edge?))
               pure? (fn [ve]
-                      (and (not (and (dh :seon.code.var/ops) (seq (d/datoms db :eavt ve :seon.code.var/ops))))
-                           (not (and (dh :seon.code.var/private?) (:v (first (d/datoms db :eavt ve :seon.code.var/private?)))))
-                           (not (and (dh :seon.code.var/test?) (:v (first (d/datoms db :eavt ve :seon.code.var/test?)))))
-                           (not (and (dh :seon.code.var/flow-edge?) (:v (first (d/datoms db :eavt ve :seon.code.var/flow-edge?)))))))]
-          (->> eids (keep #(when (pure? %) (:v (first (d/datoms db :eavt % :seon.code.var/name)))))
-               distinct sort vec))
-        []))))
+                      (and (not (and has-ops? (seq (d/datoms db :eavt ve :seon.code.var/ops))))
+                           (not (and has-priv? (:v (first (d/datoms db :eavt ve :seon.code.var/private?)))))
+                           (not (and has-test? (:v (first (d/datoms db :eavt ve :seon.code.var/test?)))))
+                           (not (and has-edge? (:v (first (d/datoms db :eavt ve :seon.code.var/flow-edge?)))))))
+              se->sk (java.util.HashMap. 64)
+              get-sk (fn [se]
+                       (if (.containsKey se->sk se)
+                         (.get se->sk se)
+                         (let [k (:v (first (d/datoms db :eavt se :seon.schema/key)))]
+                           (.put se->sk se k) k)))
+              by-sk (reduce (fn [acc dt]
+                              (let [ve (:e dt)]
+                                (if-not (pure? ve)
+                                  acc
+                                  (if-let [vname (:v (first (d/datoms db :eavt ve :seon.code.var/name)))]
+                                    (reduce (fn [m idt]
+                                              (if-let [sk (get-sk (:v idt))]
+                                                (update m sk (fnil conj #{}) vname)
+                                                m))
+                                            acc (d/datoms db :eavt ve :seon.code.var/input))
+                                    acc))))
+                            {} (d/datoms db :avet :seon.code.var/output h-eid))]
+          (reduce-kv (fn [m sk syms] (assoc m sk (vec (sort syms)))) {} by-sk))
+        {}))))
+
+(defn discover-all-renderers
+  "Single-scan `code-db-sig`-cached map `{schema-key [sorted-pure-renderer-syms ...]}` for ALL `:seon.ui/hiccup` renderers."
+  {:malli/schema [:=> [:cat :seon.host/db] :map] :cost/ticks 5000000}
+  [db]
+  (store/without-agent-eval-reads
+   (fn []
+     (if-let [sig (diff/code-db-sig db)]
+       (store/lru-get! discover-all-renderers-cache 32 sig #(compute-all-renderers-map db))
+       (compute-all-renderers-map db)))))
 
 (defn discover-renderers
-  "Commit-cached Datahike `:avet` reverse-ref discovery of ALL pure `:seon.ui/hiccup` renderers
-   accepting `schema-keys`, replaying `datahike.reads` transparently via `store/lru-get!`."
-  {:malli/schema [:=> [:cat :seon.host/db :any] [:vector :qualified-symbol]]
-   :cost/ticks 5000000}
+  "O(1) `code-db-sig`-cached lookup of ALL pure `:seon.ui/hiccup` renderers accepting `schema-keys`."
+  {:malli/schema [:=> [:cat :seon.host/db :any] [:vector :qualified-symbol]] :cost/ticks 5000000}
   [db schema-keys]
   (let [ks (cond (qualified-keyword? schema-keys) [schema-keys]
-                 (coll? schema-keys) (vec (distinct (sort (filter qualified-keyword? schema-keys))))
+                 (coll? schema-keys) (vec (distinct (filter qualified-keyword? schema-keys)))
                  :else [])]
     (if (empty? ks)
       []
-      (store/without-agent-eval-reads
-      (fn []
-        (if-let [sig (db-cache-sig db)]
-          (store/lru-get! discover-renderers-cache 256 [sig ks] #(compute-discovered-renderers db ks))
-          (compute-discovered-renderers db ks)))))))
+      (let [all-m (discover-all-renderers db)]
+        (if (= 1 (count ks))
+          (get all-m (first ks) [])
+          (->> ks (mapcat #(get all-m %)) distinct sort vec))))))
 
 (defn- item-candidates [item]
   (let [raw (:candidates item)]
@@ -260,35 +265,29 @@
 
 (defn- prepare-entry [item target avail-w already-shown]
   (let [cands0 (item-candidates item)
-        eid (:entity item)
-        cur-tx (candidate-tx item)
+        eid (:entity item) cur-tx (candidate-tx item)
         prev (when (and (= target :wire) (map? already-shown) (some? eid)) (get already-shown eid))
         rewarmed? (boolean (and prev (or (> cur-tx (fmeas/safe-long (:tx prev) 0))
-                                         (and (some? (:hash item)) (some? (:hash prev))
-                                              (not= (:hash item) (:hash prev))))))
+                                         (and (some? (:hash item)) (some? (:hash prev)) (not= (:hash item) (:hash prev))))))
         unch-prev? (boolean (and prev (not rewarmed?)))]
     (if (= target :html)
       (let [sorted (vec (sort-by (juxt :area :min-width :tokens #(str (:fn %))) cands0))
             fitting (filterv #(<= (:min-width %) avail-w) sorted)
             usable (if (seq fitting) fitting [(first (sort-by (juxt :min-width :area :tokens) sorted))])]
-        {:item item :all-cands sorted :cands usable :base-idx 0 :rewarmed? false
-         :unch-prev? false :cost-fn #(long (:area %))})
+        {:item item :all-cands sorted :cands usable :base-idx 0 :rewarmed? false :unch-prev? false :cost-fn #(long (:area %))})
       (let [sorted (vec (sort-by (juxt :tokens :chars #(str (:fn %))) cands0))
             base-idx (long (or (when unch-prev?
                                  (or (first (keep-indexed #(when (= (:fn %2) (:fn prev)) %1) sorted))
                                      (first (keep-indexed #(when (>= (:tokens %2) (fmeas/safe-long (:tokens prev) 0)) %1) sorted))))
                                0))
             unch-fn (when unch-prev? (:fn (nth sorted base-idx)))]
-        {:item item :all-cands sorted :cands sorted :base-idx base-idx
-         :rewarmed? rewarmed? :unch-prev? unch-prev?
-         :cost-fn #(if (or (= :unchanged (:status item)) (and unch-prev? (= (:fn %) unch-fn)))
-                     0 (long (:tokens %)))}))))
+        {:item item :all-cands sorted :cands sorted :base-idx base-idx :rewarmed? rewarmed? :unch-prev? unch-prev?
+         :cost-fn #(if (or (= :unchanged (:status item)) (and unch-prev? (= (:fn %) unch-fn))) 0 (long (:tokens %)))}))))
 
 (defn- pass2-upgrade [kept used budget strategy]
   (let [n (count kept)
         step (fn [entries u i]
-               (let [{:keys [cands idx cost cost-fn] :as e} (nth entries i)
-                     ni (inc idx)]
+               (let [{:keys [cands idx cost cost-fn] :as e} (nth entries i) ni (inc idx)]
                  (if (< ni (count cands))
                    (let [nc (long (cost-fn (nth cands ni))) delta (- nc cost)]
                      (if (<= (+ u delta) budget)
@@ -307,8 +306,7 @@
           (if any? (recur es' u') [es' u']))))))
 
 (defn- finalize-entry [{:keys [item all-cands cands base-idx idx cost rewarmed? unch-prev?]} target avail-w]
-  (let [chosen (nth cands idx)
-        base-c (nth cands base-idx)
+  (let [chosen (nth cands idx) base-c (nth cands base-idx)
         status (if (= target :html)
                  :fitted
                  (cond (= :unchanged (:status item)) :unchanged
@@ -350,9 +348,7 @@
                    (let [idx (:base-idx e) c0 (nth (:cands e) idx) cost0 (long ((:cost-fn e) c0))]
                      (if (or (zero? cost0) (<= (+ (:used acc) cost0) budget))
                        (-> acc (update :kept conj (assoc e :idx idx :cost cost0)) (update :used + cost0))
-                       (update acc :dropped conj
-                               (assoc (:item e) :tokens (long (:tokens c0)) :area (long (:area c0))
-                                      :all-cands (:all-cands e))))))
+                       (update acc :dropped conj (assoc (:item e) :tokens (long (:tokens c0)) :area (long (:area c0)) :all-cands (:all-cands e))))))
                  {:kept [] :dropped [] :used 0} prepared)
          [upgraded final-used] (pass2-upgrade kept used budget strategy)
          finalized (mapv #(finalize-entry % target avail-w) upgraded)
@@ -367,22 +363,19 @@
                                   (let [prev (get m eid)]
                                     (if (= :unchanged (:status p))
                                       (assoc m eid prev)
-                                      (assoc m eid {:fn (:chosen-fn p)
-                                                    :tokens (long (:measured-tokens p (:tokens p 0)))
-                                                    :hash (:hash p)
-                                                    :tx (max (fmeas/safe-long (:tx prev) 0) (candidate-tx p))})))
+                                      (assoc m eid {:fn (:chosen-fn p) :tokens (long (:measured-tokens p (:tokens p 0)))
+                                                    :hash (:hash p) :tx (max (fmeas/safe-long (:tx prev) 0) (candidate-tx p))})))
                                   m))
                               shown0 ordered)
                       shown0)]
-     {:selected ordered
-      :dropped (into dropped (drop max-items ranked-items))
+     {:selected ordered :dropped (into dropped (drop max-items ranked-items))
       :tokens (long (reduce + 0 (map #(long (:tokens % 0)) ordered)))
       :area (long (reduce + 0 (map #(long (:area % 0)) ordered)))
-      :used (long final-used) :avail-w avail-w
-      :budget budget :slot-budget slot-b :target target :strategy strategy :shown next-shown})))
+      :used (long final-used) :avail-w avail-w :budget budget :slot-budget slot-b
+      :target target :strategy strategy :shown next-shown})))
 
 (defn ^:seon.flow/edge resolve-renderer-var
-  "Resolves a qualified renderer symbol from loaded namespaces or classpath, returning nil cleanly if a branch-only namespace is not loaded in this JVM."
+  "Resolves a qualified renderer symbol from loaded namespaces or classpath, returning nil cleanly if unloaded."
   {:malli/schema [:=> [:cat :any] :any] :cost/ticks 200000}
   [vsym]
   (when (qualified-symbol? vsym)
@@ -395,17 +388,14 @@
   (let [ms (:malli/schema (meta v))
         ar1 (cond (and (vector? ms) (= :=> (first ms))) ms
                   (and (vector? ms) (= :function (first ms)))
-                  (some #(when (and (vector? %) (= :=> (first %))
-                                    (vector? (second %)) (= :cat (first (second %)))
-                                    (= 2 (count (second %)))) %)
-                        (rest ms))
+                  (some #(when (and (vector? %) (= :=> (first %)) (vector? (second %))
+                                    (= :cat (first (second %))) (= 2 (count (second %)))) %) (rest ms))
                   :else nil)]
     (when (and (vector? ar1) (vector? (second ar1)) (= :cat (first (second ar1))) (= 2 (count (second ar1))))
       (second (second ar1)))))
 
 (defn- cached-renderer-validator [reg-info rsym v]
-  (let [in-s (renderer-input-schema v)
-        reg (:registry reg-info)]
+  (let [in-s (renderer-input-schema v) reg (:registry reg-info)]
     (when (and reg in-s)
       (let [res (store/lru-get! validator-cache 256 [(:reg-sig reg-info) rsym in-s]
                                 #(or (m/validator in-s {:registry reg}) ::no-validator))]
@@ -424,9 +414,7 @@
              (filter qualified-keyword?) distinct vec)))))
 
 (defn- set-schema-form? [f]
-  (and (vector? f)
-       (or (= :set (first f))
-           (and (= :and (first f)) (some set-schema-form? (rest f))))))
+  (and (vector? f) (or (= :set (first f)) (and (= :and (first f)) (some set-schema-form? (rest f))))))
 
 (defn- unwrap-ref [x]
   (if (and (map? x) (= 1 (count x)) (integer? (:db/id x))) (:db/id x) x))
@@ -439,16 +427,12 @@
      (let [dh (db-schema db)]
        (into {} (map (fn [[k v]]
                        (let [spec (or (get dh k) (get main-dh k))
-                             many? (or (= :db.cardinality/many (:db/cardinality spec))
-                                       (set-schema-form? (get forms k)))
+                             many? (or (= :db.cardinality/many (:db/cardinality spec)) (set-schema-form? (get forms k)))
                              ref? (= :db.type/ref (:db/valueType spec))
                              v1 (cond
-                                  (and many? (sequential? v))
-                                  (into #{} (if ref? (map unwrap-ref) identity) v)
-                                  (and many? (set? v) ref?)
-                                  (into #{} (map unwrap-ref) v)
-                                  (and many? (some? v) (not (set? v)))
-                                  #{(if ref? (unwrap-ref v) v)}
+                                  (and many? (sequential? v)) (into #{} (if ref? (map unwrap-ref) identity) v)
+                                  (and many? (set? v) ref?) (into #{} (map unwrap-ref) v)
+                                  (and many? (some? v) (not (set? v))) #{(if ref? (unwrap-ref v) v)}
                                   ref? (unwrap-ref v)
                                   :else v)]
                          [k v1])))
@@ -456,8 +440,7 @@
 
 (defn- invoke-discovered-renderers [db reg-info item ent-data sks extra-ctx fallback-map main-db]
   (let [disc (seq (distinct (concat (discover-renderers db sks) (when (and main-db (not= main-db db)) (discover-renderers main-db sks)))))
-        rsyms (if (seq disc) (vec disc)
-                  (when (map? fallback-map) (vec (distinct (mapcat #(get fallback-map %) sks)))))
+        rsyms (if (seq disc) (vec disc) (when (map? fallback-map) (vec (distinct (mapcat #(get fallback-map %) sks)))))
         main-dh (when main-db (db-schema main-db))
         norm-ent (normalize-entity-for-malli db ent-data (:forms reg-info) main-dh)
         non-nil-ctx (into {} (filter (fn [[_ v]] (some? v))) (merge extra-ctx (:params item)))]
@@ -480,34 +463,26 @@
 (defn- populate-candidates [db items opts]
   (let [o (if (map? opts) opts {})
         slot-b (when (= :html (:target o)) (resolve-slot-budget o))
-        extra-ctx (cond-> {}
-                    (:slot o) (assoc :seon.ui/slot (:slot o))
-                    (:avail-w slot-b) (assoc :seon.ui/avail-w (:avail-w slot-b)))
-        fb-map (:fallback-renderers o)
-        main-db (:main-db o)
+        extra-ctx (cond-> {} (:slot o) (assoc :seon.ui/slot (:slot o)) (:avail-w slot-b) (assoc :seon.ui/avail-w (:avail-w slot-b)))
+        fb-map (:fallback-renderers o) main-db (:main-db o)
         reg-info (let [r-db (cached-registry-info db)
-            r-m (when (and main-db (not= main-db db)) (cached-registry-info main-db))]
-        (if (and r-m (> (count (:forms r-m)) (count (:forms r-db)))) r-m r-db))
+                       r-m (when (and main-db (not= main-db db)) (cached-registry-info main-db))]
+                   (if (and r-m (> (count (:forms r-m)) (count (:forms r-db)))) r-m r-db))
         ent-idx (:entity-index reg-info)]
     (mapv (fn [item]
             (let [eid (:entity item)
                   ent-data (cond (and (map? (:data item)) (seq (:data item))) (:data item)
-                                 (integer? eid) (d/pull db '[*] eid)
-                                 :else {})
+                                 (integer? eid) (d/pull db '[*] eid) :else {})
                   sks (entity-schema-keys ent-idx item ent-data)]
               (if (seq (:candidates item))
                 (cond-> (assoc item :data ent-data) (seq sks) (assoc :schemas sks))
-                (let [cands (when (seq sks)
-                              (invoke-discovered-renderers db reg-info item ent-data sks extra-ctx fb-map main-db))]
-                  (cond-> (assoc item :data ent-data :schemas sks)
-                    (seq cands) (assoc :candidates cands))))))
+                (let [cands (when (seq sks) (invoke-discovered-renderers db reg-info item ent-data sks extra-ctx fb-map main-db))]
+                  (cond-> (assoc item :data ent-data :schemas sks) (seq cands) (assoc :candidates cands))))))
           items)))
 
 (defn fit-projections
-  "Ranks `projections`, pulls each entity once, discovers & invokes pure `:seon.ui/hiccup` renderers
-   via commit-cached `discover-renderers` + `validator-cache`, and runs `upgrade-ladder`."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db [:vector :map]] :map]
+  "Ranks `projections`, pulls each entity once, discovers & invokes pure `:seon.ui/hiccup` renderers, and runs `upgrade-ladder`."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:vector :map]] :map]
                   [:=> [:cat :seon.host/db [:vector :map] [:maybe :map]] :map]]
    :cost/ticks 30000000}
   ([db projections] (fit-projections db projections nil))
@@ -520,10 +495,8 @@
      (upgrade-ladder with-cands o))))
 
 (defn explain-candidates
-  "Explains ranking signals, modifiers, provenance, and EVERY rendered variation + selection/skip
-   reason for `candidates` under `opts` (`:target :wire` or `:html`)."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db [:vector :map]] :map]
+  "Explains ranking signals, modifiers, provenance, and EVERY rendered variation + selection/skip reason."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:vector :map]] :map]
                   [:=> [:cat :seon.host/db [:vector :map] [:maybe :map]] :map]]
    :cost/ticks 40000000}
   ([db candidates] (explain-candidates db candidates nil))
@@ -536,30 +509,18 @@
          with-cands (populate-candidates db ranked o)
          raw-by-ent (into {} (map (fn [it] [(:entity it) (item-candidates it)])) with-cands)
          ladder (upgrade-ladder with-cands o)
-         target (:target ladder)
-         avail-w (long (:avail-w ladder 10000))
-         budget (long (:budget ladder 0))
-         used (long (:used ladder 0))
-         remaining (max 0 (- budget used))
-         ex-sel (mapv #(fmeas/build-explained-item % (get raw-by-ent (:entity %) (item-candidates %))
-                                                   false target avail-w remaining text-fn)
-                      (:selected ladder))
-         ex-drop (mapv #(fmeas/build-explained-item % (or (:all-cands %) (get raw-by-ent (:entity %) (item-candidates %)))
-                                                    true target avail-w remaining text-fn)
-                       (:dropped ladder))]
-     {:target target :strategy (:strategy ladder)
-      :budget budget :used used :remaining remaining
-      :avail-w avail-w :slot-budget (:slot-budget ladder)
-      :tokens (:tokens ladder) :area (:area ladder)
+         target (:target ladder) avail-w (long (:avail-w ladder 10000))
+         budget (long (:budget ladder 0)) used (long (:used ladder 0)) remaining (max 0 (- budget used))
+         ex-sel (mapv #(fmeas/build-explained-item % (get raw-by-ent (:entity %) (item-candidates %)) false target avail-w remaining text-fn) (:selected ladder))
+         ex-drop (mapv #(fmeas/build-explained-item % (or (:all-cands %) (get raw-by-ent (:entity %) (item-candidates %))) true target avail-w remaining text-fn) (:dropped ladder))]
+     {:target target :strategy (:strategy ladder) :budget budget :used used :remaining remaining
+      :avail-w avail-w :slot-budget (:slot-budget ladder) :tokens (:tokens ladder) :area (:area ladder)
       :selected-count (count ex-sel) :dropped-count (count ex-drop)
-      :items (vec (concat ex-sel ex-drop))
-      :selected ex-sel :dropped ex-drop})))
+      :items (vec (concat ex-sel ex-drop)) :selected ex-sel :dropped ex-drop})))
 
 (defn explain-entity-fit
-  "Explains ALL discovered renderer variations, measurements, text previews, and fit reasons for
-   a single entity (`eid`, lookup ref `[attr val]`, candidate map, or entity map)."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db :any] :map]
+  "Explains ALL discovered renderer variations, measurements, text previews, and fit reasons for a single entity."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :any] :map]
                   [:=> [:cat :seon.host/db :any [:maybe :map]] :map]]
    :cost/ticks 25000000}
   ([db item-or-eid] (explain-entity-fit db item-or-eid nil))

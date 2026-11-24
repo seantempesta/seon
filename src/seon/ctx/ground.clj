@@ -3,10 +3,11 @@
    scope fix matching, and live `seon.vector` 4th-signal cosine scoring for `seon.ctx`."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.render.links :refer [db-cache-sig db-schema]]
+            [seon.ctx.diff :as diff]
+            [seon.render.data :as rdata]
+            [seon.render.links :as rlinks :refer [db-cache-sig db-schema live-cid]]
             [seon.store :as store]
-            [seon.vector :as vec]
-            [seon.render.data :as rdata]))
+            [seon.vector :as vec]))
 
 (defonce ^:private ^:seon.flow/edge effect-cache (store/lru-cache 64))
 
@@ -201,10 +202,10 @@
                               (let [p (d/pull task-db t-pull [:seon.task/id tid])] (when (:seon.task/id p) p)))
                             (when ((db-schema main-db) :seon.task/id)
                               (let [p (d/pull main-db t-pull [:seon.task/id tid])] (when (:seon.task/id p) p)))))
-        cid (db-cache-sig code-db) mcid (db-cache-sig main-db)
+        csig (diff/code-db-sig code-db) mcid (db-cache-sig main-db)
         run-g #(ground-task-text code-db (:seon.task/title t-ent) (:seon.task/plan t-ent))
         g (when (and t-ent (not (:seon.task/template? t-ent)))
-            (if cid (store/lru-get! effect-cache 64 [:ground cid (:seon.task/title t-ent) (:seon.task/plan t-ent)] run-g) (run-g)))
+            (if csig (store/lru-get! effect-cache 64 [:ground csig (:seon.task/title t-ent) (:seon.task/plan t-ent)] run-g) (run-g)))
         scope-eid (when (and scope ((db-schema code-db) :seon.code.ns/name))
                     (:e (first (d/datoms code-db :avet :seon.code.ns/name scope))))
         demote-scope? (boolean (and scope-eid (some #(not= scope-eid (second %)) (:hit-nss g))))
@@ -223,25 +224,25 @@
         boot-tx (when underspec? (baseline-import-tx code-db))
         run-s #(fast-search-vars code-db (str (:seon.task/title t-ent)) 6)
         s-hits (when underspec?
-                 (if cid (store/lru-get! effect-cache 64 [:search cid (:seon.task/title t-ent) 6] run-s) (run-s)))
+                 (if csig (store/lru-get! effect-cache 64 [:search csig (:seon.task/title t-ent) 6] run-s) (run-s)))
         run-sem #(vec (concat (vec/near main-db [:seon.task/id tid] 6 {:of :seon.code.var/name})
                               (when (contains? (db-schema main-db) :seon.code.doc/id)
                                 (vec/near main-db [:seon.task/id tid] 2 {:of :seon.code.doc/id}))))
         sem-hits (when (and underspec? tid (contains? (db-schema main-db) :seon.vector/coarse))
                    (if mcid (store/lru-get! effect-cache 64 [:sem mcid tid] run-sem) (run-sem)))
         sem-items (let [min-sc (double (or (store/config-val main-db aid :seon.config/semantic-min-score)
-                                (:seon.config/semantic-min-score store/default-config-values)))]
-                  (for [[e sc] sem-hits :when (>= (double sc) min-sc)]
-                    {:entity e :semantic (double sc) :priority 82 :zone :workspace
-                     :tags #{:tag/semantic} :rules [:seed/task-semantic]}))
+                                           (:seon.config/semantic-min-score store/default-config-values)))]
+                    (for [[e sc] sem-hits :when (>= (double sc) min-sc)]
+                      {:entity e :semantic (double sc) :priority 82 :zone :workspace
+                       :tags #{:tag/semantic} :rules [:seed/task-semantic]}))
         s-items (concat
-                  (for [{:keys [e tx score]} s-hits
-                        :let [recent? (and boot-tx (> (long tx) (long boot-tx)) (>= (double score) 0.25))]]
-                    {:entity e :tx tx :ctx.match/score score
-                     :priority (if recent? 91 74) :zone (if recent? :ephemeral-tail :workspace)
-                     :tags (if recent? #{:tag/recent :tag/search} #{:tag/search}) :rules [:seed/task-search]
-                     :params (if recent? {:seon.ui/expand-section :source :show-diff? true} {})})
-                  sem-items)
+                 (for [{:keys [e tx score]} s-hits
+                       :let [recent? (and boot-tx (> (long tx) (long boot-tx)) (>= (double score) 0.25))]]
+                   {:entity e :tx tx :ctx.match/score score
+                    :priority (if recent? 91 74) :zone (if recent? :ephemeral-tail :workspace)
+                    :tags (if recent? #{:tag/recent :tag/search} #{:tag/search}) :rules [:seed/task-search]
+                    :params (if recent? {:seon.ui/expand-section :source :show-diff? true} {})})
+                 sem-items)
         t-cur (for [ref (:seon.task/curated t-ent) :let [e (resolve-lookup-eid main-db code-db ref)] :when e]
                 {:entity e :priority 94 :zone :static-prefix :tags #{:tag/curated} :rules [:seed/curated]})
         has-peers? (boolean (or (and aid ((db-schema main-db) :seon.agent.call/caller)
@@ -250,7 +251,7 @@
                                      (seq (:seon.task/needs (d/pull main-db '[:seon.task/needs] [:seon.task/id tid]))))))
         run-t #(collect-tree-discoveries main-db code-db aid tid)
         tree-raw (when has-peers?
-                   (if (and mcid cid) (store/lru-get! effect-cache 64 [:tree mcid cid aid tid] run-t) (run-t)))
+                   (if (and mcid csig) (store/lru-get! effect-cache 64 [:tree mcid csig aid tid] run-t) (run-t)))
         peer-cnt (reduce (fn [m {:keys [e peer]}] (update m e (fnil conj #{}) peer)) {} tree-raw)
         o-items (for [[e ps] peer-cnt :when (>= (count ps) 2)]
                   {:entity e :priority 94 :zone :static-prefix :tags #{:tag/tree-overlap}
@@ -289,13 +290,6 @@
                                distinct)]
                (>= (count (filter #(str/includes? hay-lc %) c-toks)) 2)))))))))
 
-(defn- latest-test-run [db br]
-  (let [dh (db-schema db)]
-    (when (and db br (dh :seon.test.run/branch) (dh :seon.test.run/pass?))
-      (when-let [e (:e (first (d/datoms db :avet :seon.test.run/branch br)))]
-        (when-let [pdt (first (d/datoms db :eavt e :seon.test.run/pass?))]
-          {:db db :e e :pass? (true? (:v pdt)) :tx (long (:tx pdt 0))})))))
-
 (defn error-referenced-eids
   "Resolves up to 4 referenced var, schema, or namespace EIDs mentioned in `error-text` / `code-text` via indexed `:avet` lookups."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :string] [:maybe :string]] [:vector :int]]
@@ -325,7 +319,7 @@
         (->> (concat var-eids sch-eids ns-eids) distinct (take 4) vec)))))
 
 (defn ^:seon.flow/edge branch-form-drift
-  "Computes O(|branch-edits|) edited form keys, hashes, and true concurrent `:main` drift via `d/merge-base`."
+  "Computes O(|branch-edits|) edited form keys, hashes, and true concurrent `:main` drift via `diff/fast-merge-base`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:sequential :int]] :map]
    :cost/ticks 5000000}
   [main-db branch-db edited-eids]
@@ -335,15 +329,15 @@
                          edited-eids))
         hashes (into {} pairs)
         edited (mapv first pairs)
-        mc (when (instance? datahike.db.DB main-db) (d/commit-id main-db))
-        bc (when (instance? datahike.db.DB branch-db) (d/commit-id branch-db))
+        mc (store/live-cid main-db)
+        bc (store/live-cid branch-db)
         fhash (fn [db fk]
                 (when (and db ((db-schema db) :seon.code.form/key))
                   (when-let [e (:e (first (d/datoms db :avet :seon.code.form/key fk)))]
                     (:v (first (d/datoms db :eavt e :seon.code.form/hash))))))
         drifted (if (or (empty? pairs) (nil? main-db) (nil? mc) (nil? bc) (= mc bc))
                   []
-                  (let [base-cid (try (d/merge-base branch-db mc bc) (catch Throwable _ nil))]
+                  (let [base-cid (diff/fast-merge-base main-db branch-db)]
                     (if (and base-cid (not= base-cid mc))
                       (if-let [base-db (try (d/commit-as-db branch-db base-cid) (catch Throwable _ nil))]
                         (vec (keep (fn [[fk th]]
@@ -353,6 +347,84 @@
                         [])
                       [])))]
     {:edited edited :hashes hashes :drifted drifted}))
+
+(defn merge-raw-candidates
+  "Collapses duplicate candidate maps per `:entity`, taking max priority/tx/touches/energy and merging rules/tags/params."
+  {:malli/schema [:=> [:cat [:sequential :map]] :map] :cost/ticks 5000000}
+  [all-raw]
+  (reduce (fn [acc it]
+            (let [e (:entity it)]
+              (if-let [prev (get acc e)]
+                (assoc acc e
+                       (-> prev
+                           (assoc :priority (max (long (:priority prev 50)) (long (:priority it 50)))
+                                  :tx (max (long (:tx prev 0)) (long (:tx it 0)))
+                                  :zone (cond (or (= :agent-prefix (:zone prev)) (= :agent-prefix (:zone it))) :agent-prefix
+                                              (= :ephemeral-tail (:zone it)) :ephemeral-tail
+                                              :else (or (:zone prev) (:zone it)))
+                                  :pinned? (boolean (or (:pinned? prev) (:pinned? it)))
+                                  :rules (vec (distinct (concat (:rules prev) (:rules it))))
+                                  :tags (into (set (:tags prev)) (:tags it))
+                                  :params (merge (:params prev) (:params it)))
+                           (cond-> (:ctx.match/score it) (assoc :ctx.match/score (:ctx.match/score it))
+                             (or (:touches prev) (:touches it)) (assoc :touches (max (long (:touches prev 0)) (long (:touches it 0))))
+                             (or (:touch-energy prev) (:touch-energy it))
+                             (assoc :touch-energy (max (double (or (:touch-energy prev) 0.0)) (double (or (:touch-energy it) 0.0))))
+                             (or (:frontier-score prev) (:frontier-score it))
+                             (assoc :frontier-score (max (double (or (:frontier-score prev) 0.0)) (double (or (:frontier-score it) 0.0))))
+                             (or (:written? prev) (:written? it)) (assoc :written? true))))
+                (assoc acc e it))))
+          {} all-raw))
+
+(defn hydrate-merged-candidates
+  "Pulls and enriches merged candidate entities across `task-db`, `branch-db`, and `main-db`."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.host/db] :map :map [:maybe :int] :boolean :boolean :boolean [:maybe :int]] [:vector :map]]
+   :cost/ticks 25000000}
+  [main-db branch-db task-db ag merged demote-eid inc-evals? enrich? allow-rich-ns? max-cands]
+  (let [scope-ns (:seon.agent/scope ag)
+        extra-ns-set (into (if scope-ns #{scope-ns} #{}) (get-in ag [:seon.agent/context-prefs :extra-namespaces]))
+        same? (fn [a b] (or (= a b) (let [ca (live-cid a) cb (live-cid b)] (and ca cb (= ca cb)))))
+        same-mb? (same? main-db branch-db)
+        same-tb? (or (nil? task-db) (same? task-db branch-db))
+        ordered (if (and (integer? max-cands) (pos? (long max-cands)) (> (count merged) (long max-cands)))
+                  (take (long max-cands)
+                        (sort-by (fn [[eid item]]
+                                   [(if (:pinned? item) 0 1) (- (long (:touches item 0)))
+                                    (- (long (:priority item 50))) (- (long (:tx item 0))) (str eid)])
+                                 merged))
+                  merged)]
+    (vec
+     (keep (fn [[eid item]]
+             (cond
+               (and (vector? eid) (= 2 (count eid)) (= :seon.agent/id (first eid)))
+               (let [pat '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/goal]
+                     b (d/pull branch-db pat eid)
+                     ent (if (:seon.agent/id b) b (when-not same-mb? (d/pull main-db pat eid)))]
+                 (when (:seon.agent/id ent) (assoc item :entity eid :data ent)))
+
+               (integer? eid)
+               (let [t-b (when-not same-tb? (d/pull task-db '[*] eid))
+                     b (d/pull branch-db '[*] eid)
+                     use-t? (boolean (and (map? t-b) (:seon.task/id t-b)))
+                     from-b? (boolean (and (not use-t?) (seq (dissoc b :db/id))))
+                     ent (cond use-t? t-b from-b? b same-mb? nil :else (d/pull main-db '[*] eid))
+                     src-db (cond use-t? task-db from-b? branch-db :else main-db)]
+                 (when (and (map? ent) (seq (dissoc ent :db/id)) (or inc-evals? (not (:seon.agent.eval/id ent))))
+                   (let [dem? (= eid demote-eid)
+                         rich-ns? (boolean (and allow-rich-ns? (:seon.code.ns/name ent) (not dem?)
+                                                (or (extra-ns-set (:seon.code.ns/name ent))
+                                                    (contains? (:tags item) :tag/mentioned)
+                                                    (get-in item [:params :seon.ui/rich-ns?]))))
+                         ep (when enrich?
+                              (rlinks/enrich-entity-params src-db ent {:focal? false :rich-ns? rich-ns?
+                                                                       :main-db main-db :agent ag :scope scope-ns}))
+                         etx (max (long (:tx item 0))
+                                  (reduce max 0 (map #(long (or (:tx %) 0)) (d/datoms src-db :eavt eid))))]
+                     (cond-> (assoc item :entity eid :data ent :tx etx)
+                       (seq ep) (update :params merge ep)
+                       dem? (-> (assoc :priority 45 :rank/suppress 0.35)
+                                (assoc-in [:params :seon.ui/summary-strip?] true))))))))
+           ordered))))
 
 (defn legacy-failing-digests
   "Fallback for minimal synthetic test stores with ZERO `:seon.test.run/branch` entities; O(1) empty on live stores."

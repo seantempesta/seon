@@ -3,7 +3,9 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.ctx.diff :as diff]
             [seon.render.fit :as fit]
+            [seon.rule :as rules]
             [seon.schema :as schema]
             [seon.store :as store :refer [db-schema]]))
 
@@ -19,8 +21,13 @@
     :policy/subject :ctx/total})
 
 (def ^:private rank-keys #{:rank/boost :rank/suppress})
+
+(defonce ^:private ^:seon.flow/edge coverage-report-cache (store/lru-cache 16))
+
 (defn- lvar? [x] (and (symbol? x) (str/starts-with? (name x) "?")))
+
 (defn- unwrap-sym [x] (if (and (seq? x) (= 'quote (first x)) (symbol? (second x))) (second x) x))
+
 (defn- rval [g x] (cond (lvar? x) (get g x #{}) (some? x) #{x} :else #{}))
 
 (defn- clip-doc [s n]
@@ -34,7 +41,7 @@
       (sequential? q)
       (:a (reduce (fn [{:keys [k] :as m} x]
                     (if (secs x) {:k x :a (assoc (:a m) x [])}
-                      (if k (update-in m [:a k] conj x) m)))
+                        (if k (update-in m [:a k] conj x) m)))
                   {:k nil :a {}} q))
       :else {})))
 
@@ -46,7 +53,7 @@
          (and (vector? cl) (>= (count cl) 2))
          (let [db? (and (symbol? (first cl)) (str/starts-with? (name (first cl)) "$"))
                [s e a v] (if db? [(first cl) (second cl) (nth cl 2 nil) (nth cl 3 '_)]
-                           ['$ (first cl) (second cl) (nth cl 2 '_)])]
+                             ['$ (first cl) (second cl) (nth cl 2 '_)])]
            (if (and (= ent e) (keyword? a))
              (conj acc (if neg? [:not s a (nv v)] [s a (nv v)])) acc))
          (and (seq? cl) (#{'not 'not-join 'and 'or 'or-join} (first cl)))
@@ -113,31 +120,35 @@
       {:seon.coverage/fns (->> ps (mapcat :fns) distinct sort vec) :seon.coverage/projections ps})))
 
 (defn rule-atlas
-  "Indexed `:aevt :seon.rule/id` read returning a deterministic, stratum-sorted vector of all `:seon.rule/*` entities."
+  "Reuses cached `seon.rule/load-rules` returning a deterministic, stratum-sorted vector of all `:seon.rule/*` entities."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]] :cost/ticks 15000000}
   [db]
   (if-not (and db (contains? (db-schema db) :seon.rule/id))
     []
-    (let [ps [:seon.rule/id :seon.rule/stratum :seon.rule/category :seon.rule/target
-              :seon.rule/enabled? :seon.rule/query :seon.rule/assert :seon.rule/doc]]
-      (->> (mapv :e (d/datoms db :aevt :seon.rule/id))
-           (map #(analyze-rule (d/pull db ps %)))
-           (sort-by (juxt :stratum #(str (:id %)))) vec))))
+    (->> (rules/load-rules db)
+         (map analyze-rule)
+         (sort-by (juxt :stratum #(str (:id %))))
+         vec)))
 
 (defn- stored-entity-schemas [db]
   (let [dh (db-schema db)]
     (if-not (and db (dh :seon.schema/key) (dh :seon.schema/form))
       {}
-      (let [e->k (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms db :aevt :seon.schema/key))]
-        (reduce
-         (fn [acc dt]
-           (let [k (get e->k (:e dt)) f (:v dt)]
-             (if (and k (coll? f) (some #(and (map? %) (true? (:seon.db/attributes %))) (tree-seq coll? seq f)))
-               (assoc acc k (if (and (vector? f) (= :map (first f)))
-                              (into #{} (keep #(let [a (if (vector? %) (first %) %)] (when (qualified-keyword? a) a)))
-                                    (if (map? (second f)) (drop 2 f) (rest f))) #{}))
-               acc)))
-         {} (d/datoms db :aevt :seon.schema/form))))))
+      (let [stored (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
+            ix (:entity-index (schema/registry-for-db db))
+            forms (:forms ix)
+            by-s (reduce-kv
+                  (fn [acc a sks]
+                    (reduce (fn [m sk] (if (contains? stored sk) (update m sk (fnil conj #{}) a) m)) acc sks))
+                  {} (:entity-schemas ix))]
+        (reduce (fn [acc sk]
+                  (if (contains? acc sk)
+                    acc
+                    (let [f (get forms sk)]
+                      (if (and (coll? f) (some #(and (map? %) (true? (:seon.db/attributes %))) (tree-seq coll? seq f)))
+                        (assoc acc sk #{})
+                        acc))))
+                by-s stored)))))
 
 (defn- ^:seon.flow/edge measure-renderer [rsym sk sample]
   (if-let [v (and (some? sample) (fit/resolve-renderer-var rsym))]
@@ -164,20 +175,23 @@
       (:measured? m) (assoc :tokens (:tokens m) :min-width (:min-width m) :area (:area m))
       (:measure-error m) (assoc :measure-error (:measure-error m)))))
 
-(defn ^:seon.flow/edge schema-renderer-matrix
-  "Maps stored entity schemas (`:seon.db/attributes true`) to pure `:seon.ui/hiccup` renderers (`seon.render.fit/discover-renderers`),
-   input contracts, and `seed = 42` footprints (`seon.schema/sample-schema`, `seon.render.fit/measure-hiccup`)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]] :cost/ticks 40000000}
-  [db]
+(defn- ^:seon.flow/edge schema-renderer-matrix* [db stored-es]
   (let [dh (db-schema db)
         ps (cond-> [] (dh :seon.code.var/input) (conj {:seon.code.var/input [:seon.schema/key]})
-                      (dh :seon.code.var/optional-input) (conj {:seon.code.var/optional-input [:seon.schema/key]}))]
+                      (dh :seon.code.var/optional-input) (conj {:seon.code.var/optional-input [:seon.schema/key]}))
+        all-r (fit/discover-all-renderers db)]
     (mapv (fn [sk]
-            (let [rsyms (fit/discover-renderers db [sk])
+            (let [rsyms (get all-r sk [])
                   sample (when (seq rsyms) (first (schema/sample-schema db sk 1)))
                   rs (mapv #(inspect-renderer db dh ps sk sample %) rsyms)]
               {:schema sk :renderer-count (count rs) :renderers rs}))
-          (sort (keys (stored-entity-schemas db))))))
+          (sort (keys stored-es)))))
+
+(defn ^:seon.flow/edge schema-renderer-matrix
+  "Maps stored entity schemas to pure `:seon.ui/hiccup` renderers via batched `fit/discover-all-renderers`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]] :cost/ticks 40000000}
+  [db]
+  (schema-renderer-matrix* db (stored-entity-schemas db)))
 
 (defn- footprints-overlap? [r1 r2]
   (let [w25? #(let [hi (max (double %1) (double %2)) lo (min (double %1) (double %2))]
@@ -217,18 +231,21 @@
          :footprints [(select-keys r1 [:tokens :min-width :area]) (select-keys r2 [:tokens :min-width :area])]
          :subject (str schema ":" f1 "<->" f2) :message (str "Ambiguous: " f1 " vs " f2 " on " schema ".")}))))
 
-(defn detect-renderer-holes
-  "Pure audit detecting `:missing-entity-renderer`, `:single-footprint-renderer`, and `:ambiguous-renderer-pair`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:vector :any] [:vector :any]] [:vector :map]] :cost/ticks 15000000}
-  [db matrix atlas]
+(defn- detect-renderer-holes* [db matrix atlas stored-es]
   (let [projs (mapcat #(rule-projs db %) (filter #(not (false? (:enabled? %))) atlas))
         sel-fns (into #{} (mapcat :fns) projs)
         ui-projs (filter #(seq (:ui-params %)) projs)
         a->s (if (and db (seq ui-projs))
-               (reduce-kv (fn [a sk ks] (reduce #(update %1 %2 (fnil conj #{}) sk) a ks)) {} (stored-entity-schemas db))
+               (reduce-kv (fn [a sk ks] (reduce #(update %1 %2 (fnil conj #{}) sk) a ks)) {} (or stored-es (stored-entity-schemas db)))
                {})
         disambig (into #{} (mapcat #(set/union (:schemas %) (into #{} (mapcat a->s) (:attrs %)))) ui-projs)]
     (->> matrix (mapcat #(schema-holes sel-fns disambig %)) (sort-by (juxt #(name (:class %)) :subject)) vec)))
+
+(defn detect-renderer-holes
+  "Pure audit detecting `:missing-entity-renderer`, `:single-footprint-renderer`, and `:ambiguous-renderer-pair`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:vector :any] [:vector :any]] [:vector :map]] :cost/ticks 15000000}
+  [db matrix atlas]
+  (detect-renderer-holes* db matrix atlas nil))
 
 (defn- claim-conflicts [cs]
   (let [v (vec cs) n (count v)]
@@ -262,31 +279,42 @@
         confs (distinct (mapcat claim-conflicts (vals (group-by (juxt :stratum :zone :pattern) claims))))]
     (->> (concat orphan dead confs) (sort-by (juxt #(name (:class %)) :subject)) vec)))
 
+(defn- ^:seon.flow/edge compute-coverage-report [db include-atlas?]
+  (let [atlas (rule-atlas db)
+        stored-es (stored-entity-schemas db)
+        matrix (schema-renderer-matrix* db stored-es)
+        rb (group-by :class (detect-renderer-holes* db matrix atlas stored-es))
+        missing (vec (:missing-entity-renderer rb)) single (vec (:single-footprint-renderer rb))
+        ambiguous (vec (:ambiguous-renderer-pair rb))
+        rule-holes (detect-rule-holes db atlas) hb (group-by :class rule-holes)
+        orphan (vec (:orphan-wm-consumer hb)) dead (vec (:dead-rule-fn hb)) confs (vec (:conflicting-rule-priority hb))
+        rn (count (filter #(pos? (:renderer-count %)) matrix))
+        counts {:entity-schemas (count matrix) :rendered-schemas rn :total-renderers (reduce + 0 (map :renderer-count matrix))
+                :missing-renderers (count missing) :single-footprint (count single) :ambiguous-renderers (count ambiguous)
+                :rules (count atlas) :enabled-rules (count (filter :enabled? atlas)) :rule-holes (count rule-holes)
+                :orphan-wm-consumer (count orphan) :dead-rule-fn (count dead) :conflicting-rule-priority (count confs)}
+        summary (str (count matrix) " entity schemas (" rn " rendered, " (count missing) " missing, "
+                     (count single) " single-footprint, " (count ambiguous) " ambiguous) | "
+                     (count atlas) " rules (" (count orphan) " orphan-wm, " (count dead) " dead-fn, " (count confs) " conflict)")
+        base (array-map :ok? (and (empty? ambiguous) (empty? dead) (empty? orphan))
+                        :summary summary :counts counts :missing-renderers missing :ambiguous-renderers ambiguous
+                        :single-footprint single :rule-holes rule-holes)]
+    (with-meta (if include-atlas? (assoc base :rule-atlas atlas) base)
+               {:seon/schema :seon.health/coverage})))
+
 (defn ^:seon.flow/edge coverage-report
-  "Exhaustive rule & renderer coverage report (`:seon.health/coverage`). Pass `{:include-atlas? false}` for holes-only view."
+  "Exhaustive rule & renderer coverage report (`:seon.health/coverage`), cached by `[code-db-sig rules-db-sig]`."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]
    :cost/ticks 60000000}
   ([db] (coverage-report db nil))
   ([db opts]
-   (let [atlas (rule-atlas db) matrix (schema-renderer-matrix db)
-         rb (group-by :class (detect-renderer-holes db matrix atlas))
-         missing (vec (:missing-entity-renderer rb)) single (vec (:single-footprint-renderer rb))
-         ambiguous (vec (:ambiguous-renderer-pair rb))
-         rule-holes (detect-rule-holes db atlas) hb (group-by :class rule-holes)
-         orphan (vec (:orphan-wm-consumer hb)) dead (vec (:dead-rule-fn hb)) confs (vec (:conflicting-rule-priority hb))
-         rn (count (filter #(pos? (:renderer-count %)) matrix))
-         counts {:entity-schemas (count matrix) :rendered-schemas rn :total-renderers (reduce + 0 (map :renderer-count matrix))
-                 :missing-renderers (count missing) :single-footprint (count single) :ambiguous-renderers (count ambiguous)
-                 :rules (count atlas) :enabled-rules (count (filter :enabled? atlas)) :rule-holes (count rule-holes)
-                 :orphan-wm-consumer (count orphan) :dead-rule-fn (count dead) :conflicting-rule-priority (count confs)}
-         summary (str (count matrix) " entity schemas (" rn " rendered, " (count missing) " missing, "
-                      (count single) " single-footprint, " (count ambiguous) " ambiguous) | "
-                      (count atlas) " rules (" (count orphan) " orphan-wm, " (count dead) " dead-fn, " (count confs) " conflict)")
-         base (array-map :ok? (and (empty? ambiguous) (empty? dead) (empty? orphan))
-                         :summary summary :counts counts :missing-renderers missing :ambiguous-renderers ambiguous
-                         :single-footprint single :rule-holes rule-holes)]
-     (with-meta (if (false? (:include-atlas? opts)) base (assoc base :rule-atlas atlas))
-                {:seon/schema :seon.health/coverage}))))
+   (let [inc-a? (not (false? (:include-atlas? opts)))
+         csig (diff/code-db-sig db)
+         rsig (rules/rules-db-sig db)]
+     (if (and csig rsig)
+       (let [full (store/lru-get! coverage-report-cache 16 [csig rsig] #(compute-coverage-report db true))]
+         (if inc-a? full (with-meta (dissoc full :rule-atlas) {:seon/schema :seon.health/coverage})))
+       (compute-coverage-report db inc-a?)))))
 
 (defn- ^:seon.flow/edge repl-agent-db [opts]
   (let [ctx-var (requiring-resolve (quote seon.fork.calls/*agent-ctx*))
@@ -297,7 +325,7 @@
       :else nil)))
 
 (defn ^:seon.flow/edge coverage
-  "REPL helper: runs NASA-style rule & renderer coverage check (`{:include-atlas? false}` by default for crisp <4k EDN). Pass `{:include-atlas? true}` for full Rule Atlas."
+  "REPL helper: runs NASA-style rule & renderer coverage check (`{:include-atlas? false}` by default)."
   {:seon.repl/export true
    :malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:maybe :map]] :map]]
    :cost/ticks 60000000}

@@ -4,11 +4,11 @@
    Emits `.ent-link` buttons so browser views stay 100% clickable while `render/hiccup->text`
    emits crisp plain text for the LLM wire."
   (:require [clojure.string :as str]
-            [seon.render.links :as rlinks]
             [datahike.api :as d]
             [seon.render :as render]
             [seon.render.data :as rdata]
-            [seon.render.text :refer [clip one-line]]))
+            [seon.render.links :as rlinks]
+            [seon.render.text :refer [one-line]]))
 
 (defn- kw-label [x fb]
   (cond (ident? x) (name x) (some? x) (str x) :else fb))
@@ -56,21 +56,21 @@
             [:p "MAIN DRIFT: " (rlinks/ent-link [:seon.branch/name :main] ":main" "mono") " updated "
              (interpose ", " (map form-key-link (take 5 dr-v)))])
           (when (map? last-proofs)
-          (let [fails (when (and (not (:ok? last-proofs))
-                                 (coll? (:failures last-proofs))
-                                 (not (map? (:failures last-proofs))))
-                        (seq (take 3 (:failures last-proofs))))]
-            [:div
-             [:p (str "AUTO-PROOFS (tx " (:tx last-proofs) "): " (if (:ok? last-proofs) "PASS" "FAIL")
-                      " (" (:passed last-proofs 0) "/" (:ran last-proofs 0) " in " (:ms last-proofs 0.0) " ms)")]
-             (when fails
-               (into [:ul]
-                     (for [f fails]
-                       [:li (one-line (if (map? f)
-                                        (str (or (:var f) (:seon.test/var f) "failure") ": "
-                                             (or (:reason f) (:seon.test/report f) (:message f) (pr-str f)))
-                                        (str f))
-                                      200)])))]))
+            (let [fails (when (and (not (:ok? last-proofs))
+                                   (coll? (:failures last-proofs))
+                                   (not (map? (:failures last-proofs))))
+                          (seq (take 3 (:failures last-proofs))))]
+              [:div
+               [:p (str "AUTO-PROOFS (tx " (:tx last-proofs) "): " (if (:ok? last-proofs) "PASS" "FAIL")
+                        " (" (:passed last-proofs 0) "/" (:ran last-proofs 0) " in " (:ms last-proofs 0.0) " ms)")]
+               (when fails
+                 (into [:ul]
+                       (for [f fails]
+                         [:li (one-line (if (map? f)
+                                          (str (or (:var f) (:seon.test/var f) "failure") ": "
+                                               (or (:reason f) (:seon.test/report f) (:message f) (pr-str f)))
+                                          (str f))
+                                        200)])))]))
           (when be-v
             [:div [:p (str "MERGE-BLOCKING HEALTH ERRORS (" (count be-v) "):")]
              (into [:ul] (for [e (take 5 be-v) :when (map? e)]
@@ -194,8 +194,7 @@
        (sig-li :proof "Proof" proof)]]}))
 
 (defn render-viewport-tail
-  "Pure `ns-map -> ns-map` Hiccup renderer for live WKWebView screenshot & DOM metadata,
-   surfacing numbered `VISUAL DEFECTS (N) — FIX BEFORE ANSWERING:` alerts even when `vision? = false`."
+  "Pure `ns-map -> ns-map` Hiccup renderer for live WKWebView screenshot & DOM metadata."
   {:malli/schema [:=> [:cat [:map [:seon.tail/viewport :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
    :cost/ticks 500000}
   [{{:keys [snapshot enabled? vision?]} :seon.tail/viewport}]
@@ -310,47 +309,76 @@
       (:image res) (assoc :image (:image res)))
     (vector? res) {:tag "tail" :hiccup res :text (render/hiccup->text res)}))
 
+(defn- top-k-by-tx [k dts]
+  (let [n (long k)]
+    (if (<= n 0)
+      []
+      (let [arr (java.util.ArrayList. (int (inc n)))]
+        (doseq [dt dts :let [t (long (:tx dt 0))]]
+          (let [sz (.size arr)]
+            (when (or (< sz n) (> t (long (:tx (.get arr (dec sz)) 0))))
+              (loop [i 0]
+                (cond
+                  (= i sz) (.add arr dt)
+                  (> t (long (:tx (.get arr i) 0))) (.add arr i dt)
+                  :else (recur (inc i))))
+              (when (> (.size arr) n) (.remove arr n)))))
+        (vec arr)))))
+
 (defn gather-chronicle-data
   "Returns the 3 most recent `:seon.summary/*` Chronicle anchors (newest first), or nil."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:maybe [:vector :map]]] :cost/ticks 2000000}
   [main-db]
   (when (and main-db ((rlinks/db-schema main-db) :seon.summary/id))
-    (->> (d/datoms main-db :aevt :seon.summary/id)
+    (->> (top-k-by-tx 8 (d/datoms main-db :aevt :seon.summary/id))
          (map #(d/pull main-db '[:seon.summary/id :seon.summary/title :seon.summary/kind :seon.summary/from-tx :seon.summary/to-tx] (:e %)))
          (sort-by #(long (or (:seon.summary/to-tx %) 0)))
          (take-last 3) reverse vec not-empty)))
 
 (defn gather-activity-data
-  "Gathers incoming/outgoing pending calls, open errors, and recent schema samples for an agent's activity tail."
+  "O(log N + |active|) indexed activity gatherer: pending calls via `:avet :seon.agent.call/status :pending`,
+   open errors via `:avet :seon.error/status :open`, and zero-alloc top-2-by-tx schema samples."
   {:malli/schema [:=> [:cat :any :any :map] :map], :cost/ticks 5000000}
   [main-db branch-db ag]
   (let [aid (:seon.agent/id ag) scope (:seon.agent/scope ag)
         prefs (or (:seon.agent/context-prefs ag) {})
         rec-lim (long (or (:recent-data-limit prefs) 4))
         mdh (rlinks/db-schema main-db) bdh (rlinks/db-schema branch-db)
-        incoming (when (and aid main-db (mdh :seon.agent.call/callee))
-                   (->> (d/datoms main-db :avet :seon.agent.call/callee aid)
-                        (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/status
-                                                :seon.agent.call/prompt :seon.agent.call/result-schema] (:e %)))
-                        (filter #(= :pending (:seon.agent.call/status %))) vec))
-        outgoing (when (and aid main-db (mdh :seon.agent.call/caller))
-                   (->> (d/datoms main-db :avet :seon.agent.call/caller aid)
-                        (map #(d/pull main-db '[:seon.agent.call/callee :seon.agent.call/status
-                                                :seon.agent.call/prompt :seon.agent.call/created-tx] (:e %)))
-                        (filter #(= :pending (:seon.agent.call/status %)))
+        pend-call-eids (when (and aid main-db (mdh :seon.agent.call/status))
+                         (mapv :e (d/datoms main-db :avet :seon.agent.call/status :pending)))
+        incoming (when (and (seq pend-call-eids) (mdh :seon.agent.call/callee))
+                   (into []
+                         (keep (fn [e]
+                                 (when (= aid (:v (first (d/datoms main-db :eavt e :seon.agent.call/callee))))
+                                   (d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/status
+                                                     :seon.agent.call/prompt :seon.agent.call/result-schema] e))))
+                         pend-call-eids))
+        outgoing (when (and (seq pend-call-eids) (mdh :seon.agent.call/caller))
+                   (->> pend-call-eids
+                        (keep (fn [e]
+                                (when (= aid (:v (first (d/datoms main-db :eavt e :seon.agent.call/caller))))
+                                  (d/pull main-db '[:seon.agent.call/callee :seon.agent.call/status
+                                                    :seon.agent.call/prompt :seon.agent.call/created-tx] e))))
                         (take-last 5) vec))
-        open-errs (when (and aid branch-db (bdh :seon.error/agent))
-                    (->> (d/datoms branch-db :avet :seon.error/agent aid)
-                         (map #(d/pull branch-db '[*] (:e %)))
-                         (filter #(= :open (:seon.error/status %))) vec))
+        open-errs (when (and aid branch-db (bdh :seon.error/status) (bdh :seon.error/agent))
+                    (into []
+                          (keep (fn [dt]
+                                  (let [e (:e dt)]
+                                    (when (= aid (:v (first (d/datoms branch-db :eavt e :seon.error/agent))))
+                                      (d/pull branch-db '[:seon.error/id :seon.error/kind :seon.error/severity
+                                                          :seon.error/status :seon.error/agent :seon.error/var
+                                                          :seon.error/message] e)))))
+                          (d/datoms branch-db :avet :seon.error/status :open)))
         samples (when (and main-db scope (pos? rec-lim))
                   (let [rdefs (when (rdata/router-agent? ag)
                                 [:seon.agent.call/id :seon.task/id :seon.test.run/branch :seon.error/id :seon.agent/id])
                         cands (->> (concat (:extra-schemas prefs) rdefs) distinct
-                                   (filter #(and (mdh %) (first (take 1 (d/datoms main-db :avet %))))) (take 5))]
+                                   (filter #(and (mdh %) (some? (first (d/datoms main-db :avet %)))))
+                                   (take 5))]
                     (->> cands
-                         (mapcat (fn [a] (map #(hash-map :attr a :tx (:tx %) :eid (:e %))
-                                              (take-last 2 (sort-by :tx (d/datoms main-db :avet a))))))
+                         (mapcat (fn [a]
+                                   (map #(hash-map :attr a :tx (:tx %) :eid (:e %))
+                                        (top-k-by-tx 2 (d/datoms main-db :avet a)))))
                          (sort-by (comp - :tx)) (take rec-lim)
                          (mapv #(assoc % :preview (rdata/compact-entity-preview (d/pull main-db '[*] (:eid %)) 150))))))]
     {:scope scope :incoming incoming :outgoing outgoing :open-errors open-errs :samples samples}))

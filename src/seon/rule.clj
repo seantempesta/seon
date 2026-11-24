@@ -3,12 +3,13 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
+            [datahike.index.interface :as di]
+            [datahike.query :as dq]
             [datahike.reads :as reads]
+            [seon.ctx.diff :as diff]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store :as store]
-            [datahike.index.interface :as di]
-            [datahike.query :as dq]))
+            [seon.store :as store :refer [live-cid]]))
 
 (defn- dsch [db] (or (:schema db) (when db (d/schema db)) {}))
 
@@ -42,46 +43,32 @@
 
 (defn lvar?
   "True when `x` is a logic variable symbol starting with `?`."
-  {:malli/schema [:=> [:cat :any] :boolean]
-   :cost/ticks 500}
+  {:malli/schema [:=> [:cat :any] :boolean] :cost/ticks 500}
   [x]
   (and (symbol? x) (str/starts-with? (name x) "?")))
 
 (defn empty-wm
   "Creates an empty immutable EAV working memory with optional `clojure.core/make-hierarchy`."
-  {:malli/schema [:function
-                  [:=> [:cat] :map]
-                  [:=> [:cat :any] :map]]
-   :cost/ticks 5000}
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :any] :map]] :cost/ticks 5000}
   ([] (empty-wm default-hierarchy))
   ([hierarchy]
-   {:facts #{}
-    :eav {}
-    :aev {}
-    :ave {}
-    :provenance {}
-    :hierarchy (or hierarchy default-hierarchy)}))
+   {:facts #{} :eav {} :aev {} :ave {} :provenance {} :hierarchy (or hierarchy default-hierarchy)}))
 
 (defn add-fact
   "Adds `[e a v]` to working memory `wm` with provenance descriptor `prov` (`{:rule :stratum}`)."
-  {:malli/schema [:=> [:cat :map [:vector :any] [:maybe :map]] :map]
-   :cost/ticks 10000}
+  {:malli/schema [:=> [:cat :map [:vector :any] [:maybe :map]] :map] :cost/ticks 10000}
   [wm [e a v :as fact] prov]
-  (if (or (not= 3 (count fact))
-          (nil? e) (nil? a) (nil? v)
+  (if (or (not= 3 (count fact)) (nil? e) (nil? a) (nil? v)
           (= :seon.rule/nil e) (= :seon.rule/nil a) (= :seon.rule/nil v))
     wm
-    (let [already? (contains? (:facts wm) fact)
-          wm' (if already?
+    (let [wm' (if (contains? (:facts wm) fact)
                 wm
                 (-> wm
                     (update :facts conj fact)
                     (update-in [:eav e a] (fnil conj #{}) v)
                     (update-in [:aev a e] (fnil conj #{}) v)
                     (update-in [:ave a v] (fnil conj #{}) e)))]
-      (if prov
-        (update-in wm' [:provenance fact] (fnil conj []) prov)
-        wm'))))
+      (if prov (update-in wm' [:provenance fact] (fnil conj []) prov) wm'))))
 
 (defn add-facts
   "Bulk-inserts a sequence or set of `[e a v]` triples into `wm` with provenance `prov`."
@@ -91,23 +78,19 @@
   (if (and (coll? facts) (not (map? facts)))
     (reduce (fn [w f]
               (if (and (vector? f) (= 3 (count f)) (some? (first f)) (some? (second f)) (some? (nth f 2)))
-                (add-fact w f prov)
-                w))
-            wm
-            facts)
+                (add-fact w f prov) w))
+            wm facts)
     wm))
 
 (defn wm-vals
   "Returns the set of values for `[e a]` in working memory `wm`."
-  {:malli/schema [:=> [:cat :map :any :any] [:set :any]]
-   :cost/ticks 1000}
+  {:malli/schema [:=> [:cat :map :any :any] [:set :any]] :cost/ticks 1000}
   [wm e a]
   (get-in (:eav wm) [e a] #{}))
 
 (defn wm-scalar
   "Resolves the winning scalar value for `[e a]` in `wm` by highest asserting rule `:stratum`."
-  {:malli/schema [:=> [:cat :map :any :any] :any]
-   :cost/ticks 5000}
+  {:malli/schema [:=> [:cat :map :any :any] :any] :cost/ticks 5000}
   [wm e a]
   (let [vs (get-in (:eav wm) [e a])]
     (when (seq vs)
@@ -116,15 +99,12 @@
         (let [prov (:provenance wm)
               score-v (fn [v]
                         (let [ps (get prov [e a v])]
-                          (if (seq ps)
-                            (apply max (map #(long (or (:stratum %) 0)) ps))
-                            0)))]
+                          (if (seq ps) (apply max (map #(long (or (:stratum %) 0)) ps)) 0)))]
           (first (sort-by (fn [v] [(- (score-v v)) (pr-str v)]) vs)))))))
 
 (defn wm-entities-with
   "Returns all entity keys in `wm` that hold attribute `a`."
-  {:malli/schema [:=> [:cat :map :any] [:vector :any]]
-   :cost/ticks 5000}
+  {:malli/schema [:=> [:cat :map :any] [:vector :any]] :cost/ticks 5000}
   [wm a]
   (vec (keys (get-in wm [:aev a]))))
 
@@ -147,26 +127,22 @@
     {:added-count (count added) :removed-count (count removed)
      :added added :removed removed :rule-diffs rdiffs}))
 
-(defonce ^:private ^:seon.flow/edge rules-load-cache
-  (store/lru-cache 16))
+(defonce ^:private ^:seon.flow/edge rules-load-cache (store/lru-cache 16))
 
 (defn- scan-stored-rules [db]
   (let [dh (dsch db)
         ev-map (fn [a] (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms db :aevt a)))
         ids (ev-map :seon.rule/id)
-        pull-a #(if (contains? dh %) (ev-map %) {})
         attrs [:seon.rule/doc :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
                :seon.rule/target :seon.rule/query :seon.rule/when :seon.rule/assert]
-        by-a (into {} (map (fn [a] [a (pull-a a)])) attrs)]
+        by-a (into {} (map (fn [a] [a (if (contains? dh a) (ev-map a) {})])) attrs)]
     (reduce-kv (fn [acc e rid]
                  (assoc acc rid
                         (reduce (fn [m a]
                                   (let [am (get by-a a)]
                                     (if (contains? am e) (assoc m a (get am e)) m)))
-                                {:seon.rule/id rid}
-                                attrs)))
-               {}
-               ids)))
+                                {:seon.rule/id rid} attrs)))
+               {} ids)))
 
 (def default-datalog-rules
   "Shared recursive Datahike Datalog rules passed as `%` to native `:seon.rule/query` evaluations."
@@ -190,21 +166,18 @@
 
 (defn entity-facets
   "Returns vector of Malli schema keywords satisfied by entity `e` (eid or map) on `db`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] [:vector :qualified-keyword]]
-   :cost/ticks 500000}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] [:vector :qualified-keyword]] :cost/ticks 500000}
   [db e]
-  (let [ent (cond
-              (map? e) e
-              (and (integer? e) db) (reduce (fn [m dt] (assoc m (:a dt) true)) {} (d/datoms db :eavt e))
-              :else nil)]
+  (let [ent (cond (map? e) e
+                  (and (integer? e) db) (reduce (fn [m dt] (assoc m (:a dt) true)) {} (d/datoms db :eavt e))
+                  :else nil)]
     (if (and (map? ent) (seq ent))
       (mapv :schema (six/facets-of (schema/entity-index db) ent))
       [])))
 
 (defn parse-query
   "Normalizes a vector or map Datahike Datalog query into `{:find :keys :in :where}`."
-  {:malli/schema [:=> [:cat :any] :map]
-   :cost/ticks 50000}
+  {:malli/schema [:=> [:cat :any] :map] :cost/ticks 50000}
   [q]
   (let [secs #{:find :keys :syms :strs :with :in :where}]
     (cond
@@ -221,20 +194,15 @@
 
 (defn subst-template
   "Recursively substitutes `?lvar` bindings from `env` into a triple or projection map template."
-  {:malli/schema [:=> [:cat :map :any] :any]
-   :cost/ticks 50000}
+  {:malli/schema [:=> [:cat :map :any] :any] :cost/ticks 50000}
   [env tmpl]
   (cond
     (lvar? tmpl) (get env tmpl)
     (vector? tmpl) (mapv #(subst-template env %) tmpl)
     (map? tmpl) (reduce-kv (fn [m k v]
-                             (let [k' (subst-template env k)
-                                   v' (subst-template env v)]
-                               (if (or (nil? k') (nil? v') (= :seon.rule/nil v'))
-                                 m
-                                 (assoc m k' v'))))
-                           {}
-                           tmpl)
+                             (let [k' (subst-template env k) v' (subst-template env v)]
+                               (if (or (nil? k') (nil? v') (= :seon.rule/nil v')) m (assoc m k' v'))))
+                           {} tmpl)
     :else tmpl))
 
 (defn- resolve-query-inputs [ins wm dbs agent-id]
@@ -253,8 +221,7 @@
     (when (every? #(and (some? %) (not= ::unknown %)) vals) vals)))
 
 (defn- rows->envs [pq raw]
-  (let [ks (:keys pq)
-        finds (:find pq)
+  (let [ks (:keys pq) finds (:find pq)
         var-sym (fn [form]
                   (cond
                     (lvar? form) form
@@ -262,31 +229,20 @@
                     (symbol (str "?" (name (first form)) "-" (subs (name (second form)) 1)))
                     :else nil))]
     (cond
-      (seq ks)
-      (mapv (fn [m] (reduce-kv (fn [acc k v] (assoc acc (symbol (str "?" (name k))) v)) {} m)) raw)
-
-      (and (= 2 (count finds)) (= '. (second finds)) (lvar? (first finds)))
-      (if (some? raw) [{(first finds) raw}] [])
-
+      (seq ks) (mapv (fn [m] (reduce-kv (fn [acc k v] (assoc acc (symbol (str "?" (name k))) v)) {} m)) raw)
+      (and (= 2 (count finds)) (= '. (second finds)) (lvar? (first finds))) (if (some? raw) [{(first finds) raw}] [])
       (and (= 1 (count finds)) (vector? (first finds)) (= '... (second (first finds))) (lvar? (ffirst finds)))
       (let [v (ffirst finds)] (mapv (fn [x] {v x}) raw))
-
-      :else
-      (let [vars (mapv var-sym finds)]
-        (mapv (fn [row] (zipmap vars row)) raw)))))
+      :else (let [vars (mapv var-sym finds)] (mapv (fn [row] (zipmap vars row)) raw)))))
 
 (defn- instantiate-asserts [envs asserts rid stratum]
-  (let [facts (volatile! #{})
-        projs (volatile! [])]
-    (doseq [env envs
-            tmpl asserts]
+  (let [facts (volatile! #{}) projs (volatile! [])]
+    (doseq [env envs tmpl asserts]
       (cond
         (vector? tmpl)
         (let [f (subst-template env tmpl)]
-          (when (and (= 3 (count f))
-                     (every? #(and (some? %) (not= :seon.rule/nil %)) f))
+          (when (and (= 3 (count f)) (every? #(and (some? %) (not= :seon.rule/nil %)) f))
             (vswap! facts conj f)))
-
         (map? tmpl)
         (let [p (subst-template env tmpl)]
           (when (and (some? (:entity p)) (not= :seon.rule/nil (:entity p)))
@@ -295,73 +251,50 @@
 
 (defn- normalize-step-args [a2 a3]
   (if (and (map? a2) (contains? a2 :facts))
-    {:base-wm a2
-     :dbs (if (map? a3) a3 {})
+    {:base-wm a2 :dbs (if (map? a3) a3 {})
      :agent-id (or (wm-scalar a2 :viewer :ctx/viewer)
                    (first (for [[_ a v] (:facts a2) :when (= a :ctx/viewer)] v)))}
     {:base-wm (if (and (map? a3) (:base-wm a3)) (:base-wm a3) (empty-wm))
-     :dbs (if (map? a2) a2 {})
-     :agent-id (if (map? a3) (:agent-id a3) a3)}))
+     :dbs (if (map? a2) a2 {}) :agent-id (if (map? a3) (:agent-id a3) a3)}))
 
 (defn- initial-dirty-attrs [prev-state base-wm active target]
   (if (or (nil? prev-state) (not= target (:target prev-state)))
     #{:*}
-    (let [old-f (or (:base-facts prev-state) #{})
-          new-f (or (:facts base-wm) #{})
+    (let [old-f (or (:base-facts prev-state) #{}) new-f (or (:facts base-wm) #{})
           base-diff (set/union (set/difference new-f old-f) (set/difference old-f new-f))
           active-ids (into #{} (map :seon.rule/id) active)
-          removed-facts (mapcat (fn [[rid run]]
-                                  (when-not (contains? active-ids rid) (:asserted-facts run)))
+          removed-facts (mapcat (fn [[rid run]] (when-not (contains? active-ids rid) (:asserted-facts run)))
                                 (:runs prev-state))]
       (into #{} (map second) (concat base-diff removed-facts)))))
 
 (def ^:dynamic *base-rules-override*
-  "Optional vector of `:seon.rule/*` maps bound during branch test execution so ephemeral `with-test-store`
-   fixtures inherit the branch's live `:seon.rule/*` entities before merge writes `resources/seon/rules.edn` to disk."
+  "Optional vector of `:seon.rule/*` maps bound during branch test execution."
   nil)
 
 (defn rules-db-sig
-  "Computes a signature over all mutable `:seon.rule/*` attributes for cache invalidation."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any]
-   :cost/ticks 500000}
+  "O(1) commit-anchored signature over `:seon.rule/*` attributes (via `seon.ctx.diff/rules-db-sig`)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :any] :cost/ticks 500000}
   [db]
-  (let [dh (dsch db)]
-    (when (and db (contains? dh :seon.rule/id))
-      (let [sig (fn [a]
-                  (if (contains? dh a)
-                  (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms db :aevt a))
-                  [0 0]))]
-      [(get-in db [:config :store :id])
-      (when-let [ov (some-> (resolve 'seon.rule/*base-rules-override*) deref)] (System/identityHashCode ov))
-      (sig :seon.rule/id)
-      (sig :seon.rule/query)
-      (sig :seon.rule/when)
-      (sig :seon.rule/assert)
-      (sig :seon.rule/enabled?)
-      (sig :seon.rule/stratum)
-      (sig :seon.rule/target)]))))
+  (when-let [s (diff/rules-db-sig db)]
+    (if-let [ov *base-rules-override*] [s (System/identityHashCode ov)] s)))
 
 (defn load-rules
-"Reads all `:seon.rule/*` entities from `db` (tracked by `datahike.reads`), merged over optional `fallback-rules` by `:seon.rule/id`."
-{:malli/schema [:function
-                [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]
-                [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] [:vector :map]]]
- :cost/ticks 2000000}
-([db] (load-rules db nil))
-([db fallback-rules]
- (let [compute (fn []
-                 (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
-                       stored (if (and db (contains? (dsch db) :seon.rule/id))
-                                (scan-stored-rules db)
-                                {})]
-                   (->> (vals (if (seq stored) stored base))
-                        (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
-                        vec)))
-       rsig (when (and db (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db)))
-              [(get-in db [:config :store :id]) (get-in db [:config :branch] :main) (rules-db-sig db) (hash fallback-rules)])]
-   (if rsig
-     (store/lru-get! rules-load-cache 16 rsig compute)
-     (compute)))))
+  "Reads all `:seon.rule/*` entities from `db` (tracked by `datahike.reads`), merged over optional `fallback-rules`."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]
+                  [:=> [:cat [:maybe :seon.host/db] [:maybe [:vector :map]]] [:vector :map]]]
+   :cost/ticks 2000000}
+  ([db] (load-rules db nil))
+  ([db fallback-rules]
+   (let [compute (fn []
+                   (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
+                         stored (if (and db (contains? (dsch db) :seon.rule/id)) (scan-stored-rules db) {})]
+                     (->> (vals (if (seq stored) stored base))
+                          (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
+                          vec)))
+         rsig (when (and db (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db)))
+                (when-let [s (rules-db-sig db)] [s (hash fallback-rules)]))]
+     (if rsig (store/lru-get! rules-load-cache 16 rsig compute) (compute)))))
 
 (defn- branch-passing-run [db dh tx]
   (when (and (dh :seon.test.run/branch) (dh :seon.test.run/pass?))
@@ -386,9 +319,7 @@
    (let [dh (dsch db)]
      (if-not (and db (dh :seon.test/var-ref))
        true
-       (let [txl (long tx)
-             prun (branch-passing-run db dh txl)
-             fset (:failed prun)]
+       (let [txl (long tx) prun (branch-passing-run db dh txl) fset (:failed prun)]
          (cond
            (and prun (empty? fset)) false
            (and prun (string? digest) (not (contains? fset digest))) false
@@ -400,15 +331,12 @@
                             (cond
                               (and (true? (:v pdt)) (>= ptx txl)) (reduced ::cleared)
                               (and prun (nil? digest) (false? (:v pdt)) (= ptx txl))
-                              (if-let [dg (:v (first (d/datoms db :eavt (:e dt) :seon.test/digest)))]
-                                (conj acc dg)
-                                acc)
+                              (if-let [dg (:v (first (d/datoms db :eavt (:e dt) :seon.test/digest)))] (conj acc dg) acc)
                               :else acc))
                           acc))
                       (if (string? digest) #{digest} #{})
                       (d/datoms db :avet :seon.test/var-ref var-eid))]
-             (and (not= ::cleared res)
-                  (or (nil? prun) (boolean (some fset res)))))))))))
+             (and (not= ::cleared res) (or (nil? prun) (boolean (some fset res)))))))))))
 
 (defonce ^:private ^:seon.flow/edge query-meta-cache (store/lru-cache 256))
 
@@ -448,9 +376,9 @@
                                             (keyword? (nth % 2)))
                                    [(first %) (nth % 2) (if (and (>= (count %) 4) (const-v? (nth % 3))) (nth % 3) ::any)]) ws))
               db-keys (reduce (fn [a s]
-                (case s $main (conj a :main) $branch (conj a :branch) $code (conj a :code)
-                        $task (conj a :task) ($ %) (conj a :branch) ?agent-eid (conj a :main :branch) a))
-              #{} raw-ins)
+                                (case s $main (conj a :main) $branch (conj a :branch) $code (conj a :code)
+                                        $task (conj a :task) ($ %) (conj a :branch) ?agent-eid (conj a :main :branch) a))
+                              #{} raw-ins)
               need-$? (and (ins-set '%) (not (ins-set '$)))
               eff-q (if-not need-$? q
                       (cond (map? q) (update q :in #(into ['$ ] %))
@@ -466,44 +394,33 @@
 (defn rule-wm-read-attrs
   "Extracts the set of `$wm` attributes read by `rule`'s `:seon.rule/query`."
   {:malli/schema [:=> [:cat :map] [:set :keyword]] :cost/ticks 50000}
-  [rule]
-  (:wm-attrs (query-meta (:seon.rule/query rule))))
+  [rule] (:wm-attrs (query-meta (:seon.rule/query rule))))
 
 (defn rule-uses-agent?
   "True when `rule`'s `:in` clause binds `?agent` or `?agent-eid`."
   {:malli/schema [:=> [:cat :map] :boolean] :cost/ticks 5000}
-  [rule]
-  (:uses-agent? (query-meta (:seon.rule/query rule))))
+  [rule] (:uses-agent? (query-meta (:seon.rule/query rule))))
 
 (defn rule-db-keys
   "Returns the set of DB keys (`:main`, `:branch`, `:code`, `:task`) read by `rule`'s `:in` clause."
   {:malli/schema [:=> [:cat :map] [:set :keyword]] :cost/ticks 10000}
-  [rule]
-  (:db-keys (query-meta (:seon.rule/query rule))))
+  [rule] (:db-keys (query-meta (:seon.rule/query rule))))
 
 (def ^:private empty-reads-idx (reads/reads-index #{}))
 
 (defn- wm-req-miss? [wm qm]
-  (let [aev (:aev wm)
-        ave (:ave wm)
-        eav (:eav wm)]
+  (let [aev (:aev wm) ave (:ave wm) eav (:eav wm)]
     (boolean
       (or (some #(not (contains? aev %)) (:wm-req qm))
           (and (map? ave) (some (fn [[a v]] (not (contains? (get ave a) v))) (:wm-const-req qm)))
           (and (map? eav)
                (some (fn [[a1 a2 v2]]
-                       (let [es (keys (get aev a1))]
-                         (every? (fn [e]
-                                   (if (= v2 ::any)
-                                     (contains? (get eav e) a2)
-                                     (contains? (get-in eav [e a2]) v2)))
-                                 es)))
+                       (every? (fn [e] (if (= v2 ::any) (contains? (get eav e) a2) (contains? (get-in eav [e a2]) v2)))
+                               (keys (get aev a1))))
                      (:wm-not-req qm)))))))
 
 (defn eval-rule-query
-  "Executes `rule`'s native Datahike `:seon.rule/query` via `d/q` and returns binding env maps.
-   Bypasses Datahike's static `*query-result-cache?*` inheritance when a `:where` fn reads a DB directly
-   (preserving exact `datahike.reads/with-reads` dependency tracking in `step-rules`)."
+  "Executes `rule`'s native Datahike `:seon.rule/query` via `d/q` and returns binding env maps."
   {:malli/schema [:=> [:cat :map :map [:maybe :keyword] :map] [:vector :map]] :cost/ticks 10000000}
   [wm dbs agent-id rule]
   (let [{:keys [pq db-req fn-syms db-fn-call? eff-q eff-ins] :as qm} (query-meta (:seon.rule/query rule))]
@@ -536,8 +453,7 @@
           {:wm (if (seq (:asserted-facts prev)) (add-facts (:wm state) (:asserted-facts prev) {:rule rid :stratum stratum}) (:wm state))
            :projections (if (seq (:projections prev)) (into (:projections state) (:projections prev)) (:projections state))
            :runs (assoc (:runs state) rid (assoc prev :skipped? true))})
-      (let [wm (:wm state)
-            old-f (or (:asserted-facts prev) #{})
+      (let [wm (:wm state) old-f (or (:asserted-facts prev) #{})
             miss? (wm-req-miss? wm qm)
             t0 (if miss? 0 (System/nanoTime))
             [envs rs] (if miss? [[] #{}] (reads/with-reads #(eval-rule-query wm dbs agent-id r)))
@@ -557,35 +473,26 @@
                        :db-keys db-keys :uses-agent? uses-agent? :reads-count (count rs) :skipped? false :ms ms})}))))
 
 (defn step-rules
-  "Incrementally evaluates `rules` in stratum order via native Datahike `d/q` inside `datahike.reads/with-reads`.
-   Accepts either `(prev-state base-wm dbs rules tx-datoms [target])` or `(prev-state dbs agent-id rules tx-datoms-by-db [target])`.
-   Skips untouched rules in O(|Delta|) while forwarding reads from both executed and skipped rules into outer `di/*reads*`."
+  "Incrementally evaluates `rules` in stratum order via native Datahike `d/q` inside `datahike.reads/with-reads`."
   {:malli/schema [:function
                   [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any]] :map]
                   [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any] [:maybe :keyword]] :map]]
    :cost/ticks 20000000}
-  ([prev-state a2 a3 rules tx-datoms]
-   (step-rules prev-state a2 a3 rules tx-datoms nil))
+  ([prev-state a2 a3 rules tx-datoms] (step-rules prev-state a2 a3 rules tx-datoms nil))
   ([prev-state a2 a3 rules tx-datoms target]
    (let [{:keys [base-wm dbs agent-id]} (normalize-step-args a2 a3)
          active (filterv #(and (:seon.rule/enabled? % true) (rule-applies-to-target? % target)) rules)
          by-stratum (group-by #(long (:seon.rule/stratum % 50)) active)
          dirty-attrs (volatile! (initial-dirty-attrs prev-state base-wm active target))
-         recomputed (volatile! 0)
-         skipped (volatile! 0)
+         recomputed (volatile! 0) skipped (volatile! 0)
          final (reduce (fn [st stratum]
                          (reduce (fn [st2 r]
                                    (step-one-rule st2 r stratum dbs agent-id prev-state tx-datoms dirty-attrs recomputed skipped))
-                                 st
-                                 (sort-by #(str (:seon.rule/id %)) (get by-stratum stratum))))
+                                 st (sort-by #(str (:seon.rule/id %)) (get by-stratum stratum))))
                        {:wm base-wm :projections [] :runs {}}
                        (sort (keys by-stratum)))]
-     (assoc final
-            :base-facts (:facts base-wm)
-            :agent-id agent-id
-            :target target
-            :recomputed @recomputed
-            :skipped @skipped))))
+     (assoc final :base-facts (:facts base-wm) :agent-id agent-id :target target
+            :recomputed @recomputed :skipped @skipped))))
 
 (defn fire-rules
   "Cold stratified rule evaluation convenience wrapper over `step-rules`."
@@ -596,76 +503,66 @@
   ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
   ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))
 
-(defonce ^:private ^:seon.flow/edge edited-forms-cache (store/lru-cache 32))
+(defonce ^:private ^:seon.flow/edge edited-forms-cache (store/lru-cache 64))
 
 (defn ^:seon.flow/edge edited-form-eids
-  "Returns `:seon.code.form/*` EIDs modified on `branch-db` since `d/merge-base` with `main-db`."
+  "Returns `:seon.code.form/*` EIDs modified on `branch-db` since `diff/fast-merge-base` with `main-db`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:vector :int]]
    :cost/ticks 5000000}
   [main-db branch-db]
   (if-not (and branch-db (contains? (dsch branch-db) :seon.code.form/hash))
     []
-    (let [mc (when (instance? datahike.db.DB main-db) (d/commit-id main-db))
-          bc (when (instance? datahike.db.DB branch-db) (d/commit-id branch-db))
+    (let [mc (live-cid main-db) bc (live-cid branch-db)
           same? (or (nil? main-db) (identical? main-db branch-db)
                     (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))]
       (if same?
         (do (first (d/datoms branch-db :aevt :seon.code.form/hash)) [])
-        (let [sid (get-in branch-db [:config :store :id])
+        (let [sid (store/store-id branch-db)
+              base (when (and mc bc (= sid (store/store-id main-db))) (diff/fast-merge-base main-db branch-db))
               run (fn []
                     (first (d/datoms branch-db :aevt :seon.code.form/hash))
-                    (or (when (and mc bc (= sid (get-in main-db [:config :store :id])))
-                          (try
-                            (when-let [base (d/merge-base branch-db mc bc)]
-                              (if (= base bc)
-                                []
-                                (let [ha (into #{:seon.code.form/hash} (keep #(get-in branch-db [:ident-ref-map %])) [:seon.code.form/hash])]
-                                (into [] (comp (filter #(and (:added %) (contains? ha (:a %))))
-                                               (map :e) (distinct)
-                                               (filter #(first (d/datoms branch-db :eavt % :seon.code.form/hash))))
-                                      (d/changes branch-db base bc)))))
-                            (catch Throwable _ nil)))
-                        (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
-                                   (reduce #(assoc %1 (:e %2) [(:v %2) (long (:tx %2 0))]) {}
-                                           (d/datoms main-db :aevt :seon.code.form/hash))
-                                   {})]
-                          (vec (keep (fn [dt]
-                                       (let [[mv mtx] (get mh (:e dt))]
-                                         (when (and (not= (:v dt) mv)
-                                                    (or (nil? mtx) (> (long (:tx dt 0)) (long mtx))))
-                                           (:e dt))))
-                                     (d/datoms branch-db :aevt :seon.code.form/hash))))))]
-          (if (and mc bc)
-            (store/lru-get! edited-forms-cache 32 [sid mc (:max-tx main-db) bc (:max-tx branch-db)] run)
+                    (if-let [chs (when base (diff/branch-changes branch-db base bc))]
+                      (let [ha (into #{:seon.code.form/hash} (keep #(get-in branch-db [:ident-ref-map %])) [:seon.code.form/hash])]
+                        (into [] (comp (filter #(and (:added %) (contains? ha (:a %))))
+                                       (map :e) (distinct)
+                                       (filter #(first (d/datoms branch-db :eavt % :seon.code.form/hash))))
+                              chs))
+                      (let [mh (if (contains? (dsch main-db) :seon.code.form/hash)
+                                 (reduce #(assoc %1 (:e %2) [(:v %2) (long (:tx %2 0))]) {}
+                                         (d/datoms main-db :aevt :seon.code.form/hash))
+                                 {})]
+                        (vec (keep (fn [dt]
+                                     (let [[mv mtx] (get mh (:e dt))]
+                                       (when (and (not= (:v dt) mv) (or (nil? mtx) (> (long (:tx dt 0)) (long mtx))))
+                                         (:e dt))))
+                                   (d/datoms branch-db :aevt :seon.code.form/hash))))))]
+          (if (and sid base bc)
+            (store/lru-get! edited-forms-cache 64 [sid base bc] run)
             (run)))))))
 
 (defn agent-eval-turn-count
   "Returns the count of distinct surviving `:seon.agent.eval/turn` values for `agent-id` in `db` via indexed `:avet` lookup."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int]
-   :cost/ticks 2000000}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int] :cost/ticks 2000000}
   [db agent-id]
-  (let [dh (dsch db)]
-    (if-not (and db (contains? dh :seon.agent.eval/agent))
-      0
-      (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
-           (keep #(:v (first (d/datoms db :eavt (:e %) :seon.agent.eval/turn))))
-           distinct count))))
+  (if-not (and db (contains? (dsch db) :seon.agent.eval/agent))
+    0
+    (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
+         (keep #(:v (first (d/datoms db :eavt (:e %) :seon.agent.eval/turn))))
+         distinct count)))
 
 (defn agent-max-eval-turn
-  "Returns the maximum `:seon.agent.eval/turn` (or 0) for `agent-id` on `branch-db` via one indexed `:avet` scan (`O(N)` instead of `O(N^2)` Datalog `not-join`)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int]
-   :cost/ticks 2000000}
+  "Returns the maximum `:seon.agent.eval/turn` (or 0) for `agent-id` on `branch-db` via indexed `:avet`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int] :cost/ticks 2000000}
   [branch-db agent-id]
   (if (and branch-db agent-id (contains? (dsch branch-db) :seon.agent.eval/agent))
     (reduce (fn [mx dt]
               (let [t (:v (first (d/datoms branch-db :eavt (:e dt) :seon.agent.eval/turn)))]
                 (if (and (integer? t) (> (long t) (long mx))) (long t) mx)))
-            0
-            (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+            0 (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
     0))
 
 (defn non-hub-schema?
-  "True when schema key `sk` is not a ubiquitous host/runtime hub schema (prevents fan-out explosions in schema-chaining rules)."
+  "True when schema key `sk` is not a ubiquitous host/runtime hub schema."
   {:malli/schema [:=> [:cat :any] :boolean] :cost/ticks 5000}
   [sk]
   (not (contains? #{:seon.host/db :seon.host/conn :seon.host/fn :seon.host/chan :seon.host/ns

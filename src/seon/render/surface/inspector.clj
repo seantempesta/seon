@@ -3,6 +3,7 @@
    + `:seon.system/id` live overview) + live `seon.vector/near` + Upgrade Ladder."
   (:require [clojure.string :as str]
             [datahike.api :as d]
+            [seon.browser.preview :as preview]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
             [seon.render.links :as rlinks :refer [badge db-schema ent-link kicker mut]]
@@ -10,9 +11,9 @@
             [seon.signals :as sig]
             [seon.signals.touches :as touches]
             [seon.store :as store :refer [live-cid]]
+            [seon.store.query :as sq]
             [seon.vector :as vec]
-            [seon.web.router]
-            [seon.browser.preview :as preview]))
+            [seon.web.router]))
 
 (defonce ^:private ^:seon.flow/edge ref-attrs-cache (store/lru-cache 16))
 
@@ -34,7 +35,7 @@
    :seon.task/scope :seon.code.ns/name :seon.task/owner :seon.agent/id
    :seon.task/created-by :seon.agent/id :seon.task/template :seon.task/id
    :seon.task/needs :seon.task/id :seon.task/tests :seon.code.var/name
-    :seon.agent/scope :seon.code.ns/name
+   :seon.agent/scope :seon.code.ns/name
    :seon.agent/parent :seon.agent/id :seon.agent.call/caller :seon.agent/id
    :seon.agent.call/callee :seon.agent/id :seon.agent.call/result-schema :seon.schema/key
    :seon.agent.call/parent-call :seon.agent.call/id :seon.error/agent :seon.agent/id
@@ -166,18 +167,24 @@
         ftst (when (dh :seon.test/digest)
                (take 4 (keep #(when (false? (:v (first (d/datoms mdb :eavt (:e %) :seon.test/pass?))))
                                 (mk (:e %) :system/failing-test 94 (:tx %)))
-                             (take-last 24 (d/datoms mdb :aevt :seon.test/digest)))))
+                             (sq/slice-datoms mdb [nil :seon.test/digest] {:reverse? true :limit 24}))))
         pcls (when (dh :seon.agent.call/status) (map #(mk (:e %) :system/pending-call 92 (:tx %)) (take 4 (d/datoms mdb :avet :seon.agent.call/status :pending))))
         ags  (when (dh :seon.agent/id)
-               (->> (d/datoms mdb :aevt :seon.agent/id)
-                    (keep #(let [a (d/pull mdb '[:seon.agent/id :seon.agent/interactive? :seon.agent/archived? :seon.agent/entry?] (:e %))
-                                 id (:seon.agent/id a)]
-                             (when (and id (not (:seon.agent/archived? a)) (not (:seon.agent/interactive? a))
-                                        (not= "example" (namespace id)))
-                               (mk (:e %) :system/agent (if (:seon.agent/entry? a) 91 89) (:tx %)))))
-                    (sort-by #(vector (- (:priority %)) (- (:tx %)))) (take 8)))
+               (let [entry-dts (when (dh :seon.agent/entry?) (d/datoms mdb :avet :seon.agent/entry? true))
+                     recent-dts (sq/slice-datoms mdb [nil :seon.agent/id] {:reverse? true :limit 32})
+                     seen (java.util.HashSet.)]
+                 (->> (concat entry-dts recent-dts)
+                      (keep (fn [dt]
+                              (let [e (:e dt)]
+                                (when (.add seen e)
+                                  (let [a (d/pull mdb '[:seon.agent/id :seon.agent/interactive? :seon.agent/archived? :seon.agent/entry?] e)
+                                        id (:seon.agent/id a)]
+                                    (when (and id (not (:seon.agent/archived? a)) (not (:seon.agent/interactive? a))
+                                               (not= "example" (namespace id)))
+                                      (mk e :system/agent (if (:seon.agent/entry? a) 91 89) (:tx dt))))))))
+                      (sort-by #(vector (- (:priority %)) (- (:tx %)))) (take 8))))
         tsks (when (dh :seon.task/id)
-               (->> (d/datoms mdb :aevt :seon.task/id)
+               (->> (sq/slice-datoms mdb [nil :seon.task/id] {:reverse? true :limit 32})
                     (keep #(let [t (d/pull mdb '[:seon.task/id :seon.task/done? :seon.task/template?] (:e %))]
                              (when (and (:seon.task/id t) (not (:seon.task/done? t)) (not (:seon.task/template? t)))
                                (mk (:e %) :system/open-task 86 (:tx %)))))
@@ -188,18 +195,18 @@
      :neighbors (vec (concat errs ftst pcls ags tsks))}))
 
 (defn- virtual-signal-world [mdb bdb sk]
-  (let [snap (sig/all-signals mdb) dh (db-schema mdb)
+  (let [snap (sig/all-signals mdb) dh (db-schema mdb) edb (or bdb mdb)
         eids (case sk
-               :flow (when (dh :seon.agent/id) (map :e (take 16 (d/datoms mdb :aevt :seon.agent/id))))
+               :flow (when (dh :seon.agent/id) (map :e (sq/slice-datoms mdb [nil :seon.agent/id] {:reverse? true :limit 16})))
                :pressure (concat (when (dh :seon.error/kind) (map :e (take 8 (d/datoms mdb :avet :seon.error/kind :slow-render))))
-                                 (when (dh :seon.agent.eval/id) (map :e (take-last 10 (d/datoms (or bdb mdb) :aevt :seon.agent.eval/id)))))
-               :context (when (dh :seon.agent.eval/id) (map :e (take-last 12 (d/datoms (or bdb mdb) :aevt :seon.agent.eval/id))))
+                                 (when (dh :seon.agent.eval/id) (map :e (sq/slice-datoms edb [nil :seon.agent.eval/id] {:reverse? true :limit 10}))))
+               :context (when (dh :seon.agent.eval/id) (map :e (sq/slice-datoms edb [nil :seon.agent.eval/id] {:reverse? true :limit 12})))
                :proof (when (dh :seon.test/digest)
-                        (->> (take-last 24 (d/datoms mdb :aevt :seon.test/digest))
+                        (->> (sq/slice-datoms mdb [nil :seon.test/digest] {:reverse? true :limit 24})
                              (map #(vector (:e %) (false? (:v (first (d/datoms mdb :eavt (:e %) :seon.test/pass?))))))
                              (sort-by #(if (second %) 0 1)) (take 16) (map first)))
                :health (concat (when (dh :seon.error/status) (map :e (take 12 (d/datoms mdb :avet :seon.error/status :open))))
-                               (when (dh :seon.fix/id) (map :e (take 8 (d/datoms mdb :aevt :seon.fix/id)))))
+                               (when (dh :seon.fix/id) (map :e (sq/slice-datoms mdb [nil :seon.fix/id] {:reverse? true :limit 8}))))
                [])]
     {:ref [:seon.signal/kind sk] :virtual? true :kind :signal :signal-kind sk
      :focal-item {:entity [:seon.signal/kind sk] :schema :seon.signal/snapshot :data snap :priority 100}
@@ -332,7 +339,7 @@
             (when-let [ag (:seon.agent.eval/agent ent)] (ent-link [:seon.agent/id ag] (str ag) "pill mono tiny"))
             (when-let [rs (:seon.agent.eval/result-schema ent)] (ent-link [:seon.schema/key rs] (str rs) "pill mono tiny"))
             (badge (if (>= pct 80.0) "green" "amber") (str "KV hit " pct "% (" ht "/" pt " tok)"))]]
-          (when-let [r (not-empty (str (:seon.agent.eval/reasoning ent ""))) ]
+          (when-let [r (not-empty (str (:seon.agent.eval/reasoning ent "")))]
             [:details {:class "activity-fold" :open true}
              [:summary {:class "mono tiny"} (str "Reasoning (" (count r) " chars)")]
              [:pre {:class "code-box tiny"} (trunc r 2400)]])])

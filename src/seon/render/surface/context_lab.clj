@@ -2,11 +2,11 @@
   "Holistic Context & Cache glass-box view (`:context` / `:debug`) inspecting REAL
    `seon.render.wire/build-live-wire-request` directly (KV-cache anatomy, 4-signal explain, rules & scoreboard)."
   (:require [clojure.string :as str]
-            [datahike.api :as d]
             [seon.ctx :as ctx]
+            [seon.ctx.diff :as diff]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
-            [seon.render.links :as rlinks :refer [badge btn card db-schema feedback-banner kicker live-cid mut pill]]
+            [seon.render.links :as rlinks :refer [badge btn card feedback-banner kicker live-cid mut pill]]
             [seon.render.surface.entity :as sentity]
             [seon.render.wire :as rwire]
             [seon.signals.cache :as scache]
@@ -14,7 +14,9 @@
             [seon.signals.touches :as touches]
             [seon.store :as store]))
 
-(defonce ^:private ^:seon.flow/edge context-lab-cache (store/lru-cache 12))
+(defonce ^:private ^:seon.flow/edge context-lab-cache (store/lru-cache 32))
+(defonce ^:private ^:seon.flow/edge explain-cands-cache (store/lru-cache 32))
+(defonce ^:private ^:seon.flow/edge eval-touches-cache (store/lru-cache 32))
 
 (def ^:private walk-unit-vars
   {"seon-css"           'seon.render.ui/css-unit
@@ -30,24 +32,29 @@
 (defn- pct1 [x] (if (number? x) (/ (Math/round (* (double x) 1000.0)) 10.0) 0.0))
 (defn- el ([ref lbl] (rlinks/ent-link ref lbl "mono")) ([ref lbl cls] (rlinks/ent-link ref lbl cls)))
 
-(defn- pull-all-context-rules [mdb bdb]
-  (let [pull-r (fn [db]
-                 (let [dh (db-schema db)]
-                   (when (and db (dh :seon.rule/category) (dh :seon.rule/id))
-                     (vec (keep #(let [r (d/pull db '[:seon.rule/id :seon.rule/category :seon.rule/stratum
-                                                      :seon.rule/enabled? :seon.rule/assert :seon.rule/doc] (:e %))]
-                                   (when (:seon.rule/id r) r))
-                                (d/datoms db :avet :seon.rule/category :context))))))
-        mr (or (pull-r mdb) [])
-        br (if (= mdb bdb) [] (or (pull-r bdb) []))]
-    (->> (vals (merge (into {} (map (juxt :seon.rule/id identity)) mr)
-                      (into {} (map (juxt :seon.rule/id identity)) br)))
-         (sort-by (juxt #(long (or (:seon.rule/stratum %) 0)) #(str (:seon.rule/id %))))
-         vec)))
+(defn- memo-explain-candidates [emdb ebdb cands opts]
+  (let [csig (diff/code-db-sig ebdb)
+        k (when csig
+            [csig (mapv (juxt :entity :tx :priority :schema :rank/boost :rank/suppress) cands)
+             (:target opts) (:token-budget opts) (:avail-w opts) (:strategy opts) (:weights opts)])]
+    (if k
+      (store/lru-get! explain-cands-cache 32 k #(fit/explain-candidates ebdb cands opts))
+      (fit/explain-candidates ebdb cands opts))))
+
+(defn- memo-eval-touches [ebdb aid evs]
+  (if (empty? evs)
+    {:eval-count 0 :reasoning-syms #{} :touched-eids #{} :touched-syms #{} :manual-lookups #{}}
+    (let [evv (vec evs)
+          csig (diff/code-db-sig ebdb)
+          k (when csig
+              [csig aid (count evv) (:seon.agent.eval/id (first evv)) (:seon.agent.eval/id (peek evv))])]
+      (if k
+        (store/lru-get! eval-touches-cache 32 k #(touches/extract-eval-touches ebdb evv {:include-reasoning? true}))
+        (touches/extract-eval-touches ebdb evv {:include-reasoning? true})))))
 
 (defn build-context-lab-model
-  "Commit-id & lab-prefs cached Context & Cache model inspecting REAL `seon.render.wire/build-live-wire-request`
-   directly (reusing `wire-request-cache` / `walk-prefix-cache` on default prefs), attaching KV-cache anatomy, 4-signal explain table, and scoreboard."
+  "Commit-id & lab-prefs cached Context & Cache model reusing `wire-request-cache`, memoized `explain-candidates`,
+   `ctx/load-context-rules`, and cached eval touches."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map :keyword :map] :map]
    :cost/ticks 60000000}
   [emdb ebdb aid ag _br o]
@@ -88,17 +95,16 @@
                                        full-cands)
                         filtered (filterv #(not (contains? sup-eids (:entity %))) raw-cands)]
                     [filtered (max (count sup-eids) (- (count full-cands) (count filtered)))]))
-                explained (fit/explain-candidates ebdb cands
-                                                  {:target target :token-budget budget :avail-w avail-w
-                                                   :main-db emdb :area-budget (* avail-w 1200)
-                                                   :strategy strat :weights weights
-                                                   :fallback-renderers rwire/fallback-entity-renderers})
+                explained (memo-explain-candidates
+                           emdb ebdb cands
+                           {:target target :token-budget budget :avail-w avail-w
+                            :main-db emdb :area-budget (* avail-w 1200)
+                            :strategy strat :weights weights
+                            :fallback-renderers rwire/fallback-entity-renderers})
                 ent-by-id (into {} (map (juxt :entity :data)) cands)
                 evs (or (seq (:evals wire)) (when (not= emdb ebdb) (seq (rdata/agent-evals-in emdb aid))) [])
                 kv-an (scache/analyze-wire-cache emdb ebdb aid wire)
-                lt (if (seq evs)
-                     (touches/extract-eval-touches ebdb evs {:include-reasoning? true})
-                     {:eval-count 0 :reasoning-syms #{} :touched-eids #{} :touched-syms #{} :manual-lookups #{}})
+                lt (memo-eval-touches ebdb aid evs)
                 sb (if (seq evs)
                      (assoc (scoreboard/score-shown-blocks
                              (mapv #(assoc % :data (get ent-by-id (:entity %))) (:selected explained))
@@ -107,13 +113,13 @@
                             :reasoning-mentions (count (:reasoning-syms lt)))
                      {:level :calm :precision 0.0 :token-precision 0.0 :recall 0.0 :f1 0.0
                       :recall-gap-count 0 :recall-gap-items [] :by-rule {} :eval-count 0 :reasoning-mentions 0})
-                all-rules (pull-all-context-rules emdb ebdb)
+                all-rules (ctx/load-context-rules emdb ebdb nil)
                 eval-by-turn (into {} (map (fn [e] [(long (or (:seon.agent.eval/turn e) 0)) (:seon.agent.eval/id e)])) evs)]
             (assoc wire :explained explained :ent-by-id ent-by-id :kv-cache kv-an
                    :scoreboard sb :all-rules all-rules :eval-by-turn eval-by-turn
                    :lab-suppressed-count suppressed-n :lab-prefs lp
                    :semantic-active? (boolean (some :semantic cands)))))]
-    (if ck (store/lru-get! context-lab-cache 12 ck build*) (build*))))
+    (if ck (store/lru-get! context-lab-cache 32 ck build*) (build*))))
 
 (defn render-kv-cache-section
   "Renders KV-Cache prefix/delta bar, Prefix-Bust Explainer, turn table, and UI walk cache table."

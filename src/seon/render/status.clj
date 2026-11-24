@@ -6,15 +6,16 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ctx :as ctx]
+            [seon.ctx.diff :as diff]
             [seon.fork.calls :as fcalls]
+            [seon.model.messages :as messages]
             [seon.render :as render]
             [seon.render.data :as rdata]
-            [seon.render.links :as rlinks]
-            [seon.store :as store]
-            [seon.model.messages :as messages]
             [seon.render.fit :as fit]
+            [seon.render.links :as rlinks]
+            [seon.render.sanitize :as sanitize]
             [seon.render.text :as rtext :refer [clamp-pct-int one-line]]
-            [seon.render.sanitize :as sanitize]))
+            [seon.store :as store]))
 
 (defn format-forked-eval-manifest
   "Formats a compact turn/eid/handle/size/status table of `parent-id`'s live evals on `branch-db`."
@@ -76,7 +77,10 @@
                                  (when (and (not= pbr :main) sc) (try (store/head sc pbr) (catch Throwable _ nil)))
                                  (when (= pbr (get-in branch-db [:config :branch])) branch-db) main-db)
                          p-main (cond (= pbr :main) fdb
-                                      (and fc sc) (or (try (when-let [mb (d/merge-base sc (d/commit-id main-db) fc)] (d/commit-as-db sc mb)) (catch Throwable _ nil)) fdb)
+                                      (and fc sc) (or (try (when-let [mb (diff/fast-merge-base main-db fdb)]
+                                                             (d/commit-as-db sc mb))
+                                                           (catch Throwable _ nil))
+                                                      fdb)
                                       :else main-db)
                          pw (build-fn p-main fdb pid {:conn conn :vision? false :include-tail? false :depth (inc depth)})]
                      {:forked-from pid :parent-shown (:shown pw) :entry {:mode :continue :id pid :messages (vec (rest (:messages pw)))}}))
@@ -220,9 +224,7 @@
 
 (defn ^:seon.flow/edge clear-status!
   "Clears the active agent's live `:seon.ui.status/entity` from its branch and `:main`."
-  {:malli/schema [:function
-                  [:=> [:cat] :map]
-                  [:=> [:cat [:maybe :map]] :map]]
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:maybe :map]] :map]]
    :cost/ticks 5000000}
   ([] (clear-status! {}))
   ([opts]
@@ -248,53 +250,46 @@
       :main-synced? (boolean (:ok? main-r))})))
 
 (defn branch-reset-tx
-  "Purely derives the latest session-reset transaction on `branch-db` for `agent-id`:
-   `max(retract-tx, sync-tx)` where `retract-tx` is max `:tx` of retracted evals in `(d/history branch-db)`
-   and `sync-tx` is max `:tx` of `:seon.tx/merged :main` datoms on `branch-db`. Zero during normal turns."
+  "Purely derives the latest session-reset transaction on `branch-db` for `agent-id`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int]
    :cost/ticks 5000000}
   [branch-db agent-id]
   (let [dh (or (:schema branch-db) {})
         keep-hist? (not= false (get-in branch-db [:config :keep-history?]))
         retract-tx (if (and branch-db agent-id keep-hist? (contains? dh :seon.agent.eval/agent))
-                     (reduce (fn [m dt]
-                               (if-not (:added dt)
-                                 (max m (long (:tx dt)))
-                                 m))
-                             0
-                             (d/datoms (d/history branch-db) :avet :seon.agent.eval/agent agent-id))
+                     (reduce (fn [m dt] (if-not (:added dt) (max m (long (:tx dt))) m))
+                             0 (d/datoms (d/history branch-db) :avet :seon.agent.eval/agent agent-id))
                      0)
         sync-tx (if (and branch-db (contains? dh :seon.tx/merged))
                   (reduce (fn [m dt] (max m (long (:tx dt))))
-                          0
-                          (d/datoms branch-db :avet :seon.tx/merged :main))
+                          0 (d/datoms branch-db :avet :seon.tx/merged :main))
                   0)]
     (max retract-tx sync-tx)))
 
-(defonce ^:private ^:seon.flow/edge tool-format-cache (store/lru-cache 512))
+(defonce ^:private ^:seon.flow/edge tool-format-cache (store/lru-cache 4096))
 
 (defn ^:seon.flow/edge cached-format-tool-content
-  "Memoizes `seon.model.messages/format-tool-content` via `store/lru-get!` (512-slot LRU, preserving `datahike.reads`)."
+  "Memoizes `seon.model.messages/format-tool-content` via `store/lru-get!` (4096-slot LRU keyed on `code-db-sig`)."
   {:malli/schema [:=> [:cat :map :map] :string]}
   [opts c]
   (let [p-db (or (:eval-db opts) (:main-db opts))
         m-db (:main-db opts)
         fb-db (:fallback-db opts)
-        p-sig (when p-db (store/db-cache-sig p-db))
-        m-sig (when m-db (store/db-cache-sig m-db))
-        fb-sig (when fb-db (store/db-cache-sig fb-db))
+        p-sig (when p-db (diff/code-db-sig p-db))
+        m-sig (when m-db (diff/code-db-sig m-db))
+        fb-sig (when fb-db (diff/code-db-sig fb-db))
         rsig (when-let [rd (or p-db fb-db m-db)] (:reg-sig (fit/cached-registry-info rd)))
         vnil? (nil? (:value c))
         vs (if vnil? "" (str (:value c)))
         os (if (nil? (:out c)) "" (str (:out c)))
         ck (when (and (or (nil? p-db) p-sig) (or (nil? m-db) m-sig) (or (nil? fb-db) fb-sig))
-             [(:handle c) (:ok? c) (:error c) (:ms c) (:ticks c)
+             [(:turn c) (:handle c) (:ok? c) (:error c) (:ms c) (:ticks c)
               (or (:result-schema c) (:schema c)) (:branch c) (:branch-tx c)
               (:max-chars c) (or (:out-max-chars opts) (:out-max-chars c))
               (boolean (and (string? (:code c)) (str/includes? (:code c) "expand!")))
               vnil? (count vs) (hash vs) (count os) (hash os) p-sig m-sig fb-sig rsig])]
     (if ck
-      (store/lru-get! tool-format-cache 512 ck #(messages/format-tool-content opts c))
+      (store/lru-get! tool-format-cache 4096 ck #(messages/format-tool-content opts c))
       (messages/format-tool-content opts c))))
 
 (defn- unanswered-user-chat-info
@@ -324,7 +319,7 @@
                           (if (and bdb (contains? (rlinks/db-schema bdb) :seon.agent.eval/agent))
                             (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
                                  (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/code
-                                                      :seon.agent.eval/thought :seon.agent.eval/seen-messages] (:e %)))
+                                                     :seon.agent.eval/thought :seon.agent.eval/seen-messages] (:e %)))
                                  (sort-by #(long (or (:seon.agent.eval/turn %) 0)))
                                  vec)
                             [])))
@@ -338,9 +333,7 @@
                 {:umsg umsg :work-evs work-evs :tx (long (or (:seon.agent.message/tx umsg) 0))}))))))))
 
 (defn compute-wait-nudge-data
-  "Computes `{:elapsed-s :eval-count :prompt :has-status?}` when `ag` has an unanswered
-   `:from :user :type :chat` message and has been working (`>= 2` evals OR `>= 5s` elapsed)
-   without a recent (`< 15s`) `:seon.ui.status/*` update; otherwise returns `nil`."
+  "Computes `{:elapsed-s :eval-count :prompt :has-status?}` when `ag` has an unanswered user chat message."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :map [:sequential :map] [:int {:min 0}]]
                   [:maybe [:map [:elapsed-s [:int {:min 0}]] [:eval-count [:int {:min 0}]]
                            [:prompt [:maybe :string]] [:has-status? :boolean]]]]
@@ -372,7 +365,7 @@
   (:tx (unanswered-user-chat-info main-db branch-db agent-id nil)))
 
 (defn compacted-turns-info
-  "Purely derives compacted (retracted) turn summary for `agent-id` from `(d/history branch-db)` with zero process flags; returns nil when no evals were retracted."
+  "Purely derives compacted (retracted) turn summary for `agent-id` from `(d/history branch-db)`; nil when none retracted."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe :map]]
    :cost/ticks 8000000}
   [branch-db agent-id]
@@ -388,20 +381,15 @@
         (let [live-eids (into #{} (map :e) (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
               gone-eids (remove live-eids (keys retracted))]
           (when (seq gone-eids)
-            (let [pull-turn (fn [e]
-                              (some #(when (:added %) (long (:v %)))
-                                    (d/datoms hdb :eavt e :seon.agent.eval/turn)))
+            (let [pull-turn (fn [e] (some #(when (:added %) (long (:v %))) (d/datoms hdb :eavt e :seon.agent.eval/turn)))
                   gone-turns (->> gone-eids (keep pull-turn) distinct sort vec)
                   live-turns (->> live-eids (keep pull-turn) distinct sort vec)
                   last-tx (reduce max 0 (map #(get retracted %) gone-eids))]
-              {:seon.agent/id agent-id
-               :retracted-turns gone-turns
-               :retracted-evals (count gone-eids)
-               :live-turns live-turns
-               :last-retract-tx last-tx})))))))
+              {:seon.agent/id agent-id :retracted-turns gone-turns :retracted-evals (count gone-eids)
+               :live-turns live-turns :last-retract-tx last-tx})))))))
 
 (defn latest-ctx-friction-tx
-  "Returns the tx of the latest eval (within last 2 turns) where `agent-id` touched `ctx` and hit an error or oversized (>6000 chars) return; nil otherwise."
+  "Returns the tx of the latest eval (within last 2 turns) where `agent-id` touched `ctx` and hit an error or oversized return; nil otherwise."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe :int]]
    :cost/ticks 4000000}
   [branch-db agent-id]
@@ -409,10 +397,8 @@
     (let [evs (rdata/agent-evals-in branch-db agent-id)
           recent (take-last 2 evs)
           mentions-ctx? (fn [^String s]
-                          (or (str/includes? s "@ctx")
-                              (str/includes? s "user/ctx")
-                              (str/includes? s "seon.ctx/ctx")
-                              (str/includes? s "swap! ctx")
+                          (or (str/includes? s "@ctx") (str/includes? s "user/ctx")
+                              (str/includes? s "seon.ctx/ctx") (str/includes? s "swap! ctx")
                               (str/includes? s "reset! ctx")))]
       (some (fn [e]
               (let [code (str (or (:seon.agent.eval/code e) ""))]
@@ -422,12 +408,11 @@
                     (when (or (some? err) (> vlen 6000))
                       (let [eid (:db/id e)]
                         (or (when (integer? eid) (:tx (first (d/datoms branch-db :eavt eid :seon.agent.eval/code))))
-                            (:max-tx branch-db)
-                            1)))))))
+                            (:max-tx branch-db) 1)))))))
             (reverse recent)))))
 
 (defn sanitize-svg
-  "Sanitizes an inline `<svg ...>` string via `seon.render.sanitize/sanitize-svg` (strips `<script>`, active tags, `on*` attrs, unsafe URIs, and normalizes Clojure ratio literals). Returns `nil` if `s` does not start with `<svg`."
+  "Sanitizes an inline `<svg ...>` string via `seon.render.sanitize/sanitize-svg`. Returns `nil` if `s` does not start with `<svg`."
   {:malli/schema [:=> {:examples [[["<svg width=\"40\"><script>alert(1)</script><circle onclick=\"evil()\" cx=\"10\" cy=\"10\" r=\"5\"/></svg>"]
                                    "<svg width=\"40\"><circle cx=\"10\" cy=\"10\" r=\"5\"/></svg>"]
                                   [["not-svg"] nil]]}
@@ -438,18 +423,16 @@
 
 (defn ^:seon.flow/edge set-status!
   "Upserts the active agent's live `:seon.ui.status/entity` on its branch, mirrors to `:main`,
-   sanitizes/normalizes `:svg`, and returns immediate `:visual-ok?` / `:visual-defects` / `:svg-normalized?` feedback."
-  {:malli/schema [:=> [:cat :map] :map]
-   :cost/ticks 35000000}
+   sanitizes/normalizes `:svg`, and returns visual audit feedback."
+  {:malli/schema [:=> [:cat :map] :map] :cost/ticks 35000000}
   [spec]
   (let [{:keys [conn agent-id]} fcalls/*agent-ctx*
         aid (or (:agent spec) (:seon.ui.status/agent spec) agent-id :agent/repl)
         raw-svg (let [sv (or (:seon.ui.status/svg spec) (:svg spec))] (when (string? sv) sv))
         san-svg (when (and raw-svg (not (str/blank? raw-svg))) (sanitize-svg raw-svg))
-        eff-spec (cond
-                   (nil? raw-svg) spec
-                   san-svg (assoc (dissoc spec :seon.ui.status/svg) :svg san-svg)
-                   :else (dissoc spec :svg :seon.ui.status/svg))
+        eff-spec (cond (nil? raw-svg) spec
+                       san-svg (assoc (dissoc spec :seon.ui.status/svg) :svg san-svg)
+                       :else (dissoc spec :svg :seon.ui.status/svg))
         ent (build-status-tx eff-spec aid (System/currentTimeMillis))
         local-r (when (and conn (contains? (rlinks/db-schema @conn) :seon.ui.status/id))
                   (let [r (d/transact conn {:tx-data [ent]})]
@@ -471,11 +454,9 @@
   (when (instance? clojure.lang.Namespace u)
     (let [add! (fn [sym f meta-m] (let [v (intern u sym f)] (alter-meta! v merge meta-m) v))]
       [(add! 'set-status! (fn [spec] (set-status! spec))
-             {:arglists '([spec])
-              :doc "Upsert live visual status card {:label :detail :pct :stage :svg} for the user."})
+             {:arglists '([spec]) :doc "Upsert live visual status card {:label :detail :pct :stage :svg} for the user."})
        (add! 'clear-status! (fn ([] (clear-status!)) ([opts] (clear-status! opts)))
-             {:arglists '([] [opts])
-              :doc "Clear the active agent's live visual status card."})])))
+             {:arglists '([] [opts]) :doc "Clear the active agent's live visual status card."})])))
 
 (defn render-status-card
   "Polished visual progress card (`:data-min-width 320`) for `:seon.ui.status/entity` with stage badge, label, detail, progress bar, and sanitized inline SVG."

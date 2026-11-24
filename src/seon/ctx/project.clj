@@ -1,28 +1,25 @@
 (ns seon.ctx.project
   "Pure generic 2-read agent world discovery, monotonic pull-key-set union,
-   Datahike entity projection pulling, zero-repetition / re-warming deltas,
-   and unified candidate hydration & Upgrade Ladder budgeting for `seon.ctx`."
+   Datahike entity projection pulling, zero-repetition deltas, and unified candidate hydration."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [seon.ctx.diff :as diff]
             [seon.ctx.ground :as ground]
+            [seon.ctx.touches :as ctouches]
+            [seon.render.data :as rdata]
             [seon.render.fit :as fit]
-            [seon.render.links :as rlinks :refer [db-schema db-cache-sig live-cid]]
+            [seon.render.links :refer [db-schema live-cid]]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store :as store]
-            [seon.render.data :as rdata]
-            [seon.ctx.touches :as ctouches]))
+            [seon.store :as store]))
 
 (defonce ^:private ^:seon.flow/edge rev-agent-attrs-cache (store/lru-cache 16))
 
 (defn same-db?
-  "True when `a` and `b` represent the same immutable Datahike snapshot (identity or equal live commit-id)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :boolean]
-   :cost/ticks 50000}
+  "True when `a` and `b` represent the same immutable Datahike snapshot."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :boolean] :cost/ticks 50000}
   [a b]
-  (boolean (or (= a b)
-               (let [ca (live-cid a) cb (live-cid b)]
-                 (and ca cb (= ca cb))))))
+  (boolean (or (= a b) (let [ca (live-cid a) cb (live-cid b)] (and ca cb (= ca cb))))))
 
 (defn- reverse-agent-ref-attrs [db]
   (let [compute (fn []
@@ -32,13 +29,9 @@
                         from-db (when (and sch-eid (contains? dh-sch :seon.schema/ref-targets))
                                   (vec (keep #(:v (first (d/datoms db :eavt (:e %) :seon.schema/key)))
                                              (d/datoms db :avet :seon.schema/ref-targets sch-eid))))
-                        raw (if (seq from-db)
-                              from-db
-                              (six/reaching (:entity-index (fit/cached-registry-info db)) :seon.agent/entity))]
-                    (->> raw
-                    (filter #(= :db.type/ref (get-in dh-sch [% :db/valueType])))
-                    distinct sort vec)))
-        sig (db-cache-sig db)]
+                        raw (if (seq from-db) from-db (six/reaching (:entity-index (fit/cached-registry-info db)) :seon.agent/entity))]
+                    (->> raw (filter #(= :db.type/ref (get-in dh-sch [% :db/valueType]))) distinct sort vec)))
+        sig (diff/code-db-sig db)]
     (if sig (store/lru-get! rev-agent-attrs-cache 16 sig compute) (compute))))
 
 (defn- merge-forward-datoms [main-db branch-db eid]
@@ -46,8 +39,7 @@
         b-ds (when (and branch-db (not (same-db? branch-db main-db))) (vec (d/datoms branch-db :eavt eid)))]
     (if (empty? b-ds)
       (or m-ds [])
-      (let [m-by-a (group-by :a m-ds)
-            b-by-a (group-by :a b-ds)
+      (let [m-by-a (group-by :a m-ds) b-by-a (group-by :a b-ds)
             all-a (sort (set/union (set (keys m-by-a)) (set (keys b-by-a))))
             max-tx (fn [ds] (reduce max 0 (map #(long (or (:tx %) 0)) ds)))]
         (vec (mapcat (fn [a]
@@ -57,8 +49,7 @@
 
 (defn merge-pull-patterns
   "Pure, commutative, associative, deterministic union of Datahike `:pull` patterns."
-  {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]
-   :cost/ticks 500000}
+  {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]] :cost/ticks 500000}
   [patterns]
   (let [step (fn [{:keys [star? scalars nested other] :as acc} clause]
                (cond
@@ -169,95 +160,22 @@
      {:selected (:selected res) :dropped (:dropped res) :tokens (long (:tokens res 0))
       :area (long (:area res 0)) :target (:target res) :strategy (:strategy res) :shown (:shown res)})))
 
-(defn- merge-raw-candidates [all-raw]
-  (reduce (fn [acc it]
-            (let [e (:entity it)]
-              (if-let [prev (get acc e)]
-                (assoc acc e
-                       (-> prev
-                           (assoc :priority (max (long (:priority prev 50)) (long (:priority it 50)))
-                                  :tx (max (long (:tx prev 0)) (long (:tx it 0)))
-                                  :zone (cond (or (= :agent-prefix (:zone prev)) (= :agent-prefix (:zone it))) :agent-prefix
-                                              (= :ephemeral-tail (:zone it)) :ephemeral-tail
-                                              :else (or (:zone prev) (:zone it)))
-                                  :pinned? (boolean (or (:pinned? prev) (:pinned? it)))
-                                  :rules (vec (distinct (concat (:rules prev) (:rules it))))
-                                  :tags (into (set (:tags prev)) (:tags it))
-                                  :params (merge (:params prev) (:params it)))
-                           (cond-> (:ctx.match/score it) (assoc :ctx.match/score (:ctx.match/score it))
-                             (or (:touches prev) (:touches it))
-                             (assoc :touches (max (long (:touches prev 0)) (long (:touches it 0))))
-                             (or (:touch-energy prev) (:touch-energy it))
-                             (assoc :touch-energy (max (double (or (:touch-energy prev) 0.0)) (double (or (:touch-energy it) 0.0))))
-                             (or (:frontier-score prev) (:frontier-score it))
-                             (assoc :frontier-score (max (double (or (:frontier-score prev) 0.0)) (double (or (:frontier-score it) 0.0))))
-                             (or (:written? prev) (:written? it)) (assoc :written? true))))
-                (assoc acc e it))))
-          {} all-raw))
-
-(defn- hydrate-merged-candidates [main-db branch-db task-db ag merged demote-eid inc-evals? enrich? allow-rich-ns? max-cands]
-  (let [scope-ns (:seon.agent/scope ag)
-        extra-ns-set (into (if scope-ns #{scope-ns} #{}) (get-in ag [:seon.agent/context-prefs :extra-namespaces]))
-        same-mb? (same-db? main-db branch-db)
-        same-tb? (or (nil? task-db) (same-db? task-db branch-db))
-        ordered (if (and (integer? max-cands) (pos? (long max-cands)) (> (count merged) (long max-cands)))
-        (take (long max-cands)
-              (sort-by (fn [[eid item]]
-                         [(if (:pinned? item) 0 1)
-                          (- (long (:touches item 0)))
-                          (- (long (:priority item 50)))
-                          (- (long (:tx item 0)))
-                          (str eid)])
-                       merged))
-        merged)]
-    (vec
-     (keep (fn [[eid item]]
-             (cond
-               (and (vector? eid) (= 2 (count eid)) (= :seon.agent/id (first eid)))
-               (let [b (d/pull branch-db '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/goal] eid)
-                     ent (if (:seon.agent/id b)
-                           b
-                           (when-not same-mb?
-                             (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/goal] eid)))]
-                 (when (:seon.agent/id ent)
-                   (assoc item :entity eid :data ent)))
-
-               (integer? eid)
-               (let [t-b (when-not same-tb? (d/pull task-db '[*] eid))
-                     b (d/pull branch-db '[*] eid)
-                     use-t? (boolean (and (map? t-b) (:seon.task/id t-b)))
-                     from-b? (boolean (and (not use-t?) (seq (dissoc b :db/id))))
-                     ent (cond use-t? t-b from-b? b same-mb? nil :else (d/pull main-db '[*] eid))
-                     src-db (cond use-t? task-db from-b? branch-db :else main-db)]
-                 (when (and (map? ent) (seq (dissoc ent :db/id)) (or inc-evals? (not (:seon.agent.eval/id ent))))
-                   (let [dem? (= eid demote-eid)
-                         rich-ns? (boolean (and allow-rich-ns? (:seon.code.ns/name ent) (not dem?)
-                                                (or (extra-ns-set (:seon.code.ns/name ent))
-                                                    (contains? (:tags item) :tag/mentioned)
-                                                    (get-in item [:params :seon.ui/rich-ns?]))))
-                         ep (when enrich?
-                              (rlinks/enrich-entity-params src-db ent {:focal? false :rich-ns? rich-ns?
-                                                                       :main-db main-db :agent ag :scope scope-ns}))
-                         etx (max (long (:tx item 0))
-                                  (reduce max 0 (map #(long (or (:tx %) 0)) (d/datoms src-db :eavt eid))))]
-                     (cond-> (assoc item :entity eid :data ent :tx etx)
-                       (seq ep) (update :params merge ep)
-                       dem? (-> (assoc :priority 45 :rank/suppress 0.35)
-                                (assoc-in [:params :seon.ui/summary-strip?] true))))))))
-           ordered))))
-
 (defn fast-skip-rule-ids
   "Pre-filters `:context` rule IDs whose source tables have 0 hits for `ag` (O(1) indexed probes)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :boolean] [:set :keyword]]
-   :cost/ticks 2000000}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :boolean] [:set :keyword]] :cost/ticks 2000000}
   [mdb bdb ag same?]
   (let [aid (:seon.agent/id ag) br (:seon.agent/branch ag :main)
         dh (db-schema bdb) mdh (db-schema mdb)
-        green? (boolean (and (dh :seon.test.run/branch) (dh :seon.test.run/pass?)
-                             (when-let [e (or (when br (:e (first (d/datoms bdb :avet :seon.test.run/branch br))))
-                                              (when same? (:e (first (d/datoms bdb :avet :seon.test.run/branch :main)))))]
-                               (true? (:v (first (d/datoms bdb :eavt e :seon.test.run/pass?)))))))
-        any-tests? (boolean (and (dh :seon.test/digest) (first (d/datoms bdb :aevt :seon.test/digest))))
+        tr-pass (fn [db dhs b]
+                  (when (and db b (dhs :seon.test.run/branch) (dhs :seon.test.run/pass?))
+                    (when-let [e (:e (first (d/datoms db :avet :seon.test.run/branch b)))]
+                      (:v (first (d/datoms db :eavt e :seon.test.run/pass?))))))
+        br-m (tr-pass mdb mdh br)
+        br-b (when-not same? (tr-pass bdb dh br))
+        main-m (tr-pass mdb mdh :main)
+        green? (and (not (false? br-m)) (not (false? br-b)) (or (true? br-m) (true? br-b) (true? main-m)))
+        any-tests? (boolean (or (and (mdh :seon.test/digest) (first (d/datoms mdb :aevt :seon.test/digest)))
+                                (and (not same?) (dh :seon.test/digest) (first (d/datoms bdb :aevt :seon.test/digest)))))
         errs? (boolean (or (and (mdh :seon.error/status) (first (d/datoms mdb :avet :seon.error/status :open)))
                            (and (not same?) (dh :seon.error/status) (first (d/datoms bdb :avet :seon.error/status :open)))))
         evs? (boolean (and aid (dh :seon.agent.eval/agent) (first (d/datoms bdb :avet :seon.agent.eval/agent aid))))
@@ -269,46 +187,39 @@
       (or green? (not any-tests?)) (conj :rule.ctx/failing-reach-tests)
       (not errs?) (conj :rule.ctx/fault-with-recommended-fix)
       (and (not errs?) (not evs?)) (conj :rule.ctx/error-neighborhood)
-      (or same? (and (some? (:seon.agent/forked-from ag)) (not evs?))) (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
+      same? (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers :rule.ctx/branch-caused-health)
       (not has-task?) (conj :rule.ctx/active-task-and-lineage)
       (and (not has-scope?) (not has-extra?) (not has-task?)) (conj :rule.ctx/scope-and-extra-namespaces)
-      (and (not has-scope?) (or has-task? (not (:seon.agent/router? ag))))
-      (conj :rule.ctx/scope-task-history-and-fixes)
+      (and (not has-scope?) (or has-task? (not (:seon.agent/router? ag)))) (conj :rule.ctx/scope-task-history-and-fixes)
       (not any-docs?) (conj :rule.ctx/citing-docs)
       (not evs?) (conj :rule.ctx/recent-eval-results)
       (and (not (:seon.agent/target ag)) (not (:seon.agent/forked-from ag))) (conj :rule.ctx/review-target)
-      (and (not (:seon.agent/forked-from ag)) (empty? (:seon.agent/example-refs ag)) (empty? (:seon.agent/examples ag)) (not has-task?)) (conj :rule.ctx/agent-prefix-sessions)
+      (and (not (:seon.agent/forked-from ag)) (empty? (:seon.agent/example-refs ag)) (empty? (:seon.agent/examples ag)) (not has-task?))
+      (conj :rule.ctx/agent-prefix-sessions)
       (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?) (empty? (ctouches/live-reads-for bdb aid)))
-      (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns :rule.ctx/novel-working-frontier :rule.ctx/error-schema-docs-and-examples)
-      same? (conj :rule.ctx/branch-caused-health))))
+      (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns :rule.ctx/novel-working-frontier :rule.ctx/error-schema-docs-and-examples))))
 
 (def ^:private volatile-rev-ref-attrs
-  #{:seon.agent/parent-ref :seon.agent/forked-from :seon.agent/target :seon.agent/example-refs :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.agent.eval/agent-ref :seon.error/agent-ref})
+  #{:seon.agent/parent-ref :seon.agent/forked-from :seon.agent/target :seon.agent/example-refs
+    :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.agent.eval/agent-ref :seon.error/agent-ref})
 
 (defn agent-world-datoms
-  "Generic 2-read agent discovery: forward `:eavt` merged by latest `:tx` (resolving `:pinned`, `:curated`,
-   virtual health pins, and `:extra-namespaces`) + reverse `:avet` refs targeting `:seon.agent/entity`
-   (routing high-churn children/calls/errors to `:reverse-ephemeral`, never `:static-prefix`)."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :map]
-   :cost/ticks 8000000}
+  "Generic 2-read agent discovery: forward `:eavt` merged by latest `:tx` + reverse `:avet` refs targeting `:seon.agent/entity`."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :map] :cost/ticks 8000000}
   [main-db branch-db agent-id]
   (let [bdb (or branch-db main-db)
-        agent-eid (or (when (contains? (db-schema bdb) :seon.agent/id)
-                        (:e (first (d/datoms bdb :avet :seon.agent/id agent-id))))
-                      (when (contains? (db-schema main-db) :seon.agent/id)
-                        (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))))]
+        agent-eid (or (when (contains? (db-schema bdb) :seon.agent/id) (:e (first (d/datoms bdb :avet :seon.agent/id agent-id))))
+                      (when (contains? (db-schema main-db) :seon.agent/id) (:e (first (d/datoms main-db :avet :seon.agent/id agent-id)))))]
     (if-not agent-eid
-      {:agent-eid nil :forward [] :reverse [] :reverse-attrs [] :reverse-ephemeral {}
+      {:agent-eid nil :forward [] :reverse [] :reverse-attrs [] :reverse-ephemeral {} :reverse-ephemeral-attrs {}
        :connected {} :pinned #{} :curated #{} :extra-nss #{} :virtual-pins []}
       (let [fwd (merge-forward-datoms main-db bdb agent-eid)
             rev-attrs (vec (remove #{:seon.agent/example-refs} (reverse-agent-ref-attrs bdb)))
             same? (same-db? bdb main-db)
             rev-ds (vec (distinct
                          (mapcat (fn [a]
-                                   (concat
-                                    (when (contains? (db-schema main-db) a) (d/datoms main-db :avet a agent-eid))
-                                    (when (and (not same?) (contains? (db-schema bdb) a))
-                                      (d/datoms bdb :avet a agent-eid))))
+                                   (concat (when (contains? (db-schema main-db) a) (d/datoms main-db :avet a agent-eid))
+                                           (when (and (not same?) (contains? (db-schema bdb) a)) (d/datoms bdb :avet a agent-eid))))
                                  rev-attrs)))
             dh-sch (if same? (db-schema main-db) (merge (db-schema main-db) (db-schema bdb)))
             pinned-eids (volatile! #{}) curated-eids (volatile! #{})
@@ -316,12 +227,11 @@
             fwd-max-tx (reduce max 0 (map #(long (or (:tx %) 0)) fwd))
             conn-map (volatile! {agent-eid fwd-max-tx})
             rev-ephem (volatile! {})
+            rev-ephem-a (volatile! {})
             bump! (fn [vm e tx] (when (integer? e) (vswap! vm update e #(max (long (or % 0)) (long (or tx 0))))))]
         (doseq [dt fwd :let [a (:a dt) v (:v dt) tx (:tx dt)]]
           (cond
-            (= :db.type/ref (get-in dh-sch [a :db/valueType]))
-            (bump! conn-map v tx)
-
+            (= :db.type/ref (get-in dh-sch [a :db/valueType])) (bump! conn-map v tx)
             (contains? #{:seon.agent/pinned :seon.agent/curated} a)
             (doseq [item (if (coll? v) v [v])]
               (if (and (vector? item) (= 2 (count item)) (= :seon.health/summary (first item)))
@@ -329,59 +239,49 @@
                 (when-let [e (ground/resolve-lookup-eid main-db bdb item)]
                   (bump! conn-map e tx)
                   (if (= :seon.agent/pinned a) (vswap! pinned-eids conj e) (vswap! curated-eids conj e)))))
-
             (and (= :seon.agent/context-prefs a) (map? v))
             (doseq [nsym (:extra-namespaces v) :when (symbol? nsym)]
               (when-let [e (ground/resolve-lookup-eid main-db bdb [:seon.code.ns/name nsym])]
                 (bump! conn-map e tx) (vswap! extra-ns-eids conj e)))))
-        (doseq [dt rev-ds]
-          (if (contains? volatile-rev-ref-attrs (:a dt))
-            (bump! rev-ephem (:e dt) (:tx dt))
-            (bump! conn-map (:e dt) (:tx dt))))
+        (doseq [dt rev-ds :let [a (:a dt) e (:e dt)]]
+          (if (contains? volatile-rev-ref-attrs a)
+            (do (bump! rev-ephem e (:tx dt)) (when (integer? e) (vswap! rev-ephem-a assoc e a)))
+            (bump! conn-map e (:tx dt))))
         {:agent-eid agent-eid :forward fwd :reverse rev-ds :reverse-attrs rev-attrs
-         :reverse-ephemeral @rev-ephem :connected @conn-map :pinned @pinned-eids
-         :curated @curated-eids :extra-nss @extra-ns-eids :virtual-pins @vpins}))))
+         :reverse-ephemeral @rev-ephem :reverse-ephemeral-attrs @rev-ephem-a :connected @conn-map
+         :pinned @pinned-eids :curated @curated-eids :extra-nss @extra-ns-eids :virtual-pins @vpins}))))
 
 (defn- group-and-order-projs [raw-projections]
-  (let [grouped (group-by :entity raw-projections)
-        capped grouped]
-    (mapv (fn [[eid ps]]
-            (let [ordered (sort-by (fn [p] [(long (or (:stratum p) 50)) (long (or (:priority p) 50)) (str (:rule p))]) ps)]
-              {:entity eid :ordered ordered
-               :base {:entity eid
-                      :params (reduce merge {} (keep :params ordered))
-                      :priority (reduce max 50 (map #(long (or (:priority %) 50)) ordered))
-                      :parent (last (keep :parent ordered))
-                      :zone (let [zs (keep :zone ordered)]
-                      (cond (some #{:agent-prefix} zs) :agent-prefix
-                      (some #{:ephemeral-tail} zs) :ephemeral-tail
-                      (seq zs) (last zs) :else :workspace))
-                      :rules (vec (sort-by str (distinct (keep :rule ordered))))
-                      :why (vec (distinct (keep :why ordered)))
-                      :tags (into #{} (mapcat #(let [t (:tags %)] (if (coll? t) t (when t [t])))) ordered)
-                      :tx (reduce max 0 (map #(long (or (:tx %) 0)) ordered))}}))
-          capped)))
+  (mapv (fn [[eid ps]]
+          (let [ordered (sort-by (fn [p] [(long (or (:stratum p) 50)) (long (or (:priority p) 50)) (str (:rule p))]) ps)]
+            {:entity eid :ordered ordered
+             :base {:entity eid
+                    :params (reduce merge {} (keep :params ordered))
+                    :priority (reduce max 50 (map #(long (or (:priority %) 50)) ordered))
+                    :parent (last (keep :parent ordered))
+                    :zone (let [zs (keep :zone ordered)]
+                            (cond (some #{:agent-prefix} zs) :agent-prefix
+                                  (some #{:ephemeral-tail} zs) :ephemeral-tail
+                                  (seq zs) (last zs) :else :workspace))
+                    :rules (vec (sort-by str (distinct (keep :rule ordered))))
+                    :why (vec (distinct (keep :why ordered)))
+                    :tags (into #{} (mapcat #(let [t (:tags %)] (if (coll? t) t (when t [t])))) ordered)
+                    :tx (reduce max 0 (map #(long (or (:tx %) 0)) ordered))}}))
+        (group-by :entity raw-projections)))
 
 (defn collapse-rule-projections
-  "Fast per-entity collapse of raw rule `:projections` (metadata only — zero `d/pull` or ranking;
-   used by `gather-agent-candidates` before single-pass hydration + Upgrade Ladder)."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]
-   :cost/ticks 5000000}
+  "Fast per-entity collapse of raw rule `:projections` (metadata only — zero `d/pull` or ranking)."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]] :cost/ticks 5000000}
   [raw-projections]
   (mapv (fn [{:keys [ordered base]}]
-          (if-let [wfn (last (keep :fn ordered))]
-            (assoc base :fn wfn)
-            base))
+          (if-let [wfn (last (keep :fn ordered))] (assoc base :fn wfn) base))
         (group-and-order-projs raw-projections)))
 
 (defn merge-projections
-  "Merges multiple rule projections per entity via monotonic `merge-pull-patterns`, pulls exact Datahike maps,
-   validates `:params` against `:seon.code.var/optional-input`, and attaches full provenance."
-  {:malli/schema [:=> [:cat :map [:vector :map]] [:vector :map]]
-   :cost/ticks 15000000}
+  "Merges multiple rule projections per entity via `merge-pull-patterns`, pulls Datahike maps, and validates `:params`."
+  {:malli/schema [:=> [:cat :map [:vector :map]] [:vector :map]] :cost/ticks 15000000}
   [dbs raw-projections]
-  (let [eff-db (or (:branch dbs) (:main dbs))
-        reg-cache (volatile! nil)]
+  (let [eff-db (or (:branch dbs) (:main dbs)) reg-cache (volatile! nil)]
     (->> (group-and-order-projs raw-projections)
          (mapv (fn [{:keys [entity ordered base]}]
                  (let [merged-pull (merge-pull-patterns (keep :pull ordered))
@@ -393,25 +293,81 @@
          (sort-by (fn [p] [(- (long (:priority p 50))) (str (:entity p))]))
          vec)))
 
-(defn- active-rev-ephemeral-items [main-db branch-db rev-ephem aeid zone]
+(defn- eavt-val [bdb mdb same? bdh mdh e a]
+  (or (when (and bdb (bdh a)) (:v (first (d/datoms bdb :eavt e a))))
+      (when (and (not same?) mdb (mdh a)) (:v (first (d/datoms mdb :eavt e a))))))
+
+(defn- active-rev-ephemeral-items [main-db branch-db rev-ephem rev-attrs aeid zone]
   (when (seq rev-ephem)
     (let [same? (same-db? main-db branch-db)
-          pat '[:seon.agent/id :seon.agent/archived? :seon.agent.call/status :seon.error/status :seon.agent.eval/id]]
+          mdh (db-schema main-db) bdh (db-schema branch-db)
+          open-errs (into #{} (map :e)
+                          (concat (when (mdh :seon.error/status) (d/datoms main-db :avet :seon.error/status :open))
+                                  (when (and (not same?) (bdh :seon.error/status)) (d/datoms branch-db :avet :seon.error/status :open))))
+          pend-calls (into #{} (map :e)
+                           (concat (when (mdh :seon.agent.call/status) (d/datoms main-db :avet :seon.agent.call/status :pending))
+                                   (when (and (not same?) (bdh :seon.agent.call/status)) (d/datoms branch-db :avet :seon.agent.call/status :pending))))
+          gv #(eavt-val branch-db main-db same? bdh mdh %1 %2)]
       (->> rev-ephem (sort-by (comp - val))
            (keep (fn [[e tx]]
                    (when (and (integer? e) (not= e aeid))
-                     (let [b (d/pull branch-db pat e)
-                           m (if (or same? (seq (dissoc b :db/id))) b (d/pull main-db pat e))]
-                       (when (and (not (:seon.agent.eval/id m))
-                                  (or (and (:seon.agent/id m) (not (:seon.agent/archived? m)))
-                                      (#{:pending :resolved} (:seon.agent.call/status m))
-                                      (= :open (:seon.error/status m))))
+                     (let [ra (get rev-attrs e)
+                           keep? (case ra
+                                   :seon.agent.eval/agent-ref false
+                                   :seon.error/agent-ref (contains? open-errs e)
+                                   (:seon.agent.call/caller-ref :seon.agent.call/callee-ref)
+                                   (or (contains? pend-calls e) (= :resolved (gv e :seon.agent.call/status)))
+                                   (:seon.agent/parent-ref :seon.agent/forked-from :seon.agent/target)
+                                   (and (some? (gv e :seon.agent/id)) (not (true? (gv e :seon.agent/archived?))))
+                                   (and (nil? (gv e :seon.agent.eval/id))
+                                        (or (contains? open-errs e)
+                                            (contains? pend-calls e)
+                                            (= :resolved (gv e :seon.agent.call/status))
+                                            (and (some? (gv e :seon.agent/id)) (not (true? (gv e :seon.agent/archived?)))))))]
+                       (when keep?
                          {:entity e :tx tx :priority 64 :zone zone :tags #{:reverse-ref} :rules [:seed/world-reverse]})))))
            (take 8) vec))))
 
+(defn- raw-world-items [main-db branch-db task-db ag world prefs derived-t minimal? rev-zone]
+  (let [aeid (:agent-eid world)
+        {:keys [pinned curated extra-nss]} world
+        res-eid #(ground/resolve-lookup-eid main-db branch-db %)
+        touch-counts (or (:counts derived-t) {}) touch-energy (or (:energy derived-t) {})
+        written-set (or (:written derived-t) #{}) touch-max-tx (or (:max-tx derived-t) {})]
+    (concat
+     (when-not minimal? (active-rev-ephemeral-items main-db branch-db (:reverse-ephemeral world) (:reverse-ephemeral-attrs world) aeid rev-zone))
+     (when-not minimal?
+       (for [[e tx] (sort-by (comp - val) (:connected world)) :when (not= e aeid)]
+         {:entity e :tx tx :priority (cond (pinned e) 88 (curated e) 90 (extra-nss e) 88 :else 60)
+          :pinned? (boolean (pinned e)) :zone (if (or (pinned e) (curated e) (extra-nss e)) :static-prefix :workspace)
+          :tags (cond-> #{} (pinned e) (conj :pinned) (curated e) (conj :tag/curated) (extra-nss e) (conj :extra-ns))
+          :rules [:seed/world]}))
+     (when-not minimal?
+       (keep #(when-let [e (and (symbol? %) (res-eid [:seon.code.ns/name %]))]
+                {:entity e :priority 88 :zone :static-prefix :tags #{:extra-ns} :rules [:seed/world]})
+             (:extra-namespaces prefs)))
+     (when-not minimal?
+       (when-let [e (some->> (:seon.agent/scope ag) (vector :seon.code.ns/name) res-eid)]
+         [{:entity e :priority 90 :zone :static-prefix :tags #{:scope-ns} :rules [:seed/scope]}]))
+     (for [[e cnt] (sort-by (comp - val) touch-counts) :when (and (integer? e) (not= e aeid))]
+       (let [w? (contains? written-set e) eng (double (get touch-energy e 0.0))]
+         (cond-> {:entity e :priority (if w? 82 72) :zone :workspace :touches (long cnt)
+                  :tx (long (get touch-max-tx e 0)) :tags (if w? #{:touched :edited} #{:touched})
+                  :rules (if w? [:signal/eval-touched :signal/branch-written] [:signal/eval-touched])}
+           (pos? eng) (assoc :touch-energy eng)
+           w? (assoc :written? true))))
+     (for [tid (rdata/agent-task-ids (or task-db branch-db) ag)
+           :let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid]) (res-eid [:seon.task/id tid]))]
+           :when e]
+       {:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]})
+     (for [item (:seon.agent/pinned ag)
+           :when (and (vector? item) (= 2 (count item)) (not= :seon.health/summary (first item)))
+           :let [e (res-eid item)] :when e]
+       {:entity e :priority 92 :zone :static-prefix :pinned? true :tags #{:pinned} :rules [:seed/pinned]}))))
+
 (defn augment-and-hydrate-candidates
   "Canonical candidate-pool assembler combining rule projections, 2-read `world`, situational grounding,
-   live `:seon.agent.eval/touched` counts, `@ctx` snapshot, hydration, enrichment, and `seon.vector` scores."
+   derived touches, `@ctx` snapshot, hydration, enrichment, and `seon.vector` scores."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map :map [:vector :map] [:maybe :map]] [:vector :map]]
    :cost/ticks 35000000}
   [main-db branch-db task-db ag world ru-projs opts]
@@ -420,67 +376,28 @@
         minimal? (boolean (if (contains? o :minimal?) (:minimal? o) (:minimal? prefs)))
         flag (fn [k d] (cond (contains? o k) (boolean (get o k)) (contains? prefs k) (boolean (get prefs k)) :else d))
         opt-bool (fn [k d] (if (contains? o k) (boolean (get o k)) d))
-        inc-evals? (opt-bool :include-evals? true)
-        enrich? (opt-bool :enrich? (not minimal?))
-        sem? (flag :semantic? (not minimal?))
-        sit? (flag :situational? (not minimal?))
-        aid (:seon.agent/id ag) aeid (:agent-eid world)
-        {:keys [pinned curated extra-nss]} world
-        res-eid #(ground/resolve-lookup-eid main-db branch-db %)
+        inc-evals? (opt-bool :include-evals? true) enrich? (opt-bool :enrich? (not minimal?))
+        sem? (flag :semantic? (not minimal?)) sit? (flag :situational? (not minimal?))
+        aid (:seon.agent/id ag)
         rev-zone (if (= :wire (or (:target o) :wire)) :ephemeral-tail :workspace)
-        derived-t (or (:derived-touches o)
-                      (when (opt-bool :use-live-touches? (not minimal?))
-                        (ctouches/derived-agent-touches main-db branch-db aid)))
-        touch-counts (or (:counts derived-t) {})
-        touch-energy (or (:energy derived-t) {})
-        frontier-scores (or (:novel-frontier derived-t) {})
-        written-set (or (:written derived-t) #{})
-        touch-max-tx (or (:max-tx derived-t) {})
+        derived-t (or (:derived-touches o) (when (opt-bool :use-live-touches? (not minimal?)) (ctouches/derived-agent-touches main-db branch-db aid)))
+        touch-counts (or (:counts derived-t) {}) touch-energy (or (:energy derived-t) {})
+        frontier-scores (or (:novel-frontier derived-t) {}) written-set (or (:written derived-t) #{})
         base-ru (into [] (comp (remove #(and (not inc-evals?)
-                                             (or (contains? (:tags %) :eval)
-                                                 (some #{:rule.ctx/recent-eval-results} (:rules %)))))
+                                             (or (contains? (:tags %) :eval) (some #{:rule.ctx/recent-eval-results} (:rules %)))))
                                (map #(dissoc % :candidates :data)))
                       ru-projs)
         sit (if sit? (ground/situational-candidates main-db branch-db task-db ag) {:extra [] :demote-eid nil})
-        all-raw (concat
-                 base-ru (:extra sit)
-                 (when-not minimal? (active-rev-ephemeral-items main-db branch-db (:reverse-ephemeral world) aeid rev-zone))
-                 (when-not minimal?
-                 (for [[e tx] (sort-by (comp - val) (:connected world)) :when (not= e aeid)]
-                   {:entity e :tx tx :priority (cond (pinned e) 88 (curated e) 90 (extra-nss e) 88 :else 60)
-                    :pinned? (boolean (pinned e)) :zone (if (or (pinned e) (curated e) (extra-nss e)) :static-prefix :workspace)
-                    :tags (cond-> #{} (pinned e) (conj :pinned) (curated e) (conj :tag/curated) (extra-nss e) (conj :extra-ns))
-                    :rules [:seed/world]}))
-                 (when-not minimal?
-                   (keep #(when-let [e (and (symbol? %) (res-eid [:seon.code.ns/name %]))]
-                            {:entity e :priority 88 :zone :static-prefix :tags #{:extra-ns} :rules [:seed/world]})
-                         (:extra-namespaces prefs)))
-                 (when-not minimal?
-                   (when-let [e (some->> (:seon.agent/scope ag) (vector :seon.code.ns/name) res-eid)]
-                     [{:entity e :priority 90 :zone :static-prefix :tags #{:scope-ns} :rules [:seed/scope]}]))
-                 (for [[e cnt] (sort-by (comp - val) touch-counts) :when (and (integer? e) (not= e aeid))]
-                 (let [w? (contains? written-set e)
-                       eng (double (get touch-energy e 0.0))]
-                   (cond-> {:entity e :priority (if w? 82 72) :zone :workspace :touches (long cnt)
-                            :tx (long (get touch-max-tx e 0))
-                            :tags (if w? #{:touched :edited} #{:touched})
-                            :rules (if w? [:signal/eval-touched :signal/branch-written] [:signal/eval-touched])}
-                     (pos? eng) (assoc :touch-energy eng)
-                     w? (assoc :written? true))))
-                 (for [tid (rdata/agent-task-ids (or task-db branch-db) ag) :let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid]) (res-eid [:seon.task/id tid]))] :when e] {:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]})
-                 (for [item (:seon.agent/pinned ag)
-                       :when (and (vector? item) (= 2 (count item)) (not= :seon.health/summary (first item)))
-                       :let [e (res-eid item)] :when e]
-                   {:entity e :priority 92 :zone :static-prefix :pinned? true :tags #{:pinned} :rules [:seed/pinned]}))
-        hydrated (hydrate-merged-candidates main-db branch-db task-db ag (merge-raw-candidates all-raw)
-                 (:demote-eid sit) inc-evals? enrich? (flag :rich-ns? (not minimal?))
-                 (:max-candidates o))
+        zf (:zone-filter o)
+        raw-w (if (= :ephemeral-tail zf) [] (raw-world-items main-db branch-db task-db ag world prefs derived-t minimal? rev-zone))
+        all-raw (let [r (concat base-ru (:extra sit) raw-w)] (if zf (filter #(= zf (:zone %)) r) r))
+        hydrated (ground/hydrate-merged-candidates main-db branch-db task-db ag (ground/merge-raw-candidates all-raw)
+                                                   (:demote-eid sit) inc-evals? enrich? (flag :rich-ns? (not minimal?)) (:max-candidates o))
         vpins (distinct (concat (:virtual-pins world)
                                 (filter #(and (vector? %) (= :seon.health/summary (first %))) (:seon.agent/pinned ag))))
         h-fn (:health-summary-fn o)
         eval-health? (when (and (not minimal?) (empty? vpins) (fn? h-fn) aid ((db-schema branch-db) :seon.agent.eval/agent))
-                       (boolean (some #(= :seon.health/report
-                                          (:seon.agent.eval/result-schema (d/pull branch-db '[:seon.agent.eval/result-schema] (:e %))))
+                       (boolean (some #(= :seon.health/report (:v (first (d/datoms branch-db :eavt (:e %) :seon.agent.eval/result-schema))))
                                       (take 8 (d/datoms branch-db :avet :seon.agent.eval/agent aid)))))
         h-items (when (fn? h-fn)
                   (for [[_ target] (or (seq vpins) (when eval-health? [[:seon.health/summary :branch]]))
@@ -489,24 +406,19 @@
                      :priority 94 :zone :static-prefix :pinned? (boolean (seq vpins)) :tags #{:pinned} :rules [:seed/pinned]}))
         ctx-item (when (:include-ctx-snapshot? o)
                    [{:entity [:ctx/self (or aid :agent/repl)] :schema :seon.ctx/snapshot
-                     :data (with-meta
-                             (into {:seon.ctx/tx (:max-tx branch-db)}
-                                   (filter (comp some? val))
-                                   (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/pinned :seon.agent/summary :seon.agent/context-prefs]))
-                             {:seon/schema :seon.ctx/snapshot})
+                     :data (with-meta (into {:seon.ctx/tx (:max-tx branch-db)} (filter (comp some? val))
+                                            (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/pinned :seon.agent/summary :seon.agent/context-prefs]))
+                                      {:seon/schema :seon.ctx/snapshot})
                      :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
         combined (mapv (fn [c]
-                   (let [e (:entity c)
-                       tc (long (get touch-counts e 0))
-                       eng (double (get touch-energy e 0.0))
-                       fs (double (get frontier-scores e 0.0))
-                       w? (contains? written-set e)]
-                   (cond-> c
-                     (pos? tc) (assoc :touches (max tc (long (:touches c 0))))
-                     (pos? eng) (assoc :touch-energy (max eng (double (or (:touch-energy c) 0.0))))
-                     (pos? fs) (assoc :frontier-score (max fs (double (or (:frontier-score c) 0.0))))
-                     w? (assoc :written? true))))
-                 (concat ctx-item h-items hydrated))]
+                         (let [e (:entity c) tc (long (get touch-counts e 0)) eng (double (get touch-energy e 0.0))
+                               fs (double (get frontier-scores e 0.0)) w? (contains? written-set e)]
+                           (cond-> c
+                             (pos? tc) (assoc :touches (max tc (long (:touches c 0))))
+                             (pos? eng) (assoc :touch-energy (max eng (double (or (:touch-energy c) 0.0))))
+                             (pos? fs) (assoc :frontier-score (max fs (double (or (:frontier-score c) 0.0))))
+                             w? (assoc :written? true))))
+                       (concat ctx-item h-items hydrated))]
     (if sem? (ground/attach-semantic-scores main-db branch-db ag combined) combined)))
 
 (defn fix-matches-scope?

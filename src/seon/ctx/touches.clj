@@ -1,11 +1,11 @@
 (ns seon.ctx.touches
   "Layered derived context-touch & working-set engine: combines source-isolated in-memory
-   `datahike.reads`, raw `d/changes` branch writes, attention-conserved working-set energy,
-   and `seon.ctx.frontier` (Turn `t-1` continuation, ACL Local-Push PPR + RRF novel frontier,
-   and generic failing-turn schema discovery) with ZERO persisted derived touch datoms."
+   `datahike.reads`, incremental `seon.ctx.diff/branch-changes` writes, attention-conserved working-set
+   energy, and `seon.ctx.frontier` with ZERO persisted derived touch datoms."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.ctx.diff :as diff]
             [seon.ctx.frontier :as frontier]
             [seon.store :as store :refer [db-schema live-cid]]))
 
@@ -15,10 +15,13 @@
   (atom {:by-key {} :key-gen {}}))
 
 (defonce ^:private ^:seon.flow/edge branch-writes-cache
-  (store/lru-cache 32))
+  (store/lru-cache 64))
 
 (defonce ^:private ^:seon.flow/edge derived-touches-cache
-  (store/lru-cache 32))
+  (store/lru-cache 64))
+
+(defonce ^:private ^:seon.flow/edge eval-parse-cache
+  (store/lru-cache 512))
 
 (defn- safe-long [x dflt]
   (cond
@@ -252,28 +255,6 @@
                  (let [ts (:v tdt)] (when (coll? ts) (filterv integer? ts))))
       :else nil)))
 
-(defonce ^:private ^:seon.flow/edge merge-base-cache
-  (atom {}))
-
-(defn- ^:seon.flow/edge fast-merge-base [main-db branch-db sid mc bc]
-  (let [k [sid bc]
-        prev (get @merge-base-cache k)
-        parents (get-in main-db [:meta :datahike/parents])]
-    (cond
-      (and prev (= mc (:mc prev)))
-      (:base prev)
-
-      (and prev (set? parents) (= 1 (count parents)) (= (first parents) (:mc prev)))
-      (let [b (:base prev)]
-        (swap! merge-base-cache assoc k {:mc mc :base b})
-        b)
-
-      :else
-      (let [b (try (d/merge-base branch-db mc bc) (catch Throwable _ nil))]
-        (when b
-          (swap! merge-base-cache (fn [m] (let [m1 (if (> (count m) 64) {} m)] (assoc m1 k {:mc mc :base b})))))
-        b))))
-
 (defn- ^:seon.flow/edge compute-branch-writes-for-base [branch-db base bc]
   (store/without-agent-eval-reads
    (fn []
@@ -293,7 +274,7 @@
                                       (update-in [e :max-tx] #(max (long (or % 0)) tx)))
                                   acc)))
                             {}
-                            (try (d/changes branch-db base bc) (catch Throwable _ [])))]
+                            (or (diff/branch-changes branch-db base bc) []))]
          (reduce-kv
           (fn [acc e {:keys [txs max-tx]}]
             (let [w (max 1 (count txs))
@@ -305,8 +286,8 @@
           per-tx))))))
 
 (defn ^:seon.flow/edge branch-write-eids
-  "Derives canonicalized domain entity EIDs written on `branch-db` since `d/merge-base` with `main-db`
-   directly from raw Datahike `d/changes` (O(1) parent-chain merge-base + immutable `[sid base bc]` cache)."
+  "Derives canonicalized domain entity EIDs written on `branch-db` since `diff/fast-merge-base` with `main-db`
+   directly from incremental `diff/branch-changes` (O(1) single-parent diff + immutable `[sid base bc]` cache)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :int]] :map]
    :cost/ticks 10000000}
   [main-db branch-db self-agent-eid]
@@ -319,7 +300,7 @@
                     (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))
           raw (if (or same? (not (and mc bc sid (= sid (get-in main-db [:config :store :id])))))
                 {}
-                (if-let [base (fast-merge-base main-db branch-db sid mc bc)]
+                (if-let [base (diff/fast-merge-base main-db branch-db)]
                   (if (= base bc)
                     {}
                     (store/lru-get! branch-writes-cache 64 [sid base bc]
@@ -328,6 +309,27 @@
       (if (integer? self-agent-eid)
         (dissoc raw (long self-agent-eid))
         raw))))
+
+(def ^:private ev-meta-pat
+  '[:seon.agent.eval/turn :seon.agent.eval/code
+    :seon.agent.eval/result-schema :seon.agent.eval/result-schemas])
+
+(def ^:private ev-latest-pat
+  '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/value
+    :seon.agent.eval/out :seon.agent.eval/error :seon.agent.eval/reasoning
+    :seon.agent.eval/thought :seon.agent.eval/result-schema :seon.agent.eval/result-schemas])
+
+(defn- ^:seon.flow/edge parse-eval-meta [bdb dh csig canon ee tx]
+  (let [compute (fn []
+                  (let [ev (d/pull bdb ev-meta-pat ee)
+                        t (max 1 (safe-long (:seon.agent.eval/turn ev) 1))
+                        m-eids (into #{} (map canon) (eval-explicit-eids bdb dh ev))
+                        leg (legacy-stored-eval-eids bdb dh ee)
+                        leg-cnts (when (seq leg) (frequencies (mapv canon leg)))]
+                    {:turn t :m-eids m-eids :leg-cnts leg-cnts}))]
+    (if csig
+      (store/lru-get! eval-parse-cache 512 [csig ee tx] compute)
+      (compute))))
 
 (defn- compute-derived-touches [mdb bdb agent-id o]
   (store/without-agent-eval-reads
@@ -346,6 +348,7 @@
                             (and (not same?) (mdh :seon.agent/archived?)
                                  (true? (:v (first (d/datoms mdb :eavt e :seon.agent/archived?))))))))
            canon #(canonicalize-eid bdb dh %)
+           csig (diff/code-db-sig bdb)
            live-calls-by-t (if (false? (:use-live-reads? o)) {} (live-read-calls-for bdb agent-id))
            eval-dts (when (dh :seon.agent.eval/agent)
                       (vec (d/datoms bdb :avet :seon.agent.eval/agent agent-id)))
@@ -357,27 +360,21 @@
                                      (or (when (dh :seon.code.ns/name) (:v (first (d/datoms bdb :eavt e :seon.code.ns/name))))
                                          (when (dh :seon.code.var/ns) (:v (first (d/datoms bdb :eavt e :seon.code.var/ns)))))))
                              (keys raw-writes))
-           ev-pull-pat '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/value
-                         :seon.agent.eval/out :seon.agent.eval/error :seon.agent.eval/reasoning
-                         :seon.agent.eval/thought :seon.agent.eval/result-schema :seon.agent.eval/result-schemas]
            ev-data (reduce (fn [acc dt]
                              (let [ee (:e dt)
                                    tx (long (or (:tx dt) 0))
-                                   ev (d/pull bdb ev-pull-pat ee)
-                                   t (max 1 (safe-long (:seon.agent.eval/turn ev) 1))
-                                   m-eids (into #{} (comp (map canon) (remove archived?))
-                                                (eval-explicit-eids bdb dh ev))
-                                   leg (legacy-stored-eval-eids bdb dh ee)
-                                   leg-cnts (when (seq leg)
-                                              (frequencies (into [] (comp (map canon) (remove archived?)) leg)))]
+                                   {:keys [turn m-eids leg-cnts]} (parse-eval-meta bdb dh csig canon ee tx)
+                                   m-clean (into #{} (remove archived?) m-eids)
+                                   l-clean (when (seq leg-cnts)
+                                             (reduce-kv (fn [a e c] (if (archived? e) a (assoc a e c))) {} leg-cnts))]
                                (-> acc
-                                   (update-in [:turns t :tx] #(max (safe-long % 0) tx))
-                                   (update-in [:turns t :evs] (fnil conj []) ev)
-                                   (update-in [:turns t :explicit] (fn [old] (set/union (or old #{}) m-eids)))
-                                   (update-in [:turns t :eids] (fn [old] (set/union (or old #{}) m-eids (set (keys leg-cnts)))))
+                                   (update-in [:turns turn :tx] #(max (safe-long % 0) tx))
+                                   (update-in [:turns turn :eids-raw] (fnil conj []) ee)
+                                   (update-in [:turns turn :explicit] (fn [old] (set/union (or old #{}) m-clean)))
+                                   (update-in [:turns turn :eids] (fn [old] (set/union (or old #{}) m-clean (set (keys l-clean)))))
                                    (update :legacy-extra (fn [m]
                                                            (reduce-kv (fn [a e c] (if (> c 1) (update a e (fnil + 0) (dec c)) a))
-                                                                      (or m {}) (or leg-cnts {})))))))
+                                                                      (or m {}) (or l-clean {})))))))
                            {:turns {} :legacy-extra {}}
                            eval-dts)
            all-turns (vec (sort (set/union (set (keys (:turns ev-data))) (set (keys live-calls-by-t)))))
@@ -412,7 +409,9 @@
            base (analyze-touch-sets per-turn raw-writes)
            counts (reduce-kv (fn [m e extra] (update m e (fnil + 0) extra)) (:counts base) (:legacy-extra ev-data))
            latest-t (last all-turns)
-           latest-evs (if latest-t (get-in ev-data [:turns latest-t :evs] []) [])
+           latest-evs (if latest-t
+                        (mapv #(d/pull bdb ev-latest-pat %) (get-in ev-data [:turns latest-t :eids-raw] []))
+                        [])
            latest-live (if latest-t (get live-calls-by-t latest-t []) [])
            turn-events (frontier/derive-turn-events bdb dh latest-evs latest-live)
            cont-scores (frontier/compute-continuation-scores bdb dh latest-evs canon archived?)
@@ -427,8 +426,8 @@
               :sig sig)))))
 
 (defn ^:seon.flow/edge derived-agent-touches
-  "Commit-cached layered working-set & frontier derivation for `agent-id`: combines source-isolated
-   live `datahike.reads`, `d/changes` branch writes, attention-conserved `:energy`, Turn `t-1`
+  "Incrementally cached layered working-set & frontier derivation for `agent-id`: combines live
+   `datahike.reads`, `diff/branch-changes` writes, attention-conserved `:energy`, Turn `t-1`
    `:continuation`, ACL-PPR + RRF `:novel-frontier`, and `:turn-events` with ZERO persisted bloat."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:? [:maybe :map]]] :map]
    :cost/ticks 25000000}
@@ -445,11 +444,13 @@
              br (get-in bdb [:config :branch] :main)
              mc (live-cid mdb)
              bc (live-cid bdb)
+             same? (or (identical? mdb bdb) (and mc bc (= mc bc)))
+             base (when (and sid mc bc) (if same? bc (diff/fast-merge-base mdb bdb)))
              use-live? (not (false? (:use-live-reads? o)))
              inc-writes? (not (false? (:include-writes? o)))
              lgen (if use-live? (get-in @live-reads-state [:key-gen (live-key sid br agent-id)] 0) -1)]
-         (if (and sid mc bc)
-           (store/lru-get! derived-touches-cache 32
-                           [sid mc (:max-tx mdb) bc (:max-tx bdb) agent-id lgen use-live? inc-writes?]
+         (if (and sid bc base)
+           (store/lru-get! derived-touches-cache 64
+                           [sid base bc (:max-tx bdb) agent-id lgen use-live? inc-writes?]
                            #(compute-derived-touches mdb bdb agent-id o))
            (compute-derived-touches mdb bdb agent-id o)))))))
