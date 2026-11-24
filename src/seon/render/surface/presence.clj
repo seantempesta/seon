@@ -197,10 +197,18 @@
                  (when (seq res-s) [:div {:class "green-text"} (str "-> " res-s)])
                  (when (seq err-s) [:div {:class "red-text"} (str "! " err-s)])])])
            (when (and expert-mode? (seq written-vars))
-             [:div {:class "pill-row"}
-              [:span {:class "mono tiny muted"} "Branch edits:"]
-              (for [vsym written-vars]
-                (ent-link [:seon.code.var/name vsym] (name vsym) "pill mono tiny"))])])]
+           (let [n (count written-vars) shown (take 10 written-vars) more (drop 10 written-vars)]
+             [:div {:class "stack-xs"}
+              [:div {:class "pill-row"}
+               [:span {:class "mono tiny muted"} (str "Branch edits (" n "):")]
+               (for [vsym shown]
+                 (ent-link [:seon.code.var/name vsym] (name vsym) "pill mono tiny"))]
+              (when (seq more)
+                [:details {:class "activity-fold"}
+                 [:summary {:class "mono tiny muted"} (str "+" (count more) " more edited var(s)")]
+                 [:div {:class "pill-row" :style {:margin-top "6px"}}
+                  (for [vsym more]
+                    (ent-link [:seon.code.var/name vsym] (name vsym) "pill mono tiny"))]])]))])]
     (cond
       (and custom-node presence-node) [:div {:class "stack-sm"} custom-node presence-node]
       custom-node custom-node
