@@ -130,11 +130,10 @@
     (with-test-store [{:keys [conn]}]
       (let [db @conn]
         (doseq [sym ['seon.error/error-tx
-                     'seon.error/resolve-error-tx
-                     'seon.error/classify-model-error
-                     'seon.error/error-rules
-                     'seon.error/model-error-response
-                     'seon.error/model-error-outputs]]
+                    'seon.error/resolve-error-tx
+                    'seon.error/classify-model-error
+                    'seon.error/model-error-response
+                    'seon.error/model-error-outputs]]
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (true? (:ok? res)) (pr-str res))
             (is (= 100 (:ran res)) (pr-str res))))))))
@@ -182,7 +181,7 @@
         (is (str/includes? (render/hiccup->text rendered) "Timed out"))))))
 
 (deftest error-rules-step-rules-lifecycle-test
-  (testing "Declarative error-rules surface open agent errors & 429 backpressure and retract cleanly on resolve"
+  (testing "Single-source :rule.error/* rules surface 429 backpressure via ?agent and retract cleanly on resolve"
     (with-test-store [{:keys [conn]}]
       (let [aid :ag/rule-err
             err-ent (error/error-tx {:kind :model/rate-limit
@@ -190,28 +189,27 @@
                                      :agent aid
                                      :message "Rate limit active"
                                      :data {:status 429 :retry-after-ms 3500}})
-            _ (d/transact conn {:tx-data [err-ent]})
+            _ (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main} err-ent]})
             db1 @conn
+            ag-eid (:e (first (d/datoms db1 :avet :seon.agent/id aid)))
             eid (:e (first (d/datoms db1 :avet :seon.error/id (:seon.error/id err-ent))))
-            wm0 (rules/add-facts (rules/empty-wm) [[aid :ctx/viewer aid]] {:rule :seed :stratum 0})
-            rs (error/error-rules)
-            s1 (rules/step-rules nil wm0 {:main db1 :branch db1} rs nil)
+            rs (error/error-rules db1)
+            s1 (rules/step-rules nil {:main db1 :branch db1} {:agent-id aid} rs nil)
             wm1 (:wm s1)]
         (is (pos? (long eid)))
-        (is (true? (rules/wm-scalar wm1 aid :error/has-open-error?)))
-        (is (= eid (rules/wm-scalar wm1 aid :rel/open-error)))
-        (is (true? (rules/wm-scalar wm1 aid :error/backpressure?)))
-        (is (= :model/rate-limit (rules/wm-scalar wm1 aid :error/backpressure-kind)))
-        (is (= 3500 (rules/wm-scalar wm1 aid :error/retry-after-ms)))
-        (is (= 'seon.error/render (rules/wm-scalar wm1 eid :view/fn)))
-        (is (= :ephemeral-tail (rules/wm-scalar wm1 eid :view/zone)))
+        (is (seq rs))
+        (is (every? #(= "rule.error" (namespace (:seon.rule/id %))) rs))
+        (is (true? (rules/wm-scalar wm1 ag-eid :error/backpressure?)))
+        (is (= :model/rate-limit (rules/wm-scalar wm1 ag-eid :error/backpressure-kind)))
+        (is (= eid (rules/wm-scalar wm1 ag-eid :error/backpressure-error)))
+        (is (= 3500 (rules/wm-scalar wm1 ag-eid :error/retry-after-ms)))
+        (is (= :tag/rate-limit-backpressure (rules/wm-scalar wm1 eid :view/tag)))
 
         (let [txr (d/transact conn {:tx-data [(error/resolve-error-tx (:seon.error/id err-ent))]})
               db2 (:db-after txr)
-              s2 (rules/step-rules s1 wm0 {:main db2 :branch db2} rs (:tx-data txr))
+              s2 (rules/step-rules s1 {:main db2 :branch db2} {:agent-id aid} rs (:tx-data txr))
               wm2 (:wm s2)]
-          (is (nil? (rules/wm-scalar wm2 aid :error/has-open-error?)))
-          (is (nil? (rules/wm-scalar wm2 aid :error/backpressure?))))))))
+          (is (nil? (rules/wm-scalar wm2 ag-eid :error/backpressure?))))))))
 
 (deftest model-proc-http-429-surfacing-and-agents-test
   (testing "model-proc surfaces HTTP 429 via real :seon.error/* :tx, :stream, ::flow/error, and :response instead of silent idle"
@@ -269,18 +267,17 @@
               (is (= 1 (count found)))
               (is (= (:seon.error/id err-ent) (:seon.error/id (first found))))))
 
-          (testing "agents/agents-proc forwards model error :tx and :exits without dropping error-entity"
-            (let [fork-out (a/chan 4)
-                  ast0 (assoc (agents/agents-proc {:fork-out fork-out})
-                              :model-reqs {"r-429" {:pid 4242 :prefix-hash "ph"}})
-                  [ast1 aouts] (agents/agents-proc ast0 :response (first (:response outs)))
-                  child-msg (a/poll! fork-out)]
-              (is (empty? (:model-reqs ast1)))
-              (is (= :model-response (get-in child-msg [:msg :op])))
-              (is (= :model/rate-limit (get-in child-msg [:msg :response :seon.error/kind])))
-              (is (= :transact (get-in aouts [:tx 0 :op])))
-              (is (= (:seon.error/id err-ent) (get-in aouts [:tx 0 :tx-data 0 :seon.error/id])))
-              (is (= :model-error (get-in aouts [:exits 0 :ev]))))))
+          (testing "agents/agents-proc forwards model error to child and :exits without duplicating :model :tx"
+          (let [fork-out (a/chan 4)
+                ast0 (assoc (agents/agents-proc {:fork-out fork-out})
+                            :model-reqs {"r-429" {:pid 4242 :prefix-hash "ph"}})
+                [ast1 aouts] (agents/agents-proc ast0 :response (first (:response outs)))
+                child-msg (a/poll! fork-out)]
+            (is (empty? (:model-reqs ast1)))
+            (is (= :model-response (get-in child-msg [:msg :op])))
+            (is (= :model/rate-limit (get-in child-msg [:msg :response :seon.error/kind])))
+            (is (nil? (:tx aouts)) "Must not duplicate :seon.error/* :tx already emitted by :model")
+            (is (= :model-error (get-in aouts [:exits 0 :ev]))))))
         (finally
           (try (adapter/stop-server srv {:drain-timeout-ms 500}) (catch Throwable _)))))))
 

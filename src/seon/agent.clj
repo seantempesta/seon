@@ -94,19 +94,17 @@
                       ph (assoc :prefix-hash ph))}))
     [(update st :model-reqs dissoc (:req-id msg))
      (when (or (map? err-ent) err-kind)
-       (let [tx-ent (when (and (map? err-ent) (uuid? (:seon.error/id err-ent))) err-ent)]
-         (cond-> {:clojure.core.async.flow/report
-                  [(str "[:agents] model error on " (:agent-id msg)
-                        " [" (if err-kind (name err-kind) "unknown") "]"
-                        (when (pos? (long (or (:retry-after-ms resp) 0)))
-                          (str " retry-after=" (:retry-after-ms resp) "ms")))]
-                  :exits [{:ev :model-error
-                           :agent-id (:agent-id msg)
-                           :req-id (:req-id msg)
-                           :seon.error/kind err-kind
-                           :retry-after-ms (long (or (:retry-after-ms resp) 0))
-                           :seon.error/id (:seon.error/id err-ent)}]}
-           tx-ent (assoc :tx [{:op :transact :tx-data [tx-ent] :reason [:model-error (:agent-id msg) err-kind]}]))))]))
+       {:clojure.core.async.flow/report
+        [(str "[:agents] model error on " (:agent-id msg)
+              " [" (if err-kind (name err-kind) "unknown") "]"
+              (when (pos? (long (or (:retry-after-ms resp) 0)))
+                (str " retry-after=" (:retry-after-ms resp) "ms")))]
+        :exits [{:ev :model-error
+                 :agent-id (:agent-id msg)
+                 :req-id (:req-id msg)
+                 :seon.error/kind err-kind
+                 :retry-after-ms (long (or (:retry-after-ms resp) 0))
+                 :seon.error/id (:seon.error/id err-ent)}]})]))
 
 (defn- handle-run
   [st tick msg]
@@ -491,10 +489,39 @@
 
       [st nil])))
 
+(defn- handle-fork-refused [st msg]
+  (let [explicit-aid (:agent-id msg)
+        code (:code msg)
+        forking-aids (if explicit-aid
+                       [explicit-aid]
+                       (vec (keep (fn [[aid v]] (when (= :forking (:pid v)) aid)) (:live st))))
+        err-str (str "COW fork refused (code " code ")"
+                     (when (seq forking-aids) (str " for " (pr-str forking-aids))))
+        aid-set (set forking-aids)
+        matching-w (filter (fn [[_ w]] (contains? aid-set (:agent-id w))) (:eval-waiters st))
+        _ (doseq [[_ w] matching-w]
+            (reply! (:reply-ch w) {:ok? false :agent-id (:agent-id w) :error err-str :class :fork-refused}))
+        st' (-> st
+                (update :live #(apply dissoc % forking-aids))
+                (update :eval-waiters #(apply dissoc % (map first matching-w)))
+                sync-agents-filter)
+        faults (if (seq forking-aids)
+                 (mapv (fn [aid]
+                         {:op :record-fault :proc :agents :class :fork-refused :severity :error
+                          :agent aid :subject (str aid) :message err-str})
+                       forking-aids)
+                 [{:op :record-fault :proc :agents :class :fork-refused :severity :error
+                   :subject "seon.agent/fork" :message err-str}])
+        exits (mapv (fn [aid] {:ev :exited :agent-id aid :pid :forking :raw-status code}) forking-aids)]
+    [st' (cond-> {:tx faults
+                  :clojure.core.async.flow/report [(str "[:agents] " err-str)]}
+           (seq exits) (assoc :exits exits))]))
+
 (defn- handle-fork-ev
   [st tick msg]
   (case (:ev msg)
     :forked (handle-forked st msg)
+    :fork-refused (handle-fork-refused st msg)
     :child-frame (handle-child-frame st tick msg)
     :child-exited (handle-child-exited st msg)
     [st nil]))

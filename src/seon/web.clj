@@ -100,7 +100,7 @@
 
 (defn ^:seon/callable toggle-vision! [& args] (apply actions/toggle-vision! args))
 
-(defn ^:seon/callable invoke-call! [& args] (apply actions/invoke-call! args))
+(defn invoke-call! [& args] (apply actions/invoke-call! args))
 
 (defn ^:seon.flow/edge call-server-edge! [& args] (apply actions/call-server-edge! args))
 
@@ -313,63 +313,69 @@
   (let [{:keys [viewing-id view-mode]} (when-let [c (:conn st)] (ui/user-view-state @c))]
     (or (contains? #{:context :debug :system :workspace} view-mode) (= aid viewing-id))))
 
-(defn- handle-exit-msg [st msg]
-  (let [{:keys [ev agent-id phase]} msg aid agent-id]
-    (case ev
-      (:forked :turn-busy)
-      (let [now-ms (System/currentTimeMillis)
-            st1 (cond-> (assoc-in st [:agent-states aid] :active)
-                  (and (= :turn-busy ev) (not (contains? (:live-streams st) aid)))
-                  (assoc-in [:live-streams aid]
-                            {:status :working :phase (or phase :working)
-                             :started-ms now-ms :last-ms now-ms :step-chars 0 :chars 0 :reasoning "" :text ""})
-                  (and phase (contains? (:live-streams st) aid))
-                  (assoc-in [:live-streams aid :phase] phase))]
-        (advance-walk-and-broadcast! st1 []))
-      (:turn-idle :exited)
-      (let [st1 (-> st (update :agent-states dissoc aid) (update :live-streams dissoc aid))]
-        (advance-walk-and-broadcast! st1 (if (and (= :turn-idle ev) (viewing-affected? st1 aid)) nil [])))
-      :branch-moved
-      (let [st1 (if (and phase (contains? (:live-streams st) aid)) (assoc-in st [:live-streams aid :phase] phase) st)]
-        (cond (viewing-affected? st1 aid) (advance-walk-and-broadcast! st1 nil)
-              (not= st1 st) (advance-walk-and-broadcast! st1 [])
-              :else st1))
-      st)))
+(defn- handle-exit-msg [st {:keys [ev agent-id phase]}]
+(case ev
+  (:forked :turn-busy)
+  (let [now-ms (System/currentTimeMillis)
+        st1 (cond-> (assoc-in st [:agent-states agent-id] :active)
+              (and (= :turn-busy ev) (not (contains? (:live-streams st) agent-id)))
+              (assoc-in [:live-streams agent-id]
+                        {:status :working :phase (or phase :working)
+                         :started-ms now-ms :last-ms now-ms :step-chars 0 :chars 0 :reasoning "" :text ""})
+              (and phase (contains? (:live-streams st) agent-id))
+              (assoc-in [:live-streams agent-id :phase] phase))]
+    (advance-walk-and-broadcast! st1 []))
+  (:turn-idle :exited)
+  (let [st1 (-> st (update :agent-states dissoc agent-id) (update :live-streams dissoc agent-id))]
+    (advance-walk-and-broadcast! st1 (if (and (= :turn-idle ev) (viewing-affected? st1 agent-id)) nil [])))
+  :branch-moved
+  (let [st1 (if (and phase (contains? (:live-streams st) agent-id)) (assoc-in st [:live-streams agent-id :phase] phase) st)]
+    (cond (viewing-affected? st1 agent-id) (advance-walk-and-broadcast! st1 nil)
+          (not= st1 st) (advance-walk-and-broadcast! st1 [])
+          :else st1))
+  st))
 
 (defn- handle-stream-msg [st msg]
-  (let [{:keys [agent-id status text phase context-tokens max-context-tokens]} msg
-        now-ms (System/currentTimeMillis) now-ns (System/nanoTime)
-        prev (get-in st [:live-streams agent-id]) prev-phase (:phase prev)
-        tstr (str (or text "")) dlen (long (count tstr))
-        started (long (or (:started-ms prev) now-ms))
-        chars (long (or (:chars prev) 0)) step-chars (long (or (:step-chars prev) 0))
-        ctx-toks (long (or (when (and (number? context-tokens) (pos? (long context-tokens))) context-tokens) (:context-tokens prev) 0))
-        max-ctx (or (when (and (number? max-context-tokens) (pos? (long max-context-tokens))) (long max-context-tokens)) (:max-context-tokens prev))
-        with-ctx (fn [m] (when m (cond-> m (pos? ctx-toks) (assoc :context-tokens ctx-toks) max-ctx (assoc :max-context-tokens max-ctx))))
-        entry (with-ctx
-               (case status
-                 :ctx-meta (or prev {:status :thinking :phase :thinking :started-ms now-ms :last-ms now-ms :step-chars 0 :chars 0 :text "" :reasoning ""})
-                 :done (when prev (assoc prev :status :running-tools :phase (or phase :tools) :last-ms now-ms :step-chars 0))
-                 :thinking (let [pr (str (:reasoning prev ""))]
-                             {:status :thinking :phase (or phase :thinking) :started-ms now-ms :last-ms now-ms :step-chars 0 :chars chars :text ""
-                              :reasoning (if (str/blank? pr) "" (str pr "\n\n── next step ──\n"))})
-                 :reasoning-token {:status :reasoning :phase (or phase :thinking) :started-ms started :last-ms now-ms
-                                   :step-chars (+ step-chars dlen) :chars (+ chars dlen)
-                                   :text (or (:text prev) "") :reasoning (str (or (:reasoning prev) "") tstr)}
-                 (:tools :eval :testing :merging :working)
-                 (assoc (or prev {:reasoning "" :text "" :chars 0 :step-chars 0})
-                        :status status :phase (or phase (if (= status :eval) :tools status)) :started-ms started :last-ms now-ms)
-                 {:status status :phase (or phase :writing) :started-ms started :last-ms now-ms
-                  :step-chars (+ step-chars dlen) :chars (+ chars dlen)
-                  :reasoning (or (:reasoning prev) "") :text (str (or (:text prev) "") tstr)}))
-        st1 (if entry
-              (cond-> (assoc-in st [:live-streams agent-id] entry)
-                (and (not= status :done) (not= :active (get-in st [:agent-states agent-id])))
-                (assoc-in [:agent-states agent-id] :active))
-              st)
-        delta-only? (and (or (= status :token) (= status :reasoning-token)) (= prev-phase (:phase entry)) (= (:agent-states st) (:agent-states st1)))
-        due? (or (not delta-only?) (>= (- now-ns (long (:last-stream-emit-ns st 0))) 80000000))]
-    (if due? (-> st1 (assoc :last-stream-emit-ns now-ns) (advance-walk-and-broadcast! [] :stream)) st1)))
+(let [{:keys [agent-id status text phase context-tokens max-context-tokens]} msg]
+  (if (= status :error)
+    (advance-walk-and-broadcast!
+      (-> st
+          (update :live-streams dissoc agent-id)
+          (update :agent-states dissoc agent-id)
+          (update :errors #(vec (take 20 (cons (select-keys msg [:agent-id :req-id :seon.error/kind :seon.error/id :retry-after-ms :message]) %)))))
+      [] :stream)
+    (let [now-ms (System/currentTimeMillis) now-ns (System/nanoTime)
+          prev (get-in st [:live-streams agent-id]) prev-phase (:phase prev)
+          tstr (str (or text "")) dlen (long (count tstr))
+          started (long (or (:started-ms prev) now-ms))
+          chars (long (or (:chars prev) 0)) step-chars (long (or (:step-chars prev) 0))
+          ctx-toks (long (or (when (and (number? context-tokens) (pos? (long context-tokens))) context-tokens) (:context-tokens prev) 0))
+          max-ctx (or (when (and (number? max-context-tokens) (pos? (long max-context-tokens))) (long max-context-tokens)) (:max-context-tokens prev))
+          with-ctx (fn [m] (when m (cond-> m (pos? ctx-toks) (assoc :context-tokens ctx-toks) max-ctx (assoc :max-context-tokens max-ctx))))
+          entry (with-ctx
+                  (case status
+                    :ctx-meta (or prev {:status :thinking :phase :thinking :started-ms now-ms :last-ms now-ms :step-chars 0 :chars 0 :text "" :reasoning ""})
+                    :done (when prev (assoc prev :status :running-tools :phase (or phase :tools) :last-ms now-ms :step-chars 0))
+                    :thinking (let [pr (str (:reasoning prev ""))]
+                                {:status :thinking :phase (or phase :thinking) :started-ms now-ms :last-ms now-ms :step-chars 0 :chars chars :text ""
+                                 :reasoning (if (str/blank? pr) "" (str pr "\n\n── next step ──\n"))})
+                    :reasoning-token {:status :reasoning :phase (or phase :thinking) :started-ms started :last-ms now-ms
+                                      :step-chars (+ step-chars dlen) :chars (+ chars dlen)
+                                      :text (or (:text prev) "") :reasoning (str (or (:reasoning prev) "") tstr)}
+                    (:tools :eval :testing :merging :working)
+                    (assoc (or prev {:reasoning "" :text "" :chars 0 :step-chars 0})
+                           :status status :phase (or phase (if (= status :eval) :tools status)) :started-ms started :last-ms now-ms)
+                    {:status status :phase (or phase :writing) :started-ms started :last-ms now-ms
+                     :step-chars (+ step-chars dlen) :chars (+ chars dlen)
+                     :reasoning (or (:reasoning prev) "") :text (str (or (:text prev) "") tstr)}))
+          st1 (if entry
+                (cond-> (assoc-in st [:live-streams agent-id] entry)
+                  (and (not= status :done) (not= :active (get-in st [:agent-states agent-id])))
+                  (assoc-in [:agent-states agent-id] :active))
+                st)
+          delta-only? (and (or (= status :token) (= status :reasoning-token)) (= prev-phase (:phase entry)) (= (:agent-states st) (:agent-states st1)))
+          due? (or (not delta-only?) (>= (- now-ns (long (:last-stream-emit-ns st 0))) 80000000))]
+      (if due? (-> st1 (assoc :last-stream-emit-ns now-ns) (advance-walk-and-broadcast! [] :stream)) st1)))))
 
 (defn url-enc
   {:malli/schema [:=> [:cat :string] :string] :cost/ticks 6000 :cost/bytes 4096}

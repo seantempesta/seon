@@ -235,27 +235,6 @@
         nxt (vec (remove #(= % ref-val) cur))]
     (async-action st {:op :transact :tx-data [{:seon.agent/id agent-id :seon.agent/pinned nxt}]} nil nil)))
 
-(defn invoke-call!
-  "Dispatches registered Reagent closure (`?h=...`) or stateless `^:seon/callable` Clojure form."
-  {:malli/schema [:=> [:cat [:map [:conn {:optional true} :seon.host/conn]] :map] :map]}
-  [st {:keys [hkey call-form form-fields]}]
-  (let [wrap (fn [res] (if (and (map? res) (contains? res :st)) (assoc res :ok? true)
-                           {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))]
-    (try
-      (cond
-        hkey
-        (if-let [hfn (get-in st [:walk :handlers hkey])]
-          (wrap (if (seq form-fields) (hfn st form-fields) (hfn st)))
-          {:ok? false :error :seon.web/stale-handler :handler hkey :st st})
-        (and (seq? call-form) (qualified-symbol? (first call-form)))
-        (let [sym (first call-form) v (resolve sym)]
-          (if-not (and v (:seon/callable (meta v)))
-            {:ok? false :error :seon.web/not-callable :message (str sym " is not marked ^:seon/callable") :fn sym :st st}
-            (wrap (apply @v st (cond-> (vec (rest call-form)) (seq form-fields) (conj form-fields))))))
-        :else {:ok? false :error :seon.web/malformed-call :form call-form :st st})
-      (catch Throwable ex
-        {:ok? false :error :seon.web/handler-error :message (or (.getMessage ex) (str ex)) :st st}))))
-
 (def mcp-tools
   [{:name "seon_repl" :description "Eval Clojure on a COW branch REPL."
     :inputSchema {:type "object"
@@ -567,3 +546,27 @@
                     :branch-feedback #(when-not (:ok? %) {:ok? false :text (str "Error: " (:error %))}))
       :else
       (async-action (assoc st :branch-feedback nil) {:op :send-message :from :user :to agent-id :type :chat :body s} nil nil))))
+
+(defn invoke-call!
+"Dispatches Reagent closure or `^:seon/callable` form; always passes `{}` form map to `-form!` handlers."
+{:malli/schema [:=> [:cat [:map [:conn {:optional true} :seon.host/conn]] :map] :map]}
+[st {:keys [hkey call-form form-fields]}]
+(let [wrap (fn [res] (if (and (map? res) (contains? res :st)) (assoc res :ok? true)
+                         {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))]
+  (try
+    (cond
+      hkey
+      (if-let [hfn (get-in st [:walk :handlers hkey])]
+        (wrap (if (seq form-fields) (hfn st form-fields) (hfn st)))
+        {:ok? false :error :seon.web/stale-handler :handler hkey :st st})
+      (and (seq? call-form) (qualified-symbol? (first call-form)))
+      (let [sym (first call-form) v (resolve sym)]
+        (if-not (and v (:seon/callable (meta v)))
+          {:ok? false :error :seon.web/not-callable :message (str sym " is not marked ^:seon/callable") :fn sym :st st}
+          (let [base-args (vec (rest call-form))
+                pass-form? (or (seq form-fields) (str/ends-with? (name sym) "-form!"))
+                args (if pass-form? (conj base-args (if (map? form-fields) form-fields {})) base-args)]
+            (wrap (apply @v st args)))))
+      :else {:ok? false :error :seon.web/malformed-call :form call-form :st st})
+    (catch Throwable ex
+      {:ok? false :error :seon.web/handler-error :message (or (.getMessage ex) (str ex)) :st st}))))
