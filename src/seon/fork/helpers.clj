@@ -15,6 +15,92 @@
             [seon.vector :as vec]
             [seon.vector.flow :as vflow]))
 
+(defn ^:seon.flow/edge render-preview!
+  "Renders Hiccup or a uniform renderer across display widths (default `[360 640 1100]`, `:dark`),
+   persists full `:seon.media/image` entities into the branch DB, and returns a compact
+   `{:seon.media/frames [...] :summary ...}` summary (`{:seon/schema :seon.media/frames}`)."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any [:maybe :map]] :map]]
+  :cost/ticks 45000000}
+  ([hiccup-or-renderer] (render-preview! hiccup-or-renderer nil))
+  ([hiccup-or-renderer opts]
+   (let [o (if (map? opts) opts {})
+         raw (if (or (fn? hiccup-or-renderer) (var? hiccup-or-renderer) (qualified-symbol? hiccup-or-renderer))
+               (let [f (cond (fn? hiccup-or-renderer) hiccup-or-renderer
+                             (var? hiccup-or-renderer) @hiccup-or-renderer
+                             :else @(requiring-resolve hiccup-or-renderer))]
+                 (cond (contains? o :input) (f (:input o))
+                       (contains? o :data) (f (:data o))
+                       :else (f)))
+               hiccup-or-renderer)
+         node (if (and (map? raw) (contains? raw :seon.ui/hiccup)) (:seon.ui/hiccup raw) raw)
+         html (if (string? node) node (str ((requiring-resolve 'seon.render/hiccup->html) node)))
+         cap-opts (merge {:widths [360 640 1100] :theme :dark}
+                         (select-keys o [:widths :theme :height :quality :max-width
+                                         :label-prefix :timeout-ms :settle-ms :binary-path]))
+         port (or (:port o) (System/getenv "SEON_PORT") 9998)
+         url (or (:url o) (str "http://127.0.0.1:" port "/"))
+         cap (if (fn? (:render-fn o))
+               ((:render-fn o) html cap-opts)
+               (let [via-op (when-not (:direct? o)
+                              (try (let [post-fn (requiring-resolve 'seon.model.wire/http-post!)
+                                         resp (post-fn (str "http://127.0.0.1:" port "/op")
+                                                       [["Content-Type" "application/edn"]]
+                                                       (pr-str (assoc cap-opts :op :render-hiccup-frames
+                                                                      :html html :url url)))]
+                                     (when (= 200 (:status resp)) (edn/read-string (:body resp))))
+                                   (catch Throwable _ nil)))]
+                 (if (and (map? via-op) (:ok? via-op) (seq (:frames via-op)))
+                   via-op
+                   ((requiring-resolve 'seon.browser/render-hiccup-frames!) url html cap-opts))))
+         eff-conn (or (:conn o) (:conn *agent-ctx*))]
+     (if-not (and (:ok? cap) (seq (:frames cap)))
+       (with-meta {:ok? false :error (or (:error cap) :render-preview-failed)
+                   :seon.media/frames [] :summary (str "Preview failed: " (or (:error cap) :render-preview-failed))}
+                  {:seon/schema :seon.media/frames})
+       (let [norm-fn (requiring-resolve 'seon.render.media/normalize-preview-frame)
+             comp-fn (requiring-resolve 'seon.render.media/compact-preview-result)
+             img-ents (mapv norm-fn (:frames cap))]
+         (when (and eff-conn (contains? (:schema @eff-conn) :seon.media/id))
+           (let [r (d/transact eff-conn {:tx-data img-ents})]
+             (when (:conn *agent-ctx*) (ctx/refresh-active! (:db-after r) (:tx-data r)))))
+         (comp-fn img-ents))))))
+
+(defn ^:seon.flow/edge install-agent-helpers!
+  "Installs all `user/*` REPL helpers via declarative `^:seon.repl/export` plus module installers."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [u (create-ns 'user)
+        ctx-fn (fn [] *agent-ctx*)]
+    (binding [*ns* u]
+      (refer-clojure)
+      (require '[datahike.api :as d] '[clojure.string :as str])
+      (fcalls/export-ns-helpers! u 'seon.fork.helpers)
+      (fcalls/install-call-and-ui-helpers! u)
+      (repl/install-repl-helpers! u)
+      (fcontainer/install-container-helpers! u)
+      (ctx/install-ctx-helpers! u ctx-fn)
+      (when-let [imh (try (requiring-resolve 'seon.code.migrate/install-user-helpers!) (catch Throwable _ nil))]
+        (imh u ctx-fn ctx/refresh-active!))
+      (doseq [sym ['seon.task.gate/install-user-helpers!
+                   'seon.render.print/install-user-helpers!
+                   'seon.signals.scoreboard/install-user-helpers!]]
+        (when-let [f (try (requiring-resolve sym) (catch Throwable _ nil))]
+          (f u ctx-fn)))
+      (when-let [ist (try (requiring-resolve 'seon.render.status/install-user-helpers!) (catch Throwable _ nil))]
+        (ist u)))))
+
+(defn ^:seon.flow/edge conn
+  "Returns the current agent branch Datahike connection."
+  {:seon.repl/export ['conn 'conn-of] :malli/schema [:=> [:cat] :any]}
+  []
+  (:conn *agent-ctx*))
+
+(defn ^:seon.flow/edge db
+  "Returns the current branch Datahike DB value (`@conn`)."
+  {:seon.repl/export true :malli/schema [:=> [:cat] :any]}
+  []
+  (when-let [c (:conn *agent-ctx*)] @c))
+
 (defn ^:seon.flow/edge source
   "Reads source of `'ns/fn`, `'ns`, `'ns#ns`, `:seon.schema/key`, `\"docs/f.md#sec\"`,
    `'user/<helper>`, a vector of targets, or variadic multiple targets `(source 'a/f 'b/g)`.
@@ -171,92 +257,6 @@
          (let [proj-fn (requiring-resolve 'seon.render.surface/project-entity-view)
                res (proj-fn mdb bdb fref (merge {:target :wire :token-budget 2400} o))]
            (if (:raw? o) res (or (:text res) {:error :entity-not-found :ref ref}))))))))
-
-(defn ^:seon.flow/edge render-preview!
-  "Renders Hiccup or a uniform renderer across display widths (default `[360 640 1100]`, `:dark`),
-   persists full `:seon.media/image` entities into the branch DB, and returns a compact
-   `{:seon.media/frames [...] :summary ...}` summary (`{:seon/schema :seon.media/frames}`)."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any [:maybe :map]] :map]]
-  :cost/ticks 45000000}
-  ([hiccup-or-renderer] (render-preview! hiccup-or-renderer nil))
-  ([hiccup-or-renderer opts]
-   (let [o (if (map? opts) opts {})
-         raw (if (or (fn? hiccup-or-renderer) (var? hiccup-or-renderer) (qualified-symbol? hiccup-or-renderer))
-               (let [f (cond (fn? hiccup-or-renderer) hiccup-or-renderer
-                             (var? hiccup-or-renderer) @hiccup-or-renderer
-                             :else @(requiring-resolve hiccup-or-renderer))]
-                 (cond (contains? o :input) (f (:input o))
-                       (contains? o :data) (f (:data o))
-                       :else (f)))
-               hiccup-or-renderer)
-         node (if (and (map? raw) (contains? raw :seon.ui/hiccup)) (:seon.ui/hiccup raw) raw)
-         html (if (string? node) node (str ((requiring-resolve 'seon.render/hiccup->html) node)))
-         cap-opts (merge {:widths [360 640 1100] :theme :dark}
-                         (select-keys o [:widths :theme :height :quality :max-width
-                                         :label-prefix :timeout-ms :settle-ms :binary-path]))
-         port (or (:port o) (System/getenv "SEON_PORT") 9998)
-         url (or (:url o) (str "http://127.0.0.1:" port "/"))
-         cap (if (fn? (:render-fn o))
-               ((:render-fn o) html cap-opts)
-               (let [via-op (when-not (:direct? o)
-                              (try (let [post-fn (requiring-resolve 'seon.model.wire/http-post!)
-                                         resp (post-fn (str "http://127.0.0.1:" port "/op")
-                                                       [["Content-Type" "application/edn"]]
-                                                       (pr-str (assoc cap-opts :op :render-hiccup-frames
-                                                                      :html html :url url)))]
-                                     (when (= 200 (:status resp)) (edn/read-string (:body resp))))
-                                   (catch Throwable _ nil)))]
-                 (if (and (map? via-op) (:ok? via-op) (seq (:frames via-op)))
-                   via-op
-                   ((requiring-resolve 'seon.browser/render-hiccup-frames!) url html cap-opts))))
-         eff-conn (or (:conn o) (:conn *agent-ctx*))]
-     (if-not (and (:ok? cap) (seq (:frames cap)))
-       (with-meta {:ok? false :error (or (:error cap) :render-preview-failed)
-                   :seon.media/frames [] :summary (str "Preview failed: " (or (:error cap) :render-preview-failed))}
-                  {:seon/schema :seon.media/frames})
-       (let [norm-fn (requiring-resolve 'seon.render.media/normalize-preview-frame)
-             comp-fn (requiring-resolve 'seon.render.media/compact-preview-result)
-             img-ents (mapv norm-fn (:frames cap))]
-         (when (and eff-conn (contains? (:schema @eff-conn) :seon.media/id))
-           (let [r (d/transact eff-conn {:tx-data img-ents})]
-             (when (:conn *agent-ctx*) (ctx/refresh-active! (:db-after r) (:tx-data r)))))
-         (comp-fn img-ents))))))
-
-(defn ^:seon.flow/edge install-agent-helpers!
-  "Installs all `user/*` REPL helpers via declarative `^:seon.repl/export` plus module installers."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (let [u (create-ns 'user)
-        ctx-fn (fn [] *agent-ctx*)]
-    (binding [*ns* u]
-      (refer-clojure)
-      (require '[datahike.api :as d] '[clojure.string :as str])
-      (fcalls/export-ns-helpers! u 'seon.fork.helpers)
-      (fcalls/install-call-and-ui-helpers! u)
-      (repl/install-repl-helpers! u)
-      (fcontainer/install-container-helpers! u)
-      (ctx/install-ctx-helpers! u ctx-fn)
-      (when-let [imh (try (requiring-resolve 'seon.code.migrate/install-user-helpers!) (catch Throwable _ nil))]
-        (imh u ctx-fn ctx/refresh-active!))
-      (doseq [sym ['seon.task.gate/install-user-helpers!
-                   'seon.render.print/install-user-helpers!
-                   'seon.signals.scoreboard/install-user-helpers!]]
-        (when-let [f (try (requiring-resolve sym) (catch Throwable _ nil))]
-          (f u ctx-fn)))
-      (when-let [ist (try (requiring-resolve 'seon.render.status/install-user-helpers!) (catch Throwable _ nil))]
-        (ist u)))))
-
-(defn ^:seon.flow/edge conn
-  "Returns the current agent branch Datahike connection."
-  {:seon.repl/export ['conn 'conn-of] :malli/schema [:=> [:cat] :any]}
-  []
-  (:conn *agent-ctx*))
-
-(defn ^:seon.flow/edge db
-  "Returns the current branch Datahike DB value (`@conn`)."
-  {:seon.repl/export true :malli/schema [:=> [:cat] :any]}
-  []
-  (when-let [c (:conn *agent-ctx*)] @c))
 
 (defn ^:seon.flow/edge main-db
   "Returns the current `:main` branch Datahike DB value."

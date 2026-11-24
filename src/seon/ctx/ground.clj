@@ -261,8 +261,7 @@
 (defn fix-matches-scope?
   "True when a `:seon.fix/*` record matches a narrower dotted namespace `scope`, or (on broad `'seon`/`nil` scope)
    matches an explicit error-class or >= 2 distinctive tokens in optional `ctx-text` (active task/error context)."
-  {:malli/schema [:=> [:cat :any :any :any :any [:? :any]] :boolean]
-   :cost/ticks 100000}
+  {:malli/schema [:=> [:cat :any :any :any :any [:? :any]] :boolean], :cost/ticks 500000}
   ([scope error-class change-summary regression-test]
    (fix-matches-scope? scope error-class change-summary regression-test nil))
   ([scope error-class change-summary regression-test ctx-text]

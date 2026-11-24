@@ -397,7 +397,7 @@
     (let [rt (or (:rule-trace wire) ctx-trace)
           tiles (take 6 (:tiles wire))
           explained (:explained wire)
-          kv (or (:kv-cache wire) (scache/analyze-wire-cache nil nil viewing-id wire))
+          kv (or (:kv-cache wire) (when (qualified-keyword? viewing-id) (scache/analyze-wire-cache nil nil viewing-id wire)) {})
           walk-c (scache/analyze-walk-cache walk-summary)
           sb (or (:scoreboard wire) {:level :calm :precision 0.0 :token-precision 0.0 :recall 0.0 :f1 0.0 :recall-gap-count 0})
           lp (or (:lab-prefs wire) (rdata/normalize-lab-prefs nil))

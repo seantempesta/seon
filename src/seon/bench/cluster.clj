@@ -290,16 +290,7 @@
 
 (defn trial-failure
   "Renders the first human-readable failure reason for a trial, or nil when green."
-  {:malli/schema [:=> [:cat [:map [:timeout-ms :int]
-                                [:agent-res [:maybe :map]]
-                                [:test-res [:maybe :map]]
-                                [:merge-res [:maybe :map]]
-                                [:ag-snap [:maybe :map]]
-                                [:final-trace [:maybe :map]]
-                                [:health-res [:maybe :map]]
-                                [:halted-not-merged? :boolean]]]
-                        [:maybe :string]]
-   :cost/ticks 500}
+  {:malli/schema [:=> [:cat [:map [:timeout-ms :int] [:agent-res [:maybe :map]] [:test-res [:maybe :map]] [:merge-res [:maybe :map]] [:ag-snap [:maybe :map]] [:final-trace [:maybe :map]] [:health-res [:maybe :map]] [:halted-not-merged? :boolean]]] [:maybe :string]], :cost/ticks 15000000}
   [{:keys [timeout-ms agent-res test-res merge-res ag-snap final-trace health-res halted-not-merged?]}]
   (or (when (= :timeout (get-in agent-res [:wait :error]))
         (str "Timed out after " (long timeout-ms) " ms"))

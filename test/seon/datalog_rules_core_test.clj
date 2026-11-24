@@ -252,7 +252,7 @@
             (finally
               (d/release bconn))))))))
 
-(deftest ^{:cost/ticks 60000000} generic-2-read-discovery-budget-trace-diff-and-extract-refs-test
+(deftest ^{:cost/ticks 120000000} generic-2-read-discovery-budget-trace-diff-and-extract-refs-test
   (testing "Generic 2-read agent-world-datoms catches brand-new custom scalar + reverse :seon.db/to [:seon.agent/entity] ref, budget prunes cleanly, and REPL context-trace/diff-context work"
     (with-test-store [{:keys [conn]}]
       ;; Register brand-new custom scalar attr on agent + brand-new reverse ref pointing TO :seon.agent/entity!

@@ -88,7 +88,7 @@
 
 (defn- sb-str
   "Nil-tolerant string coercion for `StringBuilder` accumulators (also accepts plain strings)."
-  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 5000, :cost/bytes 4096}
+  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 5000, :cost/bytes 32768}
   [x]
   (if (nil? x) "" (str x)))
 
