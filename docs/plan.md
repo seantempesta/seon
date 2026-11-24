@@ -5,10 +5,10 @@ This document tracks what is shipped on `main` and what is next, kept synchroniz
 ## Phase 1 — Lean Core, Health, Living Canvas & Atomic Switch-Over (Shipped)
 
 - [x] Static Flow graph + 1-thread COW `ForkParent` + persistent multi-turn agent workers with LRU eviction and lazy `:main` delta sync.
-- [x] 100% Malli-derived Datahike schemas (`resources/seon/schemas.edn`, `370` schemas / `654` derived attributes, `249` mined examples, write-seam rail, `seed = 42` generative checks).
+- [x] 100% Malli-derived Datahike schemas (`resources/seon/schemas.edn`, `388` schemas / `664` derived Datahike schema entries `[M]`, write-seam rail, `seed = 42` generative checks).
 - [x] Declarative Disk <-> Datahike <-> Git persistence (`seon.code.files`) + mechanical Conventional-Commit merge messages (`seon.git/format-merge-commit-message`) + inside-Seon fork indexing & pushing (`seon.git.forks`, `:op :index-forks`, `./bin/seon push`).
-- [x] Native Datahike `d/q` + `d/pull` incremental rule engine (`seon.rule`, `32` editable `:seon.rule/*` entities) + 3-signal rank + dual-target Complete-Thought Upgrade Ladder (`seon.render.fit`) driving `:canvas`, `:workspace`, `:debug`, and OpenAI Wire `<walk-context>`.
-- [x] Data-driven `:seon.route/*` Reitit SSR/SPA router (`26` bookmarkable routes), Everyday vs Expert UI toggle, sanitized SVG live status cards (`user/set-status!`), JIT Datalog primers (`docs/primers.md`), and unified zero-dep Hiccup->text (`seon.render.text`).
+- [x] Native Datahike `d/q` + `d/pull` incremental rule engine (`seon.rule`, `47` editable `:seon.rule/*` entities `[M]`) + 3-signal rank + dual-target Complete-Thought Upgrade Ladder (`seon.render.fit`) driving `:session`, `:context`, `:system`, `:inspect` (plus legacy `:canvas`, `:workspace`, `:debug`), and OpenAI Wire `<walk-context>`.
+- [x] Data-driven `:seon.route/*` Reitit SSR/SPA router (`seon.web.router`), Everyday vs Expert UI toggle, sanitized SVG live status cards (`user/set-status!`), JIT Datalog primers (`docs/primers.md`), and unified zero-dep Hiccup->text (`seon.render.text`).
 - [x] Pure derived Health engine (`seon.health.*`, cold `report` `246.3 MB < 256 MB` via content-addressed `:seon.code.ns/{forms-hash,unused-requires}` + parse-time form metrics) + LPT `:slow`-tier sharded reach tests (`seon.test`, `seon.test.lpt`) + O(1) `datahike.db/equiv-db` + zero-downtime `--take-over 9998`.
 
 ## Phase 2 — Parallel Isolated Benchmarks, Harbor Host-Bridge & `:seon.fix/*` Loop (Shipped)
@@ -20,12 +20,13 @@ This document tracks what is shipped on `main` and what is next, kept synchroniz
 ## Phase 3 — Active Priorities (Codebase Unification & Recursive Self-Improvement)
 
 - [x] **End-of-Eval Auto-Proofs & Trace Class Fixes (Wave D3 + E0):** Non-blocking `run-fast-auto-proofs!` honoring `^:seon.flow/edge`, `24k` verbatim eval/stdout cap, target-ns `::alias/kw` parsing in `add-fn!`/`set-meta!`, `:ex-data` Malli sub-schema hints, `@(user/db)` recovery hints, +1 wrap-up grace turn.
-- [x] **Accretive `:db.type/ref` Domain Graph & Unified Hiccup Tails (Wave D1):** `:seon.agent/parent-ref`, `:seon.agent.call/{caller,callee,task}-ref`, `:rule.ctx/delegation-tree`, and pure Hiccup `<ephemeral-tail>`.
-- [ ] **Declarative `^:seon.repl/export` REPL Helper Registry (Audit Wave E2-A):** Replace `756 LOC` across `11` imperative `install-*-helpers!` closures (retiring `install-agent-helpers!` `278L` and `install-call-and-ui-helpers!` `265L`) so every `user/*` helper is directly inspectable & testable.
-- [ ] **Context & Printer Convergence (Audit Wave E3):** Collapse `related-updates` onto `gather-agent-candidates` + `fit-projections`, make rule pre-skip data-driven via `query-meta`, collapse 6 `seon.render.print.*` files into 2, and purge remaining dead vars & pass-through facades.
+- [x] **Accretive `:db.type/ref` Domain Graph & Unified Hiccup Tails (Wave D1):** `:seon.agent/parent-ref`, `:seon.agent.call/{caller,callee,task}-ref`, `:rule.ctx/delegation-tree`, and pure Hiccup `<ephemeral-tail>` (`seon.render.tails`).
+- [x] **Declarative `^:seon.repl/export` REPL Helper Registry (Audit Wave E2-A):** Replaced imperative `install-*-helpers!` closures with `30` directly inspectable `^:seon.repl/export` vars (`seon.fork.helpers`).
+- [x] **Self-Assembling Graph Agents, Structured EDN Eval Output, Derived Touches & Forked Review Gates:** Retired `:seon.agent/role`, `:seon.agent/prefix-mode`, scalar `:seon.agent/task`, untyped `:seon.agent/memory`, arbitrary caps, fake `; ` comment eval returns (`seon.model.wire/format-eval-output` EDN maps), and persisted `:seon.agent.eval/touched` / `:touched-refs` LMDB writes (`seon.ctx.touches/derived-agent-touches`); shipped unified graph-driven agent prefixes (`seon.model.messages/render-prefix-agents`), verifiable forked review proofs (`seon.task.gate/evaluate-review-outcome`), and bounded 6-turn auto-merge cutoffs (`seon.task.gate/review-cutoff-ops`).
+- [ ] **Context & Printer Convergence (Audit Wave E3):** Retire remaining `seon.ctx/related-updates` callers onto `seon.ctx/gather-agent-candidates` + `seon.render.fit/fit-projections`, make rule pre-skip data-driven via `seon.rule/query-meta`, collapse `seon.render.print.*` files, and purge remaining dead vars.
 - [ ] **Graph Density & Turn-0 Predictive Recall (`45% -> 80%+`):** Replace opaque `:map` signatures with named `:seon.*/*` schemas and wire EmbeddingGemma-2 (`seon.vector`) into Turn-0 candidate ranking.
 - [ ] **Autonomous Trace-to-Fix Meta-Loop & Multi-File Delegation Benchmarks:** Run scheduled meta-diagnosis over `:learning-metrics` + chronological traces, verify fixes via isolated A/B `seon.bench.cluster` trials, and benchmark hierarchical `:agent/root` -> `:ns/*` cross-namespace features.
-- [ ] **Split Final 3 Non-Installer `:large-function`s (`handle-call-op!`, `main/-main`, `main/start-flow-instance!`)** to reach `0` `:large-function` warnings system-wide.
+- [ ] **Eliminate Remaining `:oversized-namespace` & `:large-function` Warnings** across `src/` so full `(user/health :all)` hits `0` size advisories.
 
 ## Phase 4 — Deferred
 

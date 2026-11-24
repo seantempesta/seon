@@ -6,11 +6,11 @@ Every agent reads this page whole before any work: external agent sessions direc
 
 **A user's request, however rough, becomes a task, an agent works it, and the only finish is its change merged into `:main`.**
 
-*Why.* Seon is an assembly line for software. Every worker agent has a `:seon.task/*` entity and a namespace scope; agents differ only by their task, their scope, and the data their pulls read, which is their context. A stuck or slow trajectory is audited into a class fix recorded in `:seon.fix/*` so every future task takes fewer turns.
+*Why.* Seon is an assembly line for software. Every worker agent has `:seon.agent/tasks` entities and a namespace scope; agents differ only by their graph edges, their scope, and the data their pulls read, which is their context. A stuck or slow trajectory is audited into a class fix recorded in `:seon.fix/*` so every future task takes fewer turns.
 
 *Rules out.* Counting landings, tests, or lines as progress. Rigging benchmark tasks with spoon-fed recipes or schemas instead of fixing general context and helpers ([bench](bench.md#no-rigging-discipline-owner-ruling-2026-11-20)). Scoring a task that never merged (or halted on proxy budget/error) as a pass. Carrying on over a broken system invariant instead of fixing its cause first.
 
-*Enforced by:* `seon.bench.cluster/run-parallel-trial!` (`:require-merge? true` for `:task` trials), `seon.health.metrics/agent-learning-metrics`, `:seon.bench.run/*` live monitor tiles (`seon.render.tiles/bench-run-tile`), and `:seon.fix/*` class-fix records ([bench](bench.md)).
+*Enforced by:* `seon.bench.cluster/run-parallel-trial!` (`:require-merge? true` for `:task` trials), `seon.health.metrics/agent-learning-metrics`, `:seon.bench.run/*` live monitor cards (`seon.render.entities.work/render-bench-run-card`), and `:seon.fix/*` class-fix records ([bench](bench.md)).
 
 ## 2. There is only the Seon agent
 
@@ -46,7 +46,7 @@ Every agent reads this page whole before any work: external agent sessions direc
 
 **Almost everything is immutable data, safe to share, cache, and pass anywhere; the few places that meet a changing world each have one owner, built so the failure cannot happen, and everything after them stays plain.**
 
-- **Effects & state:** One static Flow graph (`seon.main`, [architecture](architecture.md#2-static-flow-graph-cow-fork-parent-seon-main-seon-fork-seon-agents)); blocking I/O and external boundaries are explicitly marked `^:seon.flow/edge` and answer errors as data.
+- **Effects & state:** One static Flow graph (`seon.main`, [architecture](architecture.md#2-static-flow-graph-cow-fork-parent-seon-main-seon-fork-seon-agent)); blocking I/O and external boundaries are explicitly marked `^:seon.flow/edge` and answer errors as data.
 - **Writes & merges:** Every Datahike transaction passes `seon.store/validate-tx-data!` against live Malli schemas; `:transactor` is the sole serialized writer of `:main`; merges run `seon.merge/three-way` and write back to local Git atomically.
 - **Code edits:** Top-level forms edit structurally via `rewrite-clj` (`seon.code.cst`, `seon.code.edit`), validate Malli schemas upfront, and topologically order intra-namespace forms automatically.
 - **Cold boot & switch-over:** `seon.main/sync-cold-boot-forms!` overlays post-AOT `src/` and `test/` forms in dependency order; `:boot-affected?` merges trigger automatic `bin/build seon` -> `--self-test` -> drain -> `--take-over`.

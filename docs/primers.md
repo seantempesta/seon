@@ -41,7 +41,7 @@ Just-in-time behavioral primers projected dynamically into agent context via dec
 - Always conclude with a clear, honest plain-prose reply (marked with observed `[M]` evidence) so the user knows exactly what was proved and done.
 ## History & Time-Travel
 - Compacted (retracted) turns omit earlier tool calls/outputs from prompt history, while branch code, schemas, and runtime defs remain cumulative.
-- Missing turn numbers (`turn 1` -> `turn 5`) show exactly which turns were compacted; full datoms remain intact in Datahike history.
+- Gaps in `:seon.eval/turn` numbers (`1` -> `5`) show exactly which turns were compacted; full datoms remain intact in Datahike history.
 - Inspect omitted evals via `(user/past-evals {:limit 15 :grep "..."})` or `(seon.store/agent-historical-evals (user/db) (:seon.agent/id @ctx))`.
 - Time-travel any DB snapshot before a retraction with `(user/as-of tx)` or `(d/history (user/db))` and `(user/history (quote ns/fn))`.
 ## Ctx Atom
@@ -49,8 +49,16 @@ Just-in-time behavioral primers projected dynamically into agent context via dec
 - Read selectively (`(keys @ctx)`, `(:seon.agent/tasks @ctx)`, `(mapv :seon.agent.eval/turn (:seon.agent.eval/_agent-ref @ctx))`) rather than printing the entire deref.
 - Mutate via plain Clojure `(swap! ctx ...)`: `assoc` scalar attrs, `update` `:seon.agent/pinned` or `:seon.agent/curated`, or `filterv` `:seon.agent.eval/_agent-ref` (dropped maps transact `[:db/retractEntity eid]` automatically via `seon.ctx.tree/diff-entity-tx`).
 - On forked agents, `(:seon.agent/forked-from @ctx)` expands the parent agent subtree, so `(swap! ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] ...)` edits parent evals directly; for bulk/cross-entity updates or sets like `:seon.agent/tasks`, use `(user/transact! [...])` + `d/q` / `d/pull`.
-History & Time-Travel
-- Compacted (retracted) turns omit earlier tool calls/outputs from prompt history, while branch code, schemas, and runtime defs remain cumulative.
-- Gaps in `:seon.eval/turn` numbers (`1` -> `5`) show exactly which turns were compacted; full datoms remain intact in Datahike history.
-- Inspect omitted evals via `(user/past-evals {:limit 15 :grep "..."})` or `(seon.store/agent-historical-evals (user/db) (:seon.agent/id @ctx))`.
-- Time-travel any DB snapshot before a retraction with `(user/as-of tx)` or `(d/history (user/db))` and `(user/history (quote ns/fn))`.
+## Writing General Rules & Renderers
+- **Diagnose what an agent saw and why before editing:**
+  - `(user/context-trace)` (or `(user/context-trace :agent/id {:target :wire :token-budget 16000})`) shows every fired/skipped `:seon.rule/*` rule, `datahike.reads` skip count, 2-read world datoms, merged pull pattern, and fitted blocks.
+  - `(user/diff-context rules-a rules-b)` A/B diffs projected entities, pull patterns, and token budgets between rule sets without guessing.
+  - `(seon.render.fit/explain-candidates (user/db) candidates {:target :wire})` and `(seon.render.fit/explain-entity-fit (user/db) ref {:target :wire})` expose 3-signal ranking scores, every discovered renderer variation, measured `:tokens`/`:area`/`:min-width`, and exact selection or drop reasons.
+- **Write general Datalog `:seon.rule/*` rules (`user/put-rule!`, persisted to `resources/seon/rules.edn`):**
+  - Query over `$main`, `$branch`, and `$wm` (plus `?agent` and shared `%` rules such as `calls*`, `needs*`, `compatible-fn`, `render-fn`, `schema-doc`, `var-doc`), joining real schema and `:db.type/ref` graph edges or working-memory facts so rules compound across tasks.
+  - **Never hardcode** specific entity names, task IDs, retired role/mode enums (`:seon.agent/role`, `:seon.agent/prefix-mode`), or arbitrary truncation caps.
+  - Emit dynamic turn-by-turn signals (errors, diagnostics, nudges, compaction hints) in `:zone :ephemeral-tail` so the merge-base-anchored `<walk-context>` KV-cache prefix stays pinned (`:zone :static-prefix` is reserved for stable session anchors).
+- **Write pure `ns-map -> ns-map` `:seon.ui/hiccup` renderers:**
+  - Define pure, non-private, non-`^:seon.flow/edge` `defn`s with `:malli/schema [:=> [:cat [:map [:my.ns/entity :my.ns/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]` (declare any situational rule `:params` as optional keys in the input map, and set realistic `:cost/ticks`).
+  - Provide compact, medium, and full footprints (`-chip` ~180px, `-row` ~220px, `-card` ~360px, `-full` ~540px) with `:data-min-width` / `:seon.ui/min-width` hints so `seon.render.fit/discover-renderers` and `seon.render.fit/upgrade-ladder` auto-discover and fit them in **both** LLM wire context (`:target :wire`) and the Web UI (`:target :html`) with zero manual wiring.
+- **Core invariant:** Always fix the underlying data model, general rule, or pure renderer so every future agent benefits — never patch a single agent instance or add caller guards. Verify green with `(user/run-tests!)` and `(user/health)` (`0` errors, `0` `:broken-doc-ref`, `0` `:unused-require`), then finish cleanly via `(user/finish-review! summary)` (or `(user/ready!)`).
