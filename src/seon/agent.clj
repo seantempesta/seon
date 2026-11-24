@@ -150,15 +150,15 @@
 
 (defn- handle-eval
   [st tick msg]
-  (let [{:keys [branch agent-id code tool-calls ns keep-warm? reply-ch]} msg
-        raw-b (or branch :branch/repl)
-        b (if (= raw-b :main) :branch/repl raw-b)
-        aid (or agent-id (keyword "repl" (name b)))
-        _ (store/branch! (:conn st) :main b)
-        rseq (inc (:req-seq st))
-        req-id (str "eval-" rseq)
-        existing (get-in st [:live aid])
-        keep? (if (some? keep-warm?) keep-warm? (some? agent-id))]
+  (let [{:keys [branch agent-id agent code tool-calls ns keep-warm? reply-ch]} msg
+       raw-b (or branch :branch/repl)
+       b (if (= raw-b :main) :branch/repl raw-b)
+       aid (or agent-id agent (keyword "repl" (name b)))
+       _ (store/branch! (:conn st) :main b)
+       rseq (inc (:req-seq st))
+       req-id (str "eval-" rseq)
+       existing (get-in st [:live aid])
+       keep? (if (some? keep-warm?) (boolean keep-warm?) true)]
     (cond
       (and existing (number? (:pid existing)) (not (:busy? existing)))
       (do
