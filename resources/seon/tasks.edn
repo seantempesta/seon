@@ -127,6 +127,12 @@
   :seon.task/scope seon.repl,
   :seon.task/title "Split seon.repl below the 8k token namespace budget"}
  {:seon.task/done? false,
+  :seon.task/id :seon.repl/warm-eval-and-context,
+  :seon.task/plan "bin/seon eval omits :agent-id so handle-eval kills the COW worker after every call, breaking result/e<n>, wiping REPL defs, and forcing cold 130+ MB cache rebuilds. Default keep-warm? to true for REPL evals (bounded by existing LRU eviction), normalize :agent -> :agent-id in eval-route, and verify warm reuse and result/e<n> across consecutive :eval calls.",
+  :seon.task/scope seon.agent,
+  :seon.task/tests #{seon.agent-test/repl-eval-keeps-worker-warm-and-persists-results},
+  :seon.task/title "Keep REPL eval workers warm by default and normalize :agent/:context on /op :eval"}
+ {:seon.task/done? false,
   :seon.task/id :seon.test-runner/end-of-eval-auto-proofs,
   :seon.task/plan "Automatically run declared :seon.task/tests and edited :malli/schema seed=42 generative checks at the end of an agent eval block (non-blocking, surfaced in the ephemeral tail), and add an ephemeral COW merge-preview delta test when :main moved since branch base.",
   :seon.task/scope seon.test,
