@@ -2,7 +2,9 @@
   "First-class `:seon.error/*` entities, queries, classifier, renderer, and rules."
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
-            [datahike.api :as d]))
+            [datahike.api :as d]
+            [seon.rule :as rules]
+            [seon.rule.seed :as rseed]))
 
 (defn resolve-error-tx
   "Tx map resolving `[:seon.error/id err-id]`."
@@ -105,38 +107,6 @@
         (when dstr [:pre {:class "code-box tiny"} [:code (clip dstr 1200)]])
         (when (seq (:why opts)) [:p {:class "tiny muted"} (if (string? (:why opts)) (:why opts) (str/join " · " (:why opts)))])]))))
 
-(defn error-rules
-  "Declarative `:seon.rule/*` rules for errors and backpressure."
-  {:malli/schema [:=> [:cat] [:vector :seon.rule/entity]] :cost/ticks 1000000}
-  []
-  (let [r (fn [id c s q a] {:seon.rule/id id :seon.rule/category c :seon.rule/stratum s :seon.rule/enabled? true :seon.rule/target :any :seon.rule/query q :seon.rule/assert a})]
-    [(r :rule.error/surface-open-agent-error :health 15
-        '[:find ?v ?err ?aid ?kind ?sev ?msg ?why
-          :in $main $wm
-          :where [$wm ?v :ctx/viewer ?aid]
-                 [$main ?err :seon.error/status :open]
-                 [$main ?err :seon.error/agent ?aid]
-                 [$main ?err :seon.error/kind ?kind]
-                 [$main ?err :seon.error/severity ?sev]
-                 [$main ?err :seon.error/message ?msg]
-                 [(str "Open error on " ?aid ": " ?kind) ?why]]
-        '[[?v :rel/open-error ?err] [?v :error/has-open-error? true] [?err :ctx/kind :seon.error/entity] [?err :ctx/source :rule]
-          [?err :seon.error/agent ?aid] [?err :seon.error/kind ?kind] [?err :seon.error/severity ?sev] [?err :seon.error/message ?msg]
-          [?err :ctx/score 0.99] [?err :view/tag :tag/open-error] [?err :ctx/why ?why]])
-     (r :rule.error/rate-limit-backpressure :health 25
-        '[:find ?v ?err ?retry-ms
-          :in $main $wm
-          :where [$wm ?v :ctx/viewer ?aid]
-                 [$main ?err :seon.error/status :open]
-                 [$main ?err :seon.error/kind :model/rate-limit]
-                 [(get-else $main ?err :seon.error/data {}) ?data]
-                 [(get ?data :retry-after-ms 0) ?retry-ms]]
-        '[[?v :error/backpressure? true] [?v :error/backpressure-kind :model/rate-limit] [?v :error/backpressure-error ?err]
-          [?v :error/retry-after-ms ?retry-ms] [?err :view/tag :tag/rate-limit-backpressure] [?err :ctx/why "Model 429 backpressure active"]])
-     (r :rule.view/default-error :present 40
-        '[:find ?e :in $wm :where [$wm ?e :ctx/kind :seon.error/entity] [$wm ?e :ctx/score _]]
-        '[[?e :view/fn seon.error/render] [?e :view/zone :ephemeral-tail] [?e :view/layout :expanded-card] [?e :view/priority 98]])]))
-
 (defn- store-ref? [x]
   (or (integer? x) (and (string? x) (not (str/blank? x)))
       (and (vector? x) (= 2 (count x)) (qualified-keyword? (first x)))
@@ -211,3 +181,17 @@
              (first (d/datoms db :avet :seon.agent/id aid)))
       (assoc err-ent :seon.error/agent-ref [:seon.agent/id aid])
       err-ent)))
+
+(defn- error-starter-rules []
+  (filterv #(= "rule.error" (namespace (:seon.rule/id %))) (rseed/starter-rules)))
+
+(defn error-rules
+  "Declarative `:rule.error/*` rules projected from `resources/seon/rules.edn` (via `seon.rule/load-rules`)."
+  {:malli/schema [:function
+                  [:=> [:cat] [:vector :seon.rule/entity]]
+                  [:=> [:cat [:maybe :seon.host/db]] [:vector :seon.rule/entity]]]
+   :cost/ticks 2000000}
+  ([] (error-rules nil))
+  ([db]
+   (filterv #(= "rule.error" (namespace (:seon.rule/id %)))
+            (rules/load-rules db (error-starter-rules)))))

@@ -57,7 +57,6 @@
     (quote seon.web/inspect-forward!)
     (quote seon.web/set-view-mode!)
     (quote seon.web/view-agent!)
-    (quote seon.web/send-message!)
     (quote seon.web/toggle-expert-mode!)
     (quote seon.web/eval-snippet!)})
 

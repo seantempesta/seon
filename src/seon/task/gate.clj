@@ -5,7 +5,8 @@
             [seon.rule :as rules]
             [seon.store :as store]
             [seon.rule.seed :as rseed]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.reconciler.policy :as policy]))
 
 (defn- eid-of [db a v]
   (when (and db (some? v) (get-in db [:schema a]))
@@ -31,46 +32,6 @@
   (if-let [eid (eid-of db :seon.agent/id agent-id)]
     (vec (distinct (agent-ref-tasks db agent-id)))
     []))
-
-(defn gate-rules
-  "Declarative `:seon.rule/*` rules (`:rule.gate/task-needs-open`, `:rule.gate/test-missing`,
-   `:rule.gate/test-failing`, `:rule.gate/agent-blocked`) deriving `:gate/blocker` facts."
-  {:malli/schema [:=> [:cat] [:vector :map]]
-   :cost/ticks 500000}
-  []
-  (let [b {:seon.rule/category :health :seon.rule/enabled? true :seon.rule/target :any}]
-    [(assoc b :seon.rule/id :rule.gate/task-needs-open :seon.rule/stratum 20
-            :seon.rule/doc "Block task when any :seon.task/needs prerequisite is open."
-            :seon.rule/query '[:find ?t ?need :in $wm :where [$wm ?t :gate/needs ?need] (not [$wm ?need :gate/task-done? true])]
-            :seon.rule/assert '[[?t :gate/blocked? true]
-                                [?t :gate/blocker {:task ?t :reason :task-needs-open :detail {:need ?need}}]])
-     (assoc b :seon.rule/id :rule.gate/test-missing :seon.rule/stratum 20
-            :seon.rule/doc "Block task when a required test var or verdict is missing."
-            :seon.rule/query '[:find ?t ?sym ?cause :in $wm
-                               :where [$wm ?t :gate/requires-test ?sym]
-                                      (or-join [?sym ?cause]
-                                        (and (not [$wm ?sym :gate/var-exists? true]) [(ground :var-missing) ?cause])
-                                        (and [$wm ?sym :gate/var-exists? true] (not [$wm ?sym :gate/latest-pass? _]) [(ground :verdict-missing) ?cause]))]
-            :seon.rule/assert '[[?t :gate/blocked? true]
-                                [?t :gate/blocker {:task ?t :reason :test-missing :detail {:var ?sym :cause ?cause}}]])
-     (assoc b :seon.rule/id :rule.gate/test-failing :seon.rule/stratum 20
-            :seon.rule/doc "Block task when a required test var's latest digest failed."
-            :seon.rule/query '[:find ?t ?sym ?dg ?rep :in $wm
-                               :where [$wm ?t :gate/requires-test ?sym]
-                                      [$wm ?sym :gate/var-exists? true]
-                                      [$wm ?sym :gate/latest-pass? false]
-                                      (or-join [?sym ?dg]
-                                        [$wm ?sym :gate/latest-digest ?dg]
-                                        (and (not [$wm ?sym :gate/latest-digest _]) [(ground :seon.rule/nil) ?dg]))
-                                      (or-join [?sym ?rep]
-                                        [$wm ?sym :gate/latest-report ?rep]
-                                        (and (not [$wm ?sym :gate/latest-report _]) [(ground :seon.rule/nil) ?rep]))]
-            :seon.rule/assert '[[?t :gate/blocked? true]
-                                [?t :gate/blocker {:task ?t :reason :test-failing :detail {:var ?sym :digest ?dg :report ?rep}}]])
-     (assoc b :seon.rule/id :rule.gate/agent-blocked :seon.rule/stratum 30
-            :seon.rule/doc "Block agent whenever any assigned task is blocked."
-            :seon.rule/query '[:find ?ag ?b :in $wm :where [$wm ?ag :gate/assigned-task ?t] [$wm ?t :gate/blocked? true] [$wm ?t :gate/blocker ?b]]
-            :seon.rule/assert '[[?ag :gate/blocked? true] [?ag :gate/blocker ?b]])]))
 
 (defn- tagged-dbs [mdb bdb]
   (cond-> [] mdb (conj [:main mdb]) (and bdb (not= bdb mdb)) (conj [:branch bdb])))
@@ -98,35 +59,8 @@
              (when-not (contains? keep-set tid) [:db/retract [:seon.agent/id aid] :seon.agent/tasks [:seon.task/id tid]]))
           (d/datoms db :eavt eid :seon.agent/tasks))))
 
-(defn- try-resolve [sym] (try (requiring-resolve sym) (catch Throwable _ nil)))
-
-(defn- assign-tasks-impl [get-ctx raw-args]
-  (when-let [{:keys [conn agent-id in out]} (get-ctx)]
-    (let [step (fn s [x] (cond (nil? x) nil
-                               (and (vector? x) (= :seon.task/id (first x))) [(second x)]
-                               (coll? x) (mapcat s x) :else [x]))
-          tids (->> raw-args (mapcat step) (filter qualified-keyword?) distinct vec)]
-      (if (empty? tids)
-        {:ok? false :error "Provide at least one :seon.task/id keyword."}
-        (let [bdb @conn mdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)
-              pull-t #(when-let [e (eid-of %1 :seon.task/id %2)] (d/pull %1 '[:seon.task/id :seon.task/title :seon.task/scope] e))
-              found (mapv #(vector % (or (when-let [e (pull-t bdb %)] [:branch e]) (when-let [e (pull-t mdb %)] [:main e]))) tids)
-              missing (vec (keep (fn [[tid f]] (when-not f tid)) found))]
-          (if (seq missing)
-            {:ok? false :error (str "Task(s) not found: " (pr-str missing)) :missing missing}
-            (let [seed-tx (for [[_ [src e]] found :when (= :main src)]
-                            (cond-> {:seon.task/id (:seon.task/id e) :seon.task/title (or (:seon.task/title e) (name (:seon.task/id e)))}
-                              (:seon.task/scope e) (assoc :seon.task/scope (:seon.task/scope e))))
-                  scope (:seon.task/scope (second (second (first found)))) kset (set tids)
-                  mk (fn [ts] (cond-> {:seon.agent/id agent-id :seon.agent/tasks (mapv #(vector :seon.task/id %) ts)} scope (assoc :seon.agent/scope scope)))
-                  r (d/transact conn {:tx-data (vec (concat seed-tx (stale-retracts bdb agent-id kset) [(mk tids)]))})]
-              (when-let [rf (try-resolve 'seon.ctx/refresh-active!)] (rf (:db-after r) (:tx-data r)))
-              (when (and in out (eid-of mdb :seon.agent/id agent-id))
-                (when-let [sf (try-resolve 'seon.fork.calls/tx-main-sync!)]
-                  (when-let [mt (seq (filter #(eid-of mdb :seon.task/id %) tids))]
-                    (sf {:op :transact :reason [:assign-tasks agent-id (vec mt)]
-                         :tx-data (vec (concat (stale-retracts mdb agent-id kset) [(mk mt)]))}))))
-              {:ok? true :agent-id agent-id :task (first tids) :tasks tids :scope scope})))))))
+(defn- ^:seon.flow/edge try-resolve [sym]
+  (try (requiring-resolve sym) (catch Throwable _ nil)))
 
 (defn task-required-test-syms
   "Returns sorted set of required test var symbols (`:seon.task/tests` + `:seon.task/test-vars`)."
@@ -218,7 +152,7 @@
    :cost/ticks 5000000}
   [main-db branch-db b agent-id head-tx inbox gate-notified-set]
   (when (and (not= b :main) (not (contains? gate-notified-set [agent-id head-tx :wrapup])))
-    (let [last-real (reduce #(if (= :turn-cap-wrapup (:seon.agent.message/type %2)) %1
+    (let [last-real (reduce #(if (policy/system-bounce-type? (:seon.agent.message/type %2)) %1
                                  (max %1 (long (or (:seon.agent.message/seq %2) 0))))
                             0 inbox)
           sent? (some #(and (= :turn-cap-wrapup (:seon.agent.message/type %))
@@ -229,19 +163,21 @@
          :body "Turn limit reached with unmerged edits on branch. Run final test check if needed and call (user/ready!) now."}))))
 
 (defn has-active-reviewer?
-"True when `agent-eid` has an unarchived, unmerged reviewer pointing at it via `:seon.agent/forked-from` or `:seon.agent/target`."
-{:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] :boolean]
- :cost/ticks 500000}
-[main-db agent-eid]
-(boolean
- (and (integer? agent-eid)
-      (let [dh (or (:schema main-db) {})
-            dts (concat (when (contains? dh :seon.agent/forked-from) (d/datoms main-db :avet :seon.agent/forked-from agent-eid))
-                        (when (contains? dh :seon.agent/target) (d/datoms main-db :avet :seon.agent/target agent-eid)))]
-        (some (fn [dt]
-                (let [ra (d/pull main-db '[:seon.agent/archived? :seon.agent/merged-tx] (:e dt))]
-                  (and (not (:seon.agent/archived? ra)) (nil? (:seon.agent/merged-tx ra)))))
-              dts)))))
+  "True when `agent-eid` has an unarchived, unpaused, unmerged reviewer pointing at it via `:seon.agent/forked-from` or `:seon.agent/target`."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] :boolean]
+   :cost/ticks 500000}
+  [main-db agent-eid]
+  (boolean
+   (and (integer? agent-eid)
+        (let [dh (or (:schema main-db) {})
+              dts (concat (when (contains? dh :seon.agent/forked-from) (d/datoms main-db :avet :seon.agent/forked-from agent-eid))
+                          (when (contains? dh :seon.agent/target) (d/datoms main-db :avet :seon.agent/target agent-eid)))]
+          (some (fn [dt]
+                  (let [ra (d/pull main-db (quote [:seon.agent/archived? :seon.agent/paused? :seon.agent/merged-tx]) (:e dt))]
+                    (and (not (:seon.agent/archived? ra))
+                         (not (:seon.agent/paused? ra))
+                         (nil? (:seon.agent/merged-tx ra)))))
+                dts)))))
 
 (defn compute-review-ops
   "Pure rule-driven review trigger & target auto-resume ops derived from `:seon.rule/*` entities asserting `:agent/needs-review` and `:seon.agent/target`."
@@ -302,39 +238,6 @@
               []))))
 
       :else [])))
-
-(defn review-cutoff-ops
-  "When a bounded `:seon.agent/merge-target` fork hits its turn cutoff and cannot auto-merge
-   (gate-blocked or failed test/merge conflict), pauses the fork and unpauses the target parent
-   with a `:review-note` so the parent never deadlocks."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :map]]
-   :cost/ticks 2000000}
-  [main-db ma {:keys [cutoff-reached? gate-ok? blockers unread]}]
-  (let [aid (:seon.agent/id ma)
-        mref (:seon.agent/merge-target ma)
-        teid (cond (integer? mref) mref (map? mref) (:db/id mref) :else nil)
-        fail-msg (some #(when (contains? #{:test-failure :merge-conflict :health-block}
-                                         (:seon.agent.message/type %))
-                          %)
-                       unread)]
-    (if-not (and cutoff-reached? (integer? teid) (or (not gate-ok?) (some? fail-msg)))
-      []
-      (let [ta (d/pull main-db '[:seon.agent/id :seon.agent/paused?] teid)
-            taid (:seon.agent/id ta)
-            reason-txt (cond
-                         fail-msg (str (name (:seon.agent.message/type fail-msg)) ": "
-                                       (first (str/split-lines (str (or (:seon.agent.message/body fail-msg) "")))))
-                         (seq blockers) (str/join "; " (map #(str (name (or (:reason %) :blocked))) blockers))
-                         :else "turn cutoff reached without mergeable proof")
-            note (str "Review " aid " hit its turn limit cutoff and skipped merging (" reason-txt
-                      "). Resuming your branch intact without unverified edits.")]
-        (cond-> [{:op :transact
-                  :tx-data (cond-> [{:seon.agent/id aid :seon.agent/paused? true
-                                     :seon.agent/summary (str "Turn cutoff reached; skipped merge (" reason-txt ").")}]
-                             (and taid (:seon.agent/paused? ta))
-                             (conj {:seon.agent/id taid :seon.agent/paused? false}))
-                  :reason [:review-cutoff-release aid taid]}]
-          taid (conj {:op :send-message :from aid :to taid :type :review-note :body note}))))))
 
 (defn ^:seon.flow/edge evaluate-review-outcome
   "Verifies a forked review agent's Datahike mutations since `:seon.agent/fork-commit`:
@@ -428,48 +331,94 @@
              :hijacked-target-ready? hijacked?
              :blockers blockers}))))))
 
+(defn- ^:seon.flow/edge safe-main-head [conn fallback]
+  (or (try (store/head conn :main) (catch Throwable _ nil)) fallback))
+
+(defn- assign-tasks-impl [get-ctx raw-args]
+  (when-let [{:keys [conn agent-id in out]} (get-ctx)]
+    (let [step (fn s [x] (cond (nil? x) nil
+                               (and (vector? x) (= :seon.task/id (first x))) [(second x)]
+                               (coll? x) (mapcat s x) :else [x]))
+          tids (->> raw-args (mapcat step) (filter qualified-keyword?) distinct vec)]
+      (if (empty? tids)
+        {:ok? false :error "Provide at least one :seon.task/id keyword."}
+        (let [bdb @conn mdb (safe-main-head conn bdb)
+              pull-t #(when-let [e (eid-of %1 :seon.task/id %2)] (d/pull %1 '[:seon.task/id :seon.task/title :seon.task/scope] e))
+              found (mapv #(vector % (or (when-let [e (pull-t bdb %)] [:branch e]) (when-let [e (pull-t mdb %)] [:main e]))) tids)
+              missing (vec (keep (fn [[tid f]] (when-not f tid)) found))]
+          (if (seq missing)
+            {:ok? false :error (str "Task(s) not found: " (pr-str missing)) :missing missing}
+            (let [seed-tx (for [[_ [src e]] found :when (= :main src)]
+                            (cond-> {:seon.task/id (:seon.task/id e) :seon.task/title (or (:seon.task/title e) (name (:seon.task/id e)))}
+                              (:seon.task/scope e) (assoc :seon.task/scope (:seon.task/scope e))))
+                  scope (:seon.task/scope (second (second (first found)))) kset (set tids)
+                  mk (fn [ts] (cond-> {:seon.agent/id agent-id :seon.agent/tasks (mapv #(vector :seon.task/id %) ts)} scope (assoc :seon.agent/scope scope)))
+                  r (d/transact conn {:tx-data (vec (concat seed-tx (stale-retracts bdb agent-id kset) [(mk tids)]))})]
+              (when-let [rf (try-resolve 'seon.ctx/refresh-active!)] (rf (:db-after r) (:tx-data r)))
+              (when (and in out (eid-of mdb :seon.agent/id agent-id))
+                (when-let [sf (try-resolve 'seon.fork.calls/tx-main-sync!)]
+                  (when-let [mt (seq (filter #(eid-of mdb :seon.task/id %) tids))]
+                    (sf {:op :transact :reason [:assign-tasks agent-id (vec mt)]
+                         :tx-data (vec (concat (stale-retracts mdb agent-id kset) [(mk mt)]))}))))
+              {:ok? true :agent-id agent-id :task (first tids) :tasks tids :scope scope})))))))
+
+(defn- gate-starter-rules []
+  (filterv #(= "rule.gate" (namespace (:seon.rule/id %))) (rseed/starter-rules)))
+
+(defn gate-rules
+  "Declarative `:rule.gate/*` rules projected from `resources/seon/rules.edn` (via `seon.rule/load-rules`)."
+  {:malli/schema [:function
+                  [:=> [:cat] [:vector :map]]
+                  [:=> [:cat [:maybe :seon.host/db]] [:vector :map]]]
+   :cost/ticks 2000000}
+  ([] (gate-rules nil))
+  ([db]
+   (filterv #(= "rule.gate" (namespace (:seon.rule/id %)))
+            (rules/load-rules db (gate-starter-rules)))))
+
 (defn evaluate-agent-gate
-"Evaluates `:rule.gate/*` via `seon.rule/step-rules` over all assigned tasks."
-{:malli/schema [:function
-                [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
-                [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map]] :map]]
- :cost/ticks 15000000}
-([main-db branch-db agent-id] (evaluate-agent-gate main-db branch-db agent-id nil))
-([main-db branch-db agent-id opts]
- (let [tdbs (tagged-dbs main-db branch-db)
-       tids (if (seq (:tasks opts))
-              (vec (distinct (:tasks opts)))
-              (vec (sort-by str (distinct (mapcat #(agent-ref-tasks (second %) agent-id) tdbs)))))]
-   (if (empty? tids)
-     {:ok? true :tasks [] :passed-tasks [] :blocked-tasks [] :blockers []}
-     (let [aid (or agent-id :gate/anonymous)
-         wm0 (seed-gate-wm tdbs aid tids opts)
-         pull-r #(when (eid-of %1 :seon.rule/id %2)
-                   (let [r (dissoc (d/pull %1 '[*] [:seon.rule/id %2]) :db/id)] (when (:seon.rule/id r) r)))
-         rules (or (seq (:rules opts))
-                   (mapv #(or (some (fn [[_ db]] (pull-r db (:seon.rule/id %))) (rseq (vec tdbs))) %) (gate-rules)))
-         dbs (cond-> {} main-db (assoc :main main-db) (or branch-db main-db) (assoc :branch (or branch-db main-db)))
-         wm (:wm (rules/step-rules nil wm0 dbs (vec rules) nil))
-         prov (:provenance wm)
-         ab (rules/wm-vals wm aid :gate/blocker)
-         rev-out (when (some #{:template/review-and-improve} tids)
-                   (evaluate-review-outcome main-db branch-db agent-id))
-         all-bs (concat
-                 (mapv #(if-let [rid (:rule (first (get prov [(:task %) :gate/blocker %])))] (assoc % :rule rid) %) ab)
-                 (:blockers rev-out))
-         bset (into #{} (keep :task) all-bs)
-         blockers (->> all-bs
-                       (sort-by #(vector (str (:task %)) (str (:reason %)) (pr-str (:detail %))))
-                       vec)]
-     (cond-> {:ok? (empty? bset) :tasks tids
-              :passed-tasks (filterv #(not (contains? bset %)) tids)
-              :blocked-tasks (filterv #(contains? bset %) tids)
-              :blockers blockers}
-       rev-out (assoc :review-outcome rev-out)))))))
+  "Evaluates `:rule.gate/*` via `seon.rule/step-rules` over all assigned tasks."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
+                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map]] :map]]
+   :cost/ticks 15000000}
+  ([main-db branch-db agent-id] (evaluate-agent-gate main-db branch-db agent-id nil))
+  ([main-db branch-db agent-id opts]
+   (let [tdbs (tagged-dbs main-db branch-db)
+         tids (if (seq (:tasks opts))
+                (vec (distinct (:tasks opts)))
+                (vec (sort-by str (distinct (mapcat #(agent-ref-tasks (second %) agent-id) tdbs)))))]
+     (if (empty? tids)
+       {:ok? true :tasks [] :passed-tasks [] :blocked-tasks [] :blockers []}
+       (let [aid (or agent-id :gate/anonymous)
+             wm0 (seed-gate-wm tdbs aid tids opts)
+             rs (or (seq (:rules opts))
+                    (if (and branch-db main-db (not (identical? branch-db main-db)))
+                      (filterv #(= "rule.gate" (namespace (:seon.rule/id %)))
+                               (rules/load-rules branch-db (gate-rules main-db)))
+                      (gate-rules (or branch-db main-db))))
+             dbs (cond-> {} main-db (assoc :main main-db) (or branch-db main-db) (assoc :branch (or branch-db main-db)))
+             wm (:wm (rules/step-rules nil wm0 dbs (vec rs) nil))
+             prov (:provenance wm)
+             ab (rules/wm-vals wm aid :gate/blocker)
+             rev-out (when (some #{:template/review-and-improve} tids)
+                       (evaluate-review-outcome main-db branch-db agent-id))
+             all-bs (concat
+                     (mapv #(if-let [rid (:rule (first (get prov [(:task %) :gate/blocker %])))] (assoc % :rule rid) %) ab)
+                     (:blockers rev-out))
+             bset (into #{} (keep :task) all-bs)
+             blockers (->> all-bs
+                           (sort-by #(vector (str (:task %)) (str (:reason %)) (pr-str (:detail %))))
+                           vec)]
+         (cond-> {:ok? (empty? bset) :tasks tids
+                  :passed-tasks (filterv #(not (contains? bset %)) tids)
+                  :blocked-tasks (filterv #(contains? bset %) tids)
+                  :blockers blockers}
+           rev-out (assoc :review-outcome rev-out)))))))
 
 (defn- gate-status-impl [get-ctx target-aid opts]
   (when-let [{:keys [conn branch agent-id]} (get-ctx)]
-    (let [bdb @conn mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))]
+    (let [bdb @conn mdb (if (= branch :main) bdb (safe-main-head conn bdb))]
       (evaluate-agent-gate mdb bdb (or target-aid agent-id) opts))))
 
 (defn install-user-helpers!
@@ -484,3 +433,57 @@
     (alter-meta! v1 merge {:arglists '([task-ids] [t1 t2 & more]) :doc "Assign 1..N :seon.task/id refs."})
     (alter-meta! v2 merge {:arglists '([] [agent-id] [agent-id opts]) :doc "Inspect :rule.gate/* proof gating."})
     [v1 v2]))
+
+(defn- resolve-review-target-eid [main-db ma]
+  (let [resolve-ref (fn [r]
+                      (cond
+                        (integer? r) r
+                        (and (map? r) (integer? (:db/id r))) (:db/id r)
+                        (and (vector? r) (= :seon.agent/id (first r))) (eid-of main-db :seon.agent/id (second r))
+                        (keyword? r) (or (eid-of main-db :seon.agent/id r)
+                                         (when (get-in main-db [:schema :seon.agent/branch])
+                                           (some #(when (= r (:v %)) (:e %))
+                                                 (d/datoms main-db :aevt :seon.agent/branch))))
+                        :else nil))]
+    (some resolve-ref [(:seon.agent/merge-target ma)
+                       (:seon.agent/forked-from ma)
+                       (:seon.agent/target ma)
+                       (:seon.agent/parent ma)])))
+
+(defn review-cutoff-ops
+  "When a bounded `:seon.agent/merge-target` reviewer aborts (`err-halted?`, bounce limit, total-turn limit,
+   or unmergeable cutoff), atomically pauses the reviewer and unpauses the target parent with a `:review-note`."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :map]]
+   :cost/ticks 2000000}
+  [main-db ma {:keys [cutoff-reached? review-abort? err-halted? bounce-streak turns-since-external
+                      gate-ok? blockers inbox unread last-error]}]
+  (let [aid (:seon.agent/id ma)
+        teid (resolve-review-target-eid main-db ma)
+        msgs (if (seq inbox) inbox unread)
+        trailing-bounces (vec (take-while #(policy/system-bounce-type? (:seon.agent.message/type %))
+                                          (reverse msgs)))
+        fail-msg (some #(when (contains? policy/failure-bounce-types (:seon.agent.message/type %)) %)
+                       trailing-bounces)
+        trigger? (or review-abort?
+                     (and cutoff-reached? (or (not gate-ok?) (some? fail-msg) (pos? (long (or bounce-streak 0))))))]
+    (if-not (and aid trigger?)
+      []
+      (let [ta (when (integer? teid) (d/pull main-db (quote [:seon.agent/id :seon.agent/paused?]) teid))
+            taid (:seon.agent/id ta)
+            reason-txt (cond
+                         err-halted? (str "model error halt: " (or (not-empty (str last-error)) "non-retryable or repeated model error"))
+                         fail-msg (str (name (:seon.agent.message/type fail-msg)) ": "
+                                       (first (str/split-lines (str (or (:seon.agent.message/body fail-msg) "")))))
+                         (seq blockers) (str/join "; " (map #(str (name (or (:reason %) :blocked))) blockers))
+                         (pos? (long (or bounce-streak 0))) (str "repeated system bounce limit (" bounce-streak ")")
+                         (pos? (long (or turns-since-external 0))) (str "turn budget exhausted (" turns-since-external " turns)")
+                         :else "turn cutoff reached without mergeable proof")
+            note (str "Review " aid " stopped and skipped merging (" reason-txt
+                      "). Resuming your branch intact without unverified edits.")]
+        (cond-> [{:op :transact
+                  :tx-data (cond-> [{:seon.agent/id aid :seon.agent/paused? true
+                                     :seon.agent/summary (str "Review aborted; skipped merge (" reason-txt ").")}]
+                             (and taid (:seon.agent/paused? ta))
+                             (conj {:seon.agent/id taid :seon.agent/paused? false}))
+                  :reason [:review-cutoff-release aid taid]}]
+          taid (conj {:op :send-message :from aid :to taid :type :review-note :body note}))))))

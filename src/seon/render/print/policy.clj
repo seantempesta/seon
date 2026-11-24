@@ -1,78 +1,10 @@
 (ns seon.render.print.policy
   "Stage 2 of 4-Stage Printer: Declarative `:rule.preview/*` rule-derived O(1) print policy."
-  (:require [datahike.api :as d]
-            [seon.rule :as rules]
-            [seon.store :as store]))
-
-(defn preview-rules
-  "Declarative `:seon.rule/*` rules governing nested sub-schema layout, error grouping, large collections, and multi-facets."
-  {:malli/schema [:=> [:cat] [:vector :map]]
-   :cost/ticks 500000
-   :cost/bytes 131072}
-  []
-  [{:seon.rule/id :rule.preview/nested-sub-schema
-    :seon.rule/doc "Map depth to sub-schema renderer layout (:expanded-card -> :compact-row -> :ref-pill) and priority key order."
-    :seon.rule/category :present :seon.rule/stratum 34 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/query '[:find ?p :in $wm :where [$wm ?p :policy/subject :print]]
-    :seon.rule/assert '[[?p :policy/depth-0-layout :expanded-card]
-                        [?p :policy/depth-1-layout :compact-row]
-                        [?p :policy/deep-layout :ref-pill]
-                        [?p :policy/max-depth 2]
-                        [?p :policy/priority-keys [:error :status :title :ok?]]]}
-   {:seon.rule/id :rule.preview/errors-by-kind
-    :seon.rule/doc "Group large (> 10) :seon.error/entity collections by :seon.error/kind and surface the newest 5 items."
-    :seon.rule/category :present :seon.rule/stratum 35 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/query '[:find ?p :in $wm :where [$wm ?p :policy/subject :print]]
-    :seon.rule/assert '[[?p :policy/errors-by-kind? true]
-                        [?p :policy/errors-threshold 10]
-                        [?p :policy/errors-newest 5]]}
-   {:seon.rule/id :rule.preview/large-collection
-    :seon.rule/doc "Force bounded smart preview + expand hint whenever a collection exceeds 20 items."
-    :seon.rule/category :present :seon.rule/stratum 36 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/query '[:find ?e ?lim ?why :in $wm
-                       :where [$wm ?e :ctx/total ?n]
-                              [(> ?n 20)]
-                              [(ground 20) ?lim]
-                              [(str "Large collection (" ?n " items) — bounded smart preview") ?why]]
-    :seon.rule/assert '[[?e :view/tag :tag/preview-sliced]
-                        [?e :view.param/preview-limit ?lim]
-                        [?e :view.param/show-expand-hint? true]
-                        [?e :view/layout :compact-card]
-                        [?e :ctx/why ?why]]}
-   {:seon.rule/id :rule.preview/multi-facet-entity
-   :seon.rule/doc "Enable multi-facet schema annotation via `seon.schema.index/facets-of` in print policy."
-   :seon.rule/category :present :seon.rule/stratum 36 :seon.rule/enabled? true :seon.rule/target :any
-   :seon.rule/query '[:find ?p :in $wm :where [$wm ?p :policy/subject :print]]
-   :seon.rule/assert '[[?p :policy/annotate-multi-facet? true]]}])
-
-(def ^:private preview-rule-ids
-  [:rule.preview/nested-sub-schema :rule.preview/errors-by-kind
-   :rule.preview/large-collection :rule.preview/multi-facet-entity])
+  (:require [seon.rule :as rules]
+            [seon.store :as store]
+            [seon.rule.seed :as rseed]))
 
 (defonce ^:private ^:seon.flow/edge policy-cache (store/lru-cache 16))
-
-(defn- load-preview-rules [db]
-  (let [defaults (preview-rules)]
-    (if-not (and db (contains? (:schema db) :seon.rule/id))
-      defaults
-      (let [by-id (into {} (map (juxt :seon.rule/id identity)) defaults)
-            rows (d/q '[:find [(pull ?e [:seon.rule/id
-                                        :seon.rule/doc
-                                        :seon.rule/category
-                                        :seon.rule/stratum
-                                        :seon.rule/enabled?
-                                        :seon.rule/target
-                                        :seon.rule/query
-                                        :seon.rule/when
-                                        :seon.rule/assert]) ...]
-                        :in $ [?rid ...]
-                        :where [?e :seon.rule/id ?rid]]
-                      db preview-rule-ids)
-            merged (reduce (fn [acc r]
-                             (let [r' (dissoc r :db/id)]
-                               (if (:seon.rule/id r') (assoc acc (:seon.rule/id r') r') acc)))
-                           by-id rows)]
-        (vec (sort-by #(long (or (:seon.rule/stratum %) 50)) (vals merged)))))))
 
 (defn- valid-rule-map? [r]
   (and
@@ -103,6 +35,23 @@
      :errors-threshold (long (or (rules/wm-scalar wm :policy :policy/errors-threshold) 10))
      :errors-newest (long (or (rules/wm-scalar wm :policy :policy/errors-newest) 5))
      :annotate-multi-facet? multi-on?}))
+
+(defn- preview-starter-rules []
+  (filterv #(= "rule.preview" (namespace (:seon.rule/id %))) (rseed/starter-rules)))
+
+(defn preview-rules
+  "Declarative `:rule.preview/*` rules projected from `resources/seon/rules.edn` (via `seon.rule/load-rules`)."
+  {:malli/schema [:=> [:cat] [:vector :map]]
+   :cost/ticks 500000
+   :cost/bytes 131072}
+  []
+  (filterv #(= "rule.preview" (namespace (:seon.rule/id %)))
+           (rules/load-rules nil (preview-starter-rules))))
+
+(defn- load-preview-rules [db]
+  (let [fb (preview-starter-rules)]
+    (filterv #(= "rule.preview" (namespace (:seon.rule/id %)))
+             (rules/load-rules db fb))))
 
 (defn compute-print-policy
 "Pure Stage 2 helper: evaluates `explicit-rules` (or defaults) once via `seon.rule/step-rules`."
