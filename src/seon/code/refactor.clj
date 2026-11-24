@@ -110,7 +110,7 @@
   [^String form-src]
   (when form-src
     (let [t (str/trim form-src)]
-      (or (when-let [[_ v a v2] (re-matches #"\(defn-?\s+(?:\^[^\s]+\s+)*([^\s]+)\s+\[& args\]\s+\(apply\s+([^\s/]+)/([^\s\)]+)\s+args\)\)" t)]
+      (or (when-let [[_ v a v2] (re-matches #"\(defn-?\s+(?:\^\{[^}]+\}\s+|\^[^\s]+\s+)*([^\s]+)\s+\[& args\]\s+\(apply\s+([^\s/]+)/([^\s\)]+)\s+args\)\)" t)]
             (when (= v v2) [(symbol a) (symbol v)]))
           (when-let [[_ v a v2] (re-matches #"\(def\s+(?:\^[^\s]+\s+)*([^\s]+)\s+([^\s/]+)/([^\s\)]+)\)" t)]
             (when (= v v2) [(symbol a) (symbol v)]))))))
@@ -229,7 +229,7 @@
                                       (when (contains? all-stubbed simple)
                                         {:key k :order (:seon.code.form/order f) :lead (:seon.code.form/lead f "\n\n")
                                          :src (move/make-reexport-src vsym alias-sym (:seon.code.form/src f)
-                                              (contains? re-exported-priv simple))})))
+                                              (contains? re-exported-priv simple) to)})))
                                   moved-forms)
         delta-from-src (str updated-from-hdr "\n\n"
                             (str/join "\n\n" (map :src reexport-forms-meta)) "\n")
@@ -418,7 +418,7 @@
            :promoted-privates promoted-privs
            :contract-note (when (seq promoted-privs)
                             (str (count promoted-privs) " private defn- promoted to public in " to
-                                 " — each needs :malli/schema (or move public callers together so helpers stay private)."))
+                            " — each needs :malli/schema (use :seon.host/db for DB args, :seon.gen/skip true for internal map helpers, never ^:seon.flow/edge on pure callers; or move public callers together so helpers stay private)."))
            :referred (vec (sort referred-syms))
            :auto-referred-stubs stub-refers-by-ns
            :from-tokens (quot rem-chars 4)

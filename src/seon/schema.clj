@@ -420,7 +420,11 @@
   ([db fn-sym] (stress-var db fn-sym {}))
   ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
    (when-let [v (resolve fn-sym)]
-     (let [m (meta v)
+     (let [m0 (meta v)
+           v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)) (not= (:seon.code/reexport m0) fn-sym))
+               (or (resolve (:seon.code/reexport m0)) v)
+               v)
+           m (meta v)
            sch-form (:malli/schema m)
            skip-reason (stress-skip-reason db fn-sym m)]
        (cond

@@ -283,16 +283,6 @@
                  (contains? arg :as-of-tx) (assoc :as-of-tx as-of-tx)))
     {:ok? true :viewing viewing :mode mode :sidebar? sidebar? :as-of-tx as-of-tx}))
 
-(defn ^:seon.flow/edge remember!
-  "Appends a durable memory note to `:seon.agent/memory` on `@ctx`."
-  {:seon.repl/export true :malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [note]
-  (when *agent-ctx*
-    (let [cur (vec (or (:seon.agent/memory @ctx/ctx) []))
-          nxt (if (some #(= % note) cur) cur (conj cur note))]
-      (swap! ctx/ctx assoc :seon.agent/memory nxt)
-      {:remembered note :count (count nxt)})))
-
 (defn ^:seon.flow/edge start-bench-run!
   "Starts a parallel isolated benchmark run via the coordinator's `:start-bench-run` op."
   {:seon.repl/export true :malli/schema [:=> [:cat :any] :any]}
@@ -420,6 +410,27 @@
                 (seq pref-patch) (assoc :seon.agent/context-prefs prefs1)
                 (and (vector? pat) (seq pat)) (assoc :seon.ctx/pattern pat))]
     {:patch patch :context-prefs prefs1 :memory mem1 :pinned pin1}))
+
+(defn ^:seon.flow/edge remember!
+  "Appends a durable memory note to `:seon.agent/memory` on self (`@ctx`) or on `target-agent-id`."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :qualified-keyword :any] [:maybe :map]]]}
+  ([note]
+   (when *agent-ctx*
+     (let [{:keys [patch memory]} (compute-tune-patch @ctx/ctx [note] nil)]
+       (when (seq patch) (swap! ctx/ctx merge patch))
+       {:remembered note :count (count memory)})))
+  ([target-aid note]
+   (when-let [{:keys [conn agent-id]} *agent-ctx*]
+     (if (= target-aid agent-id)
+       (remember! note)
+       (let [db @conn
+             teid (:e (first (d/datoms db :avet :seon.agent/id target-aid)))]
+         (if-not teid
+           {:ok? false :error :agent-not-found :agent-id target-aid}
+           (let [cur (d/pull db '[:seon.agent/memory] teid)
+                 {:keys [patch memory]} (compute-tune-patch cur [note] nil)]
+             (when (seq patch) (d/transact conn {:tx-data [(assoc patch :seon.agent/id target-aid)]}))
+             {:ok? true :agent-id target-aid :remembered note :count (count memory)})))))))
 
 (defn ^:seon.flow/edge tune-context!
   "Updates `:seon.agent/context-prefs`, `:seon.ctx/pattern`, and `:pin`/`:unpin` on `@ctx`."

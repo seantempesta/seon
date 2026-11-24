@@ -1,5 +1,10 @@
 ;; Declarative Seon tasks (resources/seon/tasks.edn — loaded on fresh install, written back on green merge).
-[{:seon.task/scope seon.render,
+[{:seon.task/done? false,
+  :seon.task/id :ab/review-rule-audit,
+  :seon.task/plan "In addition to compacting noisy turns, note in your finish-review! summary whether any recurring tool/context friction suggests a general compounding :seon.rule/* or helper improvement (only edit platform code if there is a clear root-cause bug).",
+  :seon.task/template? true,
+  :seon.task/title "Check whether any friction in the forked session points to a general rule or helper gap"}
+ {:seon.task/scope seon.render,
   :seon.task/needs #{:subtask.w2168/c-7308beb8
                      :subtask.seon.render/c-578633c5
                      :subtask.seon.health/c-9012f4bf},
@@ -311,7 +316,7 @@
   :seon.task/title "Discover existing code/data/history, refine task plan, prove & merge"}
  {:seon.task/done? true,
   :seon.task/id :template/review-and-improve,
-  :seon.task/plan "You are forked directly onto the paused agent's Datahike branch (`(user/db)` IS their branch, with all their evals, task(s), and WIP code).\n1. Audit the closed `<agent>` session above and the eval manifest in `<walk-context>`.\n2. Anything is game to help the paused agent succeed cleanly:\n   - **Compact noisy/failed/repetitive turns** to shrink prompt bloat while preserving durable facts: `(user/compact! {:agent-id <target-id> :turns #{3 4 5} :summary \"...\"})` (or `:through-turn N` / `:keep-last K`, or `(user/transact! [[:db/retractEntity eid] ...])`).\n   - **Clarify or enrich their `:seon.task/*`** (`:seon.task/plan`, `:seon.task/curated` refs to key docs/specs/vars, `:seon.task/tests`) or pin key docs/schemas onto their agent entity (`:seon.agent/pinned` / `:seon.agent/memory`).\n   - **Fix Seon platform bugs, rules, or helpers** directly on this branch if a platform flaw caused their friction.\n3. When done (or immediately if the session is healthy), call `(user/finish-review! \"Concise summary of what you compacted, linked, or fixed\")`. Your changes merge back into the paused agent's branch with your own review turns removed.",
+  :seon.task/plan "You are forked directly onto the paused agent's Datahike branch (`(user/db)` IS their branch, with all their evals, task(s), and WIP code).\n1. **Verify first** (in parallel separate tool calls — NEVER wrap `user/run-tests!` inside `(do ...)`): inspect `<branch-status>` (including inherited `:last-proofs`), run `(user/run-tests! ...)` on the task's tests, and run `(user/health)`.\n2. **Fix root causes & compact noise** (use `user/ns-outline`, `user/grep-src`, `user/source` rather than ad-hoc `d/q` over `:seon.code.*`):\n   - Compact noisy/failed/repetitive turns: `(user/compact! {:agent-id <target-id> :turns #{...} :summary \"...\"})` (or `:through-turn N` / `:keep-last K`).\n   - Append durable guidance without compacting: `(user/remember! <target-id> \"...\")`, or clarify `:seon.task/*`.\n   - Fix failing tests, bad contracts (`:seon.host/db` for DB args, `:seon.gen/skip true` for internal map helpers; never cascade `^:seon.flow/edge` onto pure callers), or Seon platform bugs directly on this branch.\n3. **Prove green & return**: once tests + health are green (or immediately if healthy), call `(user/finish-review! \"Concise summary of what you verified, compacted, linked, or fixed\")`. Your changes merge back into the paused agent's branch with your own review turns removed.",
   :seon.task/template? true,
   :seon.task/title "Review forked agent session, compact noise, link helpful data, fix root causes, and return via (user/finish-review! summary)"}
  {:seon.task/done? false,
