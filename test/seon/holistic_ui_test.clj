@@ -179,7 +179,7 @@
                             :live-stream {:status :token :phase :writing :started-ms 1000 :last-ms 2000 :step-chars 160 :chars 160 :text "Streaming"}})]
         ;; 1. Header navigation + clickable signal pills + clickable agent breadcrumb
         (do
-        (doseq [needle ["Canvas" "Chat" "Explain" "Expert" "←" "→" "sig-pill-btn" "data-preview-ref"
+        (doseq [needle ["Canvas" "Chat" "Explain" "Dev Mode" "←" "→" "sig-pill-btn" "data-preview-ref"
                        "data-canonical-url=" "data-expert-mode=\"false\"" "is-everyday"
                        "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21"
                        "seon.web%2Fset-explain-lens%21" "seon.web%2Ftoggle-expert-mode%21"]]
@@ -197,10 +197,14 @@
         (is (str/includes? hdr-mob "Explain"))
 
         ;; 2. Strict < 40 ms warm frame budget across ALL 4 holistic views
-        (let [canv-d (timed {:viewing-id :agent/root :view-mode :canvas :viewport-w 1440 :viewport-h 900})]
-          (is (str/includes? (:html canv-d) "id=\"cv-canvas-stage\""))
-          (is (str/includes? (:html canv-d) "root-visuals"))
-          (is (< (:ms canv-d) 40.0) (str ":canvas exceeded 40 ms warm budget: " (:ms canv-d) " ms")))
+        (let [canv-u (timed {:viewing-id :agent/root :view-mode :canvas :expert-mode? false :viewport-w 1440 :viewport-h 900})
+            canv-d (timed {:viewing-id :agent/root :view-mode :canvas :expert-mode? true :viewport-w 1440 :viewport-h 900})]
+        (is (str/includes? (:html canv-u) "is-user-canvas"))
+        (is (not (str/includes? (:html canv-u) "cv-context-grid")) "Normal User Canvas must stay free of Active Context developer tiles")
+        (is (str/includes? (:html canv-d) "is-dev-canvas"))
+        (is (str/includes? (:html canv-d) "root-visuals"))
+        (is (< (:ms canv-u) 40.0) (str ":canvas user mode exceeded 40 ms warm budget: " (:ms canv-u) " ms"))
+        (is (< (:ms canv-d) 40.0) (str ":canvas dev mode exceeded 40 ms warm budget: " (:ms canv-d) " ms")))
         (doseq [[lbl r] [[:session sess-d] [:session-mobile sess-m] [:context ctx-d] [:system sys-d] [:inspect insp-d]]]
           (is (< (:ms r) 40.0) (str lbl " exceeded 40 ms warm budget: " (:ms r) " ms")))
 

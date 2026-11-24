@@ -29,50 +29,31 @@
          ch]))))
 
 (defn render-canvas-demo-deck
-  "Renders a concise, live interactive capabilities showcase on the Canvas (clickable deep-links,
-   inline Hiccup & Markdown vocabulary, live signals, and presentation time-travel controls)."
+  "Renders a compact, viewport-fitting interactive capabilities strip on the Canvas
+   (clickable live signals, entity deep-links with hovercards, and mode toggles — zero vertical scroll bloat)."
   {:malli/schema [:=> [:cat :any [:maybe :keyword] [:maybe :map]] [:vector :any]]
    :cost/ticks 2000000 :cost/bytes 1048576}
   [_main-db viewing-id signals]
   (let [h (:health signals)
         p (:proof signals)
-        f (:flow signals)
-        demo-md (str "### Interactive Canvas Vocabulary\n\n"
-                     "| Surface | Route | Purpose |\n"
-                     "| :--- | :--- | :--- |\n"
-                     "| **Canvas** | `/canvas` | Spatial presentation stage + `d/as-of` slides |\n"
-                     "| **Chat** | `/chat` | Traditional chronological thread toggle |\n"
-                     "| **Explain** | `/agent/root/explain` | KV-cache, rule trace & Upgrade Ladder lab |\n\n"
-                     "Inspect live code like `seon.render.surface.canvas/render-canvas-body`, "
-                     "routes in `seon.web.router`, or read `docs/render.md` — hover any link for a live preview.\n\n"
-                     "```clojure\n"
-                     ";; Click Run in REPL to evaluate live on this branch:\n"
-                     "(select-keys (user/health) [:ok? :counts])\n"
-                     "```")]
-    [:section {:id "cv-demo-deck" :class "card stack-sm"}
-     [:div {:class "card-head"}
+        f (:flow signals)]
+    [:section {:id "cv-demo-deck" :class "card canvas-compact-deck stack-sm"}
+     [:div {:class "row-between"}
       [:div {:class "pill-row"}
-       [:h2 "Interactive Canvas Showcase"]
-       (badge "amber" "live")
-       (badge "purple" "data-driven")]
+       (kicker "Live System")
+       (ent-link [:seon.signal/kind :health]
+                 (if (:ok? h true) "Healthy" (str (:errors h 0) " err"))
+                 (str "pill mono tiny" (when-not (:ok? h true) " red-text")))
+       (ent-link [:seon.signal/kind :proof]
+                 (str (long (or (:green p) 0)) " proofs")
+                 "pill mono tiny")
+       (ent-link [:seon.signal/kind :flow]
+                 (str (long (or (:running f) 0)) "/" (long (or (:active f) 0)) " active")
+                 "pill mono tiny")]
       [:div {:class "pill-row"}
-       (btn "btn sm" '(seon.web/set-view-mode! :session) "Toggle Chat View")
-       (btn "btn sm" '(seon.web/set-explain-lens! true nil) "Open Explain Lab →")]]
-     [:div {:class "pill-row"}
-      (ent-link [:seon.signal/kind :health]
-                (str "Health: " (if (:ok? h true) "OK" (str (:errors h 0) " err")))
-                (str "pill mono tiny" (when-not (:ok? h true) " red-text")))
-      (ent-link [:seon.signal/kind :proof]
-                (str "Proofs: " (long (or (:green p) 0)) " green")
-                "pill mono tiny")
-      (ent-link [:seon.signal/kind :flow]
-                (str "Flow: " (long (or (:running f) 0)) "/" (long (or (:active f) 0)))
-                "pill mono tiny")
-      (ent-link [:seon.code.ns/name 'seon.render.surface.canvas] "seon.render.surface.canvas" "pill mono tiny")
-      (ent-link [:seon.code.ns/name 'seon.web.router] "seon.web.router" "pill mono tiny")
-      (when viewing-id (ent-link [:seon.agent/id viewing-id] (str "Inspect " (rdata/friendly-agent-name viewing-id)) "pill mono tiny"))]
-     [:div {:class "canvas-demo-body"}
-      (rmd/render-markdown-blocks demo-md)]]))
+       (ent-link [:seon.code.ns/name 'seon.render.surface.canvas] "canvas.clj" "pill mono tiny")
+       (ent-link [:seon.code.doc/id "docs/render.md#overview"] "docs/render.md" "pill mono tiny")
+       (when viewing-id (ent-link [:seon.agent/id viewing-id] "Inspect" "pill mono tiny"))]]]))
 
 (defn- render-canvas-context-grid [entities pool-count viewing-id expert-mode?]
   (let [pin-form [:form {:class "row-form" :on-submit (list 'seon.web/pin-ref-form! viewing-id)}
@@ -127,37 +108,55 @@
        [:p {:class "muted tiny mono"} "No active context cards yet."])]))
 
 (defn render-canvas-body
-  "Renders the default spatial presentation Canvas (`:canvas`): live presence, status card,
-   self-replacing current-frame Markdown presentation stage, spatial Active Context card grid,
-   and interactive capability demos — with a 1-click toggle to traditional Chat (`:session`)."
+  "Renders the default spatial presentation Canvas (`:canvas`):
+   - Normal User Mode (`expert-mode? false`): pure, large, viewport-fitting Canvas where the agent paints
+     live presence, status cards, rich Markdown briefings, and explicitly pinned entity cards via the
+     Upgrade Ladder (zero Active Context developer clutter).
+   - Developer Mode (`expert-mode? true`): adds unmistakable DEV header/bar, branch/tx Test & Merge
+     actions, and the full spatial Active Context tile grid with provenance and `+ Pin` controls."
   {:malli/schema [:=> [:cat :map :boolean] :any] :cost/ticks 20000000}
-  [{:keys [agent viewing-id branch main-db branch-db as-of-tx entities pool-count exchanges pending-prompt
-           latest-prose reply-prompt latest-actions work-summary live-stream branch-feedback signals
-           active? expert-mode? agent-status] :as model}
+  [{:keys [agent viewing-id branch main-db branch-db as-of-tx entities pool-count exchanges evals
+           pending-prompt latest-prose reply-prompt latest-actions work-summary live-stream
+           branch-feedback signals active? expert-mode? agent-status] :as model}
    include-composer?]
   (let [label (rdata/agent-label agent viewing-id)
         prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
         tx-num (or as-of-tx (:max-tx branch-db) (:max-tx main-db))
         exp? (boolean expert-mode?)
         ex-n (count exchanges)
+        pinned-set (into #{} (keep rdata/normalize-inspect-ref) (:seon.agent/pinned agent))
+        pinned-items (when (and (not exp?) (seq pinned-set) (seq entities))
+                       (filterv (fn [it]
+                                  (let [r (or (rdata/entity-lookup-ref (:data it))
+                                              (when (integer? (:entity it)) [:db/id (:entity it)]))]
+                                    (contains? pinned-set r)))
+                                entities))
+        live-acts (if (seq latest-actions)
+                    latest-actions
+                    (when (seq evals)
+                      (vec (take-last 3 (filter #(or (not (str/blank? (str (:seon.agent.eval/code %))))
+                                                     (not (str/blank? (str (:seon.agent.eval/intent %)))))
+                                                evals)))))
         status-b (cond active? (badge "amber" "live")
                        (pos? (long (or (:seon.agent/merged-tx agent) 0))) (badge "green" "merged")
                        (:seon.agent/ready? agent) (badge "green" "ready")
                        (:seon.agent/paused? agent) (badge "muted" "paused")
                        (:seon.agent/waiting? agent) (badge "blue" "waiting")
                        :else (badge "muted" "idle"))]
-    [:div {:id "cv-canvas-stage" :class "root-canvas"}
-     [:div {:class "ws-head work-bar"}
-      [:div {:class "pill-row"}
-       (ent-link [:seon.agent/id viewing-id] label "mono strong")
-       status-b
-       (ent-link [:seon.branch/name branch] (str branch (when tx-num (str " @ tx " tx-num))) "mono tiny muted")]
-      [:div {:class "pill-row"}
-       (when (pos? ex-n)
-         (btn "btn sm" '(seon.web/set-view-mode! :session) (str "Chat (" ex-n ") →")))
-       (when (and exp? (not= branch :main))
-         (list (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
-               (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")))]]
+    [:div {:id "cv-canvas-stage" :class (str "root-canvas" (if exp? " is-dev-canvas" " is-user-canvas"))}
+     (when exp?
+       [:div {:class "ws-head work-bar dev-work-bar"}
+        [:div {:class "pill-row"}
+         (badge "amber" "DEV")
+         (ent-link [:seon.agent/id viewing-id] label "mono strong")
+         status-b
+         (ent-link [:seon.branch/name branch] (str branch (when tx-num (str " @ tx " tx-num))) "mono tiny muted")]
+        [:div {:class "pill-row"}
+         (when (pos? ex-n)
+           (btn "btn sm" '(seon.web/set-view-mode! :session) (str "Chat (" ex-n ") →")))
+         (when (not= branch :main)
+           (list (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
+                 (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")))]])
      (feedback-banner branch-feedback)
      (render-presence-slot model)
      (when (and (map? agent-status) (:seon.ui.status/label agent-status))
@@ -177,7 +176,7 @@
             [:details {:id "cv-live-reasoning" :class "activity-fold"}
              [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
              [:div {:class "live-reasoning"} reasoning]])
-          (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-live"))])
+          (when (seq live-acts) (rmd/render-activity-fold live-acts "cv-live"))])
 
        prose
        [:section {:id "cv-featured-reply" :class "canvas-surface canvas-reply stack-sm"}
@@ -198,18 +197,25 @@
        :else
        [:div {:class "stack"}
         [:header {:class "root-hero"}
-         [:div {:class "root-kicker pill-row"}
-          (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·"
-          (ent-link [:seon.branch/name branch] (str branch) "mono tiny")]
+         (when exp?
+           [:div {:class "root-kicker pill-row"}
+            (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·"
+            (ent-link [:seon.branch/name branch] (str branch) "mono tiny")])
          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
          (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])]
         (render-canvas-demo-deck main-db viewing-id signals)])
-     (render-canvas-context-grid entities pool-count viewing-id exp?)
-     (when (or prose work-summary)
-       [:details {:id "cv-demos-fold" :class "activity-fold"}
-        [:summary {:class "mono tiny"} "Interactive Canvas Showcase & Demos"]
-        [:div {:style {:margin-top "10px"}}
-         (render-canvas-demo-deck main-db viewing-id signals)]])
+     (when (seq pinned-items)
+       [:section {:id "cv-pinned-cards" :class "root-visuals"}
+        (for [item pinned-items :when (:hiccup item)]
+          [:div {:class "surface-entity-item"} (:hiccup item)])])
+     (when exp?
+       (list
+        (render-canvas-context-grid entities pool-count viewing-id true)
+        (when (or prose work-summary)
+          [:details {:id "cv-demos-fold" :class "activity-fold"}
+           [:summary {:class "mono tiny"} "Interactive Canvas Showcase & Demos"]
+           [:div {:style {:margin-top "10px"}}
+            (render-canvas-demo-deck main-db viewing-id signals)]])))
      (when include-composer?
        [:form {:class "ws-composer" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
         [:div {:class "composer-shell"}

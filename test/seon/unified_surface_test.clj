@@ -112,8 +112,8 @@
                           html (render/hiccup->html h)
                           ms (/ (double (- (System/nanoTime) t0)) 1e6)]
                       {:hiccup h :html html :ms ms}))
-            cv-desk (timed {:view-mode :canvas :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
-            cv-mob  (timed {:view-mode :canvas :viewport-w 430  :viewport-h 900 :sidebar-open? false})
+            cv-desk (timed {:view-mode :canvas :expert-mode? true :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
+            cv-mob  (timed {:view-mode :canvas :expert-mode? true :viewport-w 430  :viewport-h 900 :sidebar-open? false})
             ws-desk (timed {:view-mode :workspace :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
             dbg     (timed {:view-mode :debug :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
             m-desk  (surface/build-surface-model db db {:conn conn :view-mode :canvas :viewport-w 1440 :viewport-h 900 :sidebar-open? true})
@@ -291,8 +291,8 @@
         (doseq [tx [tx1 tx2 tx3 tx4 tx5]]
           (is (some #{tx} htxs) (str "Expected tx " tx " in view-history-txs " htxs)))
         (is (seq delegated))
-        (let [past-html (render/hiccup->html (surface/render-surface db db {:conn conn :view-mode :canvas :as-of-tx tx2}))
-              live-html (render/hiccup->html (surface/render-surface db db {:conn conn :view-mode :canvas}))]
+        (let [past-html (render/hiccup->html (surface/render-surface db db {:conn conn :view-mode :canvas :expert-mode? true :as-of-tx tx2}))
+              live-html (render/hiccup->html (surface/render-surface db db {:conn conn :view-mode :canvas :expert-mode? true}))]
           (is (str/includes? past-html "Phase 2 task edit"))
           (is (str/includes? past-html "Time-travel"))
           (is (not (str/includes? past-html "Historical error tx4")))
@@ -357,7 +357,7 @@
       (seed-unified-world! conn)
       ;; 3. Unique view-transition-name per .surface-entity-item & IME-safe composer
       (let [db0 @conn
-            ch (render/hiccup->html (surface/render-surface db0 db0 {:conn conn :view-mode :canvas :viewport-w 1440 :viewport-h 900}))
+            ch (render/hiccup->html (surface/render-surface db0 db0 {:conn conn :view-mode :canvas :expert-mode? true :viewport-w 1440 :viewport-h 900}))
             comp-h (render/hiccup->html (ui/composer-unit db0 {}))
             vt-names (mapv second (re-seq #"view-transition-name:([A-Za-z0-9_-]+)" ch))]
         (is (seq vt-names))
