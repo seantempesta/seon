@@ -62,12 +62,12 @@
         (let [pre-tx (:max-tx @conn)]
           (swap! ca #(-> %
                          (update :seon.agent.eval/_agent-ref (fn [es] (vec (remove :seon.agent.eval/error es))))
-                         (update :seon.agent/memory (fnil conj []) "Cleaned T2 error")
+                         (assoc :seon.agent/summary "Cleaned T2 error")
                          (assoc :seon.agent/ready? true :seon.agent/waiting? false)))
           (let [v1 @ca]
             (is (= 1 (count (:seon.agent.eval/_agent-ref v1))))
             (is (= [1] (mapv :seon.agent.eval/turn (:seon.agent.eval/_agent-ref v1))))
-            (is (= ["Cleaned T2 error"] (:seon.agent/memory v1)))
+            (is (= "Cleaned T2 error" (:seon.agent/summary v1)))
             (is (true? (:seon.agent/ready? v1)))
             ;; Retracted eval is still preserved in d/as-of history!
             (is (= 2 (count (d/datoms (d/as-of @conn pre-tx) :avet :seon.agent.eval/agent :ag/ctx-demo))))))))))
@@ -118,8 +118,7 @@
               (swap! rca #(-> %
                               (update-in [:seon.agent/target :seon.agent.eval/_agent-ref]
                                          (fn [es] (vec (remove :seon.agent.eval/error es))))
-                              (update-in [:seon.agent/target :seon.agent/memory]
-                                         (fnil conj []) "Use (good) directly")
+                              (assoc-in [:seon.agent/target :seon.agent/summary] "Use (good) directly")
                               (assoc :seon.agent/summary "Retracted 2 error evals and noted (good)." :seon.agent/ready? true)))
               (tmerge/handle-merge-op! {:conn conn :cfg cfg :msg-seq 1 :writes 0 :commit-git? false}
                 {:op :merge :branch :branch/rev-1 :agent-id :review/w-stalled} (d/commit-id @conn))
@@ -132,7 +131,7 @@
                                 {:agent-eid (:db/id ma-after) :active? true :raw-ready? false :waiting? false :merged? false :tool-streak 1 :head-tx (:max-tx wdb-after)})]
                 (is (= 1 (count surviving)))
                 (is (= "(good)" (:seon.agent.eval/code (first surviving))))
-                (is (= ["Use (good) directly"] (:seon.agent/memory (d/pull wdb-after '[:seon.agent/memory] [:seon.agent/id :w/stalled]))))
+                (is (= "Use (good) directly" (:seon.agent/summary (d/pull wdb-after '[:seon.agent/summary] [:seon.agent/id :w/stalled]))))
                 (is (false? (:seon.agent/paused? ma-after)))
                 (is (empty? ops-after) "Error-streak rule must stop firing purely from data once bad evals are retracted!")))
             (finally (d/release rconn))))
@@ -256,7 +255,7 @@
                 ;; Reviewer cleans 100% of :w/p2's evals and writes memory, leaving :paused? true
                 (let [rca (ctx/ctx-atom rconn [:seon.agent/id :review/p2])
                       old-eids (into #{} (map :e) (d/datoms @wconn :avet :seon.agent.eval/agent :w/p2))]
-                  (d/transact wconn {:tx-data (conj (mapv #(vector :db/retractEntity %) old-eids) {:seon.agent/id :w/p2 :seon.agent/memory ["Use demo.p2-fix/ok!"]})})
+                  (d/transact wconn {:tx-data (conj (mapv #(vector :db/retractEntity %) old-eids) {:seon.agent/id :w/p2 :seon.agent/summary "Use demo.p2-fix/ok!"})})
                   (let [wdb-clean (store/head conn :branch/w-p2)
                       mdb-unp (:db-after (d/with @conn [{:seon.agent/id :w/p2 :seon.agent/paused? false}]))
                       st-ret (rec/derive-agent-status mdb-unp (:store mdb-unp) {:w/p2 {:pid 102 :busy? false :eval-eids old-eids}} #{} #{} #{} #{} :w/p2)]

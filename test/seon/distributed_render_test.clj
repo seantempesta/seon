@@ -269,7 +269,7 @@
      :seon.agent/scope 'seon.rule :seon.agent/waiting? true
      :seon.agent/goal "Explain Seon's unified rule-driven context & rendering pipeline using real Datahike entities."
      :seon.agent/pinned [[:seon.code.ns/name 'seon.rule]]
-     :seon.agent/memory ["Uses uniform ns-map -> ns-map entity renderers."]}}
+     :seon.agent/summary "Uses uniform ns-map -> ns-map entity renderers."}}
 
    :seon.rule/entity
    {:seon.rule/entity

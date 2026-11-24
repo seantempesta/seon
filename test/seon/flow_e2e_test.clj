@@ -490,7 +490,7 @@
             ;; Mutate runtime state (memory + pinned) before shutting down to test resume preservation
             (is (:ok? (main/call! sys {:op :transact
                                        :tx-data [{:seon.agent/id :agent/root
-                                                  :seon.agent/memory ["Survives resume!"]
+                                                  :seon.agent/summary "Survives resume!"
                                                   :seon.agent/pinned [[:seon.health/summary :main] [:seon.code.ns/name 'seon.web]]}]})))
             (finally
               (main/stop! sys)))))
@@ -502,9 +502,9 @@
             (main/ensure-boot-state! sys2 repo-dir)
             (let [db @(:conn sys2)
                   catchup (git/catch-up-tx db repo-dir)
-                  root-ag (d/pull db '[:seon.agent/memory :seon.agent/pinned :seon.agent/label] [:seon.agent/id :agent/root])]
+                  root-ag (d/pull db '[:seon.agent/summary :seon.agent/pinned :seon.agent/label] [:seon.agent/id :agent/root])]
               (is (empty? catchup))
-              (is (= ["Survives resume!"] (:seon.agent/memory root-ag)))
+              (is (= "Survives resume!" (:seon.agent/summary root-ag)))
               (is (= [[:seon.health/summary :main] [:seon.code.ns/name 'seon.web]] (:seon.agent/pinned root-ag)))
               (is (= "Root" (:seon.agent/label root-ag))))
             (finally

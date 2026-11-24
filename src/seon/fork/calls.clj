@@ -380,11 +380,16 @@
     :else item))
 
 (defn- compute-tune-patch
-  "Pure shared patch builder for `:memory`, `:pinned`, `:context-prefs`, and `:seon.ctx/pattern`."
+  "Pure shared patch builder for `:summary`, `:pinned`, `:context-prefs`, and `:seon.ctx/pattern`."
   {:malli/schema [:=> [:cat :map [:sequential :any] [:maybe :map]] :map]}
   [cur notes tune]
-  (let [mem0 (vec (or (:seon.agent/memory cur) []))
-        mem1 (reduce (fn [a n] (if (some #(= % n) a) a (conj a n))) mem0 notes)
+  (let [sum0 (str/trim (str (or (:seon.agent/summary cur) "")))
+        lines0 (if (str/blank? sum0) [] (vec (remove str/blank? (str/split-lines sum0))))
+        lines1 (reduce (fn [a n]
+                         (let [s (str/trim (if (string? n) n (pr-str n)))]
+                           (if (or (str/blank? s) (some #(= % s) a)) a (conj a s))))
+                       lines0 notes)
+        sum1 (str/join "\n" lines1)
         pin0 (vec (or (:seon.agent/pinned cur) []))
         pin1 (cond-> pin0
                (seq (:pin tune))
@@ -404,20 +409,20 @@
         prefs1 (if (seq pref-patch) (merge prefs0 pref-patch) prefs0)
         pat (:pattern tune)
         patch (cond-> {}
-                (not= mem1 mem0) (assoc :seon.agent/memory mem1)
+                (and (not= sum1 sum0) (not (str/blank? sum1))) (assoc :seon.agent/summary sum1)
                 (not= pin1 pin0) (assoc :seon.agent/pinned pin1)
                 (seq pref-patch) (assoc :seon.agent/context-prefs prefs1)
                 (and (vector? pat) (seq pat)) (assoc :seon.ctx/pattern pat))]
-    {:patch patch :context-prefs prefs1 :memory mem1 :pinned pin1}))
+    {:patch patch :context-prefs prefs1 :summary sum1 :notes lines1 :pinned pin1}))
 
 (defn ^:seon.flow/edge remember!
-  "Appends a durable memory note to `:seon.agent/memory` on self (`@ctx`) or on `target-agent-id`."
+  "Appends a durable summary note onto `:seon.agent/summary` on self (`@ctx`) or on `target-agent-id`."
   {:seon.repl/export true :malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :qualified-keyword :any] [:maybe :map]]]}
   ([note]
    (when *agent-ctx*
-     (let [{:keys [patch memory]} (compute-tune-patch @ctx/ctx [note] nil)]
+     (let [{:keys [patch notes summary]} (compute-tune-patch @ctx/ctx [note] nil)]
        (when (seq patch) (swap! ctx/ctx merge patch))
-       {:remembered note :count (count memory)})))
+       {:remembered note :count (count notes) :summary summary})))
   ([target-aid note]
    (when-let [{:keys [conn agent-id]} *agent-ctx*]
      (if (= target-aid agent-id)
@@ -426,10 +431,10 @@
              teid (:e (first (d/datoms db :avet :seon.agent/id target-aid)))]
          (if-not teid
            {:ok? false :error :agent-not-found :agent-id target-aid}
-           (let [cur (d/pull db '[:seon.agent/memory] teid)
-                 {:keys [patch memory]} (compute-tune-patch cur [note] nil)]
+           (let [cur (d/pull db '[:seon.agent/summary] teid)
+                 {:keys [patch notes summary]} (compute-tune-patch cur [note] nil)]
              (when (seq patch) (d/transact conn {:tx-data [(assoc patch :seon.agent/id target-aid)]}))
-             {:ok? true :agent-id target-aid :remembered note :count (count memory)})))))))
+             {:ok? true :agent-id target-aid :remembered note :count (count notes) :summary summary})))))))
 
 (defn ^:seon.flow/edge tune-context!
   "Updates `:seon.agent/context-prefs`, `:seon.ctx/pattern`, and `:pin`/`:unpin` on `@ctx`."
@@ -473,7 +478,7 @@
                             (filterv #(<= (long (or (:seon.agent.eval/turn %) 0)) cut-turn) eval-ents))
                retract-tx (mapv #(vector :db/retractEntity (:db/id %)) to-retract)
                target-tx (when (and (not self?) (or (seq notes) (map? tune)))
-                           (let [cur (d/pull db-now '[:seon.agent/memory :seon.agent/pinned :seon.agent/context-prefs :seon.ctx/pattern] target-eid)
+                           (let [cur (d/pull db-now '[:seon.agent/summary :seon.agent/pinned :seon.agent/context-prefs :seon.ctx/pattern] target-eid)
                                  {:keys [patch]} (compute-tune-patch cur notes tune)]
                              (when (seq patch)
                                [(assoc patch :seon.agent/id target-aid)])))

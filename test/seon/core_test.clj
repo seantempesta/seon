@@ -327,7 +327,7 @@
           (is (= 5 (count old-eids)))
           ;; 2. Actually retract turns 1..5 in Datahike + record durable memory & self-tuned extra namespace!
           (d/transact conn {:tx-data (into [{:seon.agent/id :ag/compact
-                                             :seon.agent/memory ["Alpha owns :seon.agent/id lookups"]
+                                             :seon.agent/summary "Alpha owns :seon.agent/id lookups"
                                              :seon.agent/context-prefs {:extra-namespaces ['seon.demo.b] :recent-data-limit 2}}]
                                            old-eids)})
           (let [w-after (build-wire @conn @conn :ag/compact {})
@@ -557,7 +557,7 @@
         (d/transact conn {:tx-data tx1})
         (d/transact conn {:tx-data [{:seon.agent/id :agent/custom-root
                                      :seon.agent/waiting? false
-                                     :seon.agent/memory ["Remembered fact"]
+                                     :seon.agent/summary "Remembered fact"
                                      :seon.agent/curated [[:seon.code.ns/name 'seon.web]]}]})
         (let [src2 (str/replace src "Route work" "Route work v2")
               tx2 (code/file-import-tx @conn apath src2 false)]
@@ -567,7 +567,7 @@
                 reparsed (clojure.edn/read-string rendered)]
             (is (= "Route work v2" (:seon.agent/goal ag)))
             (is (= false (:seon.agent/waiting? ag)))
-            (is (= ["Remembered fact"] (:seon.agent/memory ag)))
+            (is (= "Remembered fact" (:seon.agent/summary ag)))
             (is (= [[:seon.code.ns/name 'seon.web]] (:seon.agent/curated ag)))
             (is (= apath (merge/entity->disk-path @conn @conn :seon.agent/id :agent/custom-root ag)))
             (is (= "Home" (:seon.agent/label (first reparsed))))
@@ -982,7 +982,7 @@
               (is (= h1 (:prefix-hash w2)) "Branch code edits & renderable evals MUST NOT bust static :prefix-hash!")
               (is (not (some #(= :eval (:source %)) (:tiles w2))) "Mutable :eval tiles must stay out of static <walk-context>!")
               (is (str/includes? (str (:activity-text w2)) "seon.demo.kv/extra") "Ephemeral <branch-status> tail still sees live edits!"))
-            (d/transact cw {:tx-data [{:seon.agent/id :test/kv-w :seon.agent/memory ["Remembered invariant"]}]})
+            (d/transact cw {:tx-data [{:seon.agent/id :test/kv-w :seon.agent/summary "Remembered invariant"}]})
             (let [w3 (seon.render.wire/build-live-wire-request @conn @cw :test/kv-w {:conn conn})]
               (is (not= h1 (:prefix-hash w3)))
               (is (str/includes? (:content (second (:messages w3))) "Remembered invariant"))))

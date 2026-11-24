@@ -287,9 +287,9 @@
                  (conj "scope/context-prefs changed")
                  (or (contains? ag-attrs :seon.agent/goal) (contains? ag-attrs :seon.agent/system-prompt))
                  (conj "system prompt or goal changed")
-                 (or (contains? ag-attrs :seon.agent/memory) (contains? ag-attrs :seon.agent/curated)
+                 (or (contains? ag-attrs :seon.agent/summary) (contains? ag-attrs :seon.agent/curated)
                      (contains? ag-attrs :seon.agent/examples))
-                 (conj "agent memory/curated/examples updated")
+                 (conj "agent summary/curated/examples updated")
                  task-moved? (conj "active task content updated")
                  rule-moved? (conj "context rules modified (:seon.rule/*)"))]
     (cond

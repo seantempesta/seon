@@ -269,7 +269,7 @@
                                         (map #(d/pull mdb-after '[*] (:e %)) (d/datoms mdb-after :avet :seon.agent.message/to :w/fr))))]
                 (is (= #{1 3} (set (map :seon.agent.eval/turn w-evals))) "Noisy turn 2 retracted; turns 1 & 3 preserved!")
                 (is (empty? rev-evals-on-w) "Reviewer's own evals must NOT pollute worker branch!")
-                (is (= ["Removed noisy turn 2"] (:seon.agent/memory (d/pull wdb-after '[:seon.agent/memory] [:seon.agent/id :w/fr]))))
+                (is (= "Removed noisy turn 2" (:seon.agent/summary (d/pull wdb-after '[:seon.agent/summary] [:seon.agent/id :w/fr]))))
                 (is (str/includes? (code/render-path wdb-after "src/demo/fr_bug.clj") ":fixed") "Reviewer's bug fix merged onto worker branch!")
                 (is (str/includes? (code/render-path wdb-after "src/demo/fr_wip.clj") ":worker-wip") "Worker's WIP preserved!")
                 (is (= "Clarified plan with docs link" (:seon.task/plan (d/pull wdb-after '[:seon.task/plan] [:seon.task/id :task/fr-work]))) "Edited task lives on worker branch for clean merge to :main")
@@ -290,7 +290,7 @@
       (binding [fcalls/*agent-ctx* {:conn conn :agent-id :rev/tr1 :branch :branch/rev-tr1}]
         (let [res (fcalls/remember! :w/tr1 "Verified split plan")]
           (is (true? (:ok? res)))
-          (is (= ["Verified split plan"] (:seon.agent/memory (d/pull @conn '[:seon.agent/memory] [:seon.agent/id :w/tr1]))))))
+          (is (= "Verified split plan" (:seon.agent/summary (d/pull @conn '[:seon.agent/summary] [:seon.agent/id :w/tr1]))))))
       ;; 2. gather-branch-status-data inherits parent's :last-proofs when reviewer has none
       (let [db @conn
             ag (d/pull db '[*] [:seon.agent/id :rev/tr1])

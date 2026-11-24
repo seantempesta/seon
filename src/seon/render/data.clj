@@ -234,7 +234,7 @@
     (if (and ma ba (not= branch-db main-db))
       (assoc base
              :seon.agent/pinned (or (latest-attr-val main-db branch-db ma ba :seon.agent/pinned) (:seon.agent/pinned base))
-             :seon.agent/memory (or (latest-attr-val main-db branch-db ma ba :seon.agent/memory) (:seon.agent/memory base))
+             :seon.agent/summary (or (latest-attr-val main-db branch-db ma ba :seon.agent/summary) (:seon.agent/summary base))
              :seon.agent/context-prefs (or (latest-attr-val main-db branch-db ma ba :seon.agent/context-prefs) (:seon.agent/context-prefs base)))
       base)))
 

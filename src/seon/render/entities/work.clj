@@ -190,12 +190,13 @@
     (mut (str (or role :worker) " · " (or branch :main)))]})
 
 (defn render-ctx-snapshot
-  "Full `@ctx` runtime card (~420px) for `:seon.ctx/snapshot` carrying durable memory, context-prefs,
+  "Full `@ctx` runtime card (~420px) for `:seon.ctx/snapshot` carrying agent summary, context-prefs,
    and static Core-12 REPL idioms (or Harbor `:container` workspace tools when `:mode :container`)."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/snapshot :seon.ctx/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1000000}
-  [{{:seon.agent/keys [id branch role memory context-prefs] :as snap} :seon.ctx/snapshot}]
-  (let [mem (vec (or memory []))
+  [{{:seon.agent/keys [id branch role summary context-prefs] :as snap} :seon.ctx/snapshot}]
+  (let [sum-lines (when (and (string? summary) (not (str/blank? summary)))
+                    (vec (remove str/blank? (str/split-lines summary))))
         prefs (when (map? context-prefs) context-prefs)
         container? (= :container (or (:seon.ctx/mode snap) (:mode prefs)))]
     {:seon.ui/hiccup
@@ -205,10 +206,10 @@
        (mut (str (or branch :main)))]
       (kv-dl [[":seon.agent/role" (str (or role :worker))]
               [":seon.agent/context-prefs" (when (seq prefs) (pr-str prefs))]])
-      (when (seq mem)
+      (when (seq sum-lines)
         [:div {:class "doc-box sm-copy"}
-         [:p "Durable Datahike memory:"]
-         (into [:ul] (for [note mem] [:li (if (string? note) note (pr-str note))]))])
+         [:p "Agent summary:"]
+         (into [:ul] (for [line sum-lines] [:li line]))])
       (if container?
         [:div {:class "doc-box sm-copy"}
          [:p "Container Workspace REPL tools (isolated Linux container; batch/parse output in Clojure!):"]
@@ -219,7 +220,7 @@
         [:div {:class "doc-box sm-copy"}
         [:p "REPL primitives (`d` = `datahike.api`; `@ctx` is a REPL-only reactive 2-index tree — pure functions & renderers receive values/`db` as args and never touch `@ctx`):"]
         [:ul
-         [:li "`@ctx` (REPL only — `:eavt` forward + `:avet` reverse refs, never shadow it): inspect `@ctx` (`:seon.agent.eval/_agent-ref`, `:seon.agent/tasks`, `:seon.agent/target`, `:seon.agent/memory`, `:seon.agent/pinned`, `:seon.agent/context-prefs`). Plain Clojure `(swap! ctx ...)` writes diffs to Datahike (`[:db/retractEntity]` on removed evals, or `update-in [:seon.agent/target ...]` during review). Always call `(user/ready!)` when YOUR session is done."]
+         [:li "`@ctx` (REPL only — `:eavt` forward + `:avet` reverse refs, never shadow it): inspect `@ctx` (`:seon.agent.eval/_agent-ref`, `:seon.agent/tasks`, `:seon.agent/target`, `:seon.agent/summary`, `:seon.agent/pinned`, `:seon.agent/context-prefs`). Plain Clojure `(swap! ctx ...)` writes diffs to Datahike (`[:db/retractEntity]` on removed evals, or `update-in [:seon.agent/target ...]` during review). Always call `(user/ready!)` when YOUR session is done."]
          [:li "Datahike (general read/write anywhere in graph): `(user/db)` / `(user/main-db)`, `(d/pull db '[*] ref)`, `(d/datoms db :avet/:aevt :attr)`, `(d/q ...)`, `(d/history db)`, `(d/as-of db tx)`, `(seon.vector/near (user/main-db) ref 6 {:of :seon.code.var/name})`, `(user/transact! tx-data)`."]
          [:li "Code search & CST edit: `(user/source 'a/b 'c/d)` or `(user/source 'ns [1 120])`, `(user/grep-src [\"p1\" \"p2\"] {:ns 'ns})`, `(user/ns-outline 'ns)`, `(user/search \"term\")`, `(user/edit-fn! 'ns/fn [[old new]])`, `(user/add-fn! 'ns \"(defn ...)\")`, `(user/set-meta! {'ns/f {...}})`, `(user/add-require! 'ns '[lib :as a])`, `(user/prune-requires! 'ns)`, `(user/move-vars! {...})`, `(user/revert-ns! 'ns)`, `(user/remove-var! 'ns/v)`, `(user/doc! \"docs/f.md#sec\" \"body\")`, `(user/register-schema! :seon.x/k form)`."]
          [:li "Verify, rules & delegate: `(user/run-tests! 'ns-test/var | 'ns)` (never wrap REPL edits in `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` — only inside `deftest` bodies), `(user/health)`, `(user/diff)`, `(user/context-trace)`, `(user/put-rule! {...})`, `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)`, `(user/create-task! {...})`, `(user/record-summary! {...})`."]

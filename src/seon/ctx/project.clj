@@ -500,8 +500,7 @@
                      :data (with-meta
                              (into {:seon.ctx/tx (:max-tx branch-db)}
                                    (filter (comp some? val))
-                                   (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/role
-                                                    :seon.agent/pinned :seon.agent/memory :seon.agent/context-prefs]))
+                                   (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/pinned :seon.agent/summary :seon.agent/context-prefs]))
                              {:seon/schema :seon.ctx/snapshot})
                      :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
         combined (mapv (fn [c] (let [tc (long (get touch-counts (:entity c) 0))] (if (pos? tc) (assoc c :touches tc) c)))

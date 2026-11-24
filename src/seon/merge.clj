@@ -497,7 +497,7 @@
            reg-union (schema/registry-for-db ours-db theirs-schemas)
            {:keys [identity-attrs many-attrs skipped-attrs]} (:merge-meta reg-union)
            skipped-attrs (if (and (not= ours-branch :main) (:include-session-for opts))
-                           (disj skipped-attrs :seon.agent/memory :seon.agent/pinned :seon.agent/curated :seon.agent/context-prefs)
+                           (disj skipped-attrs :seon.agent/summary :seon.agent/pinned :seon.agent/curated :seon.agent/context-prefs)
                            skipped-attrs)
            new-dh-decls (schema/sync-dh-decls (:schema ours-db) (:declarations reg-union))
            id-attr-rank (into {} (map-indexed (fn [i a] [a i])) identity-attrs)
