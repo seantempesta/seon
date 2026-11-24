@@ -285,16 +285,19 @@
          :body "Turn limit reached with unmerged edits on branch. Run final test check if needed and call (user/ready!) now."}))))
 
 (defn has-active-reviewer?
-  "True when `agent-eid` has an unarchived, unmerged reviewer pointing at it via `:seon.agent/target`."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] :boolean]
-   :cost/ticks 500000}
-  [main-db agent-eid]
-  (boolean
-   (and (integer? agent-eid) (contains? (or (:schema main-db) {}) :seon.agent/target)
+"True when `agent-eid` has an unarchived, unmerged reviewer pointing at it via `:seon.agent/forked-from` or `:seon.agent/target`."
+{:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] :boolean]
+ :cost/ticks 500000}
+[main-db agent-eid]
+(boolean
+ (and (integer? agent-eid)
+      (let [dh (or (:schema main-db) {})
+            dts (concat (when (contains? dh :seon.agent/forked-from) (d/datoms main-db :avet :seon.agent/forked-from agent-eid))
+                        (when (contains? dh :seon.agent/target) (d/datoms main-db :avet :seon.agent/target agent-eid)))]
         (some (fn [dt]
                 (let [ra (d/pull main-db '[:seon.agent/archived? :seon.agent/merged-tx] (:e dt))]
                   (and (not (:seon.agent/archived? ra)) (nil? (:seon.agent/merged-tx ra)))))
-              (d/datoms main-db :avet :seon.agent/target agent-eid)))))
+              dts)))))
 
 (defn compute-review-ops
   "Pure rule-driven review trigger & target auto-resume ops derived from `:seon.rule/*` entities asserting `:agent/needs-review` and `:seon.agent/target`."
@@ -307,7 +310,7 @@
         dh (or (:schema main-db) {})]
     (cond
       ;; 1. If a reviewer finished/merged and has not yet sent a :review-note to its paused target, atomically sync :main, unpause, and deliver :review-note!
-      (and merged? target (contains? dh :seon.agent/id))
+      (and merged? target (nil? (:seon.agent/forked-from ma)) (contains? dh :seon.agent/id))
       (let [teid (if (map? target) (:db/id target) target)
             ta (when (integer? teid) (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/paused?] teid))
             taid (:seon.agent/id ta)
@@ -327,7 +330,7 @@
           []))
 
       ;; 2. For active non-main worker agents with :seon.config/review-every-turns > 0 (and not already under review), evaluate :agent/needs-review rules!
-      (and active? (not= b :main) (not raw-ready?) (not waiting?) (nil? target)
+      (and active? (not= b :main) (not raw-ready?) (not waiting?) (and (nil? target) (nil? (:seon.agent/forked-from ma)))
            (contains? dh :seon.config/review-every-turns)
            (pos? (long (or (seon.store/config-val main-db aid :seon.config/review-every-turns) 0))))
       (let [rev-every (long (seon.store/config-val main-db aid :seon.config/review-every-turns))]
@@ -347,9 +350,9 @@
                           (conj [:periodic-review (long tool-streak)]))]
             (if (seq reasons)
               (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))
-                  spawn-op {:op :spawn-agent :id rid :parent aid :target [:seon.agent/id aid]
-                            :task :template/review-and-improve :auto-merge? true
-                            :goal (str "Review session " aid " (triggered by " (pr-str reasons) "). NEVER implement target's task on your review branch. If target is healthy with no Seon root cause, leave an optional 1-line note on :seon.agent/target's :seon.agent/memory and call (user/ready!) immediately. Otherwise fix the Seon root cause on your branch, clean noisy/failed evals via @ctx on :seon.agent/target, and call (user/ready!) on YOUR session (do NOT unpause target manually).")}]
+                  spawn-op {:op :spawn-agent :id rid :parent aid :forked-from aid
+                  :tasks [:template/review-and-improve] :auto-merge? true
+                  :goal (str "Review " aid " (triggered by " (pr-str reasons) ")")}]
               [{:op :transact :tx-data [{:seon.agent/id aid :seon.agent/paused? true}] :reason [:review-pause aid]}
                spawn-op])
               []))))

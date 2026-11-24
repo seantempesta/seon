@@ -293,54 +293,6 @@
       (swap! ctx/ctx assoc :seon.agent/memory nxt)
       {:remembered note :count (count nxt)})))
 
-(defn ^:seon.flow/edge tune-context!
-  "Updates `:seon.agent/context-prefs`, `:seon.ctx/pattern`, and `:pin`/`:unpin` on `@ctx`."
-  {:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [{:keys [pin unpin pattern recent-data-limit max-vars-shown max-schemas-shown extra-namespaces extra-schemas] :as opts}]
-  (when *agent-ctx*
-    (let [cur-prefs (or (:seon.agent/context-prefs @ctx/ctx) {})
-          pref-patch (cond-> {}
-                       (integer? recent-data-limit) (assoc :recent-data-limit (long recent-data-limit))
-                       (integer? max-vars-shown)    (assoc :max-vars-shown (long max-vars-shown))
-                       (integer? max-schemas-shown) (assoc :max-schemas-shown (long max-schemas-shown))
-                       (contains? opts :extra-namespaces) (assoc :extra-namespaces (mapv #(if (string? %) (symbol %) %) extra-namespaces))
-                       (contains? opts :extra-schemas) (assoc :extra-schemas (vec extra-schemas)))
-          next-prefs (merge cur-prefs pref-patch)]
-      (when (seq pref-patch) (swap! ctx/ctx assoc :seon.agent/context-prefs next-prefs))
-      (when (and (vector? pattern) (seq pattern)) (swap! ctx/ctx assoc :seon.ctx/pattern pattern))
-      (doseq [p pin] (pin! p))
-      (doseq [u-item unpin] (unpin! u-item))
-      {:ok? true :context-prefs next-prefs})))
-
-(defn ^:seon.flow/edge compact!
-  "Compacts eval history by retracting earlier evals (keeping `d/history` intact) and saving `:summary`/`:memory`."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]]}
-  ([] (compact! {}))
-  ([summary-or-opts]
-   (when-let [{:keys [conn agent-id]} *agent-ctx*]
-     (let [opts (if (map? summary-or-opts) summary-or-opts {:summary (str summary-or-opts)})
-           {:keys [summary memory tune through-turn keep-last]} opts
-           target-aid (or (:agent-id opts) agent-id)
-           _ (when (not (str/blank? (str summary))) (remember! (str summary)))
-           _ (doseq [m memory] (remember! m))
-           _ (when (map? tune) (tune-context! tune))
-           db-before @conn
-           eval-ents (mapv #(d/pull db-before '[:db/id :seon.agent.eval/turn] (:e %))
-                           (d/datoms db-before :avet :seon.agent.eval/agent target-aid))
-           distinct-turns (vec (sort (distinct (keep :seon.agent.eval/turn eval-ents))))
-           keep-n (long (or keep-last 0))
-           cut-turn (cond
-                      (integer? through-turn) (long through-turn)
-                      (pos? keep-n) (if (> (count distinct-turns) keep-n) (long (nth distinct-turns (- (count distinct-turns) keep-n 1))) -1)
-                      :else Long/MAX_VALUE)
-           to-retract (filterv #(<= (long (or (:seon.agent.eval/turn %) 0)) cut-turn) eval-ents)
-           retract-tx (mapv #(vector :db/retractEntity (:db/id %)) to-retract)
-           r (when (seq retract-tx) (d/transact conn {:tx-data retract-tx}))]
-       (when r (ctx/refresh-active! (:db-after r) (:tx-data r)))
-       {:ok? true :agent-id target-aid :retracted-evals (count to-retract)
-        :remaining-evals (- (count eval-ents) (count to-retract))
-        :history-tx (:max-tx db-before) :memory-count (count (:seon.agent/memory @ctx/ctx))}))))
-
 (defn ^:seon.flow/edge start-bench-run!
   "Starts a parallel isolated benchmark run via the coordinator's `:start-bench-run` op."
   {:seon.repl/export true :malli/schema [:=> [:cat :any] :any]}
@@ -385,12 +337,23 @@
      (agent-monitor-snapshot conn target-agent))))
 
 (defn ^:seon.flow/edge ready!
-  "Signals this agent's session done (`:ready? true :waiting? false`) to trigger tests and merge."
-  {:seon.repl/export true :malli/schema [:=> [:cat] [:maybe :map]]}
-  []
-  (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
-    (d/transact conn {:tx-data [{:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}]})
-    {:ok? true :status :ready :agent-id agent-id :branch branch}))
+  "Signals this agent's session done (`:ready? true :waiting? false`), optionally recording `:seon.agent/summary`."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat [:maybe :string]] [:maybe :map]]]}
+  ([] (ready! nil))
+  ([summary]
+   (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
+     (let [s (when (and (string? summary) (not (str/blank? summary))) (str/trim summary))
+           ent (cond-> {:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}
+                 s (assoc :seon.agent/summary s))]
+       (d/transact conn {:tx-data [ent]})
+       (cond-> {:ok? true :status :ready :agent-id agent-id :branch branch}
+         s (assoc :summary s))))))
+
+(defn ^:seon.flow/edge finish-review!
+  "Finishes a forked review session with a clear `summary` message, triggering tests and merge-back into the parent agent's branch."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat [:maybe :string]] [:maybe :map]]]}
+  ([] (ready! nil))
+  ([summary] (ready! summary)))
 
 (defn ^:seon.flow/edge export-ns-helpers!
   "Declaratively interns every public var in `ns-sym` carrying `:seon.repl/export` into `u`,
@@ -416,3 +379,97 @@
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
   (export-ns-helpers! u 'seon.fork.calls))
+
+(defn- normalize-pin-ref [item]
+  (cond
+    (and (map? item) (:seon.code.var/name item)) [:seon.code.var/name (:seon.code.var/name item)]
+    (and (map? item) (:seon.code.ns/name item))  [:seon.code.ns/name (:seon.code.ns/name item)]
+    (and (map? item) (:seon.code.doc/id item))   [:seon.code.doc/id (:seon.code.doc/id item)]
+    (and (map? item) (:seon.schema/key item))    [:seon.schema/key (:seon.schema/key item)]
+    (and (map? item) (:seon.task/id item))       [:seon.task/id (:seon.task/id item)]
+    (and (map? item) (:seon.agent/id item))      [:seon.agent/id (:seon.agent/id item)]
+    :else item))
+
+(defn- compute-tune-patch
+  "Pure shared patch builder for `:memory`, `:pinned`, `:context-prefs`, and `:seon.ctx/pattern`."
+  {:malli/schema [:=> [:cat :map [:sequential :any] [:maybe :map]] :map]}
+  [cur notes tune]
+  (let [mem0 (vec (or (:seon.agent/memory cur) []))
+        mem1 (reduce (fn [a n] (if (some #(= % n) a) a (conj a n))) mem0 notes)
+        pin0 (vec (or (:seon.agent/pinned cur) []))
+        pin1 (cond-> pin0
+               (seq (:pin tune))
+               (as-> p (reduce (fn [a x] (let [r (normalize-pin-ref x)] (if (some #(= % r) a) a (conj a r)))) p (:pin tune)))
+               (seq (:unpin tune))
+               (as-> p (let [rm (into #{} (map normalize-pin-ref) (:unpin tune))]
+                         (vec (remove #(or (contains? rm %) (contains? rm (normalize-pin-ref %))) p)))))
+        prefs0 (if (map? (:seon.agent/context-prefs cur)) (:seon.agent/context-prefs cur) {})
+        pref-patch (when (map? tune)
+                     (let [{:keys [recent-data-limit max-vars-shown max-schemas-shown extra-namespaces extra-schemas]} tune]
+                       (cond-> {}
+                         (integer? recent-data-limit) (assoc :recent-data-limit (long recent-data-limit))
+                         (integer? max-vars-shown)    (assoc :max-vars-shown (long max-vars-shown))
+                         (integer? max-schemas-shown) (assoc :max-schemas-shown (long max-schemas-shown))
+                         (contains? tune :extra-namespaces) (assoc :extra-namespaces (mapv #(if (string? %) (symbol %) %) extra-namespaces))
+                         (contains? tune :extra-schemas) (assoc :extra-schemas (vec extra-schemas)))))
+        prefs1 (if (seq pref-patch) (merge prefs0 pref-patch) prefs0)
+        pat (:pattern tune)
+        patch (cond-> {}
+                (not= mem1 mem0) (assoc :seon.agent/memory mem1)
+                (not= pin1 pin0) (assoc :seon.agent/pinned pin1)
+                (seq pref-patch) (assoc :seon.agent/context-prefs prefs1)
+                (and (vector? pat) (seq pat)) (assoc :seon.ctx/pattern pat))]
+    {:patch patch :context-prefs prefs1 :memory mem1 :pinned pin1}))
+
+(defn ^:seon.flow/edge tune-context!
+  "Updates `:seon.agent/context-prefs`, `:seon.ctx/pattern`, and `:pin`/`:unpin` on `@ctx`."
+  {:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [opts]
+  (when *agent-ctx*
+    (let [{:keys [patch context-prefs]} (compute-tune-patch @ctx/ctx nil opts)]
+      (when (seq patch) (swap! ctx/ctx merge patch))
+      {:ok? true :context-prefs context-prefs})))
+
+(defn ^:seon.flow/edge compact!
+  "Compacts eval history by retracting selected `:turns`, `:through-turn`, or `:keep-last` (keeping `d/history` intact) and saving `:summary`/`:memory`/`:tune` onto `:agent-id` (default self)."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]]}
+  ([] (compact! {}))
+  ([summary-or-opts]
+   (when-let [{:keys [conn agent-id]} *agent-ctx*]
+     (let [opts (if (map? summary-or-opts) summary-or-opts {:summary (str summary-or-opts)})
+           {:keys [summary memory tune turns through-turn keep-last]} opts
+           target-aid (or (:agent-id opts) agent-id)
+           self? (= target-aid agent-id)
+           notes (vec (remove #(str/blank? (str %)) (concat (when (and summary (not (str/blank? (str summary)))) [(str summary)]) memory)))
+           db-before @conn
+           target-eid (:e (first (d/datoms db-before :avet :seon.agent/id target-aid)))]
+       (if (and (not self?) (nil? target-eid))
+         {:ok? false :error :agent-not-found :agent-id target-aid}
+         (let [_ (when (and self? (or (seq notes) (map? tune)))
+                   (let [{:keys [patch]} (compute-tune-patch @ctx/ctx notes tune)]
+                     (when (seq patch) (swap! ctx/ctx merge patch))))
+               db-now @conn
+               eval-ents (mapv #(d/pull db-now '[:db/id :seon.agent.eval/turn] (:e %))
+                               (d/datoms db-now :avet :seon.agent.eval/agent target-aid))
+               distinct-turns (vec (sort (distinct (keep :seon.agent.eval/turn eval-ents))))
+               turn-set (when (coll? turns) (into #{} (map long) turns))
+               keep-n (long (or keep-last 0))
+               cut-turn (cond
+                          (integer? through-turn) (long through-turn)
+                          (pos? keep-n) (if (> (count distinct-turns) keep-n) (long (nth distinct-turns (- (count distinct-turns) keep-n 1))) -1)
+                          :else Long/MAX_VALUE)
+               to-retract (if turn-set
+                            (filterv #(contains? turn-set (long (or (:seon.agent.eval/turn %) -1))) eval-ents)
+                            (filterv #(<= (long (or (:seon.agent.eval/turn %) 0)) cut-turn) eval-ents))
+               retract-tx (mapv #(vector :db/retractEntity (:db/id %)) to-retract)
+               target-tx (when (and (not self?) (or (seq notes) (map? tune)))
+                           (let [cur (d/pull db-now '[:seon.agent/memory :seon.agent/pinned :seon.agent/context-prefs :seon.ctx/pattern] target-eid)
+                                 {:keys [patch]} (compute-tune-patch cur notes tune)]
+                             (when (seq patch)
+                               [(assoc patch :seon.agent/id target-aid)])))
+               tx (vec (concat retract-tx target-tx))]
+           (when (seq tx) (d/transact conn {:tx-data tx}))
+           (let [rem (- (count eval-ents) (count to-retract))]
+             {:ok? true :agent-id target-aid :retracted-evals (count to-retract)
+              :remaining-evals rem :through-turn (when-not turn-set cut-turn)
+              :turns (when turn-set (vec (sort turn-set))) :memories-saved (count notes)})))))))

@@ -13,6 +13,31 @@
             [seon.store :as store]
             [seon.model.messages :as messages]
             [seon.render.fit :as fit]))
+(defn format-forked-eval-manifest
+  "Formats a compact turn/eid/handle/size/status table of `parent-id`'s live evals on `branch-db`."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :keyword]] [:maybe :string]] :cost/ticks 5000000}
+  [branch-db parent-id]
+  (when (and branch-db parent-id)
+    (let [evs (rdata/agent-evals-in branch-db parent-id)]
+      (when (seq evs)
+        (let [turns (count (distinct (keep :seon.agent.eval/turn evs)))
+              rows (mapv (fn [e]
+                           (let [ch (+ (count (str (:seon.agent.eval/code e)))
+                                       (count (str (:seon.agent.eval/value e)))
+                                       (count (str (:seon.agent.eval/out e)))
+                                       (count (str (:seon.agent.eval/error e))))
+                                 st (if (:seon.agent.eval/error e) "ERR" "ok")
+                                 intent (let [s (str/trim (str (or (:seon.agent.eval/intent e)
+                                                                   (when (str/blank? (str (:seon.agent.eval/code e))) "(prose)")
+                                                                   "")))]
+                                          (if (> (count s) 48) (str (subs s 0 45) "...") s))]
+                             (str "| " (or (:seon.agent.eval/turn e) 0) " | " (:db/id e) " | "
+                                  (or (:seon.agent.eval/handle e) "-") " | " ch " | " st " | " intent " |")))
+                         evs)]
+          (str "### [forked-agent-evals · " parent-id " (" turns " turns, " (count evs) " evals)]\n"
+               "| turn | eid | handle | chars | status | intent |\n"
+               (str/join "\n" rows)
+               "\nCompact noisy turns: `(user/compact! {:agent-id " parent-id " :turns #{...} :summary \"...\"})` or `:through-turn N`."))))))
 
 (defn- nonblank [x]
   (when (and (string? x) (not (str/blank? x)))
@@ -21,6 +46,65 @@
 (defn- one-line [x n]
   (let [s (-> (if (nil? x) "" (str x)) (str/replace #"\s+" " ") str/trim)]
     (if (> (count s) n) (str (subs s 0 (max 1 (dec n))) "…") s)))
+
+(defn ^:seon.flow/edge resolve-prefix-agents
+  "ONE unified resolver for `:zone :agent-prefix` projections (`:mode :continue` forks + `:mode :example` refs).
+   Recursively invokes `build-fn` on `:mode :continue` parents at immutable `fork-commit` for ~95%+ KV-cache hit."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :any :map [:sequential :map] :int :seon.host/fn] :map]
+   :cost/ticks 25000000}
+  [main-db branch-db conn ag prefix-items depth build-fn]
+  (let [sc (or conn (:store main-db) (:store branch-db))
+        pat '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/goal]
+        items (->> prefix-items
+                   (map (fn [it]
+                          (let [ent (:data it)
+                                eid (:entity it)
+                                aid (or (:seon.agent/id ent)
+                                        (get-in it [:params :seon.agent.prefix/agent-id])
+                                        (when (and (vector? eid) (= :seon.agent/id (first eid))) (second eid)))
+                                a (cond
+                                    (:seon.agent/id ent) ent
+                                    (qualified-keyword? aid)
+                                    (let [b (d/pull branch-db pat [:seon.agent/id aid])]
+                                      (if (:seon.agent/id b) b (d/pull main-db pat [:seon.agent/id aid])))
+                                    :else nil)
+                                mode (or (get-in it [:params :seon.agent.prefix/mode]) :example)]
+                            (when (:seon.agent/id a) {:agent a :mode mode}))))
+                   (remove nil?)
+                   (sort-by (fn [{:keys [agent mode]}] [(if (= :continue mode) 0 1) (str (:seon.agent/id agent))]))
+                   (reduce (fn [{:keys [seen out]} item]
+                             (let [aid (:seon.agent/id (:agent item))]
+                               (if (contains? seen aid)
+                                 {:seen seen :out out}
+                                 {:seen (conj seen aid) :out (conj out item)})))
+                           {:seen #{} :out []})
+                   :out)
+        cont (when (< depth 4) (first (filter #(= :continue (:mode %)) items)))
+        ex-items (filterv #(= :example (:mode %)) items)
+        cont-res (when cont
+                   (let [pa (:agent cont)
+                         pid (:seon.agent/id pa)
+                         pbr (:seon.agent/branch pa :main)
+                         fc (:seon.agent/fork-commit ag)
+                         fdb (or (when (and fc sc) (try (d/commit-as-db sc fc) (catch Throwable _ nil)))
+                                 (when (and (not= pbr :main) sc) (try (store/head sc pbr) (catch Throwable _ nil)))
+                                 (when (= pbr (get-in branch-db [:config :branch])) branch-db)
+                                 main-db)
+                         p-main (if (= pbr :main) fdb main-db)
+                         pw (build-fn p-main fdb pid {:conn conn :vision? false :include-tail? false :depth (inc depth)})]
+                     {:forked-from pid
+                      :parent-shown (:shown pw)
+                      :entry {:mode :continue :id pid :messages (vec (rest (:messages pw)))}}))
+        ex-entries (vec (for [{:keys [agent]} ex-items
+                              :let [eid (:seon.agent/id agent)
+                                    ebr (:seon.agent/branch agent :main)
+                                    edb (or (when (and (not= ebr :main) sc) (try (store/head sc ebr) (catch Throwable _ nil)))
+                                            main-db)
+                                    turns (rdata/evals->turns (rdata/agent-evals-in edb eid))]]
+                          {:mode :example :id eid :goal (:seon.agent/goal agent) :db edb :turns turns}))]
+    {:forked-from (:forked-from cont-res)
+     :parent-shown (:parent-shown cont-res)
+     :entries (vec (concat (when (:entry cont-res) [(:entry cont-res)]) ex-entries))}))
 
 (defn- clamp-pct [x]
   (when (number? x)
@@ -351,43 +435,6 @@
                           (d/datoms branch-db :avet :seon.tx/merged :main))
                   0)]
     (max retract-tx sync-tx)))
-
-(defn ^:seon.flow/edge build-wire-examples
-  "Builds `<session kind=\"example|review\">` descriptors for `ag`, loading `:seon.agent/target`'s branch DB and capping >12-turn review sessions."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :any :map] [:vector :map]]
-   :cost/ticks 15000000}
-  [main-db branch-db conn ag]
-  (let [ex-list
-        (vec (for [ex-id (sort (:seon.agent/examples ag))
-                   :when (first (d/datoms main-db :avet :seon.agent/id ex-id))
-                   :let [ex-ag (d/pull main-db '[:seon.agent/id :seon.agent/goal] [:seon.agent/id ex-id])]]
-               {:id ex-id :kind :example :goal (:seon.agent/goal ex-ag)
-                :turns (rdata/evals->turns (rdata/agent-evals-in main-db ex-id))}))
-        t-raw (:seon.agent/target ag)
-        t-eid (cond (integer? t-raw) t-raw (map? t-raw) (:db/id t-raw) :else nil)
-        t-ag (when (and t-eid (contains? (or (:schema main-db) {}) :seon.agent/id))
-               (let [p (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/goal] t-eid)]
-                 (when (:seon.agent/id p) p)))
-        rev-sess (when t-ag
-                   (let [taid (:seon.agent/id t-ag)
-                         tb (:seon.agent/branch t-ag :main)
-                         tdb (or (when-let [sc (and (not= tb :main) (or conn (:store main-db) (:store branch-db)))]
-                                   (try (store/head sc tb) (catch Throwable _ nil)))
-                                 (when (= tb (get-in branch-db [:config :branch])) branch-db)
-                                 main-db)
-                         tevs (rdata/agent-evals-in tdb taid)
-                         tmsgs (rdata/agent-messages-in main-db taid)
-                         msg-map (into {} (map (juxt :seon.agent.message/id identity)) tmsgs)
-                         all-turns (when (seq tevs) (vec (rdata/evals->turns tevs msg-map)))
-                         n (count all-turns)
-                         capped? (> n 12)
-                         turns (if capped? (into (subvec all-turns 0 2) (subvec all-turns (- n 10))) all-turns)]
-                     (when (seq turns)
-                       (cond-> {:id taid :branch tb :kind :review :goal (:seon.agent/goal t-ag)
-                                :db tdb :turns turns}
-                         capped? (assoc :omitted-turns (- n 12))))))
-        ]
-    (cond-> ex-list rev-sess (conj rev-sess))))
 
 (defonce ^:private ^:seon.flow/edge tool-format-cache (store/lru-cache 512))
 

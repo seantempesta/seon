@@ -106,28 +106,14 @@
                   [:=> [:cat :seon.host/db :int :int [:set :int] [:maybe :seon.host/conn]] :map]]
    :cost/ticks 25000000}
   ([db eid] (entity->tree db eid 1 #{} nil))
-  ([db eid depth visited conn]
+  ([db eid depth visited _conn]
    (let [vis (conj visited eid)
          ref-attrs (all-ref-attrs db)
-         cur-branch (get-in db [:config :branch] :main)
          expand-fwd (when (pos? depth)
                       (fn [_a target-eid]
                         (if (contains? vis target-eid)
                           {:db/id target-eid}
-                          (let [;; If conn is available and target is an entity living on another branch (e.g. :seon.agent/target), read from its branch!
-                                tb (when (and conn (contains? (rlinks/db-schema db) :seon.agent/branch))
-                                     (:v (first (d/datoms db :eavt target-eid :seon.agent/branch))))
-                                use-db (if (and tb (not= tb cur-branch))
-                                         (or (try (store/head conn tb) (catch Throwable _ nil)) db)
-                                         db)
-                                mdb (when (and conn tb (not= tb cur-branch))
-                                      (try (store/head conn :main) (catch Throwable _ nil)))
-                                sub (entity->tree use-db target-eid (dec depth) vis nil)]
-                            (if (and mdb (not= tb :main))
-                              (let [main-sub (eavt-map mdb target-eid nil)]
-                                (merge sub (select-keys main-sub [:seon.agent/paused? :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx])
-                                {:seon.ctx/branch tb}))
-                              sub)))))
+                          (entity->tree db target-eid (dec depth) vis nil))))
          fwd (eavt-map db eid expand-fwd)]
      (if-not (pos? depth)
        fwd
@@ -147,28 +133,14 @@
   "Reads Index 1 (`:eavt eid`) + 1-hop forward refs (each expanded with its 2-index subtree) under `datahike.reads` tracking."
   {:malli/schema [:=> [:cat :seon.host/db :int [:maybe :seon.host/conn]] :map]
    :cost/ticks 20000000}
-  [db eid conn]
+  [db eid _conn]
   (let [[m rs] (reads/with-reads
                  (fn []
-                   (let [cur-branch (get-in db [:config :branch] :main)
-                         expand-fwd (fn [_a target-eid]
-                                      (if (= target-eid eid)
-                                        {:db/id target-eid}
-                                        (let [tb (when (and conn (contains? (rlinks/db-schema db) :seon.agent/branch))
-                                                   (:v (first (d/datoms db :eavt target-eid :seon.agent/branch))))
-                                              use-db (if (and tb (not= tb cur-branch))
-                                                       (or (try (store/head conn tb) (catch Throwable _ nil)) db)
-                                                       db)
-                                              mdb (when (and conn tb (not= tb cur-branch))
-                                                    (try (store/head conn :main) (catch Throwable _ nil)))
-                                              sub (entity->tree use-db target-eid 1 #{eid} nil)]
-                                          (if (and mdb (not= tb :main))
-                                            (let [main-sub (eavt-map mdb target-eid nil)]
-                                              (merge sub
-                                              (select-keys main-sub [:seon.agent/paused? :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx])
-                                              {:seon.ctx/branch tb}))
-                                            sub))))]
-                     (eavt-map db eid expand-fwd))))]
+                   (eavt-map db eid
+                     (fn [_a target-eid]
+                       (if (= target-eid eid)
+                         {:db/id target-eid}
+                         (entity->tree db target-eid 1 #{eid} nil))))))]
     {:key :seon.ctx/forward :val m :reads-idx (reads/reads-index rs)}))
 
 (defn assemble-tree-map
@@ -294,6 +266,15 @@
              :else (conj acc [:db/add eid k nv])))))
      [] all-ks)))
 
+(defn ^:seon.flow/edge apply-ctx-reset!
+  "Applies `CtxAtom.reset` write-back via pure single-branch `diff-entity-tx` (forked reviews share the parent branch directly)."
+  {:malli/schema [:=> [:cat :seon.host/conn :int :map :map] [:maybe :map]]
+   :cost/ticks 25000000}
+  [conn eid old-val new-val]
+  (let [db @conn
+        tx (diff-entity-tx db eid old-val new-val)]
+    (when (seq tx) (d/transact conn {:tx-data tx}))))
+
 (defn ^:seon.flow/edge commit-target-diff!
   "Commits cross-branch edits to `:seon.agent/target` (eval retractions/edits on target branch, `:paused?` on `:main`; zero process hacks)."
   {:malli/schema [:=> [:cat :seon.host/conn :keyword :map :map] :map]
@@ -331,23 +312,3 @@
                 (let [mconn (store/connect (:config @conn) :main)]
                   (try (d/transact mconn {:tx-data main-tx}) (finally (d/release mconn))))))
             {:handled? true :tx-count (+ (count br-tx) (count main-tx)) :branch tb}))))))
-
-(defn ^:seon.flow/edge apply-ctx-reset!
-  "Applies `CtxAtom.reset` write-back: commits cross-branch `:seon.agent/target` diffs and local branch `diff-entity-tx` (zero process hacks)."
-  {:malli/schema [:=> [:cat :seon.host/conn :int :map :map] :map]
-   :cost/ticks 25000000}
-  [conn eid old-val new-val]
-  (let [db @conn
-        cur-branch (get-in db [:config :branch] :main)
-        ot (:seon.agent/target old-val)
-        nt (:seon.agent/target new-val)
-        cross-target? (and (map? ot) (map? nt) (:seon.agent/id ot) (= (:db/id ot) (:db/id nt))
-                           (not= (:seon.agent/branch ot :main) cur-branch)
-                           (not= ot nt))
-        tres (when cross-target?
-               (commit-target-diff! conn cur-branch ot nt))
-        tx (diff-entity-tx db eid
-                           (if cross-target? (dissoc old-val :seon.agent/target) old-val)
-                           (if cross-target? (dissoc new-val :seon.agent/target) new-val))]
-    {:res (when (seq tx) (d/transact conn {:tx-data tx}))
-     :target-moved? (pos? (long (or (:tx-count tres) 0)))}))

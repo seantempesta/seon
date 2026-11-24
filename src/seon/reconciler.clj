@@ -276,7 +276,7 @@
         retracted? (boolean (and (not busy?) (some? live-pid) (seq prev-eids)
                                  (some #(not (contains? cur-eval-eids %)) prev-eids)))]
     {:live-pid live-pid :busy? busy?
-     :needs-release? (boolean (and (some? live-pid) (or merged? (and paused? (not busy?)) retracted?)))}))
+     :needs-release? (boolean (and (some? live-pid) (or merged? (and (not paused?) retracted?))))}))
 
 (defn derive-agent-status
   {:malli/schema [:function
@@ -296,12 +296,12 @@
                              (or (nil? store) (nil? br) (= br :main) (store/branch? store br))))
                   eid))]
      (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
-              :seon.agent/task :seon.agent/target :seon.agent/role :seon.agent/goal :seon.agent/paused?
+              :seon.agent/task :seon.agent/target :seon.agent/forked-from :seon.agent/role :seon.agent/goal :seon.agent/paused?
               :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/awaiting]) e)
            b (:seon.agent/branch ma)
            branch-db (safe-branch-head store main-db b)
            be (:e (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
-           ba (or (when be (d/pull branch-db (quote [:seon.agent/waiting? :seon.agent/ready?]) be)) {})
+           ba (or (when be (d/pull branch-db (quote [:seon.agent/waiting? :seon.agent/ready? :seon.agent/summary]) be)) {})
            ready-tx (or (when be (:tx (first (d/datoms branch-db :eavt be :seon.agent/ready?)))) 0)
            {:keys [seen inbox unread eval-ents]} (pull-agent-inbox-and-evals main-db branch-db agent-id)
            cur-eval-eids (into #{} (keep :db/id) eval-ents)
@@ -335,7 +335,7 @@
            wrapup-notify-op (when (and active? (empty? review-ops) (pos? max-tool-turns) (= tool-streak max-tool-turns)
                                        (not raw-ready?) (not waiting?) last-was-tool? (empty? unread))
                               (gate/wrapup-grace-notify-op main-db branch-db b agent-id head-tx inbox gate-notified-set))
-           post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents (some? (:seon.agent/target ma)))
+           post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? last-was-tool? under-turn-cap? ready-tx seen inbox eval-ents (and (str/blank? (str (:seon.agent/summary ba))) (boolean (or (:seon.agent/target ma) (:seon.agent/forked-from ma)))))
            needs-turn? (boolean (and active? (empty? review-ops)
                                      (or (seq unread) post-ready-reply?
                                          (and (not raw-ready?) (not waiting?) last-was-tool? under-turn-cap?))))

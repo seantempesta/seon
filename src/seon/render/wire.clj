@@ -27,28 +27,8 @@
 (defonce ^:private ^:seon.flow/edge walk-prefix-cache (store/lru-cache 16))
 
 (def fallback-entity-renderers
-  "Pure `ns-map -> ns-map` fallback renderers used only when a minimal DB lacks indexed code vars."
-  {:seon.code.var/entity   ['seon.render.entities/render-var-chip 'seon.render.entities/render-var-sig 'seon.render.entities/render-var-full]
-   :seon.error/entity      ['seon.render.entities/render-error-badge 'seon.render.entities/render-error-card]
-   :seon.task/entity       ['seon.render.entities/render-task-chip 'seon.render.entities/render-task-card 'seon.render.entities/render-task-full]
-   :seon.schema/entity     ['seon.render.entities/render-schema-chip 'seon.render.entities/render-schema-detail]
-   :seon.code.doc/entity   ['seon.render.entities/render-doc-snippet 'seon.render.entities/render-doc-full]
-   :seon.test/verdict      ['seon.render.entities/render-test-badge 'seon.render.entities/render-test-card]
-   :seon.agent.eval/entity ['seon.render.entities/render-eval-row 'seon.render.entities/render-eval-card]
-   :seon.code.ns/entity    ['seon.render.entities/render-ns-chip 'seon.render.entities/render-ns-card 'seon.render.entities.work/render-ns-full]
-   :seon.agent/entity      ['seon.render.entities/render-agent-row 'seon.render.entities/render-agent-card]
-   :seon.rule/entity       ['seon.render.entities/render-rule-chip 'seon.render.entities/render-rule-detail]
-   :seon.fix/entity        ['seon.render.entities/render-fix-chip 'seon.render.entities/render-fix-card]
-   :seon.agent.call/entity ['seon.render.entities/render-call-row 'seon.render.entities/render-call-card]
-   :seon.system/entity     ['seon.render.entities/render-system-chip 'seon.render.entities/render-system-card]
-   :seon.signal/snapshot   ['seon.signals/render-signals-bar 'seon.signals/render-signals-panel]
-   :seon.ctx/snapshot      ['seon.render.entities.work/render-ctx-chip 'seon.render.entities.work/render-ctx-snapshot]
-   :seon.summary/entity    ['seon.render.entities.work/render-summary-chip 'seon.render.entities.work/render-summary-card]
-   :seon.bench.run/entity  ['seon.render.entities.work/render-bench-run-card]
-   :seon.health/report     ['seon.render.entities.work/render-health-report]
-   :seon.task/lineage      ['seon.render.entities.work/render-task-lineage]
-   :seon.media/image       ['seon.render.media/render-image-chip 'seon.render.media/render-image-card]
-   :seon.ui.status/entity  ['seon.render.status/render-status-chip 'seon.render.status/render-status-card]})
+"Pure `ns-map -> ns-map` fallback renderers (defined in `seon.render.tails`)."
+rtails/fallback-entity-renderers)
 
 (defn- gather-scoped-health-data [main-db branch-db ag evals branch-status]
   (when-let [scope (and main-db (:seon.agent/scope ag))]
@@ -240,7 +220,8 @@
                                 (mapv #(assoc % :text (if (= :unchanged (:status %)) "" (render/hiccup->text (:hiccup %))))
                                       (:selected res)))]
                       (assoc res :selected sel))))
-        pref-items (filterv #(not= :ephemeral-tail (:zone %)) all-items)
+        prefix-items (filterv #(= :agent-prefix (:zone %)) all-items)
+        pref-items (filterv #(and (not= :ephemeral-tail (:zone %)) (not= :agent-prefix (:zone %))) all-items)
         tail-items (filterv #(= :ephemeral-tail (:zone %)) all-items)
         pref-res (run-fit pref-items budget)
         tail-res (run-fit tail-items tail-budget)
@@ -261,6 +242,7 @@
                      :selected selected :dropped dropped})]
     (cond-> {:tile-projections selected
              :candidates (mapv lean-wire-item all-items)
+             :prefix-items prefix-items
              :walk-text (str/join "\n\n---\n\n" (map fmt-p pref-sel))
              :walk-db walk-db
              :tail-tile-blocks (when (seq tail-sel)
@@ -291,12 +273,15 @@
                      (= :coordinator (:seon.agent/role ag)))
       store-or-conn (or conn (:store branch-db))
       reset-tx (rstatus/branch-reset-tx (if read-main? main-db branch-db) (:seon.agent/id ag))
-      anchor-cid (when (and (pos? reset-tx) (not read-main?) (not= branch :main))
-                   (or (try (:commit (dv/commit-holding-tx branch-db reset-tx)) (catch Throwable _ nil))
-                       (live-cid branch-db)))
-      base-cid (when (and (nil? anchor-cid) store-or-conn (not= branch :main) (not read-main?)
-                          (contains? (try (d/branches store-or-conn) (catch Throwable _ nil)) branch))
-                 (try (d/merge-base store-or-conn :main branch) (catch Throwable _ nil)))
+      anchor-cid (cond (and (pos? reset-tx) (not read-main?) (not= branch :main))
+      (or (try (:commit (dv/commit-holding-tx branch-db reset-tx)) (catch Throwable _ nil)) (live-cid branch-db))
+      (and (:seon.agent/forked-from ag) (not read-main?) (empty? (:datahike/uncommitted (meta branch-db))))
+      (let [ag-tx (or (:tx (first (d/datoms branch-db :avet :seon.agent/id (:seon.agent/id ag)))) 0)]
+        (when (pos? ag-tx)
+          (try (:commit (dv/commit-holding-tx branch-db ag-tx)) (catch Throwable _ nil)))))
+      base-cid (when (and (nil? anchor-cid) (nil? (:seon.agent/forked-from ag)) store-or-conn (not= branch :main) (not read-main?)
+                        (contains? (try (d/branches store-or-conn) (catch Throwable _ nil)) branch))
+               (try (d/merge-base store-or-conn :main branch) (catch Throwable _ nil)))
       eff-cid (cond
                 (seq (:already-shown opts))
                 (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
@@ -314,10 +299,12 @@
       walk-key (let [msig (rules/rules-db-sig main-db)
                      bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
                  [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch reset-tx
-                  msig bsig
-                  (:seon.agent/role ag) (:seon.agent/scope ag) task-ids (:seon.agent/goal ag)
-                  (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
-                  (:seon.agent/context-prefs ag) anchor-turn task? dis-key])
+                 msig bsig
+                 (:seon.agent/role ag) (:seon.agent/scope ag) task-ids (:seon.agent/goal ag)
+                 (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
+                 (:seon.agent/context-prefs ag) (:seon.agent/forked-from ag) (:seon.agent/fork-commit ag)
+                 (vec (sort-by pr-str (:seon.agent/examples ag))) (vec (sort-by pr-str (:seon.agent/example-refs ag)))
+                 anchor-turn task? dis-key])
       cached (store/lru-get!
               walk-prefix-cache 64 walk-key
               (fn []
@@ -343,9 +330,16 @@
                          (nil? (:strategy opts))
                          (nil? (:weights opts))
                          (not (:explain? opts)))]
-  (if default-opts?
-    @(:default-fit cached)
-    (assoc (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)) :walk-main-cid (:walk-main-cid cached)))))
+  (if (:defer-fit? opts)
+  {:pool (:pool cached)
+   :walk-main-cid (:walk-main-cid cached)
+   :pref-fit pref-fit
+   :default-fit (:default-fit cached)
+   :prefix-items (filterv #(= :agent-prefix (:zone %)) (:all-items (:pool cached)))}
+  (assoc (if default-opts?
+           @(:default-fit cached)
+           (assoc (fit-wire-pool (:pool cached) main-db (merge pref-fit opts)) :walk-main-cid (:walk-main-cid cached)))
+         :pool (:pool cached)))))
 
 (defn render-agent-context
   "Renders the unified Upgrade-Ladder `<walk-context>` + Hiccup `<ephemeral-tail>` for any agent."
@@ -398,51 +392,69 @@
                                             main-db opts)))))))
 
 (defn build-live-wire-request
-  "ONE single source of truth for an agent's LLM context AND Context Lab:
-   Datahike commit-id + `d/merge-base` KV-cache stability, ONE `seon.ctx/gather-agent-candidates`,
-   `seon.render.fit/fit-projections`, and pure `ns-map -> ns-map` Hiccup ephemeral tail renderers."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]
-   :cost/ticks 60000000}
-  [main-db branch-db agent-id {:keys [viewport-screenshot vision? conn already-shown token-budget strategy
-                                      disabled-rules weights explain?] :as opts}]
-  (let [ck (when (and (empty? already-shown) (nil? token-budget) (nil? strategy) (empty? disabled-rules) (nil? weights) (not explain?) (nil? (:now-ms opts))) (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot))
-        compute
-        (fn []
-          (let [ag (rdata/pull-agent-entity main-db branch-db agent-id)
-                evals (rdata/agent-evals-in branch-db agent-id)
-                msgs (rdata/agent-messages-in main-db agent-id)
-                unread (if (seq msgs)
-                (let [seen-ids (store/agent-seen-message-ids branch-db agent-id)]
-                  (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs))
-                [])
-                branch (:seon.agent/branch ag :main)
-                anchor-turn (or (when-let [t (:seon.agent.eval/turn (first evals))] (when (> t 1) t))
-                                (when (and (empty? evals) (pos? (rstatus/branch-reset-tx branch-db agent-id)))
-                                  (max 1 (inc (long (:max-turn (store/agent-eval-history-stats branch-db agent-id) 0)))))
-                                1)
-                {:keys [tile-projections walk-text walk-db walk-main-cid tail-tile-blocks rule-trace fit-trace shown
-                        surface-stats explained candidates]}
-                (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn (assoc opts :turn (max 0 (dec (long anchor-turn)))))
-                tail-res (assemble-unified-tail main-db branch-db ag evals
+"ONE single source of truth for an agent's LLM context AND Context Lab:
+ Datahike commit-id + `d/merge-base` KV-cache stability, ONE `seon.ctx/gather-agent-candidates`,
+ recursive `:zone :agent-prefix` assembly (`:continue` forks + `:example` refs),
+ `seon.render.fit/fit-projections`, and pure `ns-map -> ns-map` Hiccup ephemeral tail renderers."
+{:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]
+ :cost/ticks 60000000}
+[main-db branch-db agent-id {:keys [viewport-screenshot vision? conn already-shown token-budget strategy
+                                    disabled-rules weights explain? include-tail? depth] :as opts}]
+(let [inc-tail? (not= false include-tail?)
+      d0 (long (or depth 0))
+      ck (when (and (empty? already-shown) (nil? token-budget) (nil? strategy) (empty? disabled-rules) (nil? weights) (not explain?) (nil? (:now-ms opts)))
+         (when-let [k (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)] [k inc-tail? (>= d0 4)]))
+      compute
+      (fn []
+        (let [ag (rdata/pull-agent-entity main-db branch-db agent-id)
+              evals (rdata/agent-evals-in branch-db agent-id)
+              msgs (rdata/agent-messages-in main-db agent-id)
+              unread (if (and inc-tail? (seq msgs))
+                       (let [seen-ids (store/agent-seen-message-ids branch-db agent-id)]
+                         (filterv #(not (contains? seen-ids (:seon.agent.message/id %))) msgs))
+                       [])
+              branch (:seon.agent/branch ag :main)
+              anchor-turn (or (when-let [t (:seon.agent.eval/turn (first evals))] (when (> t 1) t))
+                              (when (and (empty? evals) (pos? (rstatus/branch-reset-tx branch-db agent-id)))
+                                (max 1 (inc (long (:max-turn (store/agent-eval-history-stats branch-db agent-id) 0)))))
+                              1)
+              t-opt (assoc opts :turn (max 0 (dec (long anchor-turn))))
+              w0 (derive-wire-walk-prefix main-db branch-db conn ag anchor-turn (assoc t-opt :defer-fit? true))
+              pfx (when (seq (:prefix-items w0))
+                    (rstatus/resolve-prefix-agents main-db branch-db conn ag (:prefix-items w0) d0 build-live-wire-request))
+              {:keys [tile-projections walk-text walk-db walk-main-cid tail-tile-blocks rule-trace fit-trace shown
+                      surface-stats explained candidates]}
+              (if (and (empty? already-shown) (empty? (:parent-shown pfx)) (nil? token-budget) (nil? strategy) (nil? weights) (not explain?))
+              @(:default-fit w0)
+              (assoc (fit-wire-pool (:pool w0) main-db
+                       (merge (:pref-fit w0) t-opt
+                              (when (seq (:parent-shown pfx))
+                                {:already-shown (merge (:parent-shown pfx) already-shown)})))
+                     :walk-main-cid (:walk-main-cid w0)))
+              manifest (when-let [fid (:forked-from pfx)] (rstatus/format-forked-eval-manifest walk-db fid))
+              eff-walk (if manifest (str walk-text (when-not (str/blank? walk-text) "\n\n---\n\n") manifest) walk-text)
+              tail-res (when inc-tail?
+                         (assemble-unified-tail main-db branch-db ag evals
                            {:viewport-screenshot viewport-screenshot :vision? (boolean vision?)
-                            :now-ms (:now-ms opts) :messages msgs :unread unread})
-                live-tail (if (and (not explain?) (or (not= walk-main-cid (live-cid main-db)) (not= (live-cid walk-db) (live-cid branch-db))))
+                            :now-ms (:now-ms opts) :messages msgs :unread unread}))
+              live-tail (when inc-tail?
+                          (if (and (not explain?) (or (not= walk-main-cid (live-cid main-db)) (not= (live-cid walk-db) (live-cid branch-db))))
                             (live-rule-tail-blocks main-db branch-db ag opts)
-                            tail-tile-blocks)
-                tail-blocks (vec (concat (:blocks tail-res) live-tail))
-                activity-text (not-empty (str/join "\n\n" (keep :text tail-blocks)))
-                wire (model/build-agent-wire-messages
-                      {:thinking? true :replay-reasoning? true :vision? (boolean vision?) :out-max-chars (store/config-val main-db agent-id :seon.config/eval-out-chars) :format-tool-fn rstatus/cached-format-tool-content}
-                      {:agent-id agent-id :branch branch :role (:seon.agent/role ag :worker)
-                       :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
-                       :examples (rstatus/build-wire-examples main-db branch-db conn ag) :walk-text walk-text
-                       :tail-blocks tail-blocks :ephemeral-image (:image tail-res)
-                       :history (rdata/evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
-                       :unread unread :eval-db walk-db :main-db main-db :fallback-db branch-db
-                       :viewport-screenshot viewport-screenshot})]
-            (cond-> (assoc wire :agent ag :tiles tile-projections :candidates candidates :rule-trace rule-trace
-                         :fit-trace fit-trace :shown shown :surface-stats surface-stats
-                         :tail-blocks tail-blocks :activity-text activity-text
-                         :evals evals :messages-inbox msgs :unread unread)
+                            tail-tile-blocks))
+              tail-blocks (when inc-tail? (vec (concat (:blocks tail-res) live-tail)))
+              activity-text (when inc-tail? (not-empty (str/join "\n\n" (keep :text tail-blocks))))
+              wire (model/build-agent-wire-messages
+                    {:thinking? true :replay-reasoning? true :vision? (boolean vision?) :out-max-chars (store/config-val main-db agent-id :seon.config/eval-out-chars) :format-tool-fn rstatus/cached-format-tool-content}
+                    {:agent-id agent-id :branch branch :role (:seon.agent/role ag :worker)
+                     :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
+                     :prefix-agents (:entries pfx) :forked-from (:forked-from pfx) :include-tail? inc-tail?
+                     :walk-text eff-walk :tail-blocks tail-blocks :ephemeral-image (:image tail-res)
+                     :history (rdata/evals->turns evals (into {} (map (juxt :seon.agent.message/id identity)) msgs))
+                     :unread unread :eval-db walk-db :main-db main-db :fallback-db branch-db
+                     :viewport-screenshot viewport-screenshot})]
+          (cond-> (assoc wire :agent ag :tiles tile-projections :candidates candidates :rule-trace rule-trace
+                       :fit-trace fit-trace :shown (merge (:parent-shown pfx) shown) :surface-stats surface-stats
+                       :tail-blocks (or tail-blocks []) :activity-text activity-text
+                       :evals evals :messages-inbox msgs :unread unread)
             explained (assoc :explained explained))))]
-    (if ck (store/lru-get! wire-request-cache 8 ck compute) (compute))))
+  (if ck (store/lru-get! wire-request-cache 8 ck compute) (compute))))

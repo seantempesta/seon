@@ -52,7 +52,7 @@
     (is (< (count model/default-system-prompt) 450))
     (is (< (count (str/split model/default-system-prompt #"\s+")) 75))
     (is (str/includes? model/default-system-prompt "NO tool calls"))
-    (is (str/includes? model/default-system-prompt "<session kind=\"example\">"))
+    (is (str/includes? model/default-system-prompt "<agent ...>...</agent>"))
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data [{:seon.system/id :root :seon.system/title "Seon Runtime"}
                                   {:seon.task/id :template/discover-and-plan

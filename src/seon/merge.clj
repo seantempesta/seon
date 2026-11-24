@@ -372,7 +372,8 @@
                         acc
                         (if-let [cid (get tx->cid (:tx dt))]
                           (if-let [lref (or (find-identity-ref theirs-db (:e dt) id-attr-rank)
-                                            (find-identity-ref base-db (:e dt) id-attr-rank))]
+                                        (find-identity-ref base-db (:e dt) id-attr-rank)
+                                        (when (contains? id-attr-rank (:a dt)) [(:a dt) (:v dt)]))]
                             (let [prev (get acc lref)]
                               (if (or (nil? prev) (> (long (:tx dt)) (long (:tx prev))))
                                 (assoc acc lref {:tx (:tx dt) :cid cid})
@@ -504,6 +505,9 @@
            theirs-schemas (schema/db-schema-forms theirs-db)
            reg-union (schema/registry-for-db ours-db theirs-schemas)
            {:keys [identity-attrs many-attrs skipped-attrs]} (:merge-meta reg-union)
+           skipped-attrs (if (and (not= ours-branch :main) (:include-session-for opts))
+                           (disj skipped-attrs :seon.agent/memory :seon.agent/pinned :seon.agent/curated :seon.agent/context-prefs)
+                           skipped-attrs)
            new-dh-decls (schema/sync-dh-decls (:schema ours-db) (:declarations reg-union))
            id-attr-rank (into {} (map-indexed (fn [i a] [a i])) identity-attrs)
            theirs-ds (if (= base-cid theirs-cid) [] (d/changes ours-conn base-cid theirs-cid))
@@ -511,7 +515,16 @@
            (if (= ours-branch :main)
              (branch-sync-state ours-conn ours-cid theirs-db base-db theirs-ds id-attr-rank)
              {:worker-ds theirs-ds :synced-cid-by-key {} :sync-dbs {}})
-           theirs-keys (touched-entities-in-changes base-db theirs-db worker-ds id-attr-rank)
+           ex-aid (:exclude-agent opts)
+           theirs-keys (let [ks (touched-entities-in-changes base-db theirs-db worker-ds id-attr-rank)]
+                         (if-not ex-aid
+                           ks
+                           (into #{} (remove (fn [[ia iv]]
+                                               (or (and (= ia :seon.agent/id) (= iv ex-aid))
+                                               (when-let [ak (case ia :seon.agent.eval/id :seon.agent.eval/agent :seon.ui.status/id :seon.ui.status/agent :seon.error/id :seon.error/agent nil)]
+                                                 (= ex-aid (or (get (d/pull theirs-db [ak] [ia iv]) ak)
+                                                               (get (d/pull base-db [ak] [ia iv]) ak)))))))
+                                 ks)))
            changed-schema-forms (into {}
                                       (keep (fn [[id-attr id-val]]
                                               (when (= :seon.schema/key id-attr)
