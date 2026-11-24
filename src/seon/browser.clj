@@ -80,15 +80,16 @@
     (long (min 2000 (* 250 (bit-shift-left 1 (min a 6)))))))
 
 (defn loaded?
-  "True when an `eval_js` DOM-probe `:value` represents a rendered Seon document (has #seon-app or body children)."
-  {:malli/schema [:=> {:examples [[[{:app true, :children 5}] true] [[{:children 0, :readyState "complete"}] false]]} [:cat :any] :boolean]
+  "True when an `eval_js` DOM-probe `:value` represents a rendered Seon document (has `#seon-app` or >=2 real children, rejecting 503 `<pre>Seon booting...</pre>`)."
+  {:malli/schema [:=> {:examples [[[{:app true, :children 5}] true] [[{:children 0, :readyState "complete"}] false] [[{:app false, :children 1, :booting true}] false]]} [:cat :any] :boolean]
    :cost/ticks 5000 :cost/bytes 4096}
   [value]
   (boolean
    (and (map? value)
         (nil? (:error value))
+        (not (true? (:booting value)))
         (or (true? (:app value))
-            (pos? (long (or (:children value) 0)))))))
+            (>= (long (or (:children value) 0)) 2)))))
 
 (defn retry-exhausted?
   "True when `attempt` reached `max-attempts` or `now-ms` reached `deadline-ms`."
@@ -98,8 +99,8 @@
       (>= (long now-ms) (long deadline-ms))))
 
 (defn- dom-probe-js []
-  (str "(function(){try{var b=document.body;return{"
-       "readyState:document.readyState,children:b?b.children.length:0,"
+  (str "(function(){try{var b=document.body;var boot=!!(b&&b.children.length===1&&b.firstElementChild&&b.firstElementChild.tagName==='PRE');return{"
+       "readyState:document.readyState,children:b?b.children.length:0,booting:boot,"
        "svgs:document.querySelectorAll('svg').length,"
        "app:!!document.getElementById('seon-app'),url:location.href};"
        "}catch(e){return{error:String(e)};}})()"))

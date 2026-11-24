@@ -99,8 +99,8 @@
 
 (defn measure-boxes-js
   "Builds a safe, self-contained JS IIFE for `seon-browser` `eval_js` measuring viewport
-   geometry and exact rendered boxes (`getBoundingClientRect`, scroll/client overflow,
-   computed `overflowY`, `data-chosen-fn`, `data-entity`, `data-min-width`, and `area`)."
+   geometry, rendered boxes, and deterministic visual quality defects (broken/collapsed SVGs,
+   dark-theme white-card clash, clipped header brand, cramped streaming box)."
   {:malli/schema [:function
                   [:=> [:cat] :string]
                   [:=> [:cat :any] :string]]
@@ -153,8 +153,24 @@
       "'scroll-w':sw,'scroll-h':sh,'client-w':cw,'client-h':ch,"
       "'overflow-x?':(sw>cw+1),'overflow-y?':(sh>ch+1),"
       "'scrollable-y?':scrY,'scrollable-x?':scrX,'area':area};});"
+      "var defs=[];var app=document.getElementById('seon-app');"
+      "if(!app){defs.push('Missing #seon-app root (page may still be booting)');}"
+      "var dark=!(app&&app.getAttribute('data-theme')==='light')&&de.getAttribute('data-theme')!=='light';"
+      "Array.prototype.slice.call(document.querySelectorAll('svg'),0,20).forEach(function(svg,idx){"
+      "var sr=svg.getBoundingClientRect();if(sr.width<40||sr.height<40)return;"
+      "var badR=0,zeroX=0,pts=svg.querySelectorAll('circle,rect');"
+      "for(var i=0;i<pts.length;i++){var p=pts[i];"
+      "['cx','cy','x','y','width','height','r'].forEach(function(a){var v=p.getAttribute(a);if(v&&/^-?\\d+\\/\\d+$/.test(v.trim()))badR++;});"
+      "var pr=p.getBoundingClientRect();if(p.tagName.toLowerCase()==='circle'&&pr.left<=sr.left+6)zeroX++;"
+      "if(dark&&p.tagName.toLowerCase()==='rect'&&pr.width>=200&&pr.height>=100){var fl=String((p.getAttribute('fill')||'')+' '+(window.getComputedStyle?window.getComputedStyle(p).fill:'')).toLowerCase();if(fl.indexOf('#fff')>=0||fl.indexOf('255, 255, 255')>=0||fl.indexOf('white')>=0)defs.push('SVG #'+(idx+1)+' paints bright white card in dark theme');}}"
+      "if(badR>0)defs.push('SVG #'+(idx+1)+' has '+badR+' unparsed ratio literal attr(s)');"
+      "if(zeroX>=3)defs.push('SVG #'+(idx+1)+' has '+zeroX+' circles collapsed on left edge');});"
+      "var bl=document.querySelector('#seon-header .brand-link');"
+      "if(bl&&vw>=760){var br=bl.getBoundingClientRect();if(br.width<56||bl.scrollWidth>bl.clientWidth+1)defs.push('Header brand clipped ('+num(br.width)+'px)');}"
+      "var lp=document.getElementById('cv-live-prose');"
+      "if(lp&&lp.scrollHeight>lp.clientHeight+4)defs.push('Streaming prose clipped ('+lp.clientHeight+'px < '+lp.scrollHeight+'px)');"
       "return {'viewport':{'innerWidth':vw,'innerHeight':vh,'docScrollW':dsw,'docScrollH':dsh,'overflowX':docOv},"
-      "'elements':els};"
+      "'elements':els,'visual-defects':defs};"
       "}catch(e){return {'error':String(e)};}})()"))))
 
 (defn measure-html-snippet-js
@@ -416,34 +432,37 @@
        :elements []
        :summary (str "Measurement error: " err)}
       (let [vp (normalize-viewport raw)
-            raw-els (let [xs (or (lookup raw :elements :items) [])]
-                      (if (sequential? xs) xs []))
-            els (vec (keep normalize-element raw-els))
-            clipped (filterv #(or (:overflow-x? %)
-                                  (and (:overflow-y? %) (not (:scrollable-y? %))))
-                             els)
-            scrollable (filterv #(and (:overflow-y? %) (:scrollable-y? %)) els)
-            by-r (reduce-kv (fn [acc rsym grp]
-                              (assoc acc rsym (summarize-renderer-group grp)))
-                            {}
-                            (group-by :chosen-fn (filter :chosen-fn els)))
-            doc-ov? (boolean (:overflow-x? vp))
-            ok? (and (not doc-ov?) (empty? clipped))
-            summary (str (:w vp) "x" (:h vp) " " (if ok? "ok" "OVERFLOW")
-                         (when doc-ov? (str " · doc-scroll-w=" (:doc-scroll-w vp)))
-                         " · " (count els) " boxes"
-                         " · " (count clipped) " clipped"
-                         " · " (count scrollable) " scrollable"
-                         " · " (count by-r) " renderers")]
-        {:ok? ok?
-         :viewport vp
-         :doc-overflow-x doc-ov?
-         :clipped-items clipped
-         :scrollable-items scrollable
-         :by-renderer by-r
-         :element-count (count els)
-         :elements els
-         :summary summary}))))
+          raw-els (let [xs (or (lookup raw :elements :items) [])]
+                    (if (sequential? xs) xs []))
+          els (vec (keep normalize-element raw-els))
+          defects (vec (keep nonblank (let [ds (lookup raw :visual-defects :visualDefects :defects)] (when (sequential? ds) ds))))
+          clipped (filterv #(or (:overflow-x? %)
+                                (and (:overflow-y? %) (not (:scrollable-y? %))))
+                           els)
+          scrollable (filterv #(and (:overflow-y? %) (:scrollable-y? %)) els)
+          by-r (reduce-kv (fn [acc rsym grp]
+                            (assoc acc rsym (summarize-renderer-group grp)))
+                          {}
+                          (group-by :chosen-fn (filter :chosen-fn els)))
+          doc-ov? (boolean (:overflow-x? vp))
+          ok? (and (not doc-ov?) (empty? clipped) (empty? defects))
+          summary (str (:w vp) "x" (:h vp) " " (cond (or doc-ov? (seq clipped)) "OVERFLOW" (seq defects) "DEFECTS" :else "ok")
+                       (when doc-ov? (str " · doc-scroll-w=" (:doc-scroll-w vp)))
+                       " · " (count els) " boxes"
+                       " · " (count clipped) " clipped"
+                       " · " (count scrollable) " scrollable"
+                       " · " (count by-r) " renderers"
+                       (when (seq defects) (str " · DEFECTS(" (count defects) "): " (str/join "; " (take 4 defects)))))]
+      {:ok? ok?
+       :viewport vp
+       :doc-overflow-x doc-ov?
+       :clipped-items clipped
+       :scrollable-items scrollable
+       :visual-defects defects
+       :by-renderer by-r
+       :element-count (count els)
+       :elements els
+       :summary summary}))))
 
 (defn calibrate-hints
   "Produces per-renderer pixel calibration recommendations `{renderer-sym {:measured-w :measured-h
