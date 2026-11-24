@@ -75,28 +75,35 @@
 
 (defn derive-presence-state
   "Derives present-tense live presence state for `agent-id` from `main-db` and `branch-db`
-   (100% `d/as-of` time-travelable: children, delegated calls, branch writes, and proof run)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map]] :map]
+   (100% `d/as-of` time-travelable: children, delegated calls, and in Dev Mode branch writes & proofs)."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map]] :map]
+                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map] [:maybe :map]] :map]]
    :cost/ticks 15000000}
-  [main-db branch-db agent-id agent]
-  (let [bdb (or branch-db main-db)
-        dh (when bdb (db-schema bdb))
-        children (pull-child-agents main-db agent-id)
-        calls (pull-agent-calls main-db agent-id)
-        br (or (:seon.agent/branch agent) (when bdb (get-in bdb [:config :branch])) :main)
-        writes (when (and main-db bdb (not= br :main))
-                 (ctouches/branch-write-eids main-db bdb nil))
-        written-vars (vec (keep (fn [e]
-                                  (when (and dh (dh :seon.code.var/name))
-                                    (:v (first (d/datoms bdb :eavt e :seon.code.var/name)))))
-                                (keys writes)))
-        proof-run (when (and bdb dh (dh :seon.test.run/branch))
-                    (when-let [e (:e (first (d/datoms bdb :avet :seon.test.run/branch br)))]
-                      (d/pull bdb '[:seon.test.run/pass? :seon.test.run/ran :seon.test.run/cached :seon.test.run/failed-digests] e)))]
-    {:children children
-     :calls calls
-     :written-vars (vec (sort written-vars))
-     :proof-run proof-run}))
+  ([main-db branch-db agent-id agent]
+   (derive-presence-state main-db branch-db agent-id agent {:expert-mode? true}))
+  ([main-db branch-db agent-id agent opts]
+   (let [bdb (or branch-db main-db)
+         dh (when bdb (db-schema bdb))
+         dev? (not (false? (:expert-mode? opts)))
+         children (pull-child-agents main-db agent-id)
+         calls (pull-agent-calls main-db agent-id)
+         br (or (:seon.agent/branch agent) (when bdb (get-in bdb [:config :branch])) :main)
+         writes (when (and dev? main-db bdb (not= br :main))
+                  (ctouches/branch-write-eids main-db bdb nil))
+         written-vars (if (seq writes)
+                        (vec (keep (fn [e]
+                                     (when (and dh (dh :seon.code.var/name))
+                                       (:v (first (d/datoms bdb :eavt e :seon.code.var/name)))))
+                                   (keys writes)))
+                        [])
+         proof-run (when (and dev? bdb dh (dh :seon.test.run/branch))
+                     (when-let [e (:e (first (d/datoms bdb :avet :seon.test.run/branch br)))]
+                       (d/pull bdb '[:seon.test.run/pass? :seon.test.run/ran :seon.test.run/cached :seon.test.run/failed-digests] e)))]
+     {:children children
+      :calls calls
+      :written-vars (vec (sort written-vars))
+      :proof-run proof-run})))
 
 (defn- clip-str [s n]
   (let [t (str/trim (str (or s "")))]
@@ -147,7 +154,7 @@
                           (kicker "Live Agent Canvas")
                           (badge "purple" "hiccup")])
                          clean]))
-        pres (derive-presence-state main-db bdb viewing-id agent)
+        pres (derive-presence-state main-db bdb viewing-id agent {:expert-mode? (boolean expert-mode?)})
         {:keys [children calls written-vars proof-run]} pres
         streaming? (and (map? live-stream) (some? (:phase live-stream)) (not= :idle (:phase live-stream)))
         show-presence? (or streaming? (seq children) (seq calls) (and expert-mode? (or (seq written-vars) (some? proof-run))))
