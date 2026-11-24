@@ -8,9 +8,9 @@
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
             [seon.render.links :as rlinks :refer [db-cache-sig]]
-            [seon.render.wire :as rwire]
             [seon.schema.index :as six]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.tails :as rtails]))
 
 (def ^:private ignored-nss
   #{"clojure.core" "clojure.string" "clojure.set" "clojure.edn" "clojure.java.io" "clojure.test"
@@ -333,7 +333,7 @@
          ix (:entity-index (fit/cached-registry-info edb))
          enriched (vec (keep #(enrich-candidate main-db edb ix prior %) raw))
          fit-opts (cond-> {:target :wire :token-budget 1000000
-                           :fallback-renderers rwire/fallback-entity-renderers}
+                           :fallback-renderers rtails/fallback-entity-renderers}
                     (:weights o) (assoc :weights (:weights o))
                     (:strategy o) (assoc :strategy (:strategy o)))
          by-e (into {} (map (juxt :entity identity)) (:selected (fit/fit-projections edb enriched fit-opts)))]

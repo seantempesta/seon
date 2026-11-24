@@ -39,7 +39,7 @@
       (or (when st
             (let [res (k/get st (dd/lazy-key v) ::missing {:sync? true})]
               (when-not (identical? ::missing res) (str res))))
-          (str (dd/resolve-lazy v))))
+          (str (dd/value-of v))))
     (str v)))
 
 (defn- fetch-missing-srcs [db ^java.util.HashSet needed-eids]

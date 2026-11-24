@@ -7,8 +7,7 @@
             [seon.store :as store]
             [clojure.string :as str]
             [seon.cite :as cite]
-            [seon.code.analyze :as analyze]
-            [seon.code :as code]))
+            [seon.code.analyze :as analyze]))
 
 (defn doc-sections
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :map]]}
@@ -471,7 +470,7 @@
                       :else [(symbol s) (str s "#ns")])
         path (or (:seon.code.ns/path (d/pull bdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
                  (:seon.code.ns/path (d/pull mdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
-                 (code/ns->default-path nsym))
+                 (parse/ns->default-path nsym))
         f-ent (let [b (d/pull bdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])]
                 (if (:seon.code.form/src b) b
                     (d/pull mdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])))]
