@@ -1,10 +1,5 @@
 ;; Declarative Seon tasks (resources/seon/tasks.edn — loaded on fresh install, written back on green merge).
-[{:seon.task/done? false,
-  :seon.task/id :ab/review-rule-audit,
-  :seon.task/plan "In addition to compacting noisy turns, note in your finish-review! summary whether any recurring tool/context friction suggests a general compounding :seon.rule/* or helper improvement (only edit platform code if there is a clear root-cause bug).",
-  :seon.task/template? true,
-  :seon.task/title "Check whether any friction in the forked session points to a general rule or helper gap"}
- {:seon.task/scope seon.render,
+[{:seon.task/scope seon.render,
   :seon.task/needs #{:subtask.w2168/c-7308beb8
                      :subtask.seon.render/c-578633c5
                      :subtask.seon.health/c-9012f4bf},
@@ -161,7 +156,7 @@
   :seon.task/title "Keep REPL eval workers warm by default and normalize :agent/:context on /op :eval"}
  {:seon.task/done? false,
   :seon.task/id :seon.rule/split-oversized-namespace,
-  :seon.task/plan "seon.rule is currently ~8.6k tokens (> 8k cap). Extract a cohesive child namespace so seon.rule stays cleanly under 8,000 tokens without breaking any callers or tests.",
+  :seon.task/plan "seon.rule is currently ~8.6k tokens (> 8k cap). Extract a cohesive child namespace (e.g. seon.rule.query) so seon.rule stays cleanly under 8,000 tokens without breaking any callers or tests.",
   :seon.task/scope seon.rule,
   :seon.task/tests #{seon.datalog-rules-core-test/all-10-native-datalog-context-rules-test
                      seon.datalog-rules-core-test/incremental-skip-reads-forwarding-and-recursive-rules-test},
