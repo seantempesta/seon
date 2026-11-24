@@ -242,14 +242,14 @@
         ok? (boolean (:ok? h))
         err-n (long (or (:errors h) 0))
         active-n (long (or active-count (count (filter #(= :active (val %)) agent-states))))
-        vision-on? (and expert-mode? (contains? (or (:schema db) (d/schema db) {}) :seon.config/viewport-screenshot?)
+        vision-on? (and expert-mode? (contains? (rlinks/db-schema db) :seon.config/viewport-screenshot?)
                         (boolean (store/config-val db viewing-id :seon.config/viewport-screenshot?)))
         slug (rdata/agent-id->slug viewing-id)
         href-for (fn [r fb] (or (when slug (router/path-for db r {:slug slug})) fb))
         explain-ref (or inspect-ref (when (= canon :system) [:seon.system/id :root]))
         explain-href (if inspect-ref (str (router/entity-ref->path db inspect-ref) "?explain=1") (href-for :seon.route/agent-explain "/context"))
-        ibtn (fn [cls lbl oc body & [dis?]]
-               [:button (cond-> {:type "button" :class cls :aria-label lbl :title lbl :on-click oc} dis? (assoc :disabled true)) body])
+        ibtn (fn [cls lbl oc body & [dis? id]]
+             [:button (cond-> {:type "button" :class cls :aria-label lbl :title lbl :on-click oc} id (assoc :id id) dis? (assoc :disabled true)) body])
         tab-a (fn [href act? ttl oc lbl]
                 [:a {:href href :class (str "nav-pill nav-link" (when act? " active")) :title ttl :on-click oc} lbl])
         svg-act [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden "true"}
@@ -268,8 +268,8 @@
        (ibtn (str "icon-btn sidebar-toggle" (when sb-open? " active")) (if sb-open? "Hide sidebar" "Show sidebar") '(seon.web/toggle-sidebar!) svg-sidebar)
        (when (or expert-mode? can-back? can-fwd?)
          [:div {:class "hdr-nav"}
-          (ibtn "icon-btn" "Back" '(seon.web/inspect-back!) "←" (not can-back?))
-          (ibtn "icon-btn" "Forward" '(seon.web/inspect-forward!) "→" (not can-fwd?))])
+         (ibtn "icon-btn" "Back" '(seon.web/inspect-back!) "←" (not can-back?) "hdr-nav-back")
+         (ibtn "icon-btn" "Forward" '(seon.web/inspect-forward!) "→" (not can-fwd?) "hdr-nav-fwd")])
        [:a {:href "/" :class "brand-link nav-link" :title "Home" :on-click '(seon.web/set-view-mode! :canvas)}
         [:span {:class "diamond"} "◆"]
         (when-not narrow? [:strong {:class "wordmark"} "seon"])]
