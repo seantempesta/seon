@@ -266,7 +266,7 @@
         (catch Throwable _ nil)))
     (when branch-moved?
       (let [ds (try (d/changes conn last-cid latest-cid) (catch Throwable _ nil))]
-        (reset! (:wrapped-atom conn) latest-db)
+        (swap! (:wrapped-atom conn) (fn [cur] (let [w (:writer cur)] (cond-> latest-db w (assoc :writer w)))))
         (code/load-delta! conn last-cid latest-cid true)
         (ctx/refresh-active! latest-db ds)))
     {:branch-cid latest-cid :main-cid latest-main-cid}))

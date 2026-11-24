@@ -32,8 +32,8 @@
 (defn- run-local-push [nbrs-fn seeds opts]
   (let [o (if (map? opts) opts {})
         alpha (double (or (:alpha o) 0.40))
-        eps (double (or (:eps o) 0.002))
-        max-pushes (long (or (:max-pushes o) 300))
+        eps (double (or (:eps o) 0.01))
+        max-pushes (long (or (:max-pushes o) 48))
         beta (double (or (:beta o) 0.35))
         total-seed (reduce + 0.0 (map #(finite-pos % 0.0) (vals seeds)))]
     (if (<= total-seed 0.0)
@@ -154,33 +154,49 @@
    [:seon.task/needs 0.8]])
 
 (defn- local-db-neighbors [db dh rev-attrs u]
-  (if-not (integer? u)
-    []
-    (let [out (transient [])
-          has-ns-name? (boolean (dh :seon.code.ns/name))
-          has-var-ns? (boolean (dh :seon.code.var/ns))]
-      (doseq [dt (d/datoms db :eavt u)
-              :let [a (:a dt) v (:v dt)]]
-        (cond
-          (contains? ref-fwd-weights a)
-          (when (and (integer? v) (not= v u))
-            (conj! out [v (double (get ref-fwd-weights a))]))
+(if-not (integer? u)
+  []
+  (let [out (transient [])
+        has-ns-name? (boolean (dh :seon.code.ns/name))
+        has-var-ns? (boolean (dh :seon.code.var/ns))
+        kind (volatile! nil)]
+    (doseq [dt (d/datoms db :eavt u)
+            :let [a (:a dt) v (:v dt)]]
+      (cond
+        (= :seon.code.var/name a) (vreset! kind :var)
+        (= :seon.schema/key a) (vreset! kind :schema)
+        (= :seon.code.doc/id a) (vreset! kind :doc)
+        (= :seon.task/id a) (vreset! kind :task)
+        (= :seon.code.ns/name a) (vreset! kind :ns))
+      (cond
+        (contains? ref-fwd-weights a)
+        (when (and (integer? v) (not= v u))
+          (conj! out [v (double (get ref-fwd-weights a))]))
 
-          (and (= :seon.code.var/ns a) has-ns-name? (symbol? v))
-          (when-let [ne (:e (first (d/datoms db :avet :seon.code.ns/name v)))]
-            (when (not= ne u) (conj! out [ne 0.6])))
+        (and (= :seon.code.var/ns a) has-ns-name? (symbol? v))
+        (when-let [ne (:e (first (d/datoms db :avet :seon.code.ns/name v)))]
+          (when (not= ne u) (conj! out [ne 0.6])))
 
-          (and (= :seon.code.ns/name a) has-var-ns? (symbol? v))
-          (doseq [vdt (d/datoms db :avet :seon.code.var/ns v)
-                  :let [ve (:e vdt)]
-                  :when (and (integer? ve) (not= ve u))]
-            (conj! out [ve 0.35]))))
-      (doseq [[a wr] rev-attrs
-              dt (d/datoms db :avet a u)
-              :let [src (:e dt)]
-              :when (and (integer? src) (not= src u))]
-        (conj! out [src (double wr)]))
-      (persistent! out))))
+        (and (= :seon.code.ns/name a) has-var-ns? (symbol? v))
+        (doseq [vdt (take 48 (d/datoms db :avet :seon.code.var/ns v))
+                :let [ve (:e vdt)]
+                :when (and (integer? ve) (not= ve u))]
+          (conj! out [ve 0.35]))))
+    (let [k @kind
+          allowed-rev (case k
+                        :var #{:seon.code.var/calls :seon.code.var/test-targets :seon.code.doc/references}
+                        :schema #{:seon.code.var/input :seon.code.var/output :seon.code.var/optional-input :seon.schema/keys :seon.schema/optional-keys :seon.schema/ref-targets}
+                        :task #{:seon.task/needs :seon.code.doc/references}
+                        :doc #{:seon.code.doc/references}
+                        nil)]
+      (when allowed-rev
+        (doseq [[a wr] rev-attrs
+                :when (contains? allowed-rev a)
+                dt (take 48 (d/datoms db :avet a u))
+                :let [src (:e dt)]
+                :when (and (integer? src) (not= src u))]
+          (conj! out [src (double wr)]))))
+    (persistent! out))))
 
 (def ^:private code-ref-re
   #"(?:'([a-zA-Z][\w.-]*(?:/[\w.*?!+-]+)?)|\(quote\s+([a-zA-Z][\w.-]*(?:/[\w.*?!+-]+)?)\)|\b(seon\.[a-z0-9._-]+(?:/[a-zA-Z0-9*+!_?<>=.-]+)?)|:([a-zA-Z][\w.-]+/[\w.*?!+-]+))")
@@ -334,7 +350,7 @@
                               rev-attrs (filterv #(contains? dh (first %)) ref-rev-weights)]
                           (run-local-push #(local-db-neighbors bdb dh rev-attrs %)
                                           seeds
-                                          {:alpha 0.40 :eps 0.002 :max-pushes 300 :beta 0.35}))))
+                                          {:alpha 0.40 :eps 0.01 :max-pushes 48 :beta 0.35}))))
                      {})
         seen-explicit (set/union written-set explicit-set)
         unseen-passive (reduce-kv (fn [m e v]
