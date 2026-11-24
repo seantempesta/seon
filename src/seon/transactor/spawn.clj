@@ -252,37 +252,55 @@
                            (git-wb st (d/commit-id db) "resources/seon/tasks.edn" (str "Update task " id))))))))
 
 (defn handle-create-task!
-  {:doc "Creates a `:seon.task/*` entity (optionally spawning its owning agent on a new branch) and commits it.", :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]], :seon.flow/edge true}
+  {:doc "Creates a `:seon.task/*` entity (expanding optional `:from-template` and forwarding normalized `:curated` lookup refs, optionally spawning its owning agent on a new branch) and commits it.",
+   :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]], :seon.flow/edge true}
   [st msg prev-cid]
-  (let [conn (:conn st) db0 @conn
-        {:keys [id scope title plan needs tests spawn-agent? agent-id router? auto-merge? parent template? template owner created-by summary parent-agent]} msg
+  (let [conn (:conn st) db0 @conn dh (:schema db0)
+        {:keys [id scope title plan needs tests curated from-template spawn-agent? agent-id router? auto-merge? parent template? template owner created-by summary parent-agent]} msg
+        tpl-id (or from-template template)
+        tpl (when (and from-template (qualified-keyword? from-template) (contains? dh :seon.task/id)
+                       (first (d/datoms db0 :avet :seon.task/id from-template)))
+              (d/pull db0 '[:seon.task/scope :seon.task/plan :seon.task/tests :seon.task/needs :seon.task/curated]
+                      [:seon.task/id from-template]))
+        eff-scope (or scope (:seon.task/scope tpl))
+        raw-plan (str (or plan ""))
+        tpl-plan (:seon.task/plan tpl)
+        eff-plan (cond
+                   (and tpl-plan (not (str/blank? raw-plan)) (not (str/includes? raw-plan "\n---\n")))
+                   (str (str/trim raw-plan) "\n\n---\n" tpl-plan)
+                   (not (str/blank? raw-plan)) raw-plan
+                   :else (or tpl-plan ""))
+        eff-needs (into (set (:seon.task/needs tpl)) needs)
+        eff-tests (into (set (:seon.task/tests tpl)) tests)
+        eff-curated (vec (distinct (concat (keep norm-ref (:seon.task/curated tpl)) (keep norm-ref curated))))
         aid (or agent-id (keyword (namespace id) (name id)))
         b (branch-for aid nil) mseq (inc (:msg-seq st))
-        ext? (contains? (:schema db0) :seon.task/owner)
-        tx-data (cond-> (vec (concat (when (and spawn-agent? scope) (focus-tx scope))
+        ext? (contains? dh :seon.task/owner)
+        tx-data (cond-> (vec (concat (when (and spawn-agent? eff-scope) (focus-tx eff-scope))
                                      [(cond-> {:db/id (str "task/" (namespace id) "/" (name id))
-                                             :seon.task/id id :seon.task/title (or title (name id))
-                                             :seon.task/plan (or plan "") :seon.task/done? false}
-                                      scope (assoc :seon.task/scope scope)
-                                      (and ext? (some? template?)) (assoc :seon.task/template? (boolean template?))
-                                      (and ext? template (qualified-keyword? template)) (assoc :seon.task/template template)
-                                      (and ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
-                                      (and ext? created-by) (assoc :seon.task/created-by created-by)
-                                      (and ext? (string? summary)) (assoc :seon.task/summary summary))
-                                      (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
-                                      (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})
+                                               :seon.task/id id :seon.task/title (or title (name id))
+                                               :seon.task/plan eff-plan :seon.task/done? false}
+                                        eff-scope (assoc :seon.task/scope eff-scope)
+                                        (and ext? (some? template?)) (assoc :seon.task/template? (boolean template?))
+                                        (and ext? tpl-id (qualified-keyword? tpl-id)) (assoc :seon.task/template tpl-id)
+                                        (and ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
+                                        (and ext? created-by) (assoc :seon.task/created-by created-by)
+                                        (and ext? (string? summary)) (assoc :seon.task/summary summary)
+                                        (and (contains? dh :seon.task/curated) (seq eff-curated)) (assoc :seon.task/curated eff-curated))
+                                      (when (seq eff-needs) {:seon.task/id id :seon.task/needs eff-needs})
+                                      (when (seq eff-tests) {:seon.task/id id :seon.task/tests eff-tests})
                                       (when (and parent (qualified-keyword? parent) (not= parent id)
                                                  (first (d/datoms db0 :avet :seon.task/id parent))
                                                  (not (:seon.task/template? (d/pull db0 '[:seon.task/template?] [:seon.task/id parent]))))
                                         {:seon.task/id parent :seon.task/needs #{id}})]))
                   spawn-agent?
                   (conj (cond-> {:seon.agent/id aid :seon.agent/branch b :seon.agent/goal (or title (name id))}
-                        (contains? (:schema db0) :seon.agent/tasks) (assoc :seon.agent/tasks #{(or (:e (first (d/datoms db0 :avet :seon.task/id id))) (str "task/" (namespace id) "/" (name id)))})
-                        router? (assoc :seon.agent/router? true)
-                        parent-agent (assoc :seon.agent/parent parent-agent)
-                        (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
-                        scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope)))
-                        (msg-ent (random-uuid) mseq parent-agent aid :task (str (or title (name id)) "\n" (or plan "")))))
+                          (contains? dh :seon.agent/tasks) (assoc :seon.agent/tasks #{(or (:e (first (d/datoms db0 :avet :seon.task/id id))) (str "task/" (namespace id) "/" (name id)))})
+                          router? (assoc :seon.agent/router? true)
+                          parent-agent (assoc :seon.agent/parent parent-agent)
+                          (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
+                          eff-scope (assoc :seon.agent/scope eff-scope :seon.agent/focus (str "ns/" eff-scope)))
+                        (msg-ent (random-uuid) mseq parent-agent aid :task (str (or title (name id)) "\n" eff-plan))))
         r (tx! conn (remove nil? tx-data))
         _ (when spawn-agent? (store/branch! conn :main b))
         db (:db-after r) cid (d/commit-id db)]

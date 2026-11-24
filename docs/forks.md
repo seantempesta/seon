@@ -185,3 +185,11 @@ datahike
 - **Upstream fixes replayed**, each with its test: #1117, #949, #950, #956, #1092/#905, #954, #940, #1029. Not on this line: #912, #913, #927, #885.
 - Tests changed so the core suites load and run on Jolt, as [own suites](#own-suites).
 
+## Wave 4 stdlib & library integrations
+
+Pinned Wave 4 libraries in `deps.edn` (AOT-baked via `:jolt/build {:include [jolt.fs jolt.process borkdude.text-diff]}` for `0 ms` runtime and REPL load) plus external static-analysis evaluation:
+
+- **`jolt.fs` (Jolt stdlib, AOT-baked):** Replaced raw `java.io.File` / `java.nio.file` plumbing across `seon.store`, `seon.git`, `seon.switchover`, `seon.browser`, `seon.vector`, `seon.bench.cluster`, `seon.bench.helpers`, `seon.schema.index`, `seon.rule.seed`, and `seon.web.css` (symlink-safe `delete-tree`, `regular-file?`, `executable?`, `create-dirs`, `absolutize`). Pre-aliased as `fs` in the agent REPL `user` namespace (`seon.fork.helpers/install-agent-helpers!`).
+- **`jolt.process` (Jolt stdlib, AOT-baked):** Replaced raw `ProcessBuilder` subprocess lifecycle management with structured `jolt.process/process` + `:shutdown destroy-tree` in `seon.browser` (`seon.browser/start-browser-process!`), `seon.vector`, and `seon.bench.cluster`, eliminating orphan child leaks on shutdown.
+- **`borkdude/text-diff` (pinned in `deps.edn` at `78422c5aec36862825d0c781373a388fb95c2b92`, AOT-baked):** Zero-dependency CLJC Wu et al. `O(NP)` multi-hunk unified diff powering `seon.code.cst/unified-diff` across CST form edits (replacing simple prefix/suffix line trimming).
+- **`jlt-commons/jolt-metrics` (evaluated externally, read-only EDN ingestion):** Evaluated via Jolt CLI against `src/` (`[M]` `109` files, `41,946` LOC, `1,970` functions, avg CC `8.94`, total cognitive `23,261`, avg MI `52.18`, `41` NCD near-duplicate pairs, `50` abstraction opportunities, `7` lints, `1` churn hotspot `seon.render.ui`). Kept outside runtime `deps.edn` so boot stays lean; its `--format edn` output is ingested purely into Datahike hygiene findings and `:seon.task/*` batches via `seon.code.mine/ingest-jolt-metrics-findings` and `seon.code.mine/mine-hygiene-tasks-tx`.

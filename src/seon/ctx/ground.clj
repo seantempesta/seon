@@ -224,8 +224,11 @@
         run-s #(fast-search-vars code-db (str (:seon.task/title t-ent)) 6)
         s-hits (when underspec?
                  (if cid (store/lru-get! effect-cache 64 [:search cid (:seon.task/title t-ent) 6] run-s) (run-s)))
+        run-sem #(vec (concat (vec/near main-db [:seon.task/id tid] 6 {:of :seon.code.var/name})
+                              (when (contains? (db-schema main-db) :seon.code.doc/id)
+                                (vec/near main-db [:seon.task/id tid] 2 {:of :seon.code.doc/id}))))
         sem-hits (when (and underspec? tid (contains? (db-schema main-db) :seon.vector/coarse))
-                    (vec/near main-db [:seon.task/id tid] 6 {:of :seon.code.var/name}))
+                   (if mcid (store/lru-get! effect-cache 64 [:sem mcid tid] run-sem) (run-sem)))
         sem-items (let [min-sc (double (or (store/config-val main-db aid :seon.config/semantic-min-score)
                                 (:seon.config/semantic-min-score store/default-config-values)))]
                   (for [[e sc] sem-hits :when (>= (double sc) min-sc)]

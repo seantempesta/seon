@@ -11,6 +11,142 @@
   :seon.task/done? false,
   :seon.task/plan "1. Publish initial progress canvas card.\n2. Fan out in parallel: :ns/seon.render research (canvas.live + lineage composable sections/tags), :ns/seon.health research (health + schema count + open tasks).\n3. Await both, record milestone, publish rich interactive tour canvas with clickable jump buttons (child agents, Workspace, Debug).\n\n---\n1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
   :seon.task/owner :agent/root}
+ {:seon.task/tests #{seon.chronicle-test/agent-perspective-live-canvas-and-composable-sections-test
+                     seon.core-test/hiccup-fragment-and-del-text-test
+                     seon.core-test/ui-sidebar-ordering-datastar-morph-and-stream-walk-stability-test
+                     seon.browser-test/wave4-warm-browser-routing-text-diff-and-jolt-fs-test
+                     seon.core-test/activity-fold-progressive-disclosure-test
+                     seon.chronicle-test/living-canvas-chronicle-and-summary-tile-render-test
+                     seon.browser-test/browser-proc-measure-ops-test
+                     seon.distributed-render-test/canvas-history-and-rule-board-preserved-during-chat-test},
+  :seon.task/scope seon.render,
+  :seon.task/title "Reduce complexity of seon.render/hiccup->html-with-handlers (CC 44, cog 91)",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.render/hiccup->html-with-handlers]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/complexity-seon-render-hiccup-html-with-handlers,
+  :seon.task/done? false,
+  :seon.task/plan "seon.render/hiccup->html-with-handlers has high complexity (CC 44, cognitive 91). Flatten control flow and extract pure helpers.\n\n---\n1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`."}
+ {:seon.task/tests #{seon.context-perf-test/fix-scope-grounding-archived-filter-and-test-requires-test
+                     seon.core-test/kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test
+                     seon.chronicle-test/agent-perspective-live-canvas-and-composable-sections-test
+                     seon.core-test/context-self-improvement-and-session-compaction-test
+                     seon.context-perf-test/error-neighborhood-tail-cap-and-context-lab-cache-test
+                     seon.browser-test/wave4-warm-browser-routing-text-diff-and-jolt-fs-test
+                     seon.chronicle-test/living-canvas-chronicle-and-summary-tile-render-test
+                     seon.core-test/health-efficiency-alerts-and-scope-routing-test},
+  :seon.task/scope seon.render.data,
+  :seon.task/title "Consolidate duplicate helper agent-task-ids (2 nss)",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.render.data/agent-task-ids]
+                      [:seon.code.var/name seon.task.gate/agent-task-ids]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/dup-helper-agent-task-ids,
+  :seon.task/done? false,
+  :seon.task/plan "Duplicate helper `agent-task-ids` in seon.render.data/agent-task-ids, seon.task.gate/agent-task-ids. Consolidate onto one helper.\n\n---\n1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`."}
+ {:seon.task/tests #{seon.ctx-tree-and-review-test/pure-two-index-ctx-swap-and-custom-data-test
+                     seon.ctx-tree-and-review-test/phase2-review-restart-loop-sync-release-and-kv-anchor-test
+                     seon.datalog-rules-core-test/live-ctx-atom-iatom2-auto-deref-and-neighborhood-writeback-test
+                     seon.ctx-tree-and-review-test/cross-branch-review-session-swap-and-rule-reset-test
+                     seon.core-test/ui-sidebar-ordering-datastar-morph-and-stream-walk-stability-test
+                     seon.fit-and-signals-test/discover-renderers-and-ambient-signals-integration-test
+                     seon.cycle4-perf-test/cycle4-pass-b-rules-lazy-ctx-batch-meta-and-exports-test
+                     seon.explain-cache-test/calibrated-flow-pressure-and-seed42-generative-test},
+  :seon.task/scope seon.ctx.tree,
+  :seon.task/title "Consolidate duplicate helper eavt-map (2 nss)",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.ctx.tree/eavt-map]
+                      [:seon.code.var/name seon.signals/eavt-map]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/dup-helper-eavt-map,
+  :seon.task/done? false,
+  :seon.task/plan "Duplicate helper `eavt-map` in seon.ctx.tree/eavt-map, seon.signals/eavt-map. Consolidate onto one helper.\n\n---\n1. Inspect curated vars/namespaces, `user/callers`, and `user/tests-for`.\n2. Consolidate duplicates, migrate raw Java IO/process to `jolt.fs`/`jolt.process`, or split cleanly without breaking contracts.\n3. Prove `(user/run-tests!)` + `(user/health)` green, record `:summary`, then call `(user/ready!)`."}
+ {:seon.task/tests #{seon.flow-e2e-test/branch-eval-generative-seed42-cost-overrun-and-cache-test
+                     seon.flow-e2e-test/fresh-install-vs-resume-and-switchover-failure-rollback-test
+                     seon.ctx-tree-and-review-test/phase2-review-restart-loop-sync-release-and-kv-anchor-test
+                     seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test
+                     seon.ctx-tree-and-review-test/cross-branch-review-session-swap-and-rule-reset-test
+                     seon.browser-test/wave4-warm-browser-routing-text-diff-and-jolt-fs-test
+                     seon.flow-e2e-test/data-driven-ui-lazy-sync-and-recursive-delegation-test
+                     seon.flow-e2e-test/http-datastar-listener-and-live-handover-test},
+  :seon.task/scope seon.agent,
+  :seon.task/title "Consolidate duplicate helper reply! (5 nss)",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.agent/reply!]
+                      [:seon.code.var/name seon.server/reply!]
+                      [:seon.code.var/name seon.test/reply!]
+                      [:seon.code.var/name seon.transactor.merge/reply!]
+                      [:seon.code.var/name seon.vector.flow/reply!]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/dup-helper-reply,
+  :seon.task/done? false,
+  :seon.task/plan "Duplicate helper `reply!` in seon.agent/reply!, seon.server/reply!, seon.test/reply!, seon.transactor.merge/reply!, seon.vector.flow/reply!. Consolidate onto one helper.\n\n---\n1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`."}
+ {:seon.task/tests #{seon.flow-e2e-test/branch-eval-generative-seed42-cost-overrun-and-cache-test
+                     seon.flow-e2e-test/fresh-install-vs-resume-and-switchover-failure-rollback-test
+                     seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test
+                     seon.flow-e2e-test/persistent-agent-runtime-autonomous-tree-and-cold-reboot-test
+                     seon.flow-e2e-test/persistent-agent-runtime-cold-reboot-resume-test
+                     seon.flow-e2e-test/data-driven-ui-lazy-sync-and-recursive-delegation-test
+                     seon.flow-e2e-test/http-datastar-listener-and-live-handover-test
+                     seon.core-test/declarative-files-roundtrip-and-runtime-preservation-test},
+  :seon.task/scope seon.git.forks,
+  :seon.task/title "Migrate raw Java IO/process in seon.git.forks",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.git.forks/write-and-commit-fork!]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/java-io-seon-git-forks,
+  :seon.task/done? false,
+  :seon.task/plan "seon.git.forks uses raw Java IO/process in seon.git.forks/write-and-commit-fork!. Migrate to jolt.fs / jolt.process.\n\n---\n1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`."}
+ {:seon.task/tests #{seon.core-test/repl-namespace-split-and-scratch-def-isolation-test
+                     seon.core-test/malli-write-rail-multi-segment-gate-and-instrumentation-test
+                     seon.core-test/enforcements-doc-refs-impure-gen-malli-examples-and-nudge-test
+                     seon.code-graph-parity-test/canonical-graph-reverse-ref-pull-queries-test
+                     seon.code-graph-parity-test/cold-boot-bootstrap-vs-live-eval-parity-test
+                     seon.alloc-guard-test/interrupted-lmdb-write-never-self-deadlocks-test
+                     seon.core-test/budget-override-archive-and-unified-examples-test
+                     seon.alloc-guard-test/eval-touched-domain-eids-test},
+  :seon.task/scope seon.code.analyze,
+  :seon.task/title "Deduplicate near-clone seon.code.analyze/excluded-touched-attr? / seon.ctx.touches/excluded-attr? (NCD 0.05)",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.code.analyze/excluded-touched-attr?]
+                      [:seon.code.var/name seon.ctx.touches/excluded-attr?]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/ncd-clone-excluded-touched-attr-excluded-attr,
+  :seon.task/done? false,
+  :seon.task/plan "seon.code.analyze/excluded-touched-attr? and seon.ctx.touches/excluded-attr? are near-clones (NCD 0.05). Consolidate shared logic into one helper.\n\n---\n1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`."}
+ {:seon.task/tests #{seon.bench-test/container-bridge-helpers-and-ctx-tile-mode-test
+                     seon.ctx-tree-and-review-test/phase2-review-restart-loop-sync-release-and-kv-anchor-test
+                     seon.chronicle-test/agent-perspective-live-canvas-and-composable-sections-test
+                     seon.core-test/ui-sidebar-ordering-datastar-morph-and-stream-walk-stability-test
+                     seon.cst-metrics-test/ns-require-aliases-and-context-guidance-test
+                     seon.context-perf-test/error-neighborhood-tail-cap-and-context-lab-cache-test
+                     seon.derived-preview-test/inspector-live-derived-preview-test
+                     seon.chronicle-test/living-canvas-chronicle-and-summary-tile-render-test},
+  :seon.task/scope seon.render.data,
+  :seon.task/title "Deduplicate near-clone seon.render.data/normalize-inspect-ref / seon.transactor.user/norm-ref (NCD 0.04)",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.render.data/normalize-inspect-ref]
+                      [:seon.code.var/name seon.transactor.user/norm-ref]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/ncd-clone-normalize-inspect-ref-norm-ref,
+  :seon.task/done? false,
+  :seon.task/plan "seon.render.data/normalize-inspect-ref and seon.transactor.user/norm-ref are near-clones (NCD 0.04). Consolidate shared logic into one helper.\n\n---\n1. Inspect curated vars/namespaces, `user/callers`, and `user/tests-for`.\n2. Consolidate duplicates, migrate raw Java IO/process to `jolt.fs`/`jolt.process`, or split cleanly without breaking contracts.\n3. Prove `(user/run-tests!)` + `(user/health)` green, record `:summary`, then call `(user/ready!)`."}
+ {:seon.task/tests #{seon.flow-e2e-test/branch-eval-generative-seed42-cost-overrun-and-cache-test
+                     seon.flow-e2e-test/fresh-install-vs-resume-and-switchover-failure-rollback-test
+                     seon.flow-e2e-test/self-healing-red-test-and-two-parent-local-git-sync-test
+                     seon.flow-e2e-test/flow-native-calls-await-cycles-schema-and-cancellation-test
+                     seon.flow-e2e-test/persistent-agent-runtime-autonomous-tree-and-cold-reboot-test
+                     seon.flow-e2e-test/persistent-agent-runtime-cold-reboot-resume-test
+                     seon.flow-e2e-test/data-driven-ui-lazy-sync-and-recursive-delegation-test
+                     seon.flow-e2e-test/http-datastar-listener-and-live-handover-test},
+  :seon.task/scope seon.transactor.calls,
+  :seon.task/title "Split seon.transactor.calls/handle-call-op! (285L)",
+  :seon.task/template :template/hygiene-cleanup,
+  :seon.task/curated [[:seon.code.var/name seon.transactor.calls/handle-call-op!]],
+  :seon.task/created-by :seon.code/mine,
+  :seon.task/id :hygiene/split-fn-seon-transactor-calls-handle-call-op,
+  :seon.task/done? false,
+  :seon.task/plan "seon.transactor.calls/handle-call-op! is 285L (17650 chars > 120L budget). Extract pure helpers.\n\n---\n1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`."}
  {:seon.task/done? true,
   :seon.task/id :seon.agent/forked-review-handoff,
   :seon.task/needs #{:seon.agent/unified-agent-prefix-wire},
@@ -309,6 +445,12 @@
   :seon.task/scope seon,
   :seon.task/template? true,
   :seon.task/title "Discover existing code/data/history, refine task plan, prove & merge"}
+ {:seon.task/done? false,
+  :seon.task/id :template/hygiene-cleanup,
+  :seon.task/plan "1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`.",
+  :seon.task/scope seon,
+  :seon.task/template? true,
+  :seon.task/title "Consolidate duplicates, retire raw Java IO, or split oversized code cleanly"}
  {:seon.task/done? true,
   :seon.task/id :template/review-and-improve,
   :seon.task/plan "You are forked onto the paused agent's Datahike branch (`(user/db)` IS their branch, with their evals, task(s), errors, and WIP code). Your job is to fix Seon platform friction/bugs you spot and leave the paused agent's context cleaner and sharper — NOT to hijack and finish their whole task for them.\n1. **Inspect & verify** (separate parallel calls): check `<branch-status>`, run `(user/run-tests! ...)` on touched tests, and run `(user/health)`.\n2. **Clean context, clear resolved errors & fix root causes**:\n   - Retract noisy/failed/repetitive turns on the paused agent via `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] ...)` or `(user/compact! {:agent-id <target-id> :turns #{...} :summary \"...\"})`.\n   - Clear stale/resolved `:seon.error/*` entities directly by retracting them (`[:db/retractEntity err-eid]` or removing from `:seon.error/_agent-ref`).\n   - Clarify the paused agent's `:seon.task/*` `:plan` / `:summary` or curate helpful docs/schemas/vars (`user/curate!`) and fix any Seon bugs or broken contracts directly on this branch.\n3. **Prove green & hand back**: once your changes are clean and reach tests + health pass, call `(user/finish-review! \"Concise summary of what you verified, cleaned, cleared, or fixed\")`.",
