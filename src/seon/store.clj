@@ -158,7 +158,7 @@
                       :path path
                       :id (hasch/uuid path)
                       :config {:encoding {:serializer :FaslSerializer
-                                          :compressor {:type :lz4}}}
+                                          :compressor {:type :zstd}}}
                       :lmdb {:flags (bit-or MDB_NOSYNC MDB_SAFENOSYNC)
                              :map-size map-bytes
                              :sync-pages 4096}}
@@ -167,8 +167,10 @@
               :crypto-hash? true
               :store-cache-bytes cache-bytes
               :writer {:backend :sync}
-              :index-config {:branching-factor 64
-                             :value-out-of-line-bytes 512}}]
+              :index-config {:branching-factor 32
+              :diff-buf-size 64
+              :edge-append? true
+              :value-out-of-line-bytes 512}}]
      (if-let [id (stored-id cfg)]
        (assoc-in cfg [:store :id] id)
        cfg))))
@@ -475,7 +477,7 @@
               (lambda () (when (fx>? (jolt-locks-held) lv) (jolt-locks-exit!))))))))) "))
 
 (defn ^:seon.flow/edge install-interrupt-safe-lmdb!
-  "Idempotently wraps `konserve.jolt.lmdb-ffi/{transact,write-txn,read-txn}` with masked `tryLock`/`dynamic-wind` unwind abort and `MDB_MAP_RESIZED` adoption so `run-interruptible` never leaks an LMDB txn, RW-lock hold, or wait-queue ticket."
+  "Idempotently wraps `konserve.jolt.lmdb-ffi/{transact,write-txn,read-txn}` with masked `tryLock`/`dynamic-wind` unwind abort, `MDB_MAP_RESIZED` adoption, and `MDB_MAP_FULL` automatic 2x mapsize growth so `run-interruptible` never leaks an LMDB txn or lock and stores scale to available disk."
   {:malli/schema [:=> [:cat] :boolean]
    :cost/ticks 500000}
   []
@@ -485,17 +487,22 @@
         v-br (find-var 'konserve.jolt.lmdb-ffi/begin-raw)
         v-bg (find-var 'konserve.jolt.lmdb-ffi/begin)
         v-ad (find-var 'konserve.jolt.lmdb-ffi/adopt-mapsize-unlocked!)
+        v-em (find-var 'konserve.jolt.lmdb-ffi/env-map-bytes)
+        v-sm (find-var 'konserve.jolt.lmdb-ffi/mdb-env-set-mapsize)
         v-le (find-var 'konserve.jolt.lmdb-ffi/live-env)
         v-ck (find-var 'konserve.jolt.lmdb-ffi/check)
         v-cm (find-var 'konserve.jolt.lmdb-ffi/mdb-txn-commit)
         v-ab (find-var 'konserve.jolt.lmdb-ffi/mdb-txn-abort)]
     (if (and v-tr v-wt v-rt (or v-br v-bg) v-le v-ck v-cm v-ab)
       (do
-        (when (not= 2 (:seon.store/interrupt-safe-v (meta v-tr)))
+        (when (not= 3 (:seon.store/interrupt-safe-v (meta v-tr)))
           (let [br-f (when v-br @v-br) bg-f (when v-bg @v-bg) ad-f (when v-ad @v-ad)
+                em-f (when v-em @v-em) sm-f (when v-sm @v-sm)
                 live-f @v-le check-f @v-ck commit-f @v-cm abort-f @v-ab
                 rd-flags lmdb-ffi/MDB_RDONLY
                 resized-rc (or (some-> (find-var 'konserve.jolt.lmdb-ffi/MDB_MAP_RESIZED) deref) -30785)
+                full-rc (or (some-> (find-var 'konserve.jolt.lmdb-ffi/MDB_MAP_FULL) deref) -30792)
+                map-full? (fn [e] (let [d (ex-data e)] (and (= :lmdb-error (:type d)) (= full-rc (:rc d)))))
                 adopt-masked!
                 (fn [db ^java.util.concurrent.locks.ReentrantReadWriteLock rw]
                   (let [wl (.writeLock rw) done? (volatile! false)]
@@ -505,43 +512,75 @@
                         (fn [] (ad-f db) (vreset! done? true) false)
                         false false false false)
                       (when-not @done? (Thread/yield) (recur)))))
+                grow-masked!
+                (fn [db ^java.util.concurrent.locks.ReentrantReadWriteLock rw seen]
+                  (let [wl (when rw (.writeLock rw)) done? (volatile! false)
+                        do-grow! (fn []
+                                   (let [env (live-f db)
+                                         before (long (em-f env))]
+                                     (when (<= before (long seen))
+                                       (when ad-f (ad-f db))
+                                       (let [adopted (long (em-f env))]
+                                         (when (<= adopted (long seen))
+                                           (let [base (max before adopted (long seen))
+                                                 pg 16384
+                                                 n (max (* 2 base) (+ base (* 1024 1024)))
+                                                 target (* (quot (+ n (dec pg)) pg) pg)]
+                                             (check-f "env_set_mapsize" (sm-f env target))))))))]
+                    (if wl
+                      (loop []
+                        (with-masked-lmdb-txn-fn
+                          #(.tryLock wl) #(.unlock wl)
+                          (fn [] (do-grow!) (vreset! done? true) false)
+                          false false false false)
+                        (when-not @done? (Thread/yield) (recur)))
+                      (do-grow!))))
                 run-txn!
                 (fn [db flags write? body-f]
                   (let [^java.util.concurrent.locks.ReentrantReadWriteLock rw (:rw-lock db)
                         rl (when rw (.readLock rw))
-                        state (volatile! nil)]
-                    (loop [tries 0]
+                        state (volatile! nil)
+                        seen-v (volatile! 0)]
+                    (loop [tries 0 grows 0]
                       (vreset! state nil)
-                      (let [res (with-masked-lmdb-txn-fn
-                                  (if rl (fn [] (if (.tryLock rl) true (do (vreset! state :contended) false))) false)
-                                  (if rl #(.unlock rl) false)
-                                  (fn []
-                                    (let [env (live-f db)]
-                                      (if br-f
-                                        (let [[rc t] (br-f env flags)]
-                                          (cond
-                                            (zero? rc) (do (when write? (swap! lmdb-tx-state update :active-writes inc)) t)
-                                            (and (= rc resized-rc) (< tries 2) rw ad-f (= 1 (.getReadHoldCount rw)))
-                                            (do (vreset! state :resized) false)
-                                            :else (do (check-f "txn_begin" rc) t)))
-                                        (let [t (bg-f env flags)]
-                                          (when write? (swap! lmdb-tx-state update :active-writes inc)) t))))
-                                  body-f
-                                  (if write? (fn [t] (swap! lmdb-tx-state update :active-writes #(max 0 (dec %))) (commit-f t)) false)
-                                  (if write? (fn [rc] (check-f "txn_commit" rc)) false)
-                                  (if write?
-                                    (fn [t] (try (abort-f t) (finally (swap! lmdb-tx-state #(-> % (update :active-writes (fn [n] (max 0 (dec n)))) (update :aborted-writes inc))))))
-                                    (fn [t] (abort-f t))))]
+                      (let [res (try
+                                  (with-masked-lmdb-txn-fn
+                                    (if rl (fn [] (if (.tryLock rl) true (do (vreset! state :contended) false))) false)
+                                    (if rl #(.unlock rl) false)
+                                    (fn []
+                                      (let [env (live-f db)]
+                                        (when (and write? em-f) (vreset! seen-v (long (em-f env))))
+                                        (if br-f
+                                          (let [[rc t] (br-f env flags)]
+                                            (cond
+                                              (zero? rc) (do (when write? (swap! lmdb-tx-state update :active-writes inc)) t)
+                                              (and (= rc resized-rc) (< tries 2) rw ad-f (= 1 (.getReadHoldCount rw)))
+                                              (do (vreset! state :resized) false)
+                                              :else (do (check-f "txn_begin" rc) t)))
+                                          (let [t (bg-f env flags)]
+                                            (when write? (swap! lmdb-tx-state update :active-writes inc)) t))))
+                                    body-f
+                                    (if write? (fn [t] (swap! lmdb-tx-state update :active-writes #(max 0 (dec %))) (commit-f t)) false)
+                                    (if write? (fn [rc] (check-f "txn_commit" rc)) false)
+                                    (if write?
+                                      (fn [t] (try (abort-f t) (finally (swap! lmdb-tx-state #(-> % (update :active-writes (fn [n] (max 0 (dec n)))) (update :aborted-writes inc))))))
+                                      (fn [t] (abort-f t))))
+                                  (catch Throwable e
+                                    (if (and write? em-f sm-f (map-full? e) (< grows 16)
+                                             (or (nil? rw) (zero? (.getReadHoldCount rw))))
+                                      (do (vreset! state :full) nil)
+                                      (throw e))))]
                         (case @state
-                          :contended (do (Thread/yield) (recur tries))
-                          :resized (do (adopt-masked! db rw) (recur (inc tries)))
+                          :contended (do (Thread/yield) (recur tries grows))
+                          :resized (do (adopt-masked! db rw) (recur (inc tries) grows))
+                          :full (do (grow-masked! db rw @seen-v) (recur 0 (inc grows)))
                           res)))))]
             (alter-var-root v-tr (constantly (fn [db f] (if lmdb-ffi/*txn* (f) (run-txn! db 0 true (fn [txn] (binding [lmdb-ffi/*txn* txn] (f))))))))
-            (alter-meta! v-tr assoc :seon.store/interrupt-safe? true :seon.store/interrupt-safe-v 2)
+            (alter-meta! v-tr assoc :seon.store/interrupt-safe? true :seon.store/interrupt-safe-v 3)
             (alter-var-root v-wt (constantly (fn [db f] (if-some [t lmdb-ffi/*txn*] (f t) (run-txn! db 0 true f)))))
-            (alter-meta! v-wt assoc :seon.store/interrupt-safe? true :seon.store/interrupt-safe-v 2)
+            (alter-meta! v-wt assoc :seon.store/interrupt-safe? true :seon.store/interrupt-safe-v 3)
             (alter-var-root v-rt (constantly (fn [db f] (if-some [t lmdb-ffi/*txn*] (f t) (run-txn! db rd-flags false f)))))
-            (alter-meta! v-rt assoc :seon.store/interrupt-safe? true :seon.store/interrupt-safe-v 2)))
+            (alter-meta! v-rt assoc :seon.store/interrupt-safe? true :seon.store/interrupt-safe-v 3)))
         true)
       false)))
 
