@@ -125,7 +125,7 @@ rtails/fallback-entity-renderers)
                     32)
             rem-t (when (pos? max-t) (max 0 (- max-t turns)))
             show-b? (and (pos? max-t) (pos? turns) (or (>= turns 10) (<= rem-t 12)))]
-        (when (or show-b? (not= mcid bcid))
+        (when (or show-b? (not= mcid bcid) (some? (:seon.agent/forked-from ag)))
           (let [same? (and mcid bcid (= mcid bcid))
                 eids (if same? [] (rules/edited-form-eids main-db branch-db))
                 {:keys [edited hashes drifted]} (if same? {:edited [] :hashes {} :drifted []}
@@ -138,7 +138,11 @@ rtails/fallback-entity-renderers)
                                 (store/lru-get! branch-errors-cache 32
                                                 [(get-in main-db [:config :store :id]) mcid esig]
                                                 #(health/caused-by-branch main-db branch-db {} nss))))
-             :last-proofs (:seon.agent/last-proofs ag) :show-budget? show-b?
+             :last-proofs (or (:seon.agent/last-proofs ag)
+             (when-let [ff (:seon.agent/forked-from ag)]
+               (let [feid (if (map? ff) (:db/id ff) ff)]
+                 (when (integer? feid)
+                   (:seon.agent/last-proofs (d/pull branch-db '[:seon.agent/last-proofs] feid)))))) :show-budget? show-b?
              :turns-used turns :max-turns max-t :rem-turns rem-t}))))))
 
 (def ^:private tail-specs

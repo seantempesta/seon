@@ -33,7 +33,7 @@
     register-schema! {:arglists ([k form] [k form opts]) :doc "Register Malli schema -> Datahike attr."}
     remove-var! {:arglists ([sym] [sym opts]) :doc "Retract var & form."}
     add-fn! {:arglists ([nsym src] [nsym src opts]) :doc "Add/overwrite form (auto-seeds *-test ns)."}
-    callers {:arglists ([sym]) :doc "Returns vector of caller symbols (not maps) & hiccup renderers."}
+    callers {:arglists ([sym] [sym & more]) :doc "Returns vector of caller symbols (not maps), or {sym [caller-syms]} for multiple/collection."}
     callees {:arglists ([sym]) :doc "List :refs, :input, :output, :keywords."}
     tests-for {:arglists ([sym-or-ns]) :doc "List reaching tests."}
     search {:arglists ([q]) :doc "Search vars (name/doc), schemas (key/doc/form), docs."}
@@ -278,9 +278,11 @@
                            (assoc (select-keys f [:seon.test/var :seon.test/report :seon.test/ms]) :main-pass? mp :summary (concise-failure-line f mp))))
                        (filterv #(not (:seon.test/pass? %)) results))
            ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 10000.0)) 100.0)]
+       (do (when (seq fails)
+         (println (str "FAIL (" (count fails) "/" (count results) "): " (str/join " | " (map :summary fails)))))
        (cond-> {:ok? (empty? fails) :ran (count results) :passed (- (count results) (count fails)) :failed (count fails)
                 :ms ms :failures fails :results (mapv #(select-keys % [:seon.test/var :seon.test/pass? :seon.test/ms]) results)}
-         (seq fails) (assoc :failure-lines (mapv :summary fails)))))))
+         (seq fails) (assoc :failure-lines (mapv :summary fails))))))))
 
 (defn- ^:seon.flow/edge branch-delta-info [conn bdb branch scope]
   (let [bc (try (d/merge-base conn :main branch) (catch Throwable _ nil))

@@ -277,3 +277,24 @@
                 (is (str/includes? (code/render-path mdb-after "src/demo/fr_wip.clj") ":base") "Worker WIP must NOT leak onto :main!"))
               (finally (d/release rconn))))
           (finally (d/release wconn)))))))
+
+(deftest ^{:cost/ticks 120000000} trace-audit-root-cause-fixes-test
+  (testing "2-arg remember!, forked parent :last-proofs inheritance, and move-vars! :seon.code/reexport stress-var continuity"
+    (with-test-store [{:keys [conn cfg]}]
+      ;; 1. 2-arg remember! writes durable memory onto target agent
+      (d/transact conn {:tx-data [{:seon.agent/id :w/tr1 :seon.agent/branch :branch/w-tr1 :seon.agent/role :worker
+                                   :seon.agent/goal "work" :seon.agent/last-proofs {:ok? false :failures [{:var 'foo/bar}]}}
+                                  {:seon.agent/id :rev/tr1 :seon.agent/branch :branch/rev-tr1 :seon.agent/role :worker
+                                   :seon.agent/goal "rev" :seon.agent/forked-from [:seon.agent/id :w/tr1]}]})
+      (binding [fcalls/*agent-ctx* {:conn conn :agent-id :rev/tr1 :branch :branch/rev-tr1}]
+        (let [res (fcalls/remember! :w/tr1 "Verified split plan")]
+          (is (true? (:ok? res)))
+          (is (= ["Verified split plan"] (:seon.agent/memory (d/pull @conn '[:seon.agent/memory] [:seon.agent/id :w/tr1]))))))
+      ;; 2. gather-branch-status-data inherits parent's :last-proofs when reviewer has none
+      (let [db @conn
+            ag (d/pull db '[*] [:seon.agent/id :rev/tr1])
+            bs ((requiring-resolve 'seon.render.wire/gather-branch-status-data) db db ag [{:seon.agent.eval/turn 1}])]
+        (is (= {:ok? false :failures [{:var 'foo/bar}]} (:last-proofs bs))))
+      ;; 3. make-reexport-src emits :seon.code/reexport and stress-var follows it transparently
+      (let [src ((requiring-resolve 'seon.code.rewrite.move/make-reexport-src) 'demo.from/adder 'child "(defn adder {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))" false 'demo.child)]
+        (is (str/includes? src ":seon.code/reexport 'demo.child/adder"))))))

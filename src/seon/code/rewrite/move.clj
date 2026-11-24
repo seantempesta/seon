@@ -422,20 +422,23 @@
           ")"))))
 
 (defn make-reexport-src
-  "Builds a forwarding stub in `from` pointing to `alias-sym/var` (preserving `^:seon/callable` / `^:seon.flow/edge`)."
+  "Builds a forwarding stub in `from` pointing to `alias-sym/var` (preserving `^:seon/callable` / `^:seon.flow/edge` and optional `:seon.code/reexport`)."
   {:malli/schema [:function
                   [:=> [:cat :symbol :symbol :string] :string]
-                  [:=> [:cat :symbol :symbol :string :boolean] :string]]
+                  [:=> [:cat :symbol :symbol :string :boolean] :string]
+                  [:=> [:cat :symbol :symbol :string :boolean [:maybe :symbol]] :string]]
    :cost/ticks 50000}
-  ([vsym alias-sym orig-src] (make-reexport-src vsym alias-sym orig-src false))
-  ([vsym alias-sym orig-src private?]
+  ([vsym alias-sym orig-src] (make-reexport-src vsym alias-sym orig-src false nil))
+  ([vsym alias-sym orig-src private?] (make-reexport-src vsym alias-sym orig-src private? nil))
+  ([vsym alias-sym orig-src private? to-ns]
    (let [vname (name vsym)
          target (str (name alias-sym) "/" vname)
          trimmed (str/triml (str orig-src))
          is-fn? (boolean (re-find #"^\(\s*defn-?\b" trimmed))
          callable? (boolean (re-find #"\^:seon/callable|\{\s*:seon/callable\s+true" (str orig-src)))
          meta-tags (str (when (and (not private?) callable?) "^:seon/callable ")
-                        (when (str/includes? (str orig-src) ":seon.flow/edge") "^:seon.flow/edge "))]
+                        (when (str/includes? (str orig-src) ":seon.flow/edge") "^:seon.flow/edge ")
+                        (when (and is-fn? (not private?) to-ns (str/includes? (str orig-src) ":malli/schema")) (str "^{:seon.code/reexport '" to-ns "/" vname "} ")))]
      (cond
        (and is-fn? private?) (str "(defn- " vname " [& args] (apply " target " args))")
        is-fn?                (str "(defn " meta-tags vname " [& args] (apply " target " args))")
