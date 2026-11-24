@@ -230,6 +230,37 @@
           (try (binding [*out* *err*] (println "[FLOW ERROR]" (pr-str err))) (catch Throwable _))
           (recur))))))
 
+(def flow-connections
+  "Static Flow topology connecting every declared proc `:outs` port to its consumer `:ins`."
+  [[[:server :tx] [:transactor :tx]]
+   [[:server :eval] [:agents :eval]]
+   [[:server :batch] [:test :batch]]
+   [[:server :git] [:git :in]]
+   [[:transactor :db] [:reconciler :db]]
+   [[:transactor :db] [:test :db]]
+   [[:transactor :db] [:web :db]]
+   [[:transactor :git] [:git :in]]
+   [[:git :tx] [:transactor :tx]]
+   [[:reconciler :run] [:agents :run]]
+   [[:reconciler :batch] [:test :batch]]
+   [[:reconciler :tx] [:transactor :tx]]
+   [[:agents :request] [:model :request]]
+   [[:agents :browser-req] [:browser :req]]
+   [[:browser :agents-res] [:agents :browser-res]]
+   [[:browser :web-snap] [:web :snap]]
+   [[:model :response] [:agents :response]]
+   [[:model :stream] [:web :stream]]
+   [[:model :tx] [:transactor :tx]]
+   [[:agents :tx] [:transactor :tx]]
+   [[:agents :git] [:git :in]]
+   [[:agents :exits] [:reconciler :exits]]
+   [[:agents :exits] [:web :exits]]
+   [[:test :tx] [:transactor :tx]]
+   [[:server :vectors] [:vectors :req]]
+   [[:server :browser] [:browser :req]]
+   [[:transactor :db] [:vectors :db]]
+   [[:vectors :tx] [:transactor :tx]]])
+
 (defn start-flow-instance!
   {:malli/schema [:=> [:cat [:map [:fork-out :seon.host/chan]] :map] :map]}
   [router {:keys [store-path seed-store repo-dir commit-git? auto-switch-over? port listener model-provider max-os-procs max-test-workers boot-seq on-power-loss on-hand-over on-switch-over enable-browser? disable-vectors? vectors-opts]
@@ -350,34 +381,7 @@
                                      :stream {:buf-or-n (a/sliding-buffer 64)}}}
             :vectors    (vectors-flow/proc-spec conn {:disable-vectors? disable-vectors? :auto-backfill? (pos? eff-port) :vectors-opts vectors-opts})}
 
-            :conns
-            [[[:server :tx]          [:transactor :tx]]
-            [[:server :eval]        [:agents :eval]]
-            [[:server :batch]       [:test :batch]]
-            [[:server :git]         [:git :in]]
-            [[:transactor :db]      [:reconciler :db]]
-            [[:transactor :db]      [:test :db]]
-            [[:transactor :db]      [:web :db]]
-            [[:transactor :git]     [:git :in]]
-            [[:git :tx]             [:transactor :tx]]
-            [[:reconciler :run]     [:agents :run]]
-            [[:reconciler :batch]   [:test :batch]]
-            [[:reconciler :tx]      [:transactor :tx]]
-            [[:agents :request]     [:model :request]]
-            [[:agents :browser-req] [:browser :req]]
-            [[:browser :agents-res] [:agents :browser-res]]
-            [[:browser :web-snap]   [:web :snap]]
-            [[:model :response]     [:agents :response]]
-            [[:model :stream]       [:web :stream]]
-            [[:agents :tx]          [:transactor :tx]]
-            [[:agents :git]         [:git :in]]
-            [[:agents :exits]       [:reconciler :exits]]
-            [[:agents :exits]       [:web :exits]]
-            [[:test :tx]            [:transactor :tx]]
-            [[:server :vectors]     [:vectors :req]]
-            [[:server :browser]     [:browser :req]]
-            [[:transactor :db]      [:vectors :db]]
-            [[:vectors :tx]         [:transactor :tx]]]
+            :conns flow-connections
 
             })]
     (vreset! flow-holder g)

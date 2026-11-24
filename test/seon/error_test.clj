@@ -13,7 +13,17 @@
             [seon.rule :as rules]
             [seon.schema :as schema]
             [seon.test-fixture :refer [with-test-store]]
-            [seon.health :as health]))
+            [seon.health :as health]
+            [seon.main :as main]
+            [seon.reconciler :as reconciler]
+            [seon.server :as server]
+            [seon.transactor :as transactor]
+            [seon.browser :as browser]
+            [seon.test :as test-runner]
+            [seon.git-proc :as git-proc]
+            [seon.web :as web]
+            [seon.vector.flow :as vectors-flow]
+            [clojure.set]))
 
 (deftest error-tx-and-resolve-error-tx-test
   (testing "error-tx validates and builds bare and namespaced :seon.error/* entities"
@@ -290,3 +300,124 @@
           (is (str/includes? txt "429 quota")))
         (d/transact conn {:tx-data [(error/resolve-error-tx (:seon.error/id ent))]})
         (is (empty? (health/open-faults @conn)))))))
+
+(deftest flow-topology-exhaustive-wiring-test
+  (testing "Every declared Flow proc :outs port is wired in seon.main/flow-connections and every target :ins port exists"
+    (let [procs {:server (server/server-proc)
+                 :transactor (transactor/transactor-proc)
+                 :reconciler (reconciler/reconciler-proc)
+                 :agents (agents/agents-proc)
+                 :browser (browser/browser-proc)
+                 :model (model/model-proc)
+                 :test (test-runner/test-proc)
+                 :git (git-proc/git-proc)
+                 :web (web/web-proc)
+                 :vectors (vectors-flow/vectors-proc)}
+          conns main/flow-connections
+          wired-outs (into #{} (map first) conns)
+          all-outs (into #{} (for [[pid desc] procs, out-k (keys (:outs desc))] [pid out-k]))]
+      (is (contains? (set conns) [[:model :tx] [:transactor :tx]]))
+      (is (= #{} (clojure.set/difference all-outs wired-outs))
+          "Every declared Flow proc :outs port must have at least one connection in seon.main/flow-connections")
+      (doseq [[[src-p src-o] [dst-p dst-i]] conns]
+        (is (contains? (:outs (get procs src-p)) src-o) (str "Unknown source port " [src-p src-o]))
+        (is (contains? (:ins (get procs dst-p)) dst-i) (str "Unknown target port " [dst-p dst-i]))))))
+
+(deftest ^{:cost/ms 6000} vision-gate-and-transport-drop-multimodal-fallback-test
+  (testing "vision-capable-model? excludes text-only deepseek-flash while allowing true vision models"
+    (is (false? (model/vision-capable-model? "deepseek-flash")))
+    (is (false? (model/vision-capable-model? "deepseek-chat")))
+    (is (false? (model/vision-capable-model? nil)))
+    (is (true? (model/vision-capable-model? "deepseek-vl2")))
+    (is (true? (model/vision-capable-model? "gemini-2.5-flash")))
+    (is (true? (model/vision-capable-model? "google/gemini-2.5-flash")))
+    (is (true? (model/vision-capable-model? "gpt-4o")))
+    (is (true? (model/vision-capable-model? "claude-sonnet-4"))))
+
+  (testing "openai-stream-chat! retries text-only on TCP drop with image_url and caches endpoint capability"
+    (let [hits (atom 0)
+          ss (java.net.ServerSocket. 0 16 (java.net.InetAddress/getByName "127.0.0.1"))
+          port (.getLocalPort ss)
+          running? (atom true)
+          read-http-req (fn [^java.io.InputStream in]
+                          (let [br (java.io.BufferedReader. (java.io.InputStreamReader. in "UTF-8"))]
+                            (loop [cl 0]
+                              (let [line (.readLine br)]
+                                (if (or (nil? line) (empty? line))
+                                  (let [buf (char-array cl)]
+                                    (loop [off 0]
+                                      (when (< off cl)
+                                        (let [n (.read br buf off (- cl off))]
+                                          (when (pos? n) (recur (+ off n))))))
+                                    (String. buf))
+                                  (let [lo (str/lower-case line)
+                                        cl2 (if (str/starts-with? lo "content-length:")
+                                              (parse-long (str/trim (subs line 15)))
+                                              cl)]
+                                    (recur cl2)))))))
+          srv-fut (a/thread
+                    (while @running?
+                      (try
+                        (let [sock (.accept ss)]
+                          (a/thread
+                            (try
+                              (swap! hits inc)
+                              (let [body (read-http-req (.getInputStream sock))]
+                                (if (str/includes? body "image_url")
+                                  (.close sock)
+                                  (let [sse-body (str "data: " (json/write-str {:choices [{:delta {:content "recovered-ok"}}]}) "\n\ndata: [DONE]\n\n")
+                                        resp (str "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
+                                                  (alength (.getBytes sse-body "UTF-8"))
+                                                  "\r\nConnection: close\r\n\r\n" sse-body)
+                                        out (.getOutputStream sock)]
+                                    (.write out (.getBytes resp "UTF-8"))
+                                    (.flush out)
+                                    (.close sock))))
+                              (catch Throwable _ (try (.close sock) (catch Throwable _))))))
+                        (catch Throwable _ nil))))
+          prov {:type :openai-compat :base-url (str "http://127.0.0.1:" port) :api-key "sk-test" :model "drop-img-model"}
+          mm-msgs [{:role "system" :content "sys"}
+                   {:role "user" :content [{:type "text" :text "check ui"}
+                                           {:type "image_url" :image_url {:url "data:image/jpeg;base64,AA=="}}]}]]
+      (try
+        (let [r1 (model/openai-stream-chat! prov "sys" [] "check ui" mm-msgs nil)]
+          (is (= "recovered-ok" (:thought r1)))
+          (is (= 2 @hits) "First call hits once with image_url (dropped) then retries once text-only"))
+        (let [r2 (model/openai-stream-chat! prov "sys" [] "check ui" mm-msgs nil)]
+          (is (= "recovered-ok" (:thought r2)))
+          (is (= 3 @hits) "Second call pre-strips image_url from cached unsupported endpoint (1 hit only)"))
+        (finally
+          (reset! running? false)
+          (try (.close ss) (catch Throwable _))
+          (a/alts!! [srv-fut (a/timeout 500)]))))))
+
+(deftest reconciler-bounded-model-error-retry-and-halt-test
+  (testing "reconciler retries up to 2 transient model errors, halts at 3 or non-retryable auth, and resumes on fresh unread message"
+    (with-test-store [{:keys [conn]}]
+      (let [aid :ag/retry-test
+            mid1 (random-uuid)
+            _ (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main :seon.agent/goal "test"}
+                                          {:seon.agent.message/id mid1 :seon.agent.message/seq 1
+                                           :seon.agent.message/from :user :seon.agent.message/to aid
+                                           :seon.agent.message/type :chat :seon.agent.message/body "go"}]})
+            mk-err! (fn [turn msg]
+                      (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid)
+                                                   :seon.agent.eval/agent aid
+                                                   :seon.agent.eval/turn turn
+                                                   :seon.agent.eval/code ""
+                                                   :seon.agent.eval/thought ""
+                                                   :seon.agent.eval/error msg
+                                                   :seon.agent.eval/out ""
+                                                   :seon.agent.eval/ms 0.0 :seon.agent.eval/ticks 0 :seon.agent.eval/bytes 0}]}))]
+        (mk-err! 1 "Model error [model/api-error]: transient drop 1")
+        (is (true? (:needs-turn? (reconciler/derive-agent-status @conn nil {} #{} #{} aid))))
+        (mk-err! 2 "Model error [model/api-error]: transient drop 2")
+        (is (true? (:needs-turn? (reconciler/derive-agent-status @conn nil {} #{} #{} aid))))
+        (mk-err! 3 "Model error [model/api-error]: transient drop 3")
+        (is (false? (:needs-turn? (reconciler/derive-agent-status @conn nil {} #{} #{} aid))))
+        (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid) :seon.agent.message/seq 2
+                                     :seon.agent.message/from :user :seon.agent.message/to aid
+                                     :seon.agent.message/type :chat :seon.agent.message/body "try again"}]})
+        (is (true? (:needs-turn? (reconciler/derive-agent-status @conn nil {} #{} #{} aid))))
+        (mk-err! 4 "Model error [model/auth]: Invalid API key")
+        (is (false? (:needs-turn? (reconciler/derive-agent-status @conn nil {} #{} #{} aid))))))))

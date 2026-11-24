@@ -334,6 +334,14 @@
    :last-snippet (:last-snippet final-trace)
    :last-error failure})
 
+(defn- ^:seon.flow/edge pause-preexisting-agents! [inst]
+  (let [st (instance-op! inst {:op :status})
+        pre (filterv #(and (:id %) (not= :paused (:status %))) (:agents st))]
+    (when (seq pre)
+      (instance-op! inst {:op :transact
+                          :tx-data (mapv (fn [a] {:seon.agent/id (:id a) :seon.agent/paused? true}) pre)
+                          :reason :bench-isolate-preexisting-agents}))))
+
 (defn run-one-trial!
   "Boots one isolated instance, drives a full trial against it, tears it down, returns its result map."
   {:malli/schema [:=> [:cat :int :map :map] :map], :seon.eval/budget-override {:ticks 2000000000, :bytes 1073741824}, :seon.flow/edge true}
@@ -354,6 +362,7 @@
     (try
       (let [i (start-instance! (trial-instance-opts id task opts))
             _ (reset! inst i)
+            _ (pause-preexisting-agents! i)
             _ (emit! {:status :booted :evals 0 :alive? true :boot-ms (long (:boot-ms i))})
             plan (trial-task-plan task)
             eval-res (when-let [code (:eval-code task)]
@@ -379,11 +388,12 @@
                                    (or (not (get-in agent-res [:wait :ok?]))
                                        (not= :merged (:status ag-snap))))
                           (probe-trial-trace i agent-id branch))
+            timed-out? (= :timeout (get-in agent-res [:wait :error]))
             already-merged? (= :merged (:status ag-snap))
-            test-res (when (and (:run-tests? task)
+            test-res (when (and (not timed-out?) (:run-tests? task)
                                 (or (not already-merged?) (:retest-main? task)))
                        (instance-op! i {:op :test :branch (if already-merged? :main branch)}))
-            merge-res (when (:merge? task)
+            merge-res (when (and (not timed-out?) (:merge? task))
                         (if already-merged?
                           {:ok? true :already-merged? true :branch branch}
                           (instance-op! i {:op :merge :branch branch
