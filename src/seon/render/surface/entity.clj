@@ -14,13 +14,14 @@
             [seon.signals :as sig]
             [seon.signals.cache :as scache]
             [seon.store :as store]
-            [seon.vector.flow :as vflow]))
+            [seon.vector.flow :as vflow]
+            [seon.render.text :refer [clamp-pct]]))
 
 (defonce ^:private ^:seon.flow/edge preview-html-cache (store/lru-cache 128))
 
 (defn- r2 [x] (if (number? x) (/ (Math/round (* (double x) 100.0)) 100.0) 0.0))
+
 (defn- lvl-cls [lvl] (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
-(defn- clamp-pct [x] (max 0.0 (min 100.0 (double (or x 0.0)))))
 
 (defn- format-wire-projection [ref world focal-fit fitted]
   (let [lbl (rdata/entity-short-label (or (:entity world) ref))

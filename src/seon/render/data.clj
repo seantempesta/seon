@@ -3,12 +3,7 @@
    timeline history, lookup-ref, and eval/message query helpers."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.store :as store]))
-
-(defn- db-schema [db]
-  (if (instance? datahike.db.interface.ISearch db)
-    (or (:schema db) (d/schema db) {})
-    {}))
+            [seon.store :as store :refer [db-schema]]))
 
 (defn canonical-view-mode
   "Normalizes holistic and legacy view modes (`:canvas`->`:session`, `:debug`->`:context`, `:workspace`->`:system`)."

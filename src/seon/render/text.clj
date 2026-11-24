@@ -62,3 +62,55 @@
         (str/replace #" {2,}" " ")
         (str/replace #"\n{3,}" "\n\n")
         str/trim)))
+
+(defn nonblank
+  "Returns `x` when it is a non-blank String (or trimmed when `trim?` is true), else nil."
+  {:malli/schema [:function
+                  {:examples [[["hi"] "hi"] [["   "] nil] [[nil] nil]]}
+                  [:=> [:cat :any] [:maybe :string]]
+                  [:=> [:cat :any :boolean] [:maybe :string]]]
+   :cost/ticks 50000 :cost/bytes 16384}
+  ([x] (when (and (string? x) (not (str/blank? x))) x))
+  ([x trim?] (when (and (string? x) (not (str/blank? x))) (if trim? (str/trim x) x))))
+
+(defn clip
+  "Truncates `(str x)` to at most `n` chars (min 1) appending `…` when clipped."
+  {:malli/schema [:=> {:examples [[["hello world" 6] "hello…"] [["hi" 10] "hi"] [[nil 5] ""]]}
+                  [:cat :any pos-int?] :string]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x n]
+  (let [s (if (nil? x) "" (str x))
+        lim (max 1 (long n))]
+    (if (> (count s) lim) (str (subs s 0 (max 1 (dec lim))) "…") s)))
+
+(defn one-line
+  "Collapses whitespace in `x` to single spaces, trims, and clips to `n` chars."
+  {:malli/schema [:=> {:examples [[["a\n  b\tc" 10] "a b c"]]}
+                  [:cat :any pos-int?] :string]
+   :cost/ticks 100000 :cost/bytes 32768}
+  [x n]
+  (clip (-> (if (nil? x) "" (str x)) (str/replace #"\s+" " ") str/trim) n))
+
+(defn clamp-pct
+  "Clamps numeric percentage `x` into `[0.0, 100.0]` rounded to 1 decimal place (NaN/Inf/nil -> 0.0)."
+  {:malli/schema [:=> {:examples [[[105] 100.0] [[-3] 0.0] [[42.36] 42.4] [[nil] 0.0]]}
+                  [:cat :any] :double]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x]
+  (if (number? x)
+    (let [v (double x)]
+      (if (and (== v v) (not (Double/isInfinite v)))
+        (max 0.0 (min 100.0 (/ (double (Math/round (* v 10.0))) 10.0)))
+        0.0))
+    0.0))
+
+(defn clamp-pct-int
+  "Clamps numeric percentage `x` into an integer in `[0, 100]`, returning nil for nil/non-number/NaN/Inf."
+  {:malli/schema [:=> {:examples [[[105] 100] [[-3] 0] [[42.6] 43] [[nil] nil]]}
+                  [:cat :any] [:maybe :int]]
+   :cost/ticks 50000 :cost/bytes 16384}
+  [x]
+  (when (number? x)
+    (let [dv (double x)]
+      (when (and (== dv dv) (not (Double/isInfinite dv)))
+        (max 0 (min 100 (long (Math/round dv))))))))

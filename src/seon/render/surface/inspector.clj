@@ -9,14 +9,15 @@
             [seon.render.wire :as rwire]
             [seon.signals :as sig]
             [seon.signals.touches :as touches]
-            [seon.store :as store]
+            [seon.store :as store :refer [live-cid]]
             [seon.vector :as vec]))
 
 (defonce ^:private ^:seon.flow/edge ref-attrs-cache (store/lru-cache 16))
+
 (defonce ^:private ^:seon.flow/edge entity-world-cache (store/lru-cache 32))
 
-(defn- live-cid [db] (store/live-cid db))
 (defn- btn [cls oc lbl & [dis?]] [:button (cond-> {:type "button" :class cls :on-click oc} dis? (assoc :disabled true)) lbl])
+
 (defn- trunc [s n] (if (> (count s) n) (str (subs s 0 n) "…") s))
 
 (defn- indexed-ref-attrs [db]

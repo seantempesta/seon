@@ -11,7 +11,8 @@
             [seon.git :as git]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
-            [seon.model :as model]))
+            [seon.model :as model]
+            [jolt.fs :as fs]))
 
 (defn build-and-verify!
   "Runs `bin/build seon` in `repo-dir` (which builds into an isolated `target/seon.<id>.new`,
@@ -19,7 +20,7 @@
   {:malli/schema [:=> [:cat :string] :map]}
   [repo-dir]
   (let [build-bin (str repo-dir "/bin/build")]
-    (if-not (.isFile (io/file build-bin))
+    (if-not (fs/regular-file? build-bin)
       {:ok? false :stage :build :error (str "Missing build script: " build-bin)}
       (let [{:keys [exit out err]} (git/sh-fiber build-bin "seon" :dir repo-dir)]
         (if (zero? exit)
@@ -38,14 +39,14 @@
   (let [bin-path (str repo-dir "/target/seon")
         log-dir (io/file repo-dir "runs")
         log-path (str repo-dir "/runs/server.log")]
-    (if-not (.canExecute (io/file bin-path))
+    (if-not (fs/executable? bin-path)
       {:ok? false :stage :spawn :error (str "Candidate binary missing or not executable: " bin-path)}
       (do
-        (.mkdirs log-dir)
+        (fs/create-dirs log-dir)
         (let [shell-q (fn [^String s] (str "'" (str/replace s "'" "'\\''") "'"))
-              shell-bin (if (.canExecute (io/file "/bin/zsh")) "/bin/zsh" "/bin/bash")
+              shell-bin (if (fs/executable? "/bin/zsh") "/bin/zsh" "/bin/bash")
               env-file (io/file repo-dir "bin/env")
-              env-prefix (if (.isFile env-file)
+              env-prefix (if (fs/regular-file? env-file)
                            (str "source " (shell-q (.getPath env-file)) " && ")
                            "")
               cmd (str "cd " (shell-q repo-dir) " && "

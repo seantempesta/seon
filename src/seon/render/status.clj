@@ -12,7 +12,9 @@
             [seon.render.links :as rlinks]
             [seon.store :as store]
             [seon.model.messages :as messages]
-            [seon.render.fit :as fit]))
+            [seon.render.fit :as fit]
+            [seon.render.text :refer [clamp-pct-int one-line]]))
+
 (defn format-forked-eval-manifest
   "Formats a compact turn/eid/handle/size/status table of `parent-id`'s live evals on `branch-db`."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :keyword]] [:maybe :string]] :cost/ticks 5000000}
@@ -42,10 +44,6 @@
 (defn- nonblank [x]
   (when (and (string? x) (not (str/blank? x)))
     (str/trim x)))
-
-(defn- one-line [x n]
-  (let [s (-> (if (nil? x) "" (str x)) (str/replace #"\s+" " ") str/trim)]
-    (if (> (count s) n) (str (subs s 0 (max 1 (dec n))) "…") s)))
 
 (defn ^:seon.flow/edge resolve-prefix-agents
   "ONE self-assembling resolver for `:zone :agent-prefix` projections: derives continuation purely from `ag`'s `:seon.agent/forked-from` graph edge (recursing at `:seon.agent/fork-commit` for KV-cache reuse) and renders other linked agents as closed `<agent>` references."
@@ -111,12 +109,6 @@
      :parent-shown (:parent-shown cont-res)
      :entries (vec (concat (when (:entry cont-res) [(:entry cont-res)]) ex-entries))}))
 
-(defn- clamp-pct [x]
-  (when (number? x)
-    (let [dv (double x)]
-      (when (and (not (Double/isNaN dv)) (not (Double/isInfinite dv)))
-        (max 0 (min 100 (long (Math/round dv))))))))
-
 (defn- stage-meta [stage]
   (case stage
     :thinking    ["amber" "Thinking"]
@@ -162,7 +154,7 @@
    :cost/ticks 500000 :cost/bytes 131072}
   [{{:seon.ui.status/keys [label pct stage]} :seon.ui.status/entity}]
   (let [[bcls slbl] (stage-meta stage)
-        p (clamp-pct pct)
+        p (clamp-pct-int pct)
         lbl (one-line (or (nonblank label) "Working…") 64)]
     {:seon.ui/hiccup
      (into [:span {:class "ent-chip ent-status" :data-min-width 180}
@@ -188,7 +180,7 @@
               (if (keyword? raw) raw (status-id-for-agent agent-id)))
         lbl (or (nonblank (or (:seon.ui.status/label m) (:label m))) "Working…")
         det (nonblank (or (:seon.ui.status/detail m) (:detail m)))
-        p (clamp-pct (if (contains? m :seon.ui.status/pct) (:seon.ui.status/pct m) (:pct m)))
+        p (clamp-pct-int (if (contains? m :seon.ui.status/pct) (:seon.ui.status/pct m) (:pct m)))
         stg (let [s (or (:seon.ui.status/stage m) (:stage m))] (when (keyword? s) s))
         svg (let [sv (or (:seon.ui.status/svg m) (:svg m))] (when (string? sv) sv))]
     (cond-> {:seon.ui.status/id sid
@@ -376,7 +368,7 @@
   {:malli/schema [:=> [:cat [:map [:seon.ui.status/entity :seon.ui.status/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]], :cost/ticks 1000000, :cost/bytes 2097152}
   [{{:seon.ui.status/keys [id label detail pct stage svg]} :seon.ui.status/entity}]
   (let [[bcls slbl] (stage-meta stage)
-        p (clamp-pct pct)
+        p (clamp-pct-int pct)
         done? (or (= :done stage) (= 100 p))
         lbl (one-line (or (nonblank label) "Working…") 120)
         det (when-let [d (nonblank detail)] (one-line d 240))

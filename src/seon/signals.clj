@@ -4,9 +4,10 @@
    Hiccup renderers discovered automatically via `:seon.code.var/input` + `:seon.ui/hiccup`."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.store :as store]
+            [seon.store :as store :refer [db-schema]]
             [seon.signals.scoreboard :as scoreboard]
-            [seon.store.query :as sq]))
+            [seon.store.query :as sq]
+            [seon.render.text :refer [clamp-pct]]))
 
 (def ^:private level-rank {:calm 0 :warm 1 :hot 2})
 
@@ -20,16 +21,11 @@
         0.0))
     0.0))
 
-(defn- clamp-pct [x] (max 0.0 (min 100.0 (round1 x))))
-
 (defn- worst-level [levels]
   (reduce #(if (> (get level-rank %2 0) (get level-rank %1 0)) %2 %1) :calm levels))
 
 (defn- level-class [lvl]
   (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
-
-(defn- db-schema [db]
-  (or (:schema db) (when db (d/schema db)) {}))
 
 (defn- db-branch [db]
   (or (get-in db [:config :branch])

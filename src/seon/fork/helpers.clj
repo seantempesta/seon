@@ -72,7 +72,7 @@
         ctx-fn (fn [] *agent-ctx*)]
     (binding [*ns* u]
       (refer-clojure)
-      (require '[datahike.api :as d] '[clojure.string :as str])
+      (require '[datahike.api :as d] '[clojure.string :as str] '[jolt.fs :as fs])
       (fcalls/export-ns-helpers! u 'seon.fork.helpers)
       (fcalls/install-call-and-ui-helpers! u)
       (repl/install-repl-helpers! u)

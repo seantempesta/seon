@@ -7,14 +7,8 @@
             [seon.render.links :as rlinks]
             [datahike.api :as d]
             [seon.render :as render]
-            [seon.render.data :as rdata]))
-
-(defn- clip [x n]
-  (let [s (if (nil? x) "" (str x))]
-    (if (> (count s) n) (str (subs s 0 (max 1 (dec n))) "…") s)))
-
-(defn- one-line [x n]
-  (clip (-> (if (nil? x) "" (str x)) (str/replace #"\s+" " ") str/trim) n))
+            [seon.render.data :as rdata]
+            [seon.render.text :refer [clip one-line]]))
 
 (defn- kw-label [x fb]
   (cond (ident? x) (name x) (some? x) (str x) :else fb))

@@ -7,7 +7,7 @@
             [reitit.core :as r]
             [reitit.trie]
             [seon.render.data :as rdata]
-            [seon.store :as store]))
+            [seon.store :as store :refer [db-schema]]))
 
 (defonce ^:private ^:seon.flow/edge router-cache (store/lru-cache 32))
 
@@ -17,11 +17,6 @@
    :seon.route/mcp         :mcp
    :seon.route/call        :call
    :seon.route/preview     :preview})
-
-(defn- db-schema [db]
-  (if (instance? datahike.db.interface.ISearch db)
-    (or (:schema db) (d/schema db) {})
-    {}))
 
 (defn- db-cache-key [db]
   (when (instance? datahike.db.DB db)

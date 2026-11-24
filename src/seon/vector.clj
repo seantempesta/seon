@@ -6,7 +6,9 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [jolt.ffi :as ffi]
-            [seon.store :as store])
+            [seon.store :as store]
+            [jolt.fs :as fs]
+            [jolt.process :as proc])
   (:import [java.io InputStream OutputStream]
            [java.util.concurrent TimeUnit]))
 
@@ -262,7 +264,7 @@
   (let [p (or (when (and (string? path) (not (str/blank? path))) path)
               (System/getenv "SEON_EMBED_MODEL"))]
     (when (and (string? p) (not (str/blank? p)))
-      (let [f (io/file p)] (when (.isFile f) (.getAbsolutePath f)))))))
+      (when (fs/regular-file? p) (str (fs/absolutize p)))))))
 
 (defn- scan-attr-map [db attr]
   (if (contains? (:schema db) attr)
@@ -395,8 +397,8 @@
   (let [lp (or lib-path (not-empty (System/getenv "SEON_EMBED_LIB"))
                (str store/checkout-root "/target/lib/libseon-embed.dylib"))]
     (cond
-      (not (and model-path (.isFile (io/file model-path)))) {:ok? false :error :model-missing :path model-path}
-      (not (.isFile (io/file lp))) {:ok? false :error :embed-lib-missing :path lp}
+      (not (and model-path (fs/regular-file? model-path))) {:ok? false :error :model-missing :path model-path}
+      (not (fs/regular-file? lp)) {:ok? false :error :embed-lib-missing :path lp}
       :else
       (do
         (ffi/load-library lp)
@@ -464,24 +466,25 @@
         seon-bin (str store/checkout-root "/target/seon")
         jolt-bin (str store/checkout-root "/target/jolt/jolt")]
     (cond
-      (and env-bin (.canExecute (io/file env-bin))) [env-bin "embed-worker"]
-      (.canExecute (io/file seon-bin)) [seon-bin "embed-worker"]
-      (.canExecute (io/file jolt-bin)) [jolt-bin "-m" "seon.main" "embed-worker"]
+      (and env-bin (fs/executable? env-bin)) [env-bin "embed-worker"]
+      (fs/executable? seon-bin) [seon-bin "embed-worker"]
+      (fs/executable? jolt-bin) [jolt-bin "-m" "seon.main" "embed-worker"]
       :else nil)))
 
 (defn- ^:seon.flow/edge close-worker-handle! [h force?]
   (when h
-    (let [^Process p (:proc h)]
+    (let [^Process p (:proc h)
+          jp (:process h)]
       (try (.close ^OutputStream (:in h)) (catch Throwable _ nil))
-      (when force? (try (.destroyForcibly p) (catch Throwable _ nil)))
+      (when force? (try (if jp (proc/destroy-tree jp) (.destroyForcibly p)) (catch Throwable _ nil)))
       (when-not (try (.waitFor p 2000 TimeUnit/MILLISECONDS) (catch Throwable _ false))
-        (try (.destroyForcibly p) (catch Throwable _ nil))
+        (try (if jp (proc/destroy-tree jp) (.destroyForcibly p)) (catch Throwable _ nil))
         (try (.waitFor p 500 TimeUnit/MILLISECONDS) (catch Throwable _ nil)))
       (try (.close ^InputStream (:out h)) (catch Throwable _ nil))
-      (let [ef (io/file (:err-path h))
-            raw (try (if (.isFile ef) (slurp ef) "") (catch Throwable _ ""))
+      (let [ep (:err-path h)
+            raw (try (if (and ep (fs/regular-file? ep)) (slurp ep) "") (catch Throwable _ ""))
             stderr (if (> (count raw) 2048) (subs raw (- (count raw) 2048)) raw)]
-        (try (.delete ef) (catch Throwable _ nil))
+        (try (when ep (fs/delete-if-exists ep)) (catch Throwable _ nil))
         {:exit (try (.exitValue p) (catch Throwable _ -1)) :stderr stderr}))))
 
 (defn- ^:seon.flow/edge spawn-worker-handle! [mpath argv]
@@ -489,22 +492,22 @@
     (nil? mpath) {:ok? false :error :model-missing}
     (empty? argv) {:ok? false :error :worker-binary-missing}
     :else
-    (let [tmp-dir (doto (io/file store/checkout-root "target/tmp") (.mkdirs))
-          err-path (str (.getAbsolutePath tmp-dir) "/embed-worker-" (random-uuid) ".err")
-          pb (doto (ProcessBuilder. ^java.util.List (vec argv))
-               (.directory (io/file store/checkout-root))
-               (.redirectError (io/file err-path)))]
-      (doto (.environment pb) (.put "SEON_EMBED_MODEL" mpath) (.put "SEON_CHECKOUT" store/checkout-root))
+    (let [tmp-dir (fs/create-dirs (fs/path store/checkout-root "target/tmp"))
+          err-path (str (fs/path tmp-dir (str "embed-worker-" (random-uuid) ".err")))]
       (try
-        (let [p (.start pb)
-              h {:proc p :in (.getOutputStream p) :out (.getInputStream p) :err-path err-path}
+        (let [jp (proc/process (vec argv)
+                               {:dir store/checkout-root
+                                :err (io/file err-path)
+                                :extra-env {"SEON_EMBED_MODEL" mpath "SEON_CHECKOUT" store/checkout-root}
+                                :shutdown proc/destroy-tree})
+              h {:proc (:proc jp) :process jp :in (:in jp) :out (:out jp) :err-path err-path}
               ready (try (read-frame! (:out h)) (catch Throwable t {:ok? false :error (.getMessage t)}))]
           (if (and (map? ready) (:ok? ready) (:ready? ready))
             {:ok? true :handle (assoc h :dims (:dims ready))}
             (let [fin (close-worker-handle! h true)]
               {:ok? false :error (or (:error ready) :worker-start-failed) :exit (:exit fin) :stderr (:stderr fin)})))
         (catch Throwable t
-          (try (.delete (io/file err-path)) (catch Throwable _ nil))
+          (try (fs/delete-if-exists err-path) (catch Throwable _ nil))
           {:ok? false :error :worker-spawn-failed :message (or (.getMessage t) (str t))})))))
 
 (defn- ^:seon.flow/edge ask-worker-once! [h texts]

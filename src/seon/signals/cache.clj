@@ -3,7 +3,8 @@
    `datahike.reads` walk cache analyzer (`analyze-walk-cache`)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.render.data :as rdata]))
+            [seon.render.data :as rdata]
+            [seon.store :refer [db-schema]]))
 
 (defn- round1 [x]
   (if (number? x)
@@ -236,9 +237,6 @@
     {:turns turns :raw-busts busts
      :prompt-tokens tot-p :cache-hit-tokens tot-h :cache-miss-tokens tot-m
      :overall-hit-pct (pct1 tot-h tot-p)}))
-
-(defn- db-schema [db]
-  (or (:schema db) (when db (d/schema db)) {}))
 
 (defn- pull-cache-evals [db agent-id]
   (if-not (and db (qualified-keyword? agent-id) ((db-schema db) :seon.agent.eval/agent))

@@ -10,7 +10,9 @@
             [seon.bench.proxy :as proxy]
             [seon.model :as model]
             [seon.store :refer [rm-rf!]]
-            [seon.bench.helpers :as bh]))
+            [seon.bench.helpers :as bh]
+            [jolt.fs :as fs]
+            [jolt.process :as proc]))
 
 (defn parse-listening-port [& args] (apply bh/parse-listening-port args))
 
@@ -86,9 +88,9 @@
          safe-id (str/replace (name inst-id) #"[^A-Za-z0-9._-]" "-")
          wdir (str (or work-dir (str "/tmp/seon-bench-" safe-id "-" (System/nanoTime))))
          spath (str (or store-path (str wdir "/store")))]
-     (when-not (.canExecute (io/file bin))
+     (when-not (fs/executable? bin)
        (throw (ex-info (str "Seon binary missing or not executable: " bin) {:bin-path bin})))
-     (.mkdirs (io/file wdir))
+     (fs/create-dirs wdir)
      (let [cmd (build-instance-cmd (assoc opts
                                           :bin-path bin
                                           :port 0
@@ -97,19 +99,19 @@
                                           :headless? headless?
                                           :commit-git? commit-git?
                                           :auto-switch-over? auto-switch-over?))
-           pb (doto (ProcessBuilder. ^java.util.List cmd)
-                (.directory (io/file repo))
-                (.redirectErrorStream true))
-           _ (configure-jolt-env! pb repo extra-env)
            t0 (System/nanoTime)
-           proc (.start pb)
-           stdout-r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream proc) "UTF-8"))
+           jp (proc/process cmd {:dir repo
+                                 :err :out
+                                 :extra-env (seon.bench.helpers/jolt-env-map repo extra-env)
+                                 :shutdown proc/destroy-tree})
+           ^Process proc (:proc jp)
+           stdout-r (java.io.BufferedReader. (java.io.InputStreamReader. (:out jp) "UTF-8"))
            log-atom (atom [])
            ready-ch (a/chan 1)
            delivered? (volatile! false)
            stop-fn (fn []
                      (when (.isAlive proc)
-                       (try (.destroy proc) (catch Throwable _))
+                       (try (proc/destroy-tree jp) (catch Throwable _))
                        (loop [i 0]
                          (when (and (.isAlive proc) (< i 30))
                            (a/<!! (a/timeout 50))
@@ -145,7 +147,7 @@
             :stop! stop-fn}
            (let [logs @log-atom]
              (stop-fn)
-             (rm-rf! (io/file wdir))
+             (fs/delete-tree wdir)
              (throw (ex-info (str "Isolated Seon instance " inst-id " failed to listen within " timeout-ms " ms")
                              {:id inst-id :reason (if (= ch ready-ch) :exited-early :timeout) :logs (take-last 30 logs)})))))))))
 

@@ -1,6 +1,6 @@
 (ns seon.bench.helpers
   "Extracted child namespace of `seon.bench.cluster`."
-  (:require [clojure.java.io :as io]))
+  (:require [jolt.fs :as fs]))
 
 (defn parse-listening-port
   "Extracts the bound localhost integer port from a Seon startup log line, or nil."
@@ -78,22 +78,34 @@
           (or (= :merged (:status ag))
               (pos? (long (or (:evals ag) 0))))))))
 
+(defn ^:seon.flow/edge jolt-env-map
+  "Builds the child-process env overlay map for isolated Jolt/Seon instances (`SEON_BINARY`, `JOLT_*_LIB`, plus `extra-env`)."
+  {:malli/schema [:=> [:cat :any :any] [:map-of :string :string]]}
+  [repo-dir extra-env]
+  (let [lib-dir (fs/path (str (or repo-dir ".")) "target/lib")
+        base-env (reduce (fn [acc [env-k base]]
+                           (if (System/getenv env-k)
+                             acc
+                             (let [dylib (fs/path lib-dir (str base ".dylib"))
+                                   so (fs/path lib-dir (str base ".so"))]
+                               (cond
+                                 (fs/regular-file? dylib) (assoc acc env-k (str (fs/absolutize dylib)))
+                                 (fs/regular-file? so) (assoc acc env-k (str (fs/absolutize so)))
+                                 :else acc))))
+                         {"SEON_BINARY" "1"}
+                         [["JOLT_LZ4_LIB" "liblz4"]
+                          ["JOLT_ZSTD_LIB" "libzstd"]
+                          ["JOLT_LMDB_LIB" "liblmdb"]])]
+    (if (map? extra-env)
+      (reduce-kv (fn [acc k v] (if (and k (some? v)) (assoc acc (str k) (str v)) acc))
+                 base-env extra-env)
+      base-env)))
+
 (defn configure-jolt-env!
-  {:malli/schema [:=> [:cat :any :any :any] :any]}
+  "Populates `ProcessBuilder` env from `jolt-env-map`."
+  {:malli/schema [:=> [:cat :any :any :any] :any], :seon.flow/edge true}
   [^ProcessBuilder pb repo-dir extra-env]
   (when (instance? ProcessBuilder pb)
-  (let [env (.environment pb)
-        lib-dir (io/file (str (or repo-dir ".")) "target/lib")]
-    (.put env "SEON_BINARY" "1")
-    (doseq [[env-k base] [["JOLT_LZ4_LIB" "liblz4"]
-                          ["JOLT_ZSTD_LIB" "libzstd"]
-                          ["JOLT_LMDB_LIB" "liblmdb"]]]
-      (when-not (.get env env-k)
-        (let [dylib (io/file lib-dir (str base ".dylib"))
-              so (io/file lib-dir (str base ".so"))]
-          (cond
-            (.isFile dylib) (.put env env-k (.getAbsolutePath dylib))
-            (.isFile so) (.put env env-k (.getAbsolutePath so))))))
-    (when (map? extra-env)
-      (doseq [[k v] extra-env]
-        (when (and k (some? v)) (.put env (str k) (str v))))))))
+    (let [env (.environment pb)]
+      (doseq [[k v] (jolt-env-map repo-dir extra-env)]
+        (.put env k v)))))

@@ -4,7 +4,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [seon.rule :as rules]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [jolt.fs :as fs]))
 
 (defonce ^:private ^:seon.flow/edge rules-file-cache (atom nil))
 
@@ -15,7 +16,7 @@
   []
   (or (when (seq rules/*base-rules-override*) (vec rules/*base-rules-override*))
       (let [f (io/file store/checkout-root "resources/seon/rules.edn")]
-        (if (.isFile f)
+        (if (fs/regular-file? f)
           (let [mt (.lastModified f)
                 cached @rules-file-cache]
             (if (and cached (= mt (:mtime cached)))

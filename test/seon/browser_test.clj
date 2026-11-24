@@ -7,7 +7,11 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [seon.browser :as browser]
-            [seon.browser.measure :as measure]))
+            [seon.browser.measure :as measure]
+            [seon.server :as server]
+            [seon.code.cst :as cst]
+            [seon.render.text :as rtext]
+            [jolt.fs :as fs]))
 
 (defn- mock-browser-state []
   (let [sent (atom [])
@@ -279,3 +283,56 @@
       (is (= :browser-unavailable (:error r-res)))
       (is (true? (:ok? ch-res)))
       (is (= 1 (count (:frames ch-res)))))))
+
+(deftest wave4-warm-browser-routing-text-diff-and-jolt-fs-test
+  (testing "server-proc routes warm :render-hiccup-frames and :measure-dom to :browser out-port when connected"
+    (let [in-ch (a/chan 4)
+          st (server/server-proc {:in-ch in-ch :conn nil :cfg {} :repo-dir nil :browser-connected? true})
+          rch1 (a/chan 1)
+          [_ out1] (server/server-proc st :ext {:req {:op :render-hiccup-frames :hiccup [:div "warm"] :widths [480]}
+                                                :reply-ch rch1})
+          rch2 (a/chan 1)
+          [_ out2] (server/server-proc st :ext {:req {:op :measure-dom :selector ".card"} :reply-ch rch2})]
+      (is (= :render-hiccup-frames (get-in out1 [:browser 0 :op])))
+      (is (str/includes? (str (get-in out1 [:browser 0 :html])) "warm"))
+      (is (= :measure-dom (get-in out2 [:browser 0 :op])))
+      (is (true? (get-in out2 [:browser 0 :envelope?])))))
+
+  (testing "browser-proc :measure-dom with :envelope? true returns full live envelope"
+    (let [[st0 sent] (mock-browser-state)
+        st (assoc st0 :url "http://127.0.0.1:9998/")
+        rch (a/chan 1)
+        [st1 _] (browser/browser-proc st :req {:op :measure-dom :envelope? true :reply-ch rch})
+        cmd (first @sent)
+        [_ _] (browser/browser-proc st1 :ipc {:id (:id cmd) :ok true
+                                              :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
+                                                      :elements []}})
+        ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)]
+    (is (true? (:ok? ans)))
+    (is (= "http://127.0.0.1:9998/" (:url ans)))
+    (is (map? (:analysis ans)))
+    (is (map? (:calibration ans)))
+    (is (= [] (:snippets ans)))))
+
+  (testing "seon.code.cst/unified-diff produces multi-hunk O(NP) diffs via borkdude.text-diff"
+    (let [a "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10"
+          b "l1\nl2-x\nl3\nl4\nl5\nl6\nl7\nl8\nl9-x\nl10"
+          d (cst/unified-diff a b "demo.clj")]
+      (is (= 2 (count (re-seq #"@@ " d))) "Expected 2 separate hunks instead of dumping unchanged middle")
+      (is (str/includes? d "-l2"))
+      (is (str/includes? d "+l2-x"))
+      (is (str/includes? d "-l9"))
+      (is (str/includes? d "+l9-x"))))
+
+  (testing "seon.store/rm-rf! via jolt.fs/delete-tree and canonical seon.render.text helpers"
+    (let [tmp (fs/create-temp-dir {:prefix "seon-rmrf-test-"})
+          nested (fs/path tmp "sub" "file.txt")]
+      (fs/create-dirs (fs/parent nested))
+      (spit (str nested) "ok")
+      (is (fs/regular-file? nested))
+      (seon.store/rm-rf! tmp)
+      (is (not (fs/exists? tmp))))
+    (is (= "hello…" (rtext/clip "hello world" 6)))
+    (is (= "a b c" (rtext/one-line "a\n  b\tc" 10)))
+    (is (nil? (rtext/nonblank "   ")))
+    (is (= 42.4 (rtext/clamp-pct 42.36)))))

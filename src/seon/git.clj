@@ -13,7 +13,8 @@
             [seon.code.parse :as parse]
             [seon.schema :as schema]
             [seon.git.forks :as forks]
-            [seon.code.io :as cio]))
+            [seon.code.io :as cio]
+            [jolt.fs :as fs]))
 
 (defn sh-fiber
   "Forwards to `seon.git.forks/sh-fiber`."
@@ -133,20 +134,20 @@
        (doseq [path main-paths]
          (let [f (io/file repo-dir path)]
            (if-let [txt (code/render-path db path)]
-             (do (.mkdirs (.getParentFile f))
+             (do (fs/create-dirs (fs/parent f))
                  (spit f txt)
                  (when (:seon.code.file/exec? (d/pull db '[:seon.code.file/exec?] [:seon.code.file/path path]))
                    (.setExecutable f true)))
              (if (contains? del-set path)
                (when (.exists f)
-                 (.delete f))
+                 (fs/delete-if-exists f))
                (throw (ex-info (str "Refusing blind deletion of " path ": render-path returned nil without an explicit entity deletion")
                                {:error :seon.git/refused-blind-delete :path path}))))))
        (let [fork-res (mapv (fn [[root rels]] (forks/write-and-commit-fork! db repo-dir root rels merged-branch message del-set)) fork-map)
             dirty-synced (keep (fn [p]
                                  (let [p (str/trim p)
                                        f (when (and (not (str/blank? p)) (tracked-path? p)) (io/file repo-dir p))]
-                                   (when (and f (.isFile f) (= (slurp f) (code/render-path db p))) p)))
+                                   (when (and f (fs/regular-file? f) (= (slurp f) (code/render-path db p))) p)))
                                (str/split-lines (or (:out (sh-fiber "git" "-C" repo-dir "diff" "--name-only")) "")))
             stage-paths (vec (distinct (concat main-paths dirty-synced (map :root fork-res))))]
        (apply git! repo-dir "add" "-A" "--" stage-paths))
@@ -199,7 +200,7 @@
                        (into {} (map (juxt :v :e)) (d/datoms db :aevt :seon.schema/key)) {})
         slurp-file (fn [path]
                      (let [f (io/file repo-dir path)]
-                       (when (.isFile f) (slurp f))))
+                       (when (fs/regular-file? f) (slurp f))))
         by-prio (group-by #(file-priority (:path %)) files)
         p0 (get by-prio 0 [])
         p1 (get by-prio 1 [])
@@ -265,8 +266,8 @@
                          (if (str/starts-with? status "D")
                            (retract-path-tx db path)
                            (let [f (io/file repo-dir path)]
-                             (when (.isFile f)
-                               (code/file-import-tx db path (slurp f) (.canExecute f)))))))))
+                             (when (fs/regular-file? f)
+                             (code/file-import-tx db path (slurp f) (fs/executable? f)))))))))
                  diff-lines)]
         (vec (concat ops [{:seon.git/repo :main :seon.git/commit head}]))))))
 

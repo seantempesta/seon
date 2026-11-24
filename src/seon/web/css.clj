@@ -1,8 +1,8 @@
 (ns seon.web.css
   "Presentation layer: the giant `app-css` stylesheet, sticky-scroll JS and the Datastar runtime script text. Pure data, zero IO."
-  (:require [clojure.java.io :as io]
-            [seon.store :as store]
-            [seon.web.js :as wjs]))
+  (:require [seon.store :as store]
+            [seon.web.js :as wjs]
+            [jolt.fs :as fs]))
 
 (def app-css
   "Primary Phosphor-style stylesheet for Seon."
@@ -10,8 +10,8 @@
 
 (def datastar-js-text
   (delay
-    (let [f (io/file store/checkout-root "resources/public/datastar.js")]
-      (if (.isFile f) (slurp f) "// datastar.js missing"))))
+    (let [f (fs/path store/checkout-root "resources/public/datastar.js")]
+      (if (fs/regular-file? f) (slurp (str f)) "// datastar.js missing"))))
 
 (def sticky-scroll-js
 "Re-exported from `seon.web.js/sticky-scroll-js`."

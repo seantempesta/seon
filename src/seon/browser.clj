@@ -5,13 +5,15 @@
    Hiccup frame capture (`:render-hiccup-frames`)."
   (:require [clojure.core.async :as a]
             [clojure.data.json :as json]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.browser.measure :as measure]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [jolt.fs :as fs]
+            [jolt.process :as proc]))
 
 (defn default-binary-path
   "Returns executable path to `target/seon-browser` (or `SEON_BROWSER_BIN`) if present, else nil."
+  {:malli/schema [:=> [:cat] [:maybe :string]], :seon.flow/edge true}
   []
   (let [env-bin (System/getenv "SEON_BROWSER_BIN")
         candidates (remove str/blank?
@@ -19,20 +21,20 @@
                             (str store/checkout-root "/target/seon-browser")
                             (str (System/getProperty "user.dir") "/target/seon-browser")])]
     (some (fn [p]
-            (let [f (io/file p)]
-              (when (and (.isFile f) (.canExecute f))
-                (.getAbsolutePath f))))
+            (when (and (fs/regular-file? p) (fs/executable? p))
+              (str (fs/absolutize p))))
           candidates)))
 
 (defn ^:seon.flow/edge start-browser-process!
-  "Starts `seon-browser --headless` pointing at `url` and pumps JSON-line responses into `resp-ch`."
+  "Starts `seon-browser --headless` via `jolt.process/process` (with `:shutdown destroy-tree`) and pumps JSON-line responses into `resp-ch`."
+  {:malli/schema [:=> [:cat :string :string :map :seon.host/chan] :map], :seon.flow/edge true}
   [binary-path url {:keys [width height] :or {width 1280 height 820}} resp-ch]
-  (let [pb (ProcessBuilder. ^java.util.List
-                            [binary-path "--headless" "--url" (str url)
-                             "--width" (str width) "--height" (str height)])
-        proc (.start pb)
-        stdin-w (java.io.BufferedWriter. (java.io.OutputStreamWriter. (.getOutputStream proc) "UTF-8"))
-        stdout-r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream proc) "UTF-8"))
+  (let [p (proc/process [binary-path "--headless" "--url" (str url)
+                         "--width" (str width) "--height" (str height)]
+                        {:shutdown proc/destroy-tree})
+        raw-proc (:proc p)
+        stdin-w (java.io.BufferedWriter. (java.io.OutputStreamWriter. (:in p) "UTF-8"))
+        stdout-r (java.io.BufferedReader. (java.io.InputStreamReader. (:out p) "UTF-8"))
         send-lock (Object.)
         send! (fn [cmd-map]
                 (try
@@ -44,7 +46,7 @@
         stop! (fn []
                 (try (send! {:op "quit"}) (catch Throwable _))
                 (try (.close stdin-w) (catch Throwable _))
-                (try (.destroy proc) (catch Throwable _)))]
+                (try (proc/destroy-tree p) (catch Throwable _)))]
     (a/thread
       (try
         (loop []
@@ -57,7 +59,7 @@
         (finally
           (try (.close stdout-r) (catch Throwable _))
           (a/put! resp-ch {:event "exited"}))))
-    {:proc proc :binary binary-path :url url :send! send! :stop! stop!}))
+    {:proc raw-proc :process p :binary binary-path :url url :send! send! :stop! stop!}))
 
 (defn- ^:seon.flow/edge safe-start-browser! [bin url dims ipc-ch]
   (try (start-browser-process! bin url dims ipc-ch) (catch Throwable _ nil)))
@@ -305,7 +307,7 @@
                            :else (select-keys msg [:selector :max-elements]))
             tmo (max 500 (min 15000 (long (or (:timeout-ms msg) 3500))))]
         [(send-cmd st {:op "eval_js" :code (measure/measure-boxes-js sel-opts)}
-                   {:req-id req-id :agent-id agent-id :reply-ch reply-ch :op :measure-dom} tmo) nil])
+                   {:req-id req-id :agent-id agent-id :reply-ch reply-ch :op :measure-dom :envelope? (boolean (:envelope? msg))} tmo) nil])
 
       (= op :measure-snippet)
       (let [html (coerce-html (if (contains? msg :html) (:html msg) (:hiccup msg)))
@@ -334,8 +336,14 @@
     (let [res (if (:ok msg)
                 (measure/analyze-pixel-fit (:value msg))
                 (assoc (measure/analyze-pixel-fit {:error (or (:error msg) "eval_js failed")})
-                       :error (or (:error msg) :eval-js-failed)))]
-      (when reply-ch (a/put! reply-ch res) (a/close! reply-ch))
+                       :error (or (:error msg) :eval-js-failed)))
+          out (if (:envelope? pending)
+                {:ok? (:ok? res) :url (:url st)
+                 :width (get-in res [:viewport :w] (:width st))
+                 :height (get-in res [:viewport :h] (:height st))
+                 :analysis res :calibration (measure/calibrate-hints res) :snippets []}
+                res)]
+      (when reply-ch (a/put! reply-ch out) (a/close! reply-ch))
       [st nil])
     :measure-snippet
     (let [res (if (:ok msg)
@@ -446,7 +454,7 @@
         h (max 240 (min 4096 (long (or (:height o) 820))))
         tmo (max 500 (min 20000 (long (or (:timeout-ms o) 8000))))
         settle (max 0 (min 3000 (long (or (:settle-ms o) 180))))]
-    (if-not (and (string? bin) (.canExecute (io/file bin)))
+    (if-not (and (string? bin) (fs/executable? bin))
       (on-err :browser-unavailable)
       (let [ipc-ch (a/chan 32)
             handle (safe-start-browser! bin url {:width w :height h} ipc-ch)]

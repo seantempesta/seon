@@ -3,7 +3,8 @@
   (:require [clojure.string :as str]
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]
-            [rewrite-clj.zip :as z]))
+            [rewrite-clj.zip :as z]
+            [borkdude.text-diff :as text-diff]))
 
 (defn node->structural-key
   "Returns a whitespace-, tab-, newline-, comma-, and comment-insensitive structural key
@@ -351,29 +352,14 @@
   (patch-form-source-batch form-src [[old-str new-str]] opts))
 
 (defn unified-diff
-  "Produces a compact unified diff (`-` / `+` with 2 context lines) between `old-str` and `new-str`,
-   normalizing trailing blank lines so single-line edits never emit whole-file diffs."
+  "Produces a compact multi-hunk unified diff (`-` / `+` with 2 context lines via Wu et al. O(NP) `borkdude.text-diff`) between `old-str` and `new-str`, normalizing trailing blank lines."
   {:malli/schema [:=> [:cat :string :string [:? :string]] :string]
-   :cost/ticks 500000
-   :cost/bytes 1048576}
+   :cost/ticks 1500000
+   :cost/bytes 2097152}
   ([old-str new-str] (unified-diff old-str new-str "form"))
   ([old-str new-str label]
-   (let [a (vec (str/split-lines (str/trimr (str (or old-str "")))))
-         b (vec (str/split-lines (str/trimr (str (or new-str "")))))]
+   (let [a (str/trimr (str (or old-str "")))
+         b (str/trimr (str (or new-str "")))]
      (if (= a b)
        ""
-       (let [na (count a), nb (count b)
-             p (loop [i 0] (if (and (< i na) (< i nb) (= (nth a i) (nth b i))) (recur (inc i)) i))
-             s (loop [i 0] (if (and (< (+ p i) na) (< (+ p i) nb) (= (nth a (- na 1 i)) (nth b (- nb 1 i)))) (recur (inc i)) i))
-             a-mid (subvec a p (- na s))
-             b-mid (subvec b p (- nb s))
-             ctx-pre (subvec a (max 0 (- p 2)) p)
-             ctx-post (subvec a (- na s) (min na (+ (- na s) 2)))
-             hunk (concat [(str "--- a/" label) (str "+++ b/" label)
-                           (str "@@ -" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count a-mid) (count ctx-post))
-                                " +" (inc (max 0 (- p 2))) "," (+ (count ctx-pre) (count b-mid) (count ctx-post)) " @@")]
-                          (map #(str " " %) ctx-pre)
-                          (map #(str "-" %) a-mid)
-                          (map #(str "+" %) b-mid)
-                          (map #(str " " %) ctx-post))]
-         (str/join "\n" hunk))))))
+       (text-diff/unified-diff a b {:context 2 :filename (str (or label "form"))})))))

@@ -4,15 +4,15 @@
    and honors optional rule-emitted params (`:seon.ui/highlight-terms`, `:seon.ui/expand-section`,
    `:seon.ui/show-callers?`, `:seon.view/token-budget`)."
   (:require [clojure.string :as str]
-            [seon.render.links :as rlinks :refer [badge kv-dl link-pill meta-link pill-list]])
+            [seon.render.links :as rlinks :refer [badge kv-dl link-pill meta-link pill-list]]
+            [seon.render.text :refer [clip nonblank one-line]])
   (:import [java.util.regex Pattern]))
 
-(defn- clip [x n] (let [s (if (nil? x) "" (str x))] (if (> (count s) n) (str (subs s 0 (max 1 (dec n))) "…") s)))
-(defn- one-line [x n] (clip (-> (if (nil? x) "" (str x)) (str/replace #"\s+" " ") str/trim) n))
 (defn- fmt-pr [x n] (clip (pr-str x) n))
+
 (defn- kw-label [x fb] (cond (ident? x) (name x) (some? x) (str x) :else fb))
+
 (defn- seq-items [x] (when (and (coll? x) (not (map? x))) (seq x)))
-(defn- nonblank [x] (when (and (string? x) (not (str/blank? x))) x))
 
 (defn- fmt-ms [x]
   (when (number? x)
@@ -79,8 +79,6 @@
   (cond test? (badge "green" "test") macro? (badge "purple" "macro")
         flow-edge? (badge "amber" "edge") private? (badge "muted" "defn-") :else (badge "blue" "var")))
 
-;; Var (:seon.code.var/entity)
-
 (defn render-var-chip
   "Compact chip (~160px) for `:seon.code.var/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -128,9 +126,8 @@
          (when (and (:show-diff? m) (nonblank src)) [:p {:class "tiny muted"} "Recently modified / active edit target — full source expanded:"])
          (when-let [s (nonblank src)] (code-block (clip s (bl m (if exp? 6000 4000))) exp?)))))
 
-;; Error (:seon.error/entity + optional :seon.fix/entity) & Fix (:seon.fix/entity)
-
 (defn- err-sev-cls [sev] (case sev :warning "amber" "red"))
+
 (defn- err-st-cls [st] (case st :resolved "green" :suppressed "muted" "amber"))
 
 (defn render-error-badge
@@ -206,8 +203,6 @@
                  ["before/after" (when (some? before-after) (clip before-after 240))]
                  ["merge-tx" (fmt-num merge-tx)]]))))
 
-;; Task (:seon.task/entity)
-
 (defn- task-badge [{:seon.task/keys [template? done?]}]
   (cond template? (badge "purple" "template") done? (badge "green" "done") :else (badge "blue" "task")))
 
@@ -259,8 +254,6 @@
          (pill-list "tests:" tests :seon.code.var/name 12)
          (when past-ags (pill-list "agents:" past-ags :seon.agent/id 4)))))
 
-;; Schema (:seon.schema/entity)
-
 (defn render-schema-chip
   "Compact chip (~180px) for `:seon.schema/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.schema/entity :seon.schema/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -303,8 +296,6 @@
          (when used-by (pill-list "Used by:" used-by :seon.code.var/name 8))
          (code-block (fmt-pr form (bl m 900))))))
 
-;; Doc (:seon.code.doc/entity)
-
 (defn render-doc-snippet
   "Compact snippet (~240px) for `:seon.code.doc/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.code.doc/entity :seon.code.doc/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -332,8 +323,6 @@
            :else nil)
          [:div {:class "doc-box sm-copy"} (hl (clip body (bl m 2400)) (hl-terms m))])))
 
-;; Test Verdict (:seon.test/verdict)
-
 (defn render-test-badge
   "Compact badge (~160px) for `:seon.test/verdict`."
   {:malli/schema [:=> [:cat [:map [:seon.test/verdict :seon.test/verdict]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -358,8 +347,6 @@
          (kv-dl [["var" (el :seon.code.var/name var)] ["duration" (fmt-ms ms)] ["ticks" (fmt-num ticks)]
                  ["bytes" (fmt-num bytes)] ["digest" (when (some? digest) (el :seon.test/digest digest (clip digest 24) "mono"))]])
          (when (some? report) (code-block (fmt-pr report (bl m (if exp? 1400 500))) exp?)))))
-
-;; Eval (:seon.agent.eval/entity)
 
 (defn render-eval-row
   "Compact row (~220px) for `:seon.agent.eval/entity`."
@@ -395,8 +382,6 @@
                  ["prompt-tokens" (fmt-num prompt-tokens)] ["cache-hit-tokens" (fmt-num cache-hit-tokens)]])
          (when t-refs (pill-list "touched:" t-refs :ref 10)))))
 
-;; Delegation Call (:seon.agent.call/entity)
-
 (defn- call-st-cls [st] (case st :resolved "green" :failed "red" :cancelled "muted" "amber"))
 
 (defn render-call-row
@@ -428,8 +413,6 @@
        (when (some? result) (code-block (fmt-pr result (bl m 480))))
        (when (some? error) [:div {:class "notice red mono tiny"} (fmt-pr error 320)])))
 
-;; Namespace (:seon.code.ns/entity)
-
 (defn render-ns-chip
   "Compact chip (~160px) for `:seon.code.ns/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.code.ns/entity :seon.code.ns/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -450,8 +433,6 @@
          (kv-dl [["namespace" (el :seon.code.ns/name name)]
                  ["path" (when path (el :seon.code.ns/name name (str path)))]])
          (when reqs (pill-list "requires:" reqs :seon.code.ns/name 14)))))
-
-;; Agent (:seon.agent/entity)
 
 (defn- agent-state-label [{:seon.agent/keys [archived? paused? ready? waiting? merged-tx]}]
   (cond archived? ["muted" "archived"] merged-tx ["green" "merged"] paused? ["muted" "paused"]
@@ -501,8 +482,6 @@
                     (:seon.ui/hiccup (render-eval-row {:seon.agent.eval/entity ev}))))])
          (when pins (pill-list "pinned:" pins :ref 10)))))
 
-;; Rule (:seon.rule/entity)
-
 (defn render-rule-chip
   "Compact chip (~180px) for `:seon.rule/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.rule/entity :seon.rule/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -528,8 +507,6 @@
          (when r-fns (pill-list "fns:" r-fns :seon.code.var/name 10))
          (when (some? query) (code-block (fmt-pr query (bl m 700))))
          (when (some? assert) (code-block (fmt-pr assert (bl m 500)))))))
-
-;; System (:seon.system/entity)
 
 (defn render-system-chip
   "Compact chip (~180px) for `:seon.system/entity`."

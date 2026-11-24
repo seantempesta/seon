@@ -25,7 +25,8 @@
             [seon.schema :as schema]
             [datahike.index.interface :as di]
             [datahike.reads :as reads]
-            [jolt.scheme :as scm]))
+            [jolt.scheme :as scm]
+            [jolt.fs :as fs]))
 
 (def checkout-root schema/checkout-root)
 
@@ -398,16 +399,15 @@
     (:seon.store/lru-val entry)
     entry))))
 
-(defn rm-rf!
-  "Recursively deletes a file or directory tree (nil-safe, tolerant of non-File values)."
+(defn ^:seon.flow/edge rm-rf!
+  "Recursively deletes a file or directory tree via symlink-safe `jolt.fs/delete-tree` (nil-safe, accepts File, Path, or path String)."
   {:malli/schema [:=> [:cat :any] :any]}
   [f]
-  (when (instance? java.io.File f)
-    (let [^java.io.File ff f]
-      (when (.exists ff)
-        (when (.isDirectory ff)
-          (doseq [c (.listFiles ff)] (rm-rf! c)))
-        (.delete ff)))))
+  (when (or (instance? java.io.File f)
+            (instance? java.nio.file.Path f)
+            (and (string? f) (boolean (re-find #"\S" f))))
+    (when (fs/exists? f)
+      (fs/delete-tree f))))
 
 (def ^:dynamic *tx-meta*
   "Optional map of `:seon.tx/*` metadata automatically stamped onto `datomic.tx` at `transact-checked`."
@@ -667,7 +667,7 @@
            seed-src
            (let [tmp (str path ".seeding-" (random-uuid))
                  tdir (io/file tmp)]
-             (.mkdirs tdir)
+             (fs/create-dirs tdir)
              (io/copy seed-src (io/file tdir "data.mdb"))
              (let [[rc errno] (posix/c-rename tmp path)]
                (when-not (or (zero? rc) (posix/exists? (data-file path)))
@@ -694,7 +694,7 @@
                (finally
                  (when (posix/exists? tmp)
                    (try (klmdb/close-env! tmp) (catch Throwable _))
-                   (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. tmp))))))))))]
+                   (fs/delete-tree tmp)))))))]
      (let [cfg (assoc (store-cfg path opts) :branch :main)
            _ (when-not created?
                (let [sc (d/connect (dissoc cfg :branch))]
@@ -898,3 +898,13 @@
          (.append sb (Integer/toHexString b))))
      (let [hx (.toString sb)]
        (if (< (long n) (count hx)) (subs hx 0 (long n)) hx)))))
+
+(defn db-schema
+  "Returns the Datahike schema map for `db` (handling `DB`, `AsOfDB`, `HistoricalDB`, or plain map), else `{}`."
+  {:malli/schema [:=> [:cat :any] :map]
+   :cost/ticks 100000}
+  [db]
+  (cond
+    (instance? datahike.db.interface.ISearch db) (or (:schema db) (d/schema db) {})
+    (and (map? db) (map? (:schema db))) (:schema db)
+    :else {}))

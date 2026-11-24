@@ -15,13 +15,11 @@
 (defonce ^:private ^:seon.flow/edge schema-used-by-cache (store/lru-cache 128))
 
 (defn db-schema
-  "Returns the schema map for `db`, falling back to `(d/schema db)` on `AsOfDB` / `HistoricalDB`."
+  "Returns the schema map for `db` (delegates to canonical `seon.store/db-schema`)."
   {:malli/schema [:=> [:cat :any] :map]
-   :cost/ticks 100000}
+   :cost/ticks 50000}
   [db]
-  (if (instance? datahike.db.interface.ISearch db)
-    (or (:schema db) (d/schema db) {})
-    (if (map? (:schema db)) (:schema db) {})))
+  (store/db-schema db))
 
 (defn live-cid
  "Returns `(d/commit-id db)` for a live `datahike.db.DB`, else nil."

@@ -11,12 +11,11 @@
   (:require [clojure.string :as str]
             [seon.render.data :refer [first-doc-line]]
             [seon.render.links :as rlinks :refer [badge btn ent-link kicker kv-dl mut pill-list]]
-            [seon.render.markdown :as rmd]))
+            [seon.render.markdown :as rmd]
+            [seon.render.text :refer [clip nonblank one-line]]))
 
-(defn- clip [x n] (let [s (if (nil? x) "" (str x))] (if (> (count s) n) (str (subs s 0 (max 1 (dec n))) "…") s)))
-(defn- one-line [x n] (clip (-> (if (nil? x) "" (str x)) (str/replace #"\s+" " ") str/trim) n))
-(defn- nonblank [x] (when (and (string? x) (not (str/blank? x))) x))
 (defn- seq-items [x] (when (and (coll? x) (not (map? x))) (seq x)))
+
 (defn- safe-long [x d] (if (number? x) (let [v (double x)] (if (and (== v v) (not (Double/isInfinite v))) (long v) d)) d))
 
 (defn- ns-children-block [children router?]
@@ -177,8 +176,6 @@
              "Route subsystem questions/work via (user/ask! :ns/<subsystem> \"...\") + (user/await! [...]). Specialist agents lazy-spawn on first call."
              (str "REPL: (user/source '" name "/fn | \"docs/...\" | :seon.schema/k), (user/callers '" name "/fn), (user/tests-for '" name "), (user/explore! ref)."))]]}))))
 
-;; @ctx Snapshot (:seon.ctx/snapshot) — Core-12 REPL & Harbor Container idioms
-
 (defn render-ctx-chip
   "Compact chip (~180px) for `:seon.ctx/snapshot`."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/snapshot :seon.ctx/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -225,8 +222,6 @@
          [:li "Verify, rules & delegate: `(user/run-tests! 'ns-test/var | 'ns)` (never wrap REPL edits in `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` — only inside `deftest` bodies), `(user/health)`, `(user/diff)`, `(user/context-trace)`, `(user/put-rule! {...})`, `(user/ask! :ns/<subsys> \"...\")` + `(user/await! [c1 ...])`, `(user/answer! cid val)`, `(user/create-task! {...})`, `(user/record-summary! {...})`."]
          [:li "Idioms & traps: Malli predicates are symbols (`number?`, `pos-int?`, `map?`, `fn?`), NEVER `:number`; persist tests via `(user/add-fn! 'ns-test \"(deftest ...)\")`; Datahike `:store :id` requires `(random-uuid)`; attach `:malli/schema` + `:cost/ticks` to new pure helpers; see `docs/rules-of-thumb.md` for data-model vs rule vs renderer decisions."]]])]}))
 
-;; Chronicle Summary (:seon.summary/entity)
-
 (defn render-summary-chip
   "Compact chip (~180px) for `:seon.summary/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.summary/entity :seon.summary/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -268,8 +263,6 @@
              :else [:span {:class "pill mono"} (str rf)]))])
       (when ttx [:p {:class "tiny muted mono"} (str "Drill in: (d/as-of (user/main-db) " ttx ")")])]}))
 
-;; Benchmark Run (:seon.bench.run/entity)
-
 (defn render-bench-run-card
   "Live/completed benchmark monitor card (~420px) for `:seon.bench.run/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.bench.run/entity :seon.bench.run/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
@@ -310,8 +303,6 @@
               [:a {:href (str "http://127.0.0.1:" (:port t) "/") :target "_blank" :rel "noopener" :class "tiny mono"}
                (str "Open :" (:port t) " ↗")])
             (when (nonblank (str (or err snip))) [:span {:class (str "mono tiny " (if err "red-text" "muted"))} (one-line (or err snip) 80)])])])]}))
-
-;; Health Report (:seon.health/report) & Task Lineage (:seon.task/lineage)
 
 (defn render-health-report
   "Uniform card (~360px) for `:seon.health/report`."

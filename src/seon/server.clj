@@ -326,11 +326,12 @@
               :eval "REPL evaluation requests routed to `:agents`"
               :batch "Test run requests routed to `:test`"
               :git "Branch git-ref syncs routed to `:git`"
-              :vectors "Vector search & status requests routed to `:vectors`"}
+              :vectors "Vector search & status requests routed to `:vectors`"
+              :browser "Warm embedded WKWebView ops routed to `:browser`"}
        :workload :io
        :doc "External CLI / MCP / HTTP / Take-Over command boundary."
        :ping-map-fn (fn [st] {:requests-served (:served st)})})
-  ([{:keys [in-ch conn cfg repo-dir on-hand-over on-switch-over vectors-connected?]}]
+  ([{:keys [in-ch conn cfg repo-dir on-hand-over on-switch-over vectors-connected? browser-connected?]}]
    {:in-ch in-ch
     :conn conn
     :cfg cfg
@@ -338,6 +339,7 @@
     :on-hand-over on-hand-over
     :on-switch-over on-switch-over
     :vectors-connected? (not (false? vectors-connected?))
+    :browser-connected? (boolean browser-connected?)
     :served 0
     :clojure.core.async.flow/in-ports {:ext in-ch}})
   ([st _] st)
@@ -401,8 +403,16 @@
            [st' (handle-fork-op! st req reply-ch)]
 
            (:render-hiccup-frames :measure-dom)
-           (do (handle-browser-op! st req reply-ch)
-               [st' nil])
+           (if (and (:browser-connected? st)
+                    (nil? (:binary-path req))
+                    (nil? (:url req))
+                    (or (= op :render-hiccup-frames) (empty? (:snippets req))))
+             [st' {:browser [(cond-> (assoc req :reply-ch reply-ch)
+                               (= op :measure-dom) (assoc :envelope? true)
+                               (and (= op :render-hiccup-frames) (not (string? (:html req))) (contains? req :hiccup))
+                               (assoc :html (render/hiccup->html (:hiccup req))))]}]
+             (do (handle-browser-op! st req reply-ch)
+                 [st' nil]))
 
            :hand-over
            (if-let [ho (:on-hand-over st)]

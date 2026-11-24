@@ -7,7 +7,7 @@
             [seon.render.fit.measure :as fmeas]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store :as store]))
+            [seon.store :as store :refer [db-cache-sig db-schema]]))
 
 (def default-rank-weights
   "Default tunable weights for the native Datahike ranking signals."
@@ -17,6 +17,7 @@
   {:static 0 :static-prefix 0 :canvas 1 :workspace 2 :debug 3 :ephemeral-tail 4})
 
 (defonce ^:private ^:seon.flow/edge discover-renderers-cache (store/lru-cache 256))
+
 (defonce ^:private ^:seon.flow/edge validator-cache (store/lru-cache 256))
 
 (defn- clamp01 [x]
@@ -24,12 +25,6 @@
 
 (defn- round4 [x]
   (/ (double (Math/round (* (fmeas/finite-double x 0.0) 10000.0))) 10000.0))
-
-(defn- db-schema [db]
-  (or (:schema db) (when db (d/schema db)) {}))
-
-(defn- db-cache-sig [db]
- (store/db-cache-sig db))
 
 (defn cached-registry-info
   "Returns commit-anchored `schema/registry-for-db` enriched with `:reg-sig`, replaying `datahike.reads`."

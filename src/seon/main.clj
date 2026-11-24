@@ -283,7 +283,8 @@
                                 :cfg cfg
                                 :repo-dir repo-dir
                                 :on-hand-over on-hand-over
-                                :on-switch-over on-switch-over}}
+                                :on-switch-over on-switch-over
+                                :browser-connected? browser-on?}}
             :transactor {:proc (flow/process #'transactor/transactor-proc)
                          :args {:conn conn
                                 :cfg cfg
@@ -374,6 +375,7 @@
             [[:agents :exits]       [:web :exits]]
             [[:test :tx]            [:transactor :tx]]
             [[:server :vectors]     [:vectors :req]]
+            [[:server :browser]     [:browser :req]]
             [[:transactor :db]      [:vectors :db]]
             [[:vectors :tx]         [:transactor :tx]]]
 
