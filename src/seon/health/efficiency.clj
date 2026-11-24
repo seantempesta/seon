@@ -177,11 +177,7 @@
 
 (defn eval-efficiency-warnings
 "Inspects agent evals on `branch-db` for `:low-cache-hit`, `:prefix-cache-bust`, and `:heavy-eval`."
-{:malli/schema [:function
-                [:=> [:cat :any] [:vector :map]]
-                [:=> [:cat :any :any] [:vector :map]]
-                [:=> [:cat :any :any :any] [:vector :map]]
-                [:=> [:cat :any :any :any [:maybe :map]] [:vector :map]]]}
+{:malli/schema [:function [:=> [:cat :any] [:vector :seon.health/problem]] [:=> [:cat :any :any] [:vector :seon.health/problem]] [:=> [:cat :any :any :any] [:vector :seon.health/problem]] [:=> [:cat :any :any :any [:maybe :map]] [:vector :seon.health/problem]]]}
 ([branch-db] (eval-efficiency-warnings branch-db nil nil nil))
 ([branch-db agent-id] (eval-efficiency-warnings branch-db agent-id nil nil))
 ([branch-db agent-id prefetched-evals] (eval-efficiency-warnings branch-db agent-id prefetched-evals nil))
@@ -288,9 +284,7 @@
 (defn test-efficiency-warnings
 "Checks latest passing test verdicts per `:seon.test/var` for `:slow-test` and `:cost-regression` in O(|live-vars|).
  Reuses optional `test-snap` `:top2` and fetches `:ms`/`:ticks`/`:bytes` in ascending eid order via indexed `:eavt`."
-{:malli/schema [:function
-                [:=> [:cat :seon.host/db] [:vector :map]]
-                [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+{:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]]}
 ([db] (test-efficiency-warnings db nil))
 ([db test-snap]
  (if-not (and db (contains? (:schema db) :seon.test/var))
@@ -421,10 +415,7 @@
    content-addressed `:seon.code.ns/{forms-hash,unused-requires}`, falling back to `:src` only for edited
    or unbackfilled namespaces) to flag `:oversized-namespace`, `:minified-form`, `:large-function`,
    `:nested-db-scan`, and `:unused-require`."
-  {:malli/schema [:function
-                  [:=> [:cat :any] [:vector :map]]
-                  [:=> [:cat :any [:maybe :symbol]] [:vector :map]]
-                  [:=> [:cat :any [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :any] [:vector :seon.health/problem]] [:=> [:cat :any [:maybe :symbol]] [:vector :seon.health/problem]] [:=> [:cat :any [:maybe :symbol] [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (static-efficiency-warnings db nil nil))
   ([db scope] (static-efficiency-warnings db scope nil))
   ([db scope form-snap]

@@ -54,25 +54,25 @@
 
 (defn static-efficiency-warnings
   "Delegates to `seon.health.efficiency/static-efficiency-warnings`."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] [:vector :map]] [:=> [:cat [:maybe :seon.host/db] :any] [:vector :map]]], :cost/ticks 25000000}
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] [:vector :seon.health/problem]] [:=> [:cat [:maybe :seon.host/db] :any] [:vector :seon.health/problem]]], :cost/ticks 25000000}
   ([db] (eff/static-efficiency-warnings db))
   ([db scope] (eff/static-efficiency-warnings db scope)))
 
 (defn test-efficiency-warnings
   "Delegates to `seon.health.efficiency/test-efficiency-warnings`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]], :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :seon.health/problem]], :cost/ticks 15000000}
   [db]
   (eff/test-efficiency-warnings db))
 
 (defn eval-efficiency-warnings
   "Delegates to `seon.health.efficiency/eval-efficiency-warnings`."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] [:vector :map]] [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:vector :map]]], :cost/ticks 15000000}
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] [:vector :seon.health/problem]] [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:vector :seon.health/problem]]], :cost/ticks 15000000}
   ([branch-db] (eff/eval-efficiency-warnings branch-db))
   ([branch-db agent-id] (eff/eval-efficiency-warnings branch-db agent-id)))
 
 (defn open-faults
   "Returns all unresolved recorded Flow/runtime faults and live performance outliers from Datahike."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :map]], :cost/ticks 5000000}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :seon.health/problem]], :cost/ticks 5000000}
   [db]
   (->> (serr/open-errors db)
   (mapv (fn [e]
@@ -149,9 +149,7 @@
 (defn failing-tests
   "Global view of failing tests across `:main` and all active (non-archived) branches.
    Stale failing digests superseded by a later passing run of the same var are skipped."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (failing-tests db nil))
   ([db test-snap]
    (if-not (contains? (:schema db) :seon.test.run/branch)
@@ -223,10 +221,7 @@
 
 (defn silent-catch-warnings
   "Delegates to `seon.health.static/silent-catch-warnings`."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (static/silent-catch-warnings db))
   ([db scope] (static/silent-catch-warnings db scope))
   ([db scope var-snap] (static/silent-catch-warnings db scope var-snap)))
@@ -234,7 +229,7 @@
 (defn static-problems-for-scope
   "Returns deterministic code-derived health problems owned by `scope` (exact ns or descendant `scope.*`).
    Runs ONLY scoped static checks (never scans global tests or live faults) and caches per DB snapshot + scope."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :symbol]] [:vector :seon.health/problem]]}
   [db scope]
   (if-not (and db scope (not= scope 'seon))
     []
@@ -358,7 +353,7 @@
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
    `:ok?` is true whenever zero `:error`-severity problems exist. Shares single-pass snapshots across
    all sub-checks and caches per-form/per-ns static checks so cold & warm allocations stay low."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.health/report]}
   [db]
   (let [sk (db-snapshot-key db)
         compute-full
@@ -426,7 +421,7 @@
 
 (defn fast-scoped-alerts
   "Fast O(log N + K) scoped alerts for wire tails (zero full-codebase scans!)."
-  {:malli/schema [:=> [:cat :any :any :any :any :any [:maybe :map]] [:vector :map]] :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat :any :any :any :any :any [:maybe :map]] [:vector :seon.health/problem]], :cost/ticks 15000000}
   [main-db branch-db scope aid evals {:keys [signals branch-edited]}]
   (if-not (and main-db scope)
     []
@@ -467,9 +462,7 @@
 (defn caused-by-branch
   "Returns only the structural/schema health errors introduced by `theirs-db` relative to `ours-db`
    using O(|touched-nss| + |retracted| + |added-edges|) indexed reads."
-  {:malli/schema [:function
-                  [:=> [:cat :any :any :map] [:vector :map]]
-                  [:=> [:cat :any :any :map [:maybe [:or [:sequential :symbol] [:set :symbol]]]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :any :any :map] [:vector :seon.health/problem]] [:=> [:cat :any :any :map [:maybe [:or [:sequential :symbol] [:set :symbol]]]] [:vector :seon.health/problem]]]}
   ([ours-db theirs-db changed-schema-forms]
    (caused-by-branch ours-db theirs-db changed-schema-forms nil))
   ([ours-db theirs-db changed-schema-forms touched-nss]

@@ -31,7 +31,7 @@
    2. `:schema-breaks-stored-data` — any existing stored datom in `ours-db` for a changed (or
       transitively reached) attribute whose value fails the new Malli schema.
    Forces safe accretive schema migrations instead of silently corrupting stored data!"
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.health/problem]]}
   [ours-db changed-forms]
   (if (empty? changed-forms)
     []
@@ -98,7 +98,7 @@
   "Flags any `:seon.*/*` attribute installed in Datahike (`(:schema db)`) that lacks a registered
    Malli `:seon.schema/key` entity in `db`, ignoring cleanly retired attributes (previously registered
    in `d/history` with zero remaining live datoms in `db`)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.health/problem]]}
   [db]
   (let [br (get-in db [:config :branch] :main)
         registered (into #{} (map :v) (d/datoms db :aevt :seon.schema/key))
@@ -333,10 +333,7 @@
 (defn missing-ns-forms
   "Flags any namespace in `:seon.code.form/ns` (or `ns-syms`) that defines forms without a `<ns>#ns`
    `(ns ...)` header. Accepts optional precomputed `form-snap` to avoid duplicate scans."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]]] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]] [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]]] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]] [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (missing-ns-forms db nil nil))
   ([db ns-syms] (missing-ns-forms db ns-syms nil))
   ([db ns-syms form-snap]
@@ -369,10 +366,7 @@
   "Flags forms in `src/` (or specific `ns-syms`) that reference a same-namespace var whose only
    definition appears later in the file without an earlier `(declare ...)`.
    Accepts optional `form-snap` and caches per-ns checks by form hash & order."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]]] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]] [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]]] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe [:sequential :symbol]] [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (used-before-defined db nil nil))
   ([db ns-syms] (used-before-defined db ns-syms nil))
   ([db ns-syms form-snap]
@@ -501,7 +495,7 @@
 (defn blocking-in-flow-procs
   "Flags any Flow proc (`*-proc` var in `src/`) whose transitive call graph reaches blocking ops
    (`<!!`, `>!!`, `alts!!`, `Thread/sleep`) without an explicit `^:seon.flow/edge` annotation."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :map]] [:=> [:cat :seon.host/db :map] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db :map] [:vector :seon.health/problem]]]}
   ([db] (blocking-in-flow-procs db (src-var-map db)))
   ([db vmap]
    (let [br (get-in db [:config :branch] :main)
@@ -545,7 +539,7 @@
 (defn state-outside-flow
   "Flags top-level `def`/`defonce` vars in `src/` holding an `atom`, `volatile!`, `promise`, or `agent`
    without an explicit `^:seon.flow/edge` annotation."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :map]] [:=> [:cat :seon.host/db :map] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db :map] [:vector :seon.health/problem]]]}
   ([db] (state-outside-flow db (src-var-map db)))
   ([db vmap]
    (let [br (get-in db [:config :branch] :main)]
@@ -570,10 +564,7 @@
 (defn silent-catch-warnings
   "Uses `seon.code.analyze`'s compiler-exact `:seon.code.var/catches` (when present) to flag
    non-`^:seon.flow/edge` `src/` vars with broad catch-all clauses answering `:constant`."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (silent-catch-warnings db nil nil))
   ([db scope] (silent-catch-warnings db scope nil))
   ([db scope var-snap]

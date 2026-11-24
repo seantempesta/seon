@@ -11,9 +11,7 @@
 (defn broken-symbol-refs
   "Referential integrity gate: flags any qualified symbol referenced by `:seon.render/hiccup`
    inside `:seon.schema/form` that does not exist in `:seon.code.var/name`. Accepts optional `var-snap`."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (broken-symbol-refs db nil))
   ([db var-snap]
    (if-not (and db (contains? (:schema db) :seon.code.var/name))
@@ -51,10 +49,7 @@
 (defn broken-doc-refs
   "Detects backticked qualified symbol references inside var or namespace docstrings that do not
    exist in `:seon.code.var/name` on `db`. Accepts optional `var-snap` to avoid duplicate scans."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (broken-doc-refs db nil nil))
   ([db scope] (broken-doc-refs db scope nil))
   ([db scope var-snap]
@@ -132,10 +127,7 @@
 (defn impure-generatable-fns
   "Detects non-edge functions carrying a generatable `[:=> ...]` `:malli/schema` whose static/IR
    references call a `^:seon.flow/edge` side-effecting var. Reuses `var-snap` when provided."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol]] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :symbol] [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (impure-generatable-fns db nil nil))
   ([db scope] (impure-generatable-fns db scope nil))
   ([db scope var-snap]
@@ -212,9 +204,7 @@
   "Hard merge gate: flags any newly added or edited non-test public `defn` on `theirs-db`
    (relative to `ours-db`) that lacks a `:malli/schema` contract (skipping thin `[& args] (apply ...)`
    forwarding stubs). Returns actionable `:error` violations with copy-pasteable `user/set-meta!` hints."
-  {:malli/schema [:function
-                  [:=> [:cat :any :any] [:vector :map]]
-                  [:=> [:cat :any :any [:maybe [:or [:sequential :symbol] [:set :symbol]]]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :any :any] [:vector :seon.health/problem]] [:=> [:cat :any :any [:maybe [:or [:sequential :symbol] [:set :symbol]]]] [:vector :seon.health/problem]]]}
   ([ours-db theirs-db] (missing-contract-violations ours-db theirs-db nil))
   ([ours-db theirs-db touched-nss]
    (if-not (and theirs-db
@@ -417,9 +407,7 @@
 (defn invalid-contract-violations
   "Hard health & merge gate: validates that every `:seon.code.var/schema` stored on `db`
    compiles against the live Malli registry. Accepts optional `var-snap`."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db] [:vector :map]]
-                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]]}
   ([db] (invalid-contract-violations db nil))
   ([db var-snap]
    (if-not (and db (contains? (:schema db) :seon.code.var/schema))

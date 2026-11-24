@@ -9,8 +9,7 @@
 
 (defn broken-doc-refs-for-nss
   "O(|vars in ns-syms|) indexed check for backticked qualified docstring symbol refs using point `:avet` lookups."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :map]]
-   :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :seon.health/problem]], :cost/ticks 15000000}
   [db ns-syms]
   (if-not (and db (seq ns-syms) (contains? (:schema db) :seon.code.var/name) (contains? (:schema db) :seon.code.var/doc))
     []
@@ -47,8 +46,7 @@
 
 (defn impure-generatable-fns-for-nss
   "O(|vars in ns-syms|) indexed check for generatable non-edge fns calling `^:seon.flow/edge` targets."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :map]]
-   :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :seon.health/problem]], :cost/ticks 15000000}
   [db ns-syms]
   (if-not (and db (seq ns-syms)
                (contains? (:schema db) :seon.code.var/schema)
@@ -129,8 +127,7 @@
 
 (defn broken-symbol-refs-for-syms
   "O(|schemas|) check flagging `:seon.render/hiccup` refs targeting any deleted var in `syms`."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :map]]
-   :cost/ticks 10000000}
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :seon.health/problem]], :cost/ticks 10000000}
   [db syms]
   (if-not (and db (seq syms) (contains? (:schema db) :seon.schema/form) (contains? (:schema db) :seon.code.var/name))
     []
@@ -151,8 +148,7 @@
 
 (defn broken-doc-refs-for-retracted-syms
   "Scans `:seon.code.var/doc` and `:seon.code.ns/doc` only for backticked refs to deleted `syms` (0 var-snapshot)."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :map]]
-   :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :seon.health/problem]], :cost/ticks 15000000}
   [db syms]
   (if-not (and db (seq syms) (contains? (:schema db) :seon.code.var/doc) (contains? (:schema db) :seon.code.var/name))
     []
@@ -187,8 +183,7 @@
 
 (defn impure-callers-of-edge-syms
   "O(|direct callers|) indexed `:avet :seon.code.var/refs` check for pure generatable callers of newly `^:seon.flow/edge` vars."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :map]]
-   :cost/ticks 10000000}
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :symbol]] [:vector :seon.health/problem]], :cost/ticks 10000000}
   [db edge-syms]
   (if-not (and db (seq edge-syms)
                (contains? (:schema db) :seon.code.var/refs)
@@ -215,7 +210,7 @@
 
 (defn caused-by-branch-impl
   "O(|touched-nss| + |retracted| + |added-edges|) implementation of `seon.health/caused-by-branch`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :map [:maybe :any] :map] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :map [:maybe :any] :map] [:vector :seon.health/problem]]}
   [ours-db theirs-db changed-schema-forms touched-nss {:keys [cache schema-violations-fn blocking-fn ubd-fn mns-fn]}]
   (let [no-code? (and (some? touched-nss) (empty? touched-nss))
         ocid (when (instance? datahike.db.DB ours-db) (d/commit-id ours-db))
