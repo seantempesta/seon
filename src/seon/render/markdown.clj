@@ -1,6 +1,11 @@
 (ns seon.render.markdown
-  "Pure Clojure Markdown -> Hiccup renderer, timeline interleaving, activity folds, and Phosphor SVG icons."
-  (:require [clojure.string :as str]))
+  "Pure Clojure CommonMark/GFM -> interactive Hiccup renderer, timeline interleaving, activity folds, and Phosphor SVG icons."
+  (:require [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.render.data :as rdata]
+            [seon.render.links :as rlinks]
+            [seon.render.markdown.parse :as mdp]
+            [seon.web.router :as router]))
 
 (def svg-sidebar
   [:svg {:width "15" :height "15" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round"}
@@ -68,120 +73,6 @@
                        (sort-by :seon.agent.message/seq)
                        (map (fn [m] {:kind :msg :data m})))]
      (into items trailing))))
-
-(defn render-inline-prose
-"Formats inline backtick code spans, `**bold**`, `*italic*`, and `~~strike~~` (including inline code spans nested inside emphasis)."
-{:malli/schema [:=> [:cat :any] :any], :cost/ticks 500000, :cost/bytes 1048576}
-[s]
-(let [text (str s)]
-  (if (or (str/blank? text)
-          (not (or (str/includes? text "`") (str/includes? text "*") (str/includes? text "~~"))))
-    text
-    (let [code-spans (fn [^String seg]
-                       (if-not (str/includes? seg "`")
-                         [seg]
-                         (let [parts (str/split seg #"`" -1)]
-                           (vec (mapcat (fn [[i p]]
-                                          (cond
-                                            (and (odd? i) (< i (dec (count parts)))) [[:code {:class "inline-code"} p]]
-                                            (pos? (count p)) [p]
-                                            :else []))
-                                        (map-indexed vector parts))))))
-          pat #"`([^`]+)`|\*\*([^\s*](?:`[^`]+`|[^*])*?[^\s*]|[^\s*])\*\*|\*([^\s*](?:`[^`]+`|[^*])*?[^\s*]|[^\s*])\*|~~([^\s~](?:`[^`]+`|[^~])*?[^\s~]|[^\s~])~~"
-          m (re-matcher pat text)
-          nodes (loop [pos 0 acc []]
-                  (if (.find m)
-                    (let [st (.start m) en (.end m)
-                          c (.group m 1) b (.group m 2) it (.group m 3) dl (.group m 4)
-                          acc (if (> st pos) (conj acc (subs text pos st)) acc)
-                          node (cond c [:code {:class "inline-code"} c]
-                                     b (into [:strong] (code-spans b))
-                                     it (into [:em] (code-spans it))
-                                     dl (into [:del] (code-spans dl)))]
-                      (recur en (conj acc node)))
-                    (if (< pos (count text)) (conj acc (subs text pos)) acc)))]
-      (if (and (= 1 (count nodes)) (string? (first nodes)))
-        (first nodes)
-        (vec (cons :span nodes)))))))
-
-(defn render-markdown-blocks
-  "Lightweight pure-Clojure Markdown -> Hiccup block renderer for editorial Canvas & Workspace prose:
-   handles paragraphs, bullet lists (`- ` / `* `), numbered lists (`1. `), headings (`#`/`##`/`###`),
-   fenced code blocks (```), inline `` `code` ``, `**bold**`, and `*italic*`."
-  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 2000000, :cost/bytes 4194304}
-  [s]
-  (let [lines (str/split-lines (str (or s "")))
-        flush-para (fn [acc para]
-                     (if (seq para)
-                       (let [joined (vec (interpose [:br] (map render-inline-prose para)))]
-                         (conj acc (vec (cons :p (cons {:class "prose-p"} joined)))))
-                       acc))
-        flush-list (fn [acc ltype items]
-                     (if (seq items)
-                       (conj acc (vec (cons ltype (cons {:class "prose-list"}
-                                                        (mapv (fn [it] [:li (render-inline-prose it)]) items)))))
-                       acc))
-        blocks
-        (loop [ls lines
-               acc []
-               para []
-               ltype nil
-               litems []
-               in-code? false
-               code-lines []]
-          (if (empty? ls)
-            (let [acc (if in-code?
-                        (conj acc [:pre {:class "code-box tiny"} [:code (str/join "\n" code-lines)]])
-                        acc)]
-              (-> acc (flush-para para) (flush-list ltype litems)))
-            (let [line (first ls)
-                  trimmed (str/trim line)
-                  rest-ls (rest ls)]
-              (cond
-                in-code?
-                (if (str/starts-with? trimmed "```")
-                  (recur rest-ls
-                         (conj acc [:pre {:class "code-box tiny"} [:code (str/join "\n" code-lines)]])
-                         [] nil [] false [])
-                  (recur rest-ls acc [] nil [] true (conj code-lines line)))
-
-                (str/starts-with? trimmed "```")
-                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems))
-                       [] nil [] true [])
-
-                (str/blank? trimmed)
-                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems))
-                       [] nil [] false [])
-
-                (re-find #"^-{3,}$" trimmed)
-                (recur rest-ls (-> acc (flush-para para) (flush-list ltype litems) (conj [:hr {:class "prose-hr"}]))
-                       [] nil [] false [])
-
-                (re-find #"^#{1,3}\s+" trimmed)
-                (let [heading (str/replace-first trimmed #"^#{1,3}\s+" "")]
-                  (recur rest-ls
-                         (-> acc (flush-para para) (flush-list ltype litems)
-                             (conj [:h3 {:class "prose-h3"} (render-inline-prose heading)]))
-                         [] nil [] false []))
-
-                (re-find #"^[-*]\s+" trimmed)
-                (let [item (str/replace-first trimmed #"^[-*]\s+" "")
-                      acc (cond-> (flush-para acc para)
-                            (and ltype (not= ltype :ul)) (flush-list ltype litems))]
-                  (recur rest-ls acc [] :ul (if (= ltype :ul) (conj litems item) [item]) false []))
-
-                (re-find #"^\d+\.\s+" trimmed)
-                (let [item (str/replace-first trimmed #"^\d+\.\s+" "")
-                      acc (cond-> (flush-para acc para)
-                            (and ltype (not= ltype :ol)) (flush-list ltype litems))]
-                  (recur rest-ls acc [] :ol (if (= ltype :ol) (conj litems item) [item]) false []))
-
-                :else
-                (recur rest-ls (flush-list acc ltype litems)
-                       (conj para line) nil [] false [])))))]
-    (if (= 1 (count blocks))
-      (first blocks)
-      (vec (cons :div (cons {:class "prose-blocks"} blocks))))))
 
 (defn prompt-msg? [item]
   (and (= :msg (:kind item))
@@ -251,24 +142,12 @@
     (when (or h eid rs err-str)
       [:div {:class "step-meta-row"}
        (cond
-         (and eid h)
-         [:button {:type "button" :class "ent-link mono tiny muted"
-                   :title (str "Inspect eval " h)
-                   :on-click (list 'seon.web/inspect-entity! [:seon.agent.eval/id eid])}
-          (str h)]
-         h
-         [:span {:class "mono tiny muted"} (str h)]
-         eid
-         [:button {:type "button" :class "ent-link mono tiny muted"
-                   :title "Inspect eval turn"
-                   :on-click (list 'seon.web/inspect-entity! [:seon.agent.eval/id eid])}
-          (str "turn " (or turn "—"))])
+         (and eid h) (rlinks/ent-link [:seon.agent.eval/id eid] (str h) "mono tiny muted")
+         h           [:span {:class "mono tiny muted"} (str h)]
+         eid         (rlinks/ent-link [:seon.agent.eval/id eid] (str "turn " (or turn "—")) "mono tiny muted"))
        (when rs
          (if (qualified-keyword? rs)
-           [:button {:type "button" :class "ent-link badge green tiny mono"
-                     :title (str "Inspect schema " rs)
-                     :on-click (list 'seon.web/inspect-entity! [:seon.schema/key rs])}
-            (name rs)]
+           (rlinks/ent-link [:seon.schema/key rs] (name rs) "badge green tiny mono")
            [:span {:class "badge green tiny mono"} (str rs)]))
        (when err-str
          [:span {:class "badge red tiny mono"} "error"])])))
@@ -423,3 +302,258 @@
      [:div {:class "activity-list"}
       (for [[idx e] (map-indexed vector action-evals)]
         (render-activity-step e id-prefix idx))]]))
+
+(defn resolve-backtick-ref
+  "Resolves a backtick code token into a Seon Datahike lookup ref `[attr val]`, or nil
+   (docs, qualified vars, `seon.*` namespaces, concrete entity keywords; skips `*` wildcards)."
+  {:malli/schema [:function
+                  {:examples [[["seon.web/navigate-url!"] [:seon.code.var/name (quote seon.web/navigate-url!)]]
+                              [["seon.web.router"] [:seon.code.ns/name (quote seon.web.router)]]
+                              [[":seon.summary/*"] nil] [["c"] nil]
+                              [["docs/render.md#walk"] [:seon.code.doc/id "docs/render.md#walk"]]]}
+                  [:=> [:cat [:maybe :string]] [:maybe [:vector :any]]]
+                  [:=> [:cat [:maybe :string] :any] [:maybe [:vector :any]]]]
+   :cost/ticks 500000 :cost/bytes 262144}
+  ([token] (resolve-backtick-ref token nil))
+  ([token db]
+   (let [t (str/trim (str (or token "")))]
+     (when (and (pos? (count t)) (not (re-find #"\s" t)))
+       (cond
+         (re-matches #"^(?:docs/[a-zA-Z0-9_./-]+\.md|AGENTS\.md)(?:#[a-zA-Z0-9_.-]+)?$" t)
+         [:seon.code.doc/id t]
+         (re-matches #"^[a-z][a-z0-9_.-]+\.[a-z0-9_.-]+/[a-zA-Z0-9_*!?+<>=.-]+$" t)
+         (let [[ns-p nm] (str/split t #"/" 2)]
+           (when (not= nm "*") [:seon.code.var/name (symbol ns-p nm)]))
+         (and (str/starts-with? t "seon.")
+              (re-matches #"^seon\.[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$" t)
+              (not (re-find #"\.(?:clj|cljs|cljc|edn|md|js|css|html)$" t)))
+         [:seon.code.ns/name (symbol t)]
+         (and (str/starts-with? t ":") (not (str/includes? t "*")))
+         (when-let [[_ ns-p nm] (re-matches #"^:([a-z][a-z0-9_.-]*)/([a-zA-Z0-9_!?+<>=.-]+)$" t)]
+           (let [kw (keyword ns-p nm)
+                 dh (when (and db (instance? datahike.db.interface.ISearch db)) (rlinks/db-schema db))]
+             (or (when dh
+                   (some #(when (and (contains? dh %) (first (d/datoms db :avet % kw))) [% kw])
+                         [:seon.task/id :seon.rule/id :seon.agent/id :seon.schema/key]))
+                 (cond (#{"seon.task" "task"} ns-p) [:seon.task/id kw]
+                       (or (= ns-p "rule") (str/starts-with? ns-p "rule.")) [:seon.rule/id kw]
+                       (#{"agent" "ns"} ns-p) [:seon.agent/id kw]
+                       (str/starts-with? ns-p "seon.") [:seon.schema/key kw])))))))))
+
+(def ^:private copy-code-js
+  "const p=evt.currentTarget.closest('.md-code-block,.md-live-card');const c=p&&p.querySelector('pre code');if(c&&navigator.clipboard){navigator.clipboard.writeText(c.textContent||'');const b=evt.currentTarget;b.textContent='Copied';setTimeout(()=>{b.textContent='Copy';},1200);}")
+
+(defn- copy-code-btn []
+  [:button {:type "button" :class "md-code-btn" :title "Copy snippet" :on-click copy-code-js} "Copy"])
+
+(defn- render-diff-block [content]
+  [:div {:class "md-code-block md-diff-block"}
+   [:div {:class "md-code-head"}
+    [:span {:class "md-code-lang"} "diff"]
+    [:div {:class "md-code-actions"} (copy-code-btn)]]
+   [:pre {:class "code-box tiny md-diff"}
+    (into [:code]
+          (mapv (fn [ln]
+                  (let [cls (cond (or (str/starts-with? ln "@@") (str/starts-with? ln "diff ")
+                                      (str/starts-with? ln "+++") (str/starts-with? ln "---")) "diff-line diff-hunk"
+                                  (str/starts-with? ln "+") "diff-line diff-add"
+                                  (str/starts-with? ln "-") "diff-line diff-del"
+                                  :else "diff-line diff-ctx")]
+                    [:span {:class cls} (str ln "\n")]))
+                (str/split (str (or content "")) #"\n" -1)))]])
+
+(defn- render-clojure-block [lang content]
+  [:div {:class "md-code-block md-clj-block"}
+   [:div {:class "md-code-head"}
+    [:span {:class "md-code-lang"} lang]
+    [:div {:class "md-code-actions"}
+     (copy-code-btn)
+     [:button {:type "button"
+               :class "md-code-btn md-run-btn"
+               :title "Run snippet in active agent branch REPL"
+               :on-click (list (quote seon.web/eval-snippet!) (str (or content "")))}
+      "▶ Run in REPL"]]]
+   [:pre {:class "code-box tiny"}
+    [:code {:class (str "language-" lang)} (str (or content ""))]]])
+
+(defn- render-hiccup-block [content]
+  (let [raw (str (or content ""))
+        parsed (mdp/safe-read-edn raw)
+        safe (when (:ok? parsed) (mdp/sanitize-hiccup (:val parsed)))]
+    [:div {:class "md-live-card md-hiccup-card"}
+     [:div {:class "md-live-head"}
+      [:span {:class "badge purple tiny mono"} "live hiccup"]
+      [:div {:class "md-code-actions"} (copy-code-btn)]]
+     (if (and (:ok? parsed) (some? safe))
+       [:div {:class "md-live-body"} safe]
+       [:div {:class "notice red mono tiny"}
+        (if (:ok? parsed) "Hiccup block contained no whitelisted tags." (str "Invalid Hiccup EDN: " (:error parsed)))])
+     [:details {:class "md-live-source"}
+      [:summary {:class "mono tiny muted"} "View Hiccup Source"]
+      [:pre {:class "code-box tiny"} [:code {:class "language-clojure"} raw]]]]))
+
+(defn- invoke-seon-view-var [var-sym data]
+  (let [ns-s (when (qualified-symbol? var-sym) (namespace var-sym))]
+    (if-not (and ns-s (or (= ns-s "seon.render") (str/starts-with? ns-s "seon.render.")))
+      {:ok? false :error (str "Renderer var must be in seon.render.*: " var-sym)}
+      (try
+        (if-let [v (requiring-resolve var-sym)]
+          (if (or (:macro (meta v)) (not (ifn? @v)))
+            {:ok? false :error (str "Not a callable renderer var: " var-sym)}
+            (let [sch (:malli/schema (meta v))
+                  cf (when (and (vector? sch) (= :=> (first sch))) (if (map? (second sch)) (nth sch 2 nil) (second sch)))
+                  a0 (when (and (vector? cf) (= :cat (first cf))) (second cf))
+                  ek (when (and (vector? a0) (= :map (first a0)))
+                       (some #(when (and (vector? %) (qualified-keyword? (first %))) (first %))
+                             (if (map? (second a0)) (drop 2 a0) (rest a0))))
+                  res (@v (if (and (map? data) ek (not (contains? data ek))) {ek data} (or data {})))
+                  h (or (when (map? res) (:seon.ui/hiccup res)) (when (and (vector? res) (keyword? (first res))) res))]
+              (if h {:ok? true :hiccup h} {:ok? false :error (str "Renderer " var-sym " returned no Hiccup.")})))
+          {:ok? false :error (str "Renderer var not found: " var-sym)})
+        (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))})))))
+
+(defn- render-seon-view-block [content opts]
+  (let [raw (str (or content ""))
+        parsed (mdp/safe-read-edn raw)
+        spec (when (and (:ok? parsed) (map? (:val parsed))) (:val parsed))
+        rv (:var spec)
+        rv (if (and (seq? rv) (= (quote quote) (first rv))) (second rv) rv)
+        var-sym (when (qualified-symbol? rv) rv)
+        ref (when (:ref spec) (rdata/normalize-inspect-ref (:ref spec)))
+        db (:db opts)
+        pulled (when (and db (instance? datahike.db.interface.ISearch db) ref)
+                 (try (not-empty (dissoc (d/pull db (quote [*]) ref) :db/id))
+                      (catch Throwable ex {:seon.view/error (or (.getMessage ex) (str ex))})))
+        valid-pull (when (and (map? pulled) (not (:seon.view/error pulled))) pulled)
+        head [:div {:class "md-live-head"}
+              [:div {:class "pill-row"}
+               [:span {:class "badge amber tiny mono"} "seon-view"]
+               (when var-sym (rlinks/ent-link [:seon.code.var/name var-sym] (str var-sym) "badge blue tiny mono"))]
+              (when ref (rlinks/ent-link ref (str "Inspect " (rdata/entity-short-label ref) " →") "mono tiny muted"))]]
+    [:div {:class "md-live-card md-seon-view-card"}
+     head
+     (cond
+       (not spec)
+       [:div {:class "notice red mono tiny"}
+        (if (:ok? parsed) "seon-view expects {:var ns/fn :data {...}} or {:ref [:attr val]}." (str "Invalid seon-view EDN: " (:error parsed)))]
+       (and var-sym (or (contains? spec :data) valid-pull))
+       (let [res (invoke-seon-view-var var-sym (if (contains? spec :data) (:data spec) valid-pull))]
+         (if (:ok? res) [:div {:class "md-live-body"} (:hiccup res)] [:div {:class "notice red mono tiny"} (:error res)]))
+       ref
+       [:div {:class "md-live-body stack-xs"}
+        (rlinks/ent-link ref (rdata/entity-short-label (or valid-pull ref)) "mono strong")
+        (when valid-pull [:div {:class "mono tiny muted"} (rdata/compact-entity-preview valid-pull 180)])]
+       var-sym
+       [:div {:class "md-live-body"} (rlinks/ent-link [:seon.code.var/name var-sym] (str var-sym) "mono strong")]
+       :else
+       [:div {:class "notice red mono tiny"} "seon-view requires :var and/or :ref."])
+     [:details {:class "md-live-source"}
+      [:summary {:class "mono tiny muted"} "View Spec"]
+      [:pre {:class "code-box tiny"} [:code {:class "language-clojure"} raw]]]]))
+
+(defn- render-code-block [{:keys [info content]} opts]
+  (let [lang-raw (first (str/split (str/trim (str (or info ""))) #"\s+"))
+        lang (str/lower-case (str (or lang-raw "")))
+        body (str (or content ""))]
+    (case lang
+      "diff" (render-diff-block body)
+      ("clojure" "clj" "repl") (render-clojure-block lang body)
+      "hiccup" (render-hiccup-block body)
+      "seon-view" (render-seon-view-block body opts)
+      [:div {:class "md-code-block"}
+       [:div {:class "md-code-head"}
+        [:span {:class "md-code-lang"} (if (str/blank? lang) "code" lang)]
+        [:div {:class "md-code-actions"} (copy-code-btn)]]
+       [:pre {:class "code-box tiny"}
+        [:code (if (str/blank? lang) {} {:class (str "language-" lang)}) body]]])))
+
+(defn- render-inline-node [node opts]
+  (case (:t node)
+    :str (:v node)
+    :br [:br]
+    :code (let [raw (:v node)
+                ref (when (and (not (:in-link? opts)) (not (false? (:auto-link? opts)))) (resolve-backtick-ref raw (:db opts)))]
+            (if ref
+              [:a {:href (router/entity-ref->path (:db opts) ref) :class "ent-link md-code-link"
+                   :data-ref (pr-str ref) :data-preview-ref (pr-str ref) :interestfor "seon-hovercard"
+                   :on-click (list (quote seon.web/inspect-entity!) ref)}
+               [:code {:class "inline-code"} raw]]
+              [:code {:class "inline-code"} raw]))
+    :strong (into [:strong] (mapv #(render-inline-node % opts) (:children node)))
+    :em (into [:em] (mapv #(render-inline-node % opts) (:children node)))
+    :del (into [:del] (mapv #(render-inline-node % opts) (:children node)))
+    :image (let [{:keys [kind href]} (mdp/classify-url (:src node)) alt (str (or (:alt node) ""))]
+             (if (#{:external :internal} kind)
+               [:img (cond-> {:src href :alt alt :class "md-img" :loading "lazy"} (:title node) (assoc :title (:title node)))]
+               [:span {:class "muted tiny"} (if (str/blank? alt) "[blocked image]" alt)]))
+    :link (let [{:keys [kind href]} (mdp/classify-url (:href node))
+                kids (mapv #(render-inline-node % (assoc opts :in-link? true)) (:children node))
+                t (:title node)]
+            (case kind
+              :internal (let [r (:inspect-ref (router/path->show-user-op (:db opts) href))]
+                          (into [:a (cond-> {:href href :class "ent-link md-link" :on-click (list (quote seon.web/navigate-url!) href)}
+                                      t (assoc :title t) r (assoc :data-ref (pr-str r) :data-preview-ref (pr-str r) :interestfor "seon-hovercard"))] kids))
+              :external (into [:a (cond-> {:href href :target "_blank" :rel "noopener noreferrer" :class "md-ext-link"} t (assoc :title t))] kids)
+              (:mailto :fragment) (into [:a (cond-> {:href href :class "md-ext-link"} t (assoc :title t))] kids)
+              (into [:span (cond-> {:class "md-unsafe-link"} t (assoc :title t))] kids)))
+    ""))
+
+(defn render-inline-prose
+  "Formats inline CommonMark + GFM markup (`**bold**`, `*italic*`, `~~strike~~`, deep-linked `` `code` ``,
+   interactive `[links](url)`, safe `![images](src)`, hard breaks) into Hiccup with zero raw HTML."
+  {:malli/schema [:function
+                  {:examples [[["plain"] "plain"] [["**bold**"] [:span [:strong "bold"]]] [["~~crossed out~~"] [:span [:del "crossed out"]]]]}
+                  [:=> [:cat :any] :any] [:=> [:cat :any [:maybe :map]] :any]]
+   :cost/ticks 2000000 :cost/bytes 4194304}
+  ([s] (render-inline-prose s {}))
+  ([s opts]
+   (let [text (str s) o (if (map? opts) opts {})]
+     (if (str/blank? text) text
+         (let [nodes (mapv #(render-inline-node % o) (mdp/parse-inlines text))]
+           (cond (empty? nodes) text
+                 (and (= 1 (count nodes)) (string? (first nodes))) (first nodes)
+                 :else (vec (cons :span nodes))))))))
+
+(defn- render-block-node [node opts]
+  (case (:t node)
+    :heading (let [lvl (max 1 (min 6 (long (or (:level node) 3))))]
+               [(keyword (str "h" lvl)) {:class (str "prose-h" lvl)} (render-inline-prose (:text node) opts)])
+    :para [:p {:class "prose-p"} (render-inline-prose (:text node) opts)]
+    :hr [:hr {:class "prose-hr"}]
+    :code-block (render-code-block node opts)
+    :blockquote (into [:blockquote {:class "md-quote"}] (mapv #(render-block-node % opts) (:children node)))
+    :alert (let [k (or (:kind node) :note)]
+             (into [:aside {:class (str "md-alert md-alert-" (name k))}
+                    [:div {:class "md-alert-title"} (str/upper-case (name k))]]
+                   (mapv #(render-block-node % opts) (:children node))))
+    :table (let [als (:align node)
+                 ca #(when-let [a (get als %)] {:style {:text-align (name a)}})]
+             [:div {:class "table-scroll md-table-wrap"}
+              [:table {:class "md-table"}
+               [:thead (into [:tr] (map-indexed (fn [i h] [:th (or (ca i) {}) (render-inline-prose h opts)]) (:header node)))]
+               [:tbody (mapv (fn [row] (into [:tr] (map-indexed (fn [i c] [:td (or (ca i) {}) (render-inline-prose c opts)]) row))) (:rows node))]]])
+    :list (let [tag (if (:ordered node) :ol :ul)
+                attrs (cond-> {:class (if (:has-tasks? node) "prose-list has-tasks" "prose-list")}
+                        (and (:ordered node) (:start node) (not= 1 (:start node))) (assoc :start (:start node)))
+                tight? (:tight node)]
+            (into [tag attrs]
+                  (mapv (fn [{:keys [checked children]}]
+                          (let [chk (when (some? checked) [:input {:type "checkbox" :class "md-task-check" :disabled true :checked (boolean checked)}])
+                                li (if (some? checked) [:li {:class (str "md-task-item" (when checked " is-done"))}] [:li])
+                                body (if (and tight? (= 1 (count children)) (= :para (:t (first children))))
+                                       [(render-inline-prose (:text (first children)) opts)]
+                                       (mapv #(render-block-node % opts) children))]
+                            (into li (if chk (cons chk body) body))))
+                        (:items node))))
+    [:p {:class "prose-p"} (str node)]))
+
+(defn render-markdown-blocks
+  "Pure CommonMark + GFM -> interactive Hiccup block renderer (headings, tables, alerts, task lists,
+   backtick deep-links, safe links/images, and `diff`/`clojure`/`hiccup`/`seon-view` blocks)."
+  {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat :any [:maybe :map]] :any]]
+   :cost/ticks 5000000 :cost/bytes 8388608}
+  ([s] (render-markdown-blocks s {}))
+  ([s opts]
+   (let [o (if (map? opts) opts {})
+         blocks (mapv #(render-block-node % o) (mdp/parse-document (str (or s ""))))]
+     (if (= 1 (count blocks)) (first blocks) (into [:div {:class "prose-blocks"}] blocks)))))

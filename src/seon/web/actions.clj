@@ -135,7 +135,7 @@
   (async-action st {:op :show-user :reset-lab-prefs true} nil nil))
 
 (defn ^:seon/callable semantic-search-form!
-  "Runs live semantic vector search (`:op :embed-search`) across embedded vars, docs, tasks, schemas, and errors."
+  "Runs live vector search (`:op :embed-search`) across embedded entities."
   {:malli/schema [:=> [:cat :map :map] :map] :cost/ticks 500000}
   [st form]
   (let [raw (str/trim (str (:query form "")))
@@ -146,11 +146,9 @@
             raw)]
     (if (str/blank? raw)
       {:st (assoc st :semantic-search nil)}
-      (async-action
-       (assoc st :branch-feedback {:ok? true :text (str "Searching vectors for \"" raw "\"...")})
-       {:op :embed-search :query q :k 12 :opts (if of-kw {:of of-kw} {})}
-       :semantic-search
-       (fn [ans] (assoc ans :query raw))))))
+      (async-action (assoc st :branch-feedback {:ok? true :text (str "Searching vectors for \"" raw "\"...")})
+                    {:op :embed-search :query q :k 12 :opts (if of-kw {:of of-kw} {})}
+                    :semantic-search #(assoc % :query raw)))))
 
 (defn ^:seon/callable refresh-vector-status!
   "Fetches live `:vectors` Flow proc backpressure and indexing telemetry (`:op :vector-status`)."
@@ -167,15 +165,12 @@
 (defn ^:seon/callable run-tests!
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st branch]
-  (async-action
-   (assoc st :branch-feedback {:ok? true :text (str "Running reach tests on " branch "...")})
-   {:op :test :branch branch}
-   :branch-feedback
-   (fn [ans]
-     {:ok? (:ok? ans)
-      :text (str "Tests on " branch ": " (if (:ok? ans) "PASS" "FAIL")
-                 " (" (:ran ans 0) " ran, " (:cached ans 0) " cached"
-                 (when (:short-circuited? ans) (str ", fail-fast skipped " (:skipped-slow ans) " slow")) ")")})))
+  (async-action (assoc st :branch-feedback {:ok? true :text (str "Running reach tests on " branch "...")})
+                {:op :test :branch branch} :branch-feedback
+                (fn [ans]
+                  {:ok? (:ok? ans)
+                   :text (str "Tests on " branch ": " (if (:ok? ans) "PASS" "FAIL") " (" (:ran ans 0) " ran, " (:cached ans 0) " cached"
+                              (when (:short-circuited? ans) (str ", fail-fast skipped " (:skipped-slow ans) " slow")) ")")})))
 
 (defn ^:seon/callable merge-branch!
   {:malli/schema [:=> [:cat :map :keyword] :map]}
@@ -187,17 +182,16 @@
                      (let [rc (a/chan 1)]
                        (a/>! srv {:req req :reply-ch rc})
                        (or (first (a/alts! [rc (a/timeout 30000)])) {:ok? false :error :timeout})))
-              t-ans (ask! {:op :test :branch branch})]
-          (if-not (:ok? t-ans)
-            (a/>! ev-ch {:ev :action-done :slot :branch-feedback
-                         :val {:ok? false :text (str "Merge blocked on " branch ": tests failed ("
-                                                     (or (:error t-ans) (str (:ran t-ans 0) " ran, " (count (remove :seon.test/pass? (:results t-ans))) " failed")) ")")}})
-            (let [m-ans (ask! {:op :merge :branch branch})]
-              (a/>! ev-ch {:ev :action-done :slot :branch-feedback
-                           :val {:ok? (:ok? m-ans)
-                                 :text (if (:ok? m-ans)
-                                         (str "Tested & merged " branch " -> :main @ tx " (:tx m-ans) " (" (count (:touched-paths m-ans)) " files)")
-                                         (str "Blocked / Conflict: " (pr-str (or (:conflicts m-ans) (:error m-ans)))))}}))))))
+              t-ans (ask! {:op :test :branch branch})
+              fb (if-not (:ok? t-ans)
+                   {:ok? false :text (str "Merge blocked on " branch ": tests failed ("
+                                          (or (:error t-ans) (str (:ran t-ans 0) " ran, " (count (remove :seon.test/pass? (:results t-ans))) " failed")) ")")}
+                   (let [m-ans (ask! {:op :merge :branch branch})]
+                     {:ok? (:ok? m-ans)
+                      :text (if (:ok? m-ans)
+                              (str "Tested & merged " branch " -> :main @ tx " (:tx m-ans) " (" (count (:touched-paths m-ans)) " files)")
+                              (str "Blocked / Conflict: " (pr-str (or (:conflicts m-ans) (:error m-ans)))))}))]
+          (a/>! ev-ch {:ev :action-done :slot :branch-feedback :val fb}))))
     (assoc st :branch-feedback {:ok? true :text (str "Running reach tests before merging " branch " -> :main...")})))
 
 (defn ^:seon/callable assign-health-fix!
@@ -229,18 +223,17 @@
   {:malli/schema [:=> [:cat :map :map] :map]}
   [st form]
   (let [k (parse-kw-input (:key form) :seon.custom/item)]
-    (async-action
-     (assoc st :branch-feedback {:ok? true :text (str "Validating & deriving " k "...")})
-     (cond-> {:op :register-schema :key k :form (:form form "")}
-       (not (str/blank? (:doc form))) (assoc :doc (:doc form)))
-     :branch-feedback
-     (fn [ans]
-       {:ok? (:ok? ans)
-        :text (if (:ok? ans)
-                (str "Registered " (:key ans)
-                     (when (seq (:derived-attributes ans)) (str " + derived Datahike attr " (:derived-attributes ans)))
-                     " — seed=42 sample: " (:sample ans))
-                (str "Rejected: " (:error ans)))}))))
+    (async-action (assoc st :branch-feedback {:ok? true :text (str "Validating & deriving " k "...")})
+                  (cond-> {:op :register-schema :key k :form (:form form "")}
+                    (not (str/blank? (:doc form))) (assoc :doc (:doc form)))
+                  :branch-feedback
+                  (fn [ans]
+                    {:ok? (:ok? ans)
+                     :text (if (:ok? ans)
+                             (str "Registered " (:key ans)
+                                  (when (seq (:derived-attributes ans)) (str " + derived Datahike attr " (:derived-attributes ans)))
+                                  " — seed=42 sample: " (:sample ans))
+                             (str "Rejected: " (:error ans)))}))))
 
 (defn ^:seon/callable jump-canvas-live!
   {:malli/schema [:=> [:cat :map] :map]}
@@ -252,19 +245,6 @@
   [st]
   {:st (assoc st :branch-feedback nil)})
 
-(defn ^:seon/callable pin-ref-form!
-  {:malli/schema [:=> [:cat :map :keyword :map] :map]}
-  [st agent-id form]
-  (let [raw (str/trim (str (:ref form "")))
-        parsed (try (rdata/normalize-inspect-ref (edn/read-string raw)) (catch Throwable _ nil))]
-    (if-not parsed
-      {:st (assoc st :branch-feedback {:ok? false :text "Pin expects a lookup ref vector like [:seon.code.ns/name 'seon.web]"})}
-      (let [cur (vec (or (:seon.agent/pinned (d/pull @(:conn st) '[:seon.agent/pinned] [:seon.agent/id agent-id])) []))
-            nxt (if (some #(= % parsed) cur) cur (conj cur parsed))]
-        (async-action (assoc st :branch-feedback {:ok? true :text (str "Pinned " (pr-str parsed) " to " agent-id "'s walk.")})
-                      {:op :transact :tx-data [{:seon.agent/id agent-id :seon.agent/pinned nxt}]}
-                      nil nil)))))
-
 (defn ^:seon/callable unpin-tile!
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :keyword :any] :map]}
   [st agent-id ref-val]
@@ -273,44 +253,42 @@
     (async-action st {:op :transact :tx-data [{:seon.agent/id agent-id :seon.agent/pinned nxt}]} nil nil)))
 
 (defn invoke-call!
-  "Dispatches either a registered Reagent closure (`?h=...`) OR a stateless `^:seon/callable` Clojure call form."
+  "Dispatches registered Reagent closure (`?h=...`) or stateless `^:seon/callable` Clojure form."
   {:malli/schema [:=> [:cat [:map [:conn {:optional true} :seon.host/conn]] :map] :map]}
   [st {:keys [hkey call-form form-fields]}]
-  (try
-    (cond
-      hkey
-      (if-let [hfn (get-in st [:walk :handlers hkey])]
-        (let [res (if (seq form-fields) (hfn st form-fields) (hfn st))]
-          (if (and (map? res) (contains? res :st)) (assoc res :ok? true) {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))
-        {:ok? false :error :seon.web/stale-handler :handler hkey :st st})
-      (and (seq? call-form) (qualified-symbol? (first call-form)))
-      (let [sym (first call-form) v (resolve sym)]
-        (if-not (and v (:seon/callable (meta v)))
-          {:ok? false :error :seon.web/not-callable :message (str sym " is not marked ^:seon/callable") :fn sym :st st}
-          (let [args (cond-> (vec (rest call-form)) (seq form-fields) (conj form-fields))
-                res (apply @v st args)]
-            (if (and (map? res) (contains? res :st)) (assoc res :ok? true) {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))))
-      :else {:ok? false :error :seon.web/malformed-call :form call-form :st st})
-    (catch Throwable ex
-      {:ok? false :error :seon.web/handler-error :message (or (.getMessage ex) (str ex)) :st st})))
+  (let [wrap (fn [res] (if (and (map? res) (contains? res :st)) (assoc res :ok? true)
+                           {:ok? true :st (if (and (map? res) (contains? res :conn)) res st)}))]
+    (try
+      (cond
+        hkey
+        (if-let [hfn (get-in st [:walk :handlers hkey])]
+          (wrap (if (seq form-fields) (hfn st form-fields) (hfn st)))
+          {:ok? false :error :seon.web/stale-handler :handler hkey :st st})
+        (and (seq? call-form) (qualified-symbol? (first call-form)))
+        (let [sym (first call-form) v (resolve sym)]
+          (if-not (and v (:seon/callable (meta v)))
+            {:ok? false :error :seon.web/not-callable :message (str sym " is not marked ^:seon/callable") :fn sym :st st}
+            (wrap (apply @v st (cond-> (vec (rest call-form)) (seq form-fields) (conj form-fields))))))
+        :else {:ok? false :error :seon.web/malformed-call :form call-form :st st})
+      (catch Throwable ex
+        {:ok? false :error :seon.web/handler-error :message (or (.getMessage ex) (str ex)) :st st}))))
 
 (def mcp-tools
-  [{:name "seon_repl"
-    :description "Evaluate Clojure forms inside an isolated COW forked Seon agent REPL on a Datahike branch. Auto-attaches `<walk-context>` + `<ephemeral-tail>` on Turn 1 or when `task`/`scope`/`context: true` is passed."
+  [{:name "seon_repl" :description "Evaluate Clojure in an isolated COW branch REPL with auto walk context."
     :inputSchema {:type "object"
-                  :properties {:code {:type "string" :description "Clojure form(s) to evaluate."}
-                               :branch {:type "string" :description "Datahike branch keyword, e.g. \":branch/work\"."}
-                               :agent {:type "string" :description "Agent keyword id, e.g. \":agent/mcp\"."}
-                               :task {:type "string" :description "Optional task keyword id."}
+                  :properties {:code {:type "string" :description "Clojure form(s)."}
+                               :branch {:type "string" :description "Branch keyword."}
+                               :agent {:type "string" :description "Agent keyword."}
+                               :task {:type "string" :description "Optional task keyword."}
                                :scope {:type "string" :description "Optional namespace symbol."}
-                               :context {:type "boolean" :description "Include/suppress walk context."}}
+                               :context {:type "boolean" :description "Include/suppress context."}}
                   :required ["code"]}}
-   {:name "seon_health" :description "Read system health report." :inputSchema {:type "object" :properties {}}}
-   {:name "seon_test" :description "Run reach-selected fail-fast tests + seed=42 generative checks on a branch."
+   {:name "seon_health" :description "System health report." :inputSchema {:type "object" :properties {}}}
+   {:name "seon_test" :description "Run reach-selected fail-fast tests + seed=42 checks."
     :inputSchema {:type "object" :properties {:branch {:type "string"} :force {:type "boolean"}}}}
-   {:name "seon_merge" :description "Malli-driven 3-way merge of a branch into :main & local Git."
+   {:name "seon_merge" :description "Malli 3-way merge of branch into :main & Git."
     :inputSchema {:type "object" :properties {:branch {:type "string"} :message {:type "string"}} :required ["branch"]}}
-   {:name "seon_status" :description "Read system status snapshot." :inputSchema {:type "object" :properties {}}}])
+   {:name "seon_status" :description "System status snapshot." :inputSchema {:type "object" :properties {}}}])
 
 (defn ^:seon.flow/edge call-server-edge!
   {:malli/schema [:=> [:cat :seon.host/chan :map :int] :map]}
@@ -337,10 +315,10 @@
              br (parse-kw-input (or (:branch args) ":branch/mcp") :branch/mcp)
              aid (when (:agent args) (parse-kw-input (:agent args) :agent/mcp))
              req (case tname
-                   "seon_repl"   {:op :eval :branch br :agent-id aid :code (str (:code args "")) :keep-warm? true}
+                   "seon_repl" {:op :eval :branch br :agent-id aid :code (str (:code args "")) :keep-warm? true}
                    "seon_health" {:op :health}
-                   "seon_test"   {:op :test :branch (parse-kw-input (or (:branch args) ":main") :main) :force? (boolean (:force args))}
-                   "seon_merge"  {:op :merge :branch (parse-kw-input (:branch args) :branch/mcp) :message (:message args)}
+                   "seon_test" {:op :test :branch (parse-kw-input (or (:branch args) ":main") :main) :force? (boolean (:force args))}
+                   "seon_merge" {:op :merge :branch (parse-kw-input (:branch args) :branch/mcp) :message (:message args)}
                    "seon_status" {:op :status}
                    nil)]
          (if-not req
@@ -351,16 +329,13 @@
                              (call-server-edge! server-in-ch req 30000)))
                        (call-server-edge! server-in-ch req 30000))
                  text (if (= tname "seon_repl")
-                        (let [task-kw (when (and (:task args) (not (str/blank? (str (:task args))))) (parse-kw-input (:task args) nil))
-                              scope-sym (when (and (string? (:scope args)) (not (str/blank? (str (:scope args)))))
+                        (let [task-kw (when (not (str/blank? (str (:task args)))) (parse-kw-input (:task args) nil))
+                              scope-sym (when (and (string? (:scope args)) (not (str/blank? (:scope args))))
                                           (symbol (str/replace (str/trim (:scope args)) #"^'" "")))
-                              ctx-opt (when (contains? args :context) (boolean (:context args)))
-                              want-ctx? (cond (false? ctx-opt) false (true? ctx-opt) true
-                                              :else (boolean (or (= (:handle ans) 'result/e1) task-kw scope-sym)))
+                              want-ctx? (if (contains? args :context) (boolean (:context args)) (boolean (or (= (:handle ans) (quote result/e1)) task-kw scope-sym)))
                               ctx-ans (try (call-server-edge! server-in-ch
-                                                              (cond-> {:op :agent-context :branch br :agent-id (or aid :agent/mcp) :include-context? want-ctx?}
-                                                                task-kw (assoc :task task-kw) scope-sym (assoc :scope scope-sym))
-                                                              15000)
+                                             (cond-> {:op :agent-context :branch br :agent-id (or aid :agent/mcp) :include-context? want-ctx?}
+                                               task-kw (assoc :task task-kw) scope-sym (assoc :scope scope-sym)) 15000)
                                            (catch Throwable _ nil))
                               unread (:unread ctx-ans)
                               unread-txt (when (seq unread)
@@ -368,11 +343,11 @@
                                                 (str/join "\n" (map #(str "- [" (name (or (:seon.agent.message/type %) :chat))
                                                                            " from " (:seon.agent.message/from %) " #" (:seon.agent.message/seq %) "]: "
                                                                            (:seon.agent.message/body %)) unread))
-                                                "\n</unread-messages>"))
-                              parts (cond-> [] (and want-ctx? (not (str/blank? (:context-text ctx-ans)))) (conj (:context-text ctx-ans))
-                                            unread-txt (conj unread-txt)
-                                            true (conj (mwire/format-eval-output (cond-> ans db (assoc :db db :main-db db)))))]
-                          (str/join "\n\n" parts))
+                                                "\n</unread-messages>"))]
+                          (str/join "\n\n"
+                            (cond-> [] (and want-ctx? (not (str/blank? (:context-text ctx-ans)))) (conj (:context-text ctx-ans))
+                              unread-txt (conj unread-txt)
+                              true (conj (mwire/format-eval-output (cond-> ans db (assoc :db db :main-db db)))))))
                         (pr-str ans))]
              (jresp 200 {:jsonrpc "2.0" :id id :result {:content [{:type "text" :text text}] :isError (not (:ok? ans true))}}))))
        :else (jresp 200 {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Method not found: " method)}})))))
@@ -399,20 +374,27 @@
       (async-action st {:op :transact :tx-data [{:seon.user/id :user/default :seon.user/viewport-w cw :seon.user/viewport-h ch}]} nil nil))))
 
 (defn ^:seon/callable pin-to-agent!
-  "Pins any Datahike lookup ref onto `target-agent-id`'s `:seon.agent/pinned` walk."
+  "Pins any Datahike lookup ref onto target agent's `:seon.agent/pinned` walk."
   {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any]] :map]
                   [:=> [:cat [:map [:conn :seon.host/conn]] :keyword [:vector :any] :boolean] :map]]}
   ([st target-agent-id lookup-ref] (pin-to-agent! st target-agent-id lookup-ref false))
   ([st target-agent-id lookup-ref jump?]
    (let [db @(:conn st)
          ref (or (rdata/normalize-inspect-ref lookup-ref) lookup-ref)
-         cur (vec (or (:seon.agent/pinned (d/pull db '[:seon.agent/pinned] [:seon.agent/id target-agent-id])) []))
+         cur (vec (or (:seon.agent/pinned (d/pull db (quote [:seon.agent/pinned]) [:seon.agent/id target-agent-id])) []))
          nxt (if (some #(= % ref) cur) cur (conj cur ref))
          tx (cond-> [{:seon.agent/id target-agent-id :seon.agent/pinned nxt}]
-              jump? (conj {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id target-agent-id]
-                           :seon.user/view-mode :session}))]
+              jump? (conj {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id target-agent-id] :seon.user/view-mode :session}))]
      (async-action (assoc st :branch-feedback {:ok? true :text (str "Pinned " (pr-str ref) " onto " target-agent-id "'s walk.")})
                    {:op :transact :tx-data tx} nil nil))))
+
+(defn ^:seon/callable pin-ref-form!
+  {:malli/schema [:=> [:cat :map :keyword :map] :map]}
+  [st agent-id form]
+  (let [parsed (try (rdata/normalize-inspect-ref (edn/read-string (str/trim (str (:ref form ""))))) (catch Throwable _ nil))]
+    (if-not parsed
+      {:st (assoc st :branch-feedback {:ok? false :text "Pin expects a lookup ref vector like [:seon.code.ns/name 'seon.web]"})}
+      (pin-to-agent! st agent-id parsed false))))
 
 (defn parse-kv-pairs
   {:malli/schema [:=> [:cat [:maybe :string]] :map], :cost/ticks 500000, :cost/bytes 262144}
@@ -457,40 +439,27 @@
             :else (parse-kv-pairs body-str))))))
 
 (defn ^:seon/callable set-explain-lens!
-  "Switches between Explore (`explain? false`) and Explain (`explain? true`, `:context`)
-   for WHATEVER focal entity is currently on screen (preserving `:inspect-ref`)."
-  {:malli/schema [:function
-                  [:=> [:cat :map :boolean] :map]
-                  [:=> [:cat :map :boolean :any] :map]]
-   :cost/ticks 200000}
+  "Switches between Explore (`explain? false`) and Explain (`explain? true`, `:context`) preserving `:inspect-ref`."
+  {:malli/schema [:function [:=> [:cat :map :boolean] :map] [:=> [:cat :map :boolean :any] :map]] :cost/ticks 200000}
   ([st explain?] (set-explain-lens! st explain? nil))
   ([st explain? focus-ref]
    (let [nr (when focus-ref (rdata/normalize-inspect-ref focus-ref))
-       cur-vs (when-let [c (:conn st)] (ui/user-view-state @c))
-       sys-exit? (and (not explain?) (nil? nr) (= [:seon.system/id :root] (:inspect-ref cur-vs)))
-       req (cond
-             sys-exit? {:op :show-user :mode :system :clear-inspect true}
-             :else (cond-> {:op :show-user :mode (if explain? :context :session) :keep-inspect? true}
-                     nr (assoc :inspect-ref nr)))]
-   (async-action (assoc st :branch-feedback nil) req nil nil))))
+         cur-vs (when-let [c (:conn st)] (ui/user-view-state @c))
+         req (if (and (not explain?) (nil? nr) (= [:seon.system/id :root] (:inspect-ref cur-vs)))
+               {:op :show-user :mode :system :clear-inspect true}
+               (cond-> {:op :show-user :mode (if explain? :context :session) :keep-inspect? true} nr (assoc :inspect-ref nr)))]
+     (async-action (assoc st :branch-feedback nil) req nil nil))))
 
 (defn ^:seon/callable spawn-on-entity-form!
-  "Spawns a dedicated worker agent focused on `focus-ref` with optional `:prompt`/`:text` from `form`."
-  {:malli/schema [:function
-                  [:=> [:cat :map :any] :map]
-                  [:=> [:cat :map :any :map] :map]]
-   :cost/ticks 500000}
+  "Spawns a worker focused on `focus-ref` with optional prompt."
+  {:malli/schema [:function [:=> [:cat :map :any] :map] [:=> [:cat :map :any :map] :map]] :cost/ticks 500000}
   ([st focus-ref] (spawn-on-entity-form! st focus-ref {}))
   ([st focus-ref form]
    (if-let [fref (rdata/normalize-inspect-ref focus-ref)]
-     (let [prompt (str/trim (str (or (:prompt form) (:text form) "")))]
-       (async-action
-        (assoc st :branch-feedback {:ok? true :text (str "Starting agent focused on " (rdata/entity-short-label fref) "...")})
-        {:op :spawn-on-entity :focus-ref fref :prompt prompt :role :worker :parent :user}
-        :branch-feedback
-        (fn [ans]
-          (when-not (:ok? ans)
-            {:ok? false :text (str "Spawn failed: " (or (:error ans) "unknown error"))}))))
+     (async-action
+      (assoc st :branch-feedback {:ok? true :text (str "Starting agent focused on " (rdata/entity-short-label fref) "...")})
+      {:op :spawn-on-entity :focus-ref fref :prompt (str/trim (str (or (:prompt form) (:text form) ""))) :role :worker :parent :user}
+      :branch-feedback #(when-not (:ok? %) {:ok? false :text (str "Spawn failed: " (or (:error %) "unknown error"))}))
      {:st (assoc st :branch-feedback {:ok? false :text "Cannot spawn agent: invalid entity reference."})})))
 
 (defn ^:seon/callable navigate-url!
@@ -568,3 +537,26 @@
   {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :map] :map] [:=> [:cat [:map [:conn :seon.host/conn]] :any :map] :map]]}
   ([st form] (chat-agent-form! st form))
   ([st agent-id form] (chat-agent-form! st agent-id form)))
+
+(defn ^:seon/callable eval-snippet!
+  "Evaluates Clojure snippet `code` on the viewed agent branch via `:op :eval` into `:branch-feedback`."
+  {:malli/schema [:=> [:cat :map :string] :map] :cost/ticks 500000}
+  [st code]
+  (let [s (str/trim (str (or code "")))]
+    (if (str/blank? s)
+      {:st (assoc st :branch-feedback {:ok? false :text "Empty snippet."})}
+      (let [db (when-let [c (:conn st)] @c)
+            aid (when db (:viewing-id (ui/user-view-state db)))
+            br (or (when (and db aid) (:seon.agent/branch (d/pull db (quote [:seon.agent/branch]) [:seon.agent/id aid]))) :branch/repl)
+            clip (fn [t n] (if (> (count t) n) (str (subs t 0 (- n 3)) "...") t))]
+        (async-action
+         (assoc st :branch-feedback {:ok? true :text (str "Evaluating snippet on " br "...")})
+         {:op :eval :branch br :agent-id (or aid :agent/repl) :code s :keep-warm? true}
+         :branch-feedback
+         (fn [ans]
+           (if (:ok? ans)
+             (let [o (not-empty (str/trim (str (or (:out ans) ""))))]
+               {:ok? true :text (str (when (:handle ans) (str (:handle ans) " ")) "=> "
+                                     (clip (str (or (:value ans) "nil")) 240)
+                                     (when o (str " | out: " (clip o 160))))})
+             {:ok? false :text (str "Eval error on " br ": " (or (:error ans) "unknown error"))})))))))

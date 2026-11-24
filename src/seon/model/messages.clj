@@ -22,7 +22,7 @@
 (def default-system-prompt
   (str "You are a Seon Clojure agent in your branch's live Jolt runtime.\n"
        "Relevant code, schemas, docs, tasks, and primers are surfaced dynamically in context.\n"
-       "When replying directly to the user (greetings, simple answers, or final summaries), respond in clear plain prose with NO tool calls.\n"
+       "Use clear Markdown — headings, tables, diffs, backtick entity links, or inline `hiccup` blocks when helpful — with NO tool calls when replying directly to the user.\n"
        "Never treat a closed `<agent ...>...</agent>` example block as your own live session."))
 
 (defn format-tool-content
@@ -166,7 +166,7 @@
 (defn build-request-body
   "Constructs the OpenAI-compat / DeepSeek request body using present-only optional params
    (`temperature` omitted unless explicitly set, `stream_options: {:include_usage true}` when streaming)."
-  {:malli/schema [:=> [:cat [:map [:model {:optional true} :string] [:max-tokens {:optional true} :int] [:temperature {:optional true} :double] [:thinking {:optional true} [:enum :enabled :disabled]] [:reasoning-effort {:optional true} [:enum :low :medium :high]] [:replay-reasoning {:optional true} :boolean] [:stream? {:optional true} :boolean] [:messages {:optional true} [:vector [:map [:role :string] [:content :string]]]]] [:maybe :string] [:vector [:map [:thought {:optional true} :string]]] [:maybe :string]] :map], :cost/ticks 5000000}
+  {:malli/schema [:=> [:cat [:map [:model {:optional true} :string] [:max-tokens {:optional true} :int] [:temperature {:optional true} :double] [:thinking {:optional true} [:enum :enabled :disabled]] [:reasoning-effort {:optional true} [:enum :low :medium :high]] [:replay-reasoning {:optional true} :boolean] [:stream? {:optional true} :boolean] [:messages {:optional true} [:vector [:map [:role :string] [:content [:or :string [:vector :map]]]]]]] [:maybe :string] [:vector [:map [:thought {:optional true} :string]]] [:maybe :string]] :map], :cost/ticks 5000000}
   [{:keys [model max-tokens temperature thinking reasoning-effort replay-reasoning stream? messages]
     :or {stream? true replay-reasoning true}}
    system-prompt history user-prompt]
