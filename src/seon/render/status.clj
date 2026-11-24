@@ -535,3 +535,58 @@
    :cost/ticks 5000000}
   [main-db branch-db agent-id]
   (:tx (unanswered-user-chat-info main-db branch-db agent-id nil)))
+
+(defn compacted-turns-info
+  "Purely derives compacted (retracted) turn summary for `agent-id` from `(d/history branch-db)` with zero process flags; returns nil when no evals were retracted."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe :map]]
+   :cost/ticks 8000000}
+  [branch-db agent-id]
+  (when (and branch-db agent-id (contains? (:schema branch-db) :seon.agent.eval/agent))
+    (let [hdb (d/history branch-db)
+          dts (vec (d/datoms hdb :avet :seon.agent.eval/agent agent-id))
+          retracted (reduce (fn [acc dt]
+                              (if-not (:added dt)
+                                (update acc (:e dt) #(max (long (or % 0)) (long (or (:tx dt) 0))))
+                                acc))
+                            {} dts)]
+      (when (seq retracted)
+        (let [live-eids (into #{} (map :e) (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
+              gone-eids (remove live-eids (keys retracted))]
+          (when (seq gone-eids)
+            (let [pull-turn (fn [e]
+                              (some #(when (:added %) (long (:v %)))
+                                    (d/datoms hdb :eavt e :seon.agent.eval/turn)))
+                  gone-turns (->> gone-eids (keep pull-turn) distinct sort vec)
+                  live-turns (->> live-eids (keep pull-turn) distinct sort vec)
+                  last-tx (reduce max 0 (map #(get retracted %) gone-eids))]
+              {:seon.agent/id agent-id
+               :retracted-turns gone-turns
+               :retracted-evals (count gone-eids)
+               :live-turns live-turns
+               :last-retract-tx last-tx})))))))
+
+(defn latest-ctx-friction-tx
+  "Returns the tx of the latest eval (within last 2 turns) where `agent-id` touched `ctx` and hit an error or oversized (>6000 chars) return; nil otherwise."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe :int]]
+   :cost/ticks 4000000}
+  [branch-db agent-id]
+  (when (and branch-db agent-id (contains? (:schema branch-db) :seon.agent.eval/agent))
+    (let [evs (rdata/agent-evals-in branch-db agent-id)
+          recent (take-last 2 evs)
+          mentions-ctx? (fn [^String s]
+                          (or (str/includes? s "@ctx")
+                              (str/includes? s "user/ctx")
+                              (str/includes? s "seon.ctx/ctx")
+                              (str/includes? s "swap! ctx")
+                              (str/includes? s "reset! ctx")))]
+      (some (fn [e]
+              (let [code (str (or (:seon.agent.eval/code e) ""))]
+                (when (mentions-ctx? code)
+                  (let [err (:seon.agent.eval/error e)
+                        vlen (count (str (or (:seon.agent.eval/value e) "")))]
+                    (when (or (some? err) (> vlen 6000))
+                      (let [eid (:db/id e)]
+                        (or (when (integer? eid) (:tx (first (d/datoms branch-db :eavt eid :seon.agent.eval/code))))
+                            (:max-tx branch-db)
+                            1)))))))
+            (reverse recent)))))

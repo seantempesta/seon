@@ -511,7 +511,7 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any :any [:maybe :int] :int] [:vector :int]]
    :cost/ticks 5000000}
   [db read-entries persist-tx self-agent-eid limit]
-  (let [lim (min 64 (max 1 (long (or limit 64))))
+  (let [lim (min 256 (max 1 (long (or limit 256))))
         dh-sch (when db (:schema db))
         excluded (volatile! (if (integer? self-agent-eid) #{(long self-agent-eid)} #{}))
         saw-excluded-avet? (volatile! false)

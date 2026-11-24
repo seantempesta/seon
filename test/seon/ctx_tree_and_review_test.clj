@@ -22,7 +22,11 @@
             [seon.model.wire :as mwire]
             [seon.code.refactor :as refactor]
             [seon.code.migrate :as migrate]
-            [seon.transactor.spawn :as tspawn]))
+            [seon.transactor.spawn :as tspawn]
+            [seon.model.messages :as messages]
+            [seon.code.analyze :as analyze]
+            [seon.fork.helpers :as fhelpers]
+            [seon.fork.calls :as fcalls]))
 
 (deftest ^{:cost/ticks 120000000} pure-two-index-ctx-swap-and-custom-data-test
   (testing "Pure 2-index @ctx attaches evals via :seon.agent.eval/_agent-ref, retracts via swap!, and generalizes to arbitrary custom schemas"
@@ -371,3 +375,68 @@
                 (is (= :restored (:action r-res)))
                 (is (str/includes? (or (code/render-path @wconn "src/demo/rev/orig.clj") "") "(defn- helper [x]"))))
             (finally (d/release wconn))))))))
+
+(deftest turn-numbers-compaction-hop-ctx-friction-and-typed-callers-test
+  (testing "1. Wire messages include explicit turn N headers so compacted turn gaps are obvious"
+    (let [msgs (vec (messages/turns->wire-messages {}
+                      [{:turn 1 :thought "first" :calls [{:id "c1" :handle (quote result/e1) :code "(+ 1 2)" :ok? true :value "3"}]}
+                       {:turn 5 :thought "after compact" :calls [{:id "c5" :handle (quote result/e5) :code "(+ 3 4)" :ok? true :value "7"}]}]))
+          tool-contents (mapv :content (filter #(= "tool" (:role %)) msgs))]
+      (is (= 2 (count tool-contents)))
+      (is (str/starts-with? (first tool-contents) "; turn 1 · result/e1 · ok"))
+      (is (str/starts-with? (second tool-contents) "; turn 5 · result/e5 · ok"))))
+  (testing "2. Compaction detection derives missing turns from d/history and fires history doc hop, plus ctx-friction progressive disclosure"
+    (with-test-store [{:keys [conn]}]
+      (let [aid :agent/compact-probe]
+        (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main :seon.agent/role :worker}
+                                    {:seon.code.doc/id "docs/primers.md#history-and-time-travel"
+                                     :seon.code.doc/path "docs/primers.md" :seon.code.doc/order 10
+                                     :seon.code.doc/heading "## History & Time-Travel" :seon.code.doc/body "Use d/history"}
+                                    {:seon.code.doc/id "docs/primers.md#ctx-atom"
+                                     :seon.code.doc/path "docs/primers.md" :seon.code.doc/order 11
+                                     :seon.code.doc/heading "## Ctx Atom" :seon.code.doc/body "Use swap! ctx"}]})
+        (let [ag-eid (:e (first (d/datoms @conn :avet :seon.agent/id aid)))
+              e1-id (random-uuid) e2-id (random-uuid) e3-id (random-uuid)]
+          (d/transact conn {:tx-data [{:seon.agent.eval/id e1-id :seon.agent.eval/agent aid :seon.agent.eval/agent-ref ag-eid
+                                       :seon.agent.eval/turn 1 :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/value "2"}
+                                      {:seon.agent.eval/id e2-id :seon.agent.eval/agent aid :seon.agent.eval/agent-ref ag-eid
+                                       :seon.agent.eval/turn 2 :seon.agent.eval/code "(bad)" :seon.agent.eval/error "boom"}
+                                      {:seon.agent.eval/id e3-id :seon.agent.eval/agent aid :seon.agent.eval/agent-ref ag-eid
+                                       :seon.agent.eval/turn 3 :seon.agent.eval/code "(+ 2 2)" :seon.agent.eval/value "4"}]})
+          ;; Before compaction: nil info, no ctx friction
+          (is (nil? (rstatus/compacted-turns-info @conn aid)))
+          (is (nil? (rstatus/latest-ctx-friction-tx @conn aid)))
+          ;; Retract turn 2 via true [:db/retractEntity]
+          (let [e2-eid (:e (first (d/datoms @conn :avet :seon.agent.eval/id e2-id)))]
+            (d/transact conn {:tx-data [[:db/retractEntity e2-eid]]}))
+          (let [info (rstatus/compacted-turns-info @conn aid)
+                wire (rwire/build-live-wire-request @conn @conn aid {:conn conn :vision? false})]
+            (is (= [2] (:retracted-turns info)))
+            (is (= 1 (:retracted-evals info)))
+            (is (= [1 3] (:live-turns info)))
+            (is (some #(and (= "user" (:role %))
+                            (string? (:content %))
+                            (str/includes? (:content %) "Compacted turns: [2]"))
+                      (:messages wire))))
+          ;; Now record a ctx error eval -> latest-ctx-friction-tx returns non-nil tx
+          (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent aid :seon.agent.eval/agent-ref ag-eid
+                                       :seon.agent.eval/turn 4 :seon.agent.eval/code "(swap! ctx assoc :bad 1)"
+                                       :seon.agent.eval/error "Schema rail rejected"}]})
+          (is (integer? (rstatus/latest-ctx-friction-tx @conn aid)))))))
+  (testing "3. extract-domain-touched-eids scales beyond old 64 cap up to 256"
+    (let [entries (mapv (fn [i] [{:e (+ 1000 i) :a :seon.code.var/name} {:e (+ 1000 i) :a :seon.code.var/name}]) (range 120))
+          res (analyze/extract-domain-touched-eids nil entries nil nil 256)]
+      (is (= 120 (count res)))))
+  (testing "4. user/callers and user/callees return schema-typed ns-qualified maps"
+    (with-test-store [{:keys [conn]}]
+      (let [tx (code/file-import-tx @conn "src/demo/typed_callers.clj"
+                 "(ns demo.typed-callers)\n(defn leaf [x] (inc x))\n(defn caller [x] (leaf x))\n" false)]
+        (d/transact conn {:tx-data tx})
+        (binding [fcalls/*agent-ctx* {:conn conn :branch :main :agent-id :repl/test}]
+          (let [cs (fhelpers/callers (quote demo.typed-callers/leaf))
+                cl (fhelpers/callees (quote demo.typed-callers/caller))]
+            (is (= (quote demo.typed-callers/leaf) (:seon.code.var/name cs)))
+            (is (= [(quote demo.typed-callers/caller)] (:seon.code.var/callers cs)))
+            (is (= :seon.code.var/callers-result (:seon/schema (meta cs))))
+            (is (= (quote demo.typed-callers/caller) (:seon.code.var/name cl)))
+            (is (= :seon.code.var/callees-result (:seon/schema (meta cl))))))))))

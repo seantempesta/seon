@@ -29,13 +29,14 @@
       {:wire wire
        :st (assoc-in st [:perf-alerts fid] {:ms ms :mb mb})
        :tx [{:op :record-fault
-             :id fid
-             :class :slow-wire-build
-             :severity :warning
-             :proc :agents
-             :ns 'seon.render.ui
-             :subject (str "seon.render.ui/build-live-wire-request:" (name aid))
-             :message (str "Slow wire context build for " aid ": " ms " ms, " mb " MB (> 120 ms / 80 MB budget).")}]}
+            :id fid
+            :class :slow-wire-build
+            :severity :warning
+            :proc :agents
+            :agent aid
+            :ns (quote seon.render.ui)
+            :subject (str "seon.render.ui/build-live-wire-request:" (name aid))
+            :message (str "Slow wire context build for " aid ": " ms " ms, " mb " MB (> 120 ms / 80 MB budget).")}]}
 
       (and (not slow?) (or prev persisted?))
       {:wire wire
@@ -314,6 +315,7 @@
                 :proc :agents
                 :class :child-exception
                 :severity :error
+                :agent aid
                 :subject (str aid)
                 :message err-str}]
           :exits [{:ev :turn-idle :agent-id aid :pid pid}]

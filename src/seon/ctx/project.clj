@@ -277,16 +277,21 @@
                      (or (and (dh :seon.agent/archived?)
                               (true? (:v (first (d/datoms branch-db :eavt e :seon.agent/archived?)))))
                          (and main-db (not (same-db? main-db branch-db)) (mdh :seon.agent/archived?)
-                              (true? (:v (first (d/datoms main-db :eavt e :seon.agent/archived?))))))))]
-    (if (and aid (dh :seon.agent.eval/agent) (dh :seon.agent.eval/touched)
-             (first (d/datoms branch-db :aevt :seon.agent.eval/touched)))
+                              (true? (:v (first (d/datoms main-db :eavt e :seon.agent/archived?))))))))
+        has-refs? (boolean (and (dh :seon.agent.eval/touched-refs) (first (d/datoms branch-db :aevt :seon.agent.eval/touched-refs))))
+        has-vec? (boolean (and (dh :seon.agent.eval/touched) (first (d/datoms branch-db :aevt :seon.agent.eval/touched))))]
+    (if (and aid (dh :seon.agent.eval/agent) (or has-refs? has-vec?))
       (reduce (fn [acc dt]
-                (if-let [tdt (first (d/datoms branch-db :eavt (:e dt) :seon.agent.eval/touched))]
-                  (let [ts (:v tdt)]
-                    (if (coll? ts)
-                      (reduce (fn [a e] (if (and (integer? e) (not (archived? e))) (update a e (fnil inc 0)) a)) acc ts)
-                      acc))
-                  acc))
+                (let [ee (:e dt)
+                      r-ds (when has-refs? (seq (d/datoms branch-db :eavt ee :seon.agent.eval/touched-refs)))]
+                  (if r-ds
+                    (reduce (fn [a rdt] (let [e (:v rdt)] (if (and (integer? e) (not (archived? e))) (update a e (fnil inc 0)) a))) acc r-ds)
+                    (if-let [tdt (when has-vec? (first (d/datoms branch-db :eavt ee :seon.agent.eval/touched)))]
+                      (let [ts (:v tdt)]
+                        (if (coll? ts)
+                          (reduce (fn [a e] (if (and (integer? e) (not (archived? e))) (update a e (fnil inc 0)) a)) acc ts)
+                          acc))
+                      acc))))
               {}
               (d/datoms branch-db :avet :seon.agent.eval/agent aid))
       {})))

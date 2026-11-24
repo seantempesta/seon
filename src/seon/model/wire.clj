@@ -519,7 +519,7 @@
                   [:cat :map] :string]
    :cost/ticks 500000
    :cost/bytes 1048576}
-  [{:keys [handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars out-max-chars db main-db fallback-db code]}]
+  [{:keys [turn handle ok? value out error ms ticks result-schema schema branch branch-tx max-chars out-max-chars db main-db fallback-db code]}]
   (let [eff-ok? (if (some? ok?) (boolean ok?) (nil? error))
         cap (long (max 256 (if (number? max-chars) max-chars 24000)))
         h-str (if handle (str handle) "result/e?")
@@ -530,12 +530,13 @@
         hdr (str "; "
                  (str/join " · "
                            (remove nil?
-                                   [(when handle (str handle))
-                                    (if eff-ok? "ok" "error")
-                                    (when (number? ms) (str ms " ms"))
-                                    ticks-str
-                                    (when sch (str sch))
-                                    (when branch (str branch (when branch-tx (str " @ tx " branch-tx))))])))
+                                   [(when (integer? turn) (str "turn " turn))
+                                   (when handle (str handle))
+                                   (if eff-ok? "ok" "error")
+                                   (when (number? ms) (str ms " ms"))
+                                   ticks-str
+                                   (when sch (str sch))
+                                   (when branch (str branch (when branch-tx (str " @ tx " branch-tx))))])))
         out-s (when (and (some? out) (not (str/blank? (str out))))
                 (let [os (str out)
                                                       n (count os)

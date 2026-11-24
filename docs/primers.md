@@ -39,3 +39,13 @@ Just-in-time behavioral primers projected dynamically into agent context via dec
 - Verify `(user/health)` reports `0` errors, `0` `:oversized-namespace`, `0` `:broken-doc-ref`, and `0` `:unused-require` (run `(user/health)` and `(user/diff)` as parallel tool calls instead of `(do ...)`).
 - When working an assigned task on a branch that should merge, signal YOUR session done once all proofs and health checks are green via `(user/ready!)` (during review, never set `:seon.agent/ready?` on `:seon.agent/target`).
 - Always conclude with a clear, honest plain-prose reply (marked with observed `[M]` evidence) so the user knows exactly what was proved and done.
+## History & Time-Travel
+- Compacted (retracted) turns omit earlier tool calls/outputs from prompt history, while branch code, schemas, and runtime defs remain cumulative.
+- Missing turn numbers (`turn 1` -> `turn 5`) show exactly which turns were compacted; full datoms remain intact in Datahike history.
+- Inspect omitted evals via `(user/past-evals {:limit 15 :grep "..."})` or `(seon.store/agent-historical-evals (user/db) (:seon.agent/id @ctx))`.
+- Time-travel any DB snapshot before a retraction with `(user/as-of tx)` or `(d/history (user/db))` and `(user/history (quote ns/fn))`.
+## Ctx Atom
+- `@ctx` (`user/ctx` / `@seon.ctx/ctx`) is your live 2-index Datahike tree (`:eavt` forward + `:avet` reverse refs like `:seon.agent.eval/_agent-ref`).
+- Read selectively (`(keys @ctx)`, `(:seon.agent/tasks @ctx)`, `(mapv :seon.agent.eval/turn (:seon.agent.eval/_agent-ref @ctx))`) rather than printing the entire deref.
+- Mutate via plain Clojure `(swap! ctx ...)`: `assoc` scalar attrs, `update` `:seon.agent/pinned` or `:seon.agent/curated`, or `filterv` `:seon.agent.eval/_agent-ref` (dropped maps transact `[:db/retractEntity eid]` automatically via `seon.ctx.tree/diff-entity-tx`).
+- On forked agents, `(:seon.agent/forked-from @ctx)` expands the parent agent subtree, so `(swap! ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] ...)` edits parent evals directly; for bulk/cross-entity updates or sets like `:seon.agent/tasks`, use `(user/transact! [...])` + `d/q` / `d/pull`.

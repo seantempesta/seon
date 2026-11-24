@@ -19,8 +19,7 @@
   "Renders Hiccup or a uniform renderer across display widths (default `[360 640 1100]`, `:dark`),
    persists full `:seon.media/image` entities into the branch DB, and returns a compact
    `{:seon.media/frames [...] :summary ...}` summary (`{:seon/schema :seon.media/frames}`)."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat :any] :map] [:=> [:cat :any [:maybe :map]] :map]]
-  :cost/ticks 45000000}
+  {:seon.repl/export true, :malli/schema [:function [:=> [:cat :any] :seon.media/frames] [:=> [:cat :any :map] :seon.media/frames]], :cost/ticks 45000000}
   ([hiccup-or-renderer] (render-preview! hiccup-or-renderer nil))
   ([hiccup-or-renderer opts]
    (let [o (if (map? opts) opts {})
@@ -91,13 +90,13 @@
 
 (defn ^:seon.flow/edge conn
   "Returns the current agent branch Datahike connection."
-  {:seon.repl/export ['conn 'conn-of] :malli/schema [:=> [:cat] :any]}
+  {:seon.repl/export [(quote conn) (quote conn-of)], :malli/schema [:=> [:cat] [:maybe :seon.host/conn]]}
   []
   (:conn *agent-ctx*))
 
 (defn ^:seon.flow/edge db
   "Returns the current branch Datahike DB value (`@conn`)."
-  {:seon.repl/export true :malli/schema [:=> [:cat] :any]}
+  {:seon.repl/export true, :malli/schema [:=> [:cat] [:maybe :seon.host/db]]}
   []
   (when-let [c (:conn *agent-ctx*)] @c))
 
@@ -260,102 +259,48 @@
 
 (defn ^:seon.flow/edge main-db
   "Returns the current `:main` branch Datahike DB value."
-  {:seon.repl/export true :malli/schema [:=> [:cat] :any]}
+  {:seon.repl/export true, :malli/schema [:=> [:cat] [:maybe :seon.host/db]]}
   []
   (when-let [{:keys [conn]} *agent-ctx*] (store/head conn :main)))
 
 (defn ^:seon.flow/edge as-of
   "Returns a historical Datahike DB snapshot at transaction id `tx`."
-  {:seon.repl/export true :malli/schema [:=> [:cat :int] :any]}
+  {:seon.repl/export true, :malli/schema [:=> [:cat :int] [:maybe :seon.host/db]]}
   [tx]
   (when-let [{:keys [conn]} *agent-ctx*] (d/as-of @conn (long tx))))
 
-(defn- all-refs-of [db s]
-  (let [var-callers (->> (d/datoms db :avet :seon.code.var/refs s)
-                         (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
-                         distinct sort vec)
-        schema-renders (when (contains? (:schema db) :seon.schema/form)
-                         (vec (distinct
-                               (keep (fn [dt]
-                                       (let [f (:v dt)
-                                             r (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
-                                         (when (= s r)
-                                           (when-let [k (:seon.schema/key (d/pull db '[:seon.schema/key] (:e dt)))]
-                                             [:seon.render/hiccup k]))))
-                                     (d/datoms db :aevt :seon.schema/form)))))]
-    (vec (concat var-callers schema-renders))))
-
-(defn ^:seon.flow/edge callers
-  "Returns all vars and `:seon.render/hiccup` schema declarations referencing `sym` (or a map for multiple symbols)."
-  {:seon.repl/export true :malli/schema [:=> [:cat :any [:* :any]] :any]}
-  ([sym]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [db @conn]
-       (if (and (coll? sym) (not (map? sym)))
-         (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (all-refs-of db s)]))) sym)
-         (all-refs-of db (if (string? sym) (symbol sym) sym))))))
-  ([sym & more]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [db @conn]
-       (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (all-refs-of db s)]))) (cons sym more))))))
-
 (defn ^:seon.flow/edge callees
-  "Returns `{:refs :input :optional-input :output :keywords}` for `sym` in the current branch DB."
-  {:seon.repl/export true :malli/schema [:=> [:cat :any] [:maybe :map]]}
+  "Returns a schema-typed `:seon.code.var/callees-result` map `{:seon.code.var/name :seon.code.var/refs :seon.code.var/input :seon.code.var/optional-input :seon.code.var/output :seon.code.var/keywords}` for `sym`."
+  {:seon.repl/export true
+   :malli/schema [:=> [:cat [:or :seon.code.var/name :string]] [:maybe :seon.code.var/callees-result]]}
   [sym]
   (when-let [{:keys [conn]} *agent-ctx*]
     (let [db @conn
           s (if (string? sym) (symbol sym) sym)
-          v (d/pull db '[:seon.code.var/name :seon.code.var/refs :seon.code.var/keywords
-                         {:seon.code.var/input [:seon.schema/key]}
-                         {:seon.code.var/optional-input [:seon.schema/key]}
-                         {:seon.code.var/output [:seon.schema/key]}]
+          v (d/pull db (quote [:seon.code.var/name :seon.code.var/refs :seon.code.var/keywords
+                               {:seon.code.var/input [:seon.schema/key]}
+                               {:seon.code.var/optional-input [:seon.schema/key]}
+                               {:seon.code.var/output [:seon.schema/key]}])
                     [:seon.code.var/name s])]
       (when (:seon.code.var/name v)
-        {:refs (vec (sort (:seon.code.var/refs v)))
-         :input (vec (sort (keep :seon.schema/key (:seon.code.var/input v))))
-         :optional-input (vec (sort (keep :seon.schema/key (:seon.code.var/optional-input v))))
-         :output (vec (sort (keep :seon.schema/key (:seon.code.var/output v))))
-         :keywords (vec (sort (:seon.code.var/keywords v)))}))))
+        (with-meta
+          {:seon.code.var/name s
+           :seon.code.var/refs (vec (sort (:seon.code.var/refs v)))
+           :seon.code.var/input (vec (sort (keep :seon.schema/key (:seon.code.var/input v))))
+           :seon.code.var/optional-input (vec (sort (keep :seon.schema/key (:seon.code.var/optional-input v))))
+           :seon.code.var/output (vec (sort (keep :seon.schema/key (:seon.code.var/output v))))
+           :seon.code.var/keywords (vec (sort (:seon.code.var/keywords v)))}
+          {:seon/schema :seon.code.var/callees-result})))))
 
 (defn ^:seon.flow/edge tests-for
   "Returns the reach-selected tests that cover `sym-or-ns`."
-  {:seon.repl/export true :malli/schema [:=> [:cat :any] :any]}
+  {:seon.repl/export true, :malli/schema [:=> [:cat [:or :seon.code.var/name :seon.code.ns/name :string]] [:maybe [:vector :seon.code.var/name]]]}
   [sym-or-ns]
   (when-let [{:keys [conn]} *agent-ctx*] (code/reaching-tests @conn sym-or-ns)))
 
-(defn ^:seon.flow/edge remove-var!
-  "Retracts a var and its form from the branch DB (refuses if callers exist unless `{:force? true}`)."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any [:maybe :map]] [:maybe :map]]]}
-  ([sym] (remove-var! sym {}))
-  ([sym {:keys [force?]}]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [db @conn
-           s (if (string? sym) (symbol sym) sym)
-           k (str s)
-           callers (->> (d/datoms db :avet :seon.code.var/refs s)
-                        (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
-                        (remove #(= % s))
-                        distinct sort vec)]
-       (if (and (seq callers) (not force?))
-         {:ok? false :error :has-callers :var s :callers callers
-          :hint "Update callers first or pass {:force? true}."}
-         (let [has-form? (boolean (first (d/datoms db :avet :seon.code.form/key k)))
-               has-var? (boolean (first (d/datoms db :avet :seon.code.var/name s)))
-               tx (cond-> []
-                    has-form? (conj [:db/retractEntity [:seon.code.form/key k]])
-                    has-var? (conj [:db/retractEntity [:seon.code.var/name s]]))
-               r (when (seq tx) (d/transact conn {:tx-data tx}))]
-           (when (namespace s)
-             (when-let [ns-obj (find-ns (symbol (namespace s)))]
-               (ns-unmap ns-obj (symbol (name s)))))
-           (when r (ctx/refresh-active! (:db-after r) (:tx-data r)))
-           {:ok? true :removed s :retracted-form? has-form? :retracted-var? has-var?
-            :tx (when r (:max-tx (:db-after r)))}))))))
-
 (defn ^:seon.flow/edge doc!
   "Creates or updates a documentation section entity in the branch DB and refreshes context."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat :any :any :any] [:maybe :map]]]}
+  {:seon.repl/export true, :malli/schema [:function [:=> [:cat :seon.code.doc/id :seon.code.doc/body] [:maybe :map]] [:=> [:cat :seon.code.doc/id [:maybe :string] :seon.code.doc/body] [:maybe :map]]]}
   ([doc-id body] (doc! doc-id nil body))
   ([doc-id heading body]
    (if-not (string? body)
@@ -464,7 +409,7 @@
 
 (defn ^:seon.flow/edge register-schema!
   "Validates and registers a Malli schema `:seon.schema/*` entity and its derived Datahike attributes."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat :keyword :any] [:maybe :map]] [:=> [:cat :keyword :any [:maybe :map]] [:maybe :map]]]}
+  {:seon.repl/export true, :malli/schema [:function [:=> [:cat :seon.schema/key :seon.schema/form] [:maybe :map]] [:=> [:cat :seon.schema/key :seon.schema/form [:maybe :map]] [:maybe :map]]]}
   ([key form] (register-schema! key form nil))
   ([key form {:keys [doc examples]}]
    (when-let [{:keys [conn]} *agent-ctx*]
@@ -490,3 +435,68 @@
            mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
            render-fn (requiring-resolve 'seon.render.wire/render-agent-context)]
        (render-fn mdb bdb (or agent-id :agent/repl) opts)))))
+
+(defn- callers-entry [db s]
+  (let [var-callers (->> (d/datoms db :avet :seon.code.var/refs s)
+                         (keep #(:seon.code.var/name (d/pull db (quote [:seon.code.var/name]) (:e %))))
+                         distinct sort vec)
+        schema-renders (when (contains? (:schema db) :seon.schema/form)
+                         (vec (distinct
+                               (keep (fn [dt]
+                                       (let [f (:v dt)
+                                             r (when (and (vector? f) (map? (second f))) (:seon.render/hiccup (second f)))]
+                                         (when (= s r)
+                                           (:seon.schema/key (d/pull db (quote [:seon.schema/key]) (:e dt))))))
+                                     (d/datoms db :aevt :seon.schema/form)))))]
+    (with-meta
+      (cond-> {:seon.code.var/name s :seon.code.var/callers var-callers}
+        (seq schema-renders) (assoc :seon.code.var/render-schemas schema-renders))
+      {:seon/schema :seon.code.var/callers-result})))
+
+(defn ^:seon.flow/edge callers
+  "Returns a schema-typed `:seon.code.var/callers-result` map `{:seon.code.var/name :seon.code.var/callers :seon.code.var/render-schemas}` for `sym` (or `{sym result ...}` for multiple symbols)."
+  {:seon.repl/export true
+   :malli/schema [:function
+                  [:=> [:cat [:or :seon.code.var/name :string [:sequential [:or :seon.code.var/name :string]]]]
+                       [:maybe [:or :seon.code.var/callers-result [:map-of :seon.code.var/name :seon.code.var/callers-result]]]]
+                  [:=> [:cat [:or :seon.code.var/name :string] [:* [:or :seon.code.var/name :string]]]
+                       [:maybe [:map-of :seon.code.var/name :seon.code.var/callers-result]]]]}
+  ([sym]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [db @conn]
+       (if (and (coll? sym) (not (map? sym)))
+         (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (callers-entry db s)]))) sym)
+         (callers-entry db (if (string? sym) (symbol sym) sym))))))
+  ([sym & more]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [db @conn]
+       (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (callers-entry db s)]))) (cons sym more))))))
+
+(defn ^:seon.flow/edge remove-var!
+  "Retracts a var and its form from the branch DB (refuses if callers exist unless `{:force? true}`)."
+  {:seon.repl/export true, :malli/schema [:function [:=> [:cat [:or :seon.code.var/name :string]] [:maybe :map]] [:=> [:cat [:or :seon.code.var/name :string] [:maybe :map]] [:maybe :map]]]}
+  ([sym] (remove-var! sym {}))
+  ([sym {:keys [force?]}]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [db @conn
+           s (if (string? sym) (symbol sym) sym)
+           k (str s)
+           callers (->> (d/datoms db :avet :seon.code.var/refs s)
+                        (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
+                        (remove #(= % s))
+                        distinct sort vec)]
+       (if (and (seq callers) (not force?))
+         {:ok? false :error :has-callers :var s :callers callers
+          :hint "Update callers first or pass {:force? true}."}
+         (let [has-form? (boolean (first (d/datoms db :avet :seon.code.form/key k)))
+               has-var? (boolean (first (d/datoms db :avet :seon.code.var/name s)))
+               tx (cond-> []
+                    has-form? (conj [:db/retractEntity [:seon.code.form/key k]])
+                    has-var? (conj [:db/retractEntity [:seon.code.var/name s]]))
+               r (when (seq tx) (d/transact conn {:tx-data tx}))]
+           (when (namespace s)
+             (when-let [ns-obj (find-ns (symbol (namespace s)))]
+               (ns-unmap ns-obj (symbol (name s)))))
+           (when r (ctx/refresh-active! (:db-after r) (:tx-data r)))
+           {:ok? true :removed s :retracted-form? has-form? :retracted-var? has-var?
+            :tx (when r (:max-tx (:db-after r)))}))))))

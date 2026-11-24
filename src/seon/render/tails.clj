@@ -359,3 +359,20 @@
    :seon.task/lineage      ['seon.render.entities.work/render-task-lineage]
    :seon.media/image       ['seon.render.media/render-image-chip 'seon.render.media/render-image-card]
    :seon.ui.status/entity  ['seon.render.status/render-status-chip 'seon.render.status/render-status-card]})
+
+(defn render-compacted-history-tail
+  "Pure `ns-map -> ns-map` Hiccup renderer for compacted-session notice derived from `(d/history branch-db)`."
+  {:malli/schema [:=> [:cat [:map [:seon.tail/compacted-history :map]]] [:maybe [:map [:seon.ui/hiccup :seon.ui/hiccup]]]]
+   :cost/ticks 300000}
+  [{{:keys [retracted-turns retracted-evals last-retract-tx]} :seon.tail/compacted-history}]
+  (when (pos? (long (or retracted-evals 0)))
+    (let [ts (when (seq retracted-turns) (vec retracted-turns))]
+      {:tag "compacted-history"
+       :seon.ui/hiccup
+       [:section {:class "tail-block" :data-min-width 220}
+        [:p (str "Compacted turns: " (if ts (pr-str ts) "(earlier)")
+                 " (" retracted-evals " eval(s) retracted at tx " last-retract-tx
+                 "; branch code/data/runtime is cumulative).")]
+        [:p "Inspect omitted turns via " [:code "(user/past-evals)"]
+         ", " [:code "(d/history (user/db))"]
+         ", or " [:code (str "(user/as-of " (max 0 (dec (long (or last-retract-tx 1)))) ")")] "."]]})))

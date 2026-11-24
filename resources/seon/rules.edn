@@ -3,6 +3,23 @@
                     ?agent
                     ?tx
                     :in
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.render.status/compacted-turns-info $branch ?agent) ?info]
+                    [(some? ?info)]
+                    [(get ?info :last-retract-tx) ?tx]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?agent :wm/session-compacted ?tx]],
+  :seon.rule/doc "Derives [?agent :wm/session-compacted ?tx] purely from (d/history $branch) whenever any eval of ?agent has been retracted.",
+  :seon.rule/stratum 14,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/session-compacted}
+ {:seon.rule/query [:find
+                    ?agent
+                    ?tx
+                    :in
                     $main
                     $branch
                     ?agent
@@ -107,6 +124,30 @@
   :seon.rule/stratum 15,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/live-status-card}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $wm
+                    $branch
+                    ?agent
+                    :where
+                    [$wm ?agent :wm/session-compacted ?tx]
+                    [$branch ?doc :seon.code.doc/id "docs/primers.md#history-and-time-travel"]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :ephemeral-tail,
+                      :priority 95,
+                      :tx ?tx}],
+  :seon.rule/doc "Compounds off [$wm ?agent :wm/session-compacted ?tx] to surface docs/primers.md#history-and-time-travel in :ephemeral-tail only when compaction occurred.",
+  :seon.rule/stratum 15,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-history-time-travel}
  {:seon.rule/query [:find
                     ?doc
                     ?tx
@@ -264,6 +305,30 @@
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/agent-prefix-sessions}
+ {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.render.status/latest-ctx-friction-tx $branch ?agent) ?tx]
+                    [(some? ?tx)]
+                    [$branch ?doc :seon.code.doc/id "docs/primers.md#ctx-atom"]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :ephemeral-tail,
+                      :priority 94,
+                      :tx ?tx}],
+  :seon.rule/doc "Progressive disclosure: surfaces docs/primers.md#ctx-atom in :ephemeral-tail only when a recent eval hit an error or oversized return touching ctx.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/primer-ctx-usage}
  {:seon.rule/query [:find
                     ?ns
                     ?pri

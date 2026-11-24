@@ -150,6 +150,8 @@ rtails/fallback-entity-renderers)
     :data (fn [_ _ _ _ opts] (when-let [u (seq (:unread opts))] {:unread u}))}
    {:roles :router :key :seon.tail/system-health :render rtails/render-system-health-tail
     :data (fn [mdb _ _ _ _] (when mdb (sig/all-signals mdb)))}
+   {:roles :all    :key :seon.tail/compacted-history :render rtails/render-compacted-history-tail
+    :data (fn [_ bdb ag _ _] (rstatus/compacted-turns-info bdb (:seon.agent/id ag)))}
    {:roles :worker :key :seon.tail/branch-status :render rtails/render-branch-status-tail
     :data (fn [_ _ _ _ opts] (:branch-status opts))}
    {:roles :worker :key :seon.tail/scoped-health :render rtails/render-scoped-health-tail

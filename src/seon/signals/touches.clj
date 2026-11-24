@@ -295,18 +295,19 @@
          edb (or branch-db main-db)
          disabled (if (coll? (:disabled-rules o)) (set (:disabled-rules o)) #{})
          ag (or (rdata/pull-agent-entity main-db edb agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
+         ut (when (integer? (:upto-turn o)) (long (:upto-turn o)))
+         utx (when (and (nil? ut) (integer? (:upto-tx o))) (long (:upto-tx o)))
          {:keys [world candidates]}
          (ctx/gather-agent-candidates main-db edb agent-id
                                       {:agent ag :target :wire :disabled-rules disabled
                                        :include-evals? false :include-ctx-snapshot? false
+                                       :use-live-touches? (and (nil? ut) (nil? utx))
                                        :enrich? false :situational? false :semantic? false
                                        :ru-budget (long (or (:token-budget o) 100000))})
          base-cands (if (contains? disabled :seed/world)
                       (filterv #(not= [:seed/world] (:rules %)) candidates)
                       candidates)
          seen (into #{} (keep :entity) base-cands)
-         ut (when (integer? (:upto-turn o)) (long (:upto-turn o)))
-         utx (when (and (nil? ut) (integer? (:upto-tx o))) (long (:upto-tx o)))
          inc-r? (if (contains? o :include-reasoning?) (boolean (:include-reasoning? o)) true)
          prior-db (or (:eval-db o) edb)
          prior-raw (if (sequential? (:all-evals o)) (:all-evals o) (pull-agent-evals prior-db agent-id))

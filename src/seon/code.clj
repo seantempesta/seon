@@ -397,7 +397,26 @@
                                         (eval form-val)))
                                     eff-ticks
                                     eff-bytes)))]
-                (when (< (count @touched-all) 512) (vswap! touched-all into (take (- 512 (count @touched-all)) rset)))
+                (when (< (count @touched-all) 512)
+                (let [seen-e (volatile! #{})
+                      deduped (persistent!
+                               (reduce (fn [acc pair]
+                                         (if (>= (count acc) (- 512 (count @touched-all)))
+                                           (reduced acc)
+                                           (let [lo (when (vector? pair) (nth pair 0 nil))
+                                                 hi (when (vector? pair) (nth pair 1 nil))
+                                                 e1 (when lo (:e lo))
+                                                 e2 (when hi (:e hi))]
+                                             (if (and (integer? e1) (pos? (long e1)) (= e1 e2))
+                                               (if (contains? @seen-e e1)
+                                                 acc
+                                                 (do (vswap! seen-e conj e1) (conj! acc pair)))
+                                               (if (and (or (when lo (:a lo)) (when hi (:a hi))) (< (count acc) 64))
+                                                 (conj! acc pair)
+                                                 acc)))))
+                                       (transient [])
+                                       rset))]
+                  (vswap! touched-all into deduped)))
                 val)
             ns-after (ns-name *ns*)
             is-ns? (= (quote ns) form-head)
@@ -534,8 +553,8 @@
                      (persist-forms-by-ns db by-ns @ir-by-var))
         touched-eids (when (contains? (:schema db) :seon.agent.eval/touched)
                        (analyze/extract-domain-touched-eids db @touched-all persist-tx
-                         (when (and db agent-id (contains? (:schema db) :seon.agent/id))
-                           (:e (first (d/datoms db :avet :seon.agent/id agent-id)))) 64))
+                       (when (and db agent-id (contains? (:schema db) :seon.agent/id))
+                         (:e (first (d/datoms db :avet :seon.agent/id agent-id)))) 256))
         eval-ent (build-eval-entity db {:agent-id agent-id :turn turn :call-index call-index
                                         :call-id call-id :seen-messages seen-messages
                                         :thought thought :reasoning reasoning :intent intent

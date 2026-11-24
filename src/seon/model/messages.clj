@@ -50,7 +50,7 @@
                                (do (vswap! seen-tc-ids conj cand) cand)
                                (recur (inc n))))))))]
     (mapcat
-     (fn [{:keys [messages thought reasoning calls]}]
+     (fn [{:keys [turn messages thought reasoning calls]}]
        (let [in-msgs (mapv (fn [m]
                              {:role "user"
                               :content (str "<message from=\"" (or (:seon.agent.message/from m) (:from m) "user")
@@ -80,7 +80,7 @@
              tool-msgs (mapv (fn [{:keys [id] :as c}]
                                {:role "tool"
                                 :tool_call_id id
-                                :content ((if (fn? (:format-tool-fn opts)) (:format-tool-fn opts) format-tool-content) opts c)})
+                                :content ((if (fn? (:format-tool-fn opts)) (:format-tool-fn opts) format-tool-content) opts (cond-> c (and (integer? turn) (nil? (:turn c))) (assoc :turn turn)))})
                              real-calls)]
          (concat in-msgs (when asst [asst]) tool-msgs)))
      turns)))
