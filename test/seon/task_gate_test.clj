@@ -9,7 +9,9 @@
             [seon.store :as store]
             [seon.task.gate :as gate]
             [seon.test-fixture :refer [with-test-store]]
-            [seon.transactor.merge :as tmerge]))
+            [seon.transactor.merge :as tmerge]
+            [seon.render.wire :as wire]
+            [clojure.string :as str]))
 
 (defn- setup-demo-vars! [conn]
   (let [src (str "(ns demo.gate-test (:require [clojure.test :refer [deftest is]]))\n"
@@ -167,3 +169,45 @@
                 (remove-ns tmp-ns-sym))))
           (finally
             (d/release bconn)))))))
+
+(deftest ^{:cost/ticks 40000000} multi-task-steering-surfaces-all-scopes-and-gates-all-proofs
+  (testing "multi-task :seon.agent/tasks surfaces every task scope in walk context and gates all proofs"
+    (with-test-store [{:keys [conn]}]
+      (setup-demo-vars! conn)
+      (d/transact conn {:tx-data (code/file-import-tx @conn "test/demo/other_test.clj"
+                                                      (str "(ns demo.other-test (:require [clojure.test :refer [deftest is]]))\n"
+                                                           "(deftest other-one (is true))") false)})
+      (d/transact conn {:tx-data
+                        [{:seon.task/id :task/scope-one :seon.task/title "Scope one" :seon.task/done? false
+                          :seon.task/scope 'demo.gate-test
+                          :seon.task/test-vars #{[:seon.code.var/name 'demo.gate-test/alpha-test]}}
+                         {:seon.task/id :task/scope-two :seon.task/title "Scope two" :seon.task/done? false
+                          :seon.task/scope 'demo.other-test
+                          :seon.task/test-vars #{[:seon.code.var/name 'demo.other-test/other-one]}}
+                         {:seon.agent/id :ag/steer :seon.agent/branch :main :seon.agent/role :worker
+                          :seon.agent/scope 'demo.gate-test
+                          :seon.agent/tasks [[:seon.task/id :task/scope-one] [:seon.task/id :task/scope-two]]}]})
+      (let [db @conn]
+        (is (= [:task/scope-one :task/scope-two] (gate/agent-task-ids db :ag/steer)))
+        ;; no proofs yet -> BOTH tasks blocked (all proofs gate completion)
+        (let [g0 (gate/evaluate-agent-gate db db :ag/steer)]
+          (is (false? (:ok? g0)))
+          (is (= [:task/scope-one :task/scope-two] (:tasks g0)))
+          (is (= [:task/scope-one :task/scope-two] (:blocked-tasks g0)))
+          (is (empty? (:passed-tasks g0))))
+        ;; only one proof -> still blocked on the other task
+        (d/transact conn {:tx-data [{:seon.test/digest "dg-alpha-pass-1" :seon.test/var 'demo.gate-test/alpha-test
+                                     :seon.test/kind :deftest :seon.test/pass? true :seon.test/ms 1.0 :seon.test/report "ok"}]})
+        (let [g1 (gate/evaluate-agent-gate @conn @conn :ag/steer)]
+          (is (false? (:ok? g1)))
+          (is (= [:task/scope-one] (:passed-tasks g1)))
+          (is (= [:task/scope-two] (:blocked-tasks g1))))
+        ;; all proofs -> gate passes
+        (d/transact conn {:tx-data [{:seon.test/digest "dg-other-pass-1" :seon.test/var 'demo.other-test/other-one
+                                     :seon.test/kind :deftest :seon.test/pass? true :seon.test/ms 1.0 :seon.test/report "ok"}]})
+        (is (true? (:ok? (gate/evaluate-agent-gate @conn @conn :ag/steer))))
+        ;; walk context surfaces BOTH task scopes (single :seon.agent/scope + tasks union)
+        (let [wt (wire/render-agent-context @conn @conn :ag/steer)]
+          (is (str/includes? wt "walk-context"))
+          (is (str/includes? wt "demo.gate-test"))
+          (is (str/includes? wt "demo.other-test")))))))

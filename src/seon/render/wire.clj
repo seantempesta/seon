@@ -304,13 +304,18 @@
                 base-cid base-cid
                 (pos? reset-tx) [:main-reset reset-tx]
                 :else :main-session)
-      task? (boolean (and (:seon.agent/task ag) (first (d/datoms branch-db :avet :seon.task/id (:seon.agent/task ag)))))
+      task-ids (vec (sort-by str (distinct (concat
+                                 (when-let [t (:seon.agent/task ag)] (when (qualified-keyword? t) [t]))
+                                 (keep (fn [r] (let [eid (if (map? r) (:db/id r) r)] (when (integer? eid) (:seon.task/id (or (d/pull branch-db '[:seon.task/id] eid) (d/pull main-db '[:seon.task/id] eid))))))
+                                 (:seon.agent/tasks ag))))))
+      task? (boolean (and (seq task-ids)
+                          (some (fn [tid] (first (d/datoms branch-db :avet :seon.task/id tid))) task-ids)))
       dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
       walk-key (let [msig (rules/rules-db-sig main-db)
                      bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
                  [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch reset-tx
                   msig bsig
-                  (:seon.agent/role ag) (:seon.agent/scope ag) (:seon.agent/task ag) (:seon.agent/goal ag)
+                  (:seon.agent/role ag) (:seon.agent/scope ag) task-ids (:seon.agent/goal ag)
                   (vec (:seon.agent/pinned ag)) (vec (:seon.agent/memory ag)) (vec (:seon.agent/curated ag))
                   (:seon.agent/context-prefs ag) anchor-turn task? dis-key])
       cached (store/lru-get!
@@ -351,12 +356,17 @@
   ([main-db branch-db agent-id opts]
    (let [base-ag (or (rdata/pull-agent-entity main-db branch-db agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
          tid (or (:task opts) (:seon.agent/task base-ag))
-         tscope (when (and tid (nil? (:scope opts)) (nil? (:seon.agent/scope base-ag)))
-                  (:seon.task/scope (or (d/pull branch-db '[:seon.task/scope] [:seon.task/id tid])
-                                        (d/pull main-db '[:seon.task/scope] [:seon.task/id tid]))))
-         scope (or (:scope opts) (:seon.agent/scope base-ag) tscope)
+         task-ids (vec (distinct (concat (when tid [tid])
+                                         (keep (fn [r] (let [eid (if (map? r) (:db/id r) r)] (when (integer? eid) (:seon.task/id (or (d/pull branch-db '[:seon.task/id] eid) (d/pull main-db '[:seon.task/id] eid))))))
+                                         (:seon.agent/tasks base-ag)))))
+         task-scopes (into [] (keep (fn [t]
+                                      (:seon.task/scope (or (d/pull branch-db '[:seon.task/scope] [:seon.task/id t])
+                                                            (d/pull main-db '[:seon.task/scope] [:seon.task/id t])))))
+                           task-ids)
+         scope (or (:scope opts) (:seon.agent/scope base-ag) (first task-scopes))
          extra-nss (vec (distinct (concat (get-in base-ag [:seon.agent/context-prefs :extra-namespaces])
-                                          (:extra-namespaces opts))))
+                                          (:extra-namespaces opts)
+                                          (remove #(= % scope) task-scopes))))
          pinned (vec (distinct (concat (:seon.agent/pinned base-ag) (:pinned opts))))
          ag (cond-> base-ag tid (assoc :seon.agent/task tid) scope (assoc :seon.agent/scope scope)
                     (seq extra-nss) (assoc-in [:seon.agent/context-prefs :extra-namespaces] extra-nss)

@@ -223,7 +223,15 @@
                       (or-join
                        [?agent ?sc]
                        (and [$branch ?ag :seon.agent/id ?agent] [$branch ?ag :seon.agent/scope ?sc])
-                       (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/scope ?sc]))
+                       (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/scope ?sc])
+                       (and
+                        [$branch ?ag :seon.agent/id ?agent]
+                        [$branch ?ag :seon.agent/tasks ?te]
+                        [$branch ?te :seon.task/scope ?sc])
+                       (and
+                        [$main ?ag :seon.agent/id ?agent]
+                        [$main ?ag :seon.agent/tasks ?te]
+                        [$main ?te :seon.task/scope ?sc]))
                       (or-join
                        [?sc ?ns ?tx]
                        [$branch ?ns :seon.code.ns/name ?sc ?tx]
@@ -250,7 +258,7 @@
                       :zone :static-prefix,
                       :priority ?pri,
                       :tx ?tx}],
-  :seon.rule/doc "Project the agent's :seon.agent/scope namespace and self-tuned :extra-namespaces for Turn-0 awareness.",
+  :seon.rule/doc "Project the agent's :seon.agent/scope, all :seon.agent/tasks scopes, and self-tuned :extra-namespaces for Turn-0 awareness.",
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/scope-and-extra-namespaces}

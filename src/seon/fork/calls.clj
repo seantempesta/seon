@@ -184,29 +184,34 @@
   (when-let [{:keys [conn agent-id]} *agent-ctx*]
     (let [tid (or (:id spec)
                   (:seon.agent/task (d/pull @conn '[:seon.agent/task] [:seon.agent/id agent-id]))
-                  (:seon.agent/task (d/pull (store/head conn :main) '[:seon.agent/task] [:seon.agent/id agent-id])))]
+                  (:seon.agent/task (d/pull (store/head conn :main) '[:seon.agent/task] [:seon.agent/id agent-id]))
+                  (some #(when-let [eid (if (map? %) (:db/id %) %)] (:seon.task/id (d/pull (store/head conn :main) '[:seon.task/id] eid))) (:seon.agent/tasks (d/pull @conn '[:seon.agent/tasks] [:seon.agent/id agent-id]))))]
       (if-not tid
         {:ok? false :error "No active :seon.agent/task on your agent; pass {:id :ns/task ...} or create one via (user/create-task! ...)."}
         (tx-main-sync! (assoc spec :op :update-task :id tid))))))
 
 (defn ^:seon.flow/edge assign-task!
-  "Assigns `:seon.task/id` `task-id` and its `:scope` to the active agent."
-  {:seon.repl/export true :malli/schema [:=> [:cat :keyword] [:maybe :map]]}
-  [task-id]
-  (when-let [{:keys [conn agent-id]} *agent-ctx*]
-    (let [mdb (store/head conn :main)
-          t (d/pull mdb '[:seon.task/id :seon.task/scope] [:seon.task/id task-id])]
-      (if-not (:seon.task/id t)
-        {:ok? false :error (str "Task not found: " task-id)}
-        (let [te (:e (first (d/datoms mdb :avet :seon.task/id task-id)))
-              ent (cond-> {:seon.agent/id agent-id :seon.agent/task task-id}
-                    (and te (contains? (:schema @conn) :seon.agent/tasks)) (assoc :seon.agent/tasks #{te})
-                    (:seon.task/scope t) (assoc :seon.agent/scope (:seon.task/scope t)))
-              r (d/transact conn {:tx-data [ent]})]
-          (ctx/refresh-active! (:db-after r) (:tx-data r))
-          (when (first (d/datoms mdb :avet :seon.agent/id agent-id))
-            (tx-main-sync! {:op :transact :tx-data [ent] :reason [:assign-task agent-id task-id]}))
-          {:ok? true :agent-id agent-id :task task-id :scope (:seon.task/scope t)})))))
+"Assigns `:seon.task/id` `task-id` (and its `:scope`) to the active agent, preserving any existing `:seon.agent/tasks`."
+{:seon.repl/export true :malli/schema [:=> [:cat :keyword] [:maybe :map]]}
+[task-id]
+(when-let [{:keys [conn agent-id]} *agent-ctx*]
+  (let [mdb (store/head conn :main)
+        t (d/pull mdb '[:seon.task/id :seon.task/scope] [:seon.task/id task-id])]
+    (if-not (:seon.task/id t)
+      {:ok? false :error (str "Task not found: " task-id)}
+      (let [te (:e (first (d/datoms mdb :avet :seon.task/id task-id)))
+            has-tasks? (contains? (:schema @conn) :seon.agent/tasks)
+            existing (when has-tasks?
+                       (into #{} (keep #(if (map? %) (:db/id %) %))
+                             (:seon.agent/tasks (d/pull @conn '[:seon.agent/tasks] [:seon.agent/id agent-id]))))
+            ent (cond-> {:seon.agent/id agent-id :seon.agent/task task-id}
+                  (and te has-tasks?) (assoc :seon.agent/tasks (conj (or existing #{}) te))
+                  (:seon.task/scope t) (assoc :seon.agent/scope (:seon.task/scope t)))
+            r (d/transact conn {:tx-data [ent]})]
+        (ctx/refresh-active! (:db-after r) (:tx-data r))
+        (when (first (d/datoms mdb :avet :seon.agent/id agent-id))
+          (tx-main-sync! {:op :transact :tx-data [ent] :reason [:assign-task agent-id task-id]}))
+        {:ok? true :agent-id agent-id :task task-id :scope (:seon.task/scope t)})))))
 
 (defn ^:seon.flow/edge await!
   "Suspends until one or more outgoing call IDs resolve."

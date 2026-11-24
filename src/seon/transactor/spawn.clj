@@ -125,42 +125,63 @@
                         {:msg-seq mseq})))))))
 
 (defn handle-spawn-agent!
-  {:doc "Spawns an agent entity (branch, matched/template task, parent, target) and commits it, replying to the caller.", :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]], :seon.flow/edge true}
+  {:doc "Spawns an agent entity (branch, matched/template task, parent, target) and commits it, replying to the caller. Accepts `:task` (singular) or `:tasks` (multiple task ids)."
+   :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]]
+   :seon.flow/edge true}
   [st msg prev-cid]
   (let [conn (:conn st) db0 @conn
-      {:keys [id parent scope branch role goal task target config auto-merge?]} msg
-      b (branch-for id branch) mseq (inc (:msg-seq st))
-      blank? (and (str/blank? (str goal)) (nil? task) (nil? scope))
-      matched (when-not blank? (or task (tcalls/best-task-for-scope db0 scope)))
-      sub (when (and (not blank?) (nil? matched) (first (d/datoms db0 :avet :seon.task/id :template/discover-and-plan)))
-            (tcalls/build-subtask-tx db0 (or parent :user) id (random-uuid) scope
-                                     {:title (or (not-empty (str goal)) (str "Discover & plan " (or scope id)))
-                                      :plan (str (or goal "")) :from-template :template/discover-and-plan :role role}))
-      eff-task (or matched (:task-id sub))
-      ag0 (merge {:seon.agent/id id :seon.agent/branch b :seon.agent/role (or role :worker) :seon.agent/goal (or goal "")} config)
-      ag (let [task-ref (when (and eff-task (contains? (:schema db0) :seon.agent/tasks))
-                        (or (:e (first (d/datoms db0 :avet :seon.task/id eff-task)))
-                            (some #(when (= eff-task (:seon.task/id %)) (:db/id %)) (:tx sub))))
-             target-ref (when (and target (contains? (:schema db0) :seon.agent/target))
-                          (cond (integer? target) target
-                                (and (vector? target) (= 2 (count target))) (:e (first (d/datoms db0 :avet (first target) (second target))))
-                                (qualified-keyword? target) (:e (first (d/datoms db0 :avet :seon.agent/id target)))
-                                :else nil))]
-         (cond-> ag0
-           (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
-           blank? (assoc :seon.agent/pinned (vec (distinct (conj (vec (:seon.agent/pinned ag0)) [:seon.system/id :root]))))
-           parent (assoc :seon.agent/parent parent)
-           scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope))
-           eff-task (assoc :seon.agent/task eff-task)
-           task-ref (assoc :seon.agent/tasks #{task-ref})
-           target-ref (assoc :seon.agent/target target-ref)))
-      tx-data (vec (concat (when scope (focus-tx scope)) (:tx sub)
-                           (remove nil? [ag (when-not (str/blank? (str goal)) (msg-ent (random-uuid) mseq parent id :delegate goal))])))
-      r (tx! conn tx-data) _ (store/branch! conn :main b)]
-  (tmerge/reply! msg (cond-> {:ok? true :agent id :branch b :scope scope :tx (:max-tx (:db-after r))} eff-task (assoc :task eff-task)))
-  (commit-res st prev-cid r [:spawn-agent id]
-              {::flow/report [(str "[:transactor] branched " b " for agent " id (when eff-task (str " (task " eff-task ")")))]}
-              {:msg-seq mseq})))
+        {:keys [id parent scope branch role goal task tasks target config auto-merge?]} msg
+        b (branch-for id branch) mseq (inc (:msg-seq st))
+        given-tasks (vec (distinct (concat (when task [task]) (when (seq tasks) (vec tasks)))))
+        blank? (and (str/blank? (str goal)) (empty? given-tasks) (nil? scope))
+        matched (when (and (not blank?) (empty? given-tasks))
+                  (tcalls/best-task-for-scope db0 scope))
+        sub (when (and (not blank?) (empty? given-tasks) (nil? matched)
+                       (first (d/datoms db0 :avet :seon.task/id :template/discover-and-plan)))
+              (tcalls/build-subtask-tx db0 (or parent :user) id (random-uuid) scope
+                {:title (or (not-empty (str goal)) (str "Discover & plan " (or scope id)))
+                 :plan (str (or goal "")) :from-template :template/discover-and-plan :role role}))
+        eff-tasks (cond (seq given-tasks) given-tasks
+                        matched [matched]
+                        (:task-id sub) [(:task-id sub)]
+                        :else [])
+        eff-task (first eff-tasks)
+        eff-scope (or scope
+                      (when eff-task
+                        (:seon.task/scope (d/pull db0 '[:seon.task/scope] [:seon.task/id eff-task]))))
+        ag0 (merge {:seon.agent/id id :seon.agent/branch b :seon.agent/role (or role :worker)
+                    :seon.agent/goal (or goal "")} config)
+        ag (let [task-refs (when (and (seq eff-tasks) (contains? (:schema db0) :seon.agent/tasks))
+                             (into [] (keep (fn [tid]
+                                              (or (:e (first (d/datoms db0 :avet :seon.task/id tid)))
+                                                  (some #(when (= tid (:seon.task/id %)) (:db/id %)) (:tx sub)))))
+                                   eff-tasks))
+                 target-ref (when (and target (contains? (:schema db0) :seon.agent/target))
+                              (cond (integer? target) target
+                                    (and (vector? target) (= 2 (count target)))
+                                    (:e (first (d/datoms db0 :avet (first target) (second target))))
+                                    (qualified-keyword? target)
+                                    (:e (first (d/datoms db0 :avet :seon.agent/id target)))
+                                    :else nil))]
+             (cond-> ag0
+               (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
+               blank? (assoc :seon.agent/pinned (vec (distinct (conj (vec (:seon.agent/pinned ag0)) [:seon.system/id :root]))))
+               parent (assoc :seon.agent/parent parent)
+               eff-scope (assoc :seon.agent/scope eff-scope :seon.agent/focus (str "ns/" eff-scope))
+               eff-task (assoc :seon.agent/task eff-task)
+               (seq task-refs) (assoc :seon.agent/tasks (set task-refs))
+               target-ref (assoc :seon.agent/target target-ref)))
+        tx-data (vec (concat (when eff-scope (focus-tx eff-scope)) (:tx sub)
+                             (remove nil? [ag (when-not (str/blank? (str goal))
+                                                (msg-ent (random-uuid) mseq parent id :delegate goal))])))
+        r (tx! conn tx-data) _ (store/branch! conn :main b)]
+    (tmerge/reply! msg (cond-> {:ok? true :agent id :branch b :scope eff-scope :tx (:max-tx (:db-after r))}
+                         eff-task (assoc :task eff-task)
+                         (seq eff-tasks) (assoc :tasks eff-tasks)))
+    (commit-res st prev-cid r [:spawn-agent id]
+                {::flow/report [(str "[:transactor] branched " b " for agent " id
+                                    (when eff-task (str " (task " eff-task ")")))]}
+                {:msg-seq mseq})))
 
 (defn handle-update-task!
   {:doc "Updates an existing `:seon.task/*` entity's fields/needs/tests and commits the change.", :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]], :seon.flow/edge true}
