@@ -60,23 +60,24 @@
                  [[:seon.schema/key :seon.route/entity] "/schema/seon.route/entity"]
                  [[:seon.fix/id u-fix] (str "/fix/" u-fix)]
                  [[:seon.error/id u-err] (str "/error/" u-err)]
-                 [[:seon.code.doc/id "docs/render.md#walk"] "/doc/"]
-                 [[:seon.signal/kind :flow] "/entity/seon.signal~kind/"]
-                 [[:seon.branch/name :branch/demo] "/entity/seon.branch~name/"]
+                 [[:seon.code.doc/id "docs/render.md#walk"] "/docs/render.md?section=walk"]
+                 [[:seon.signal/kind :flow] "/signals/flow"]
+                 [[:seon.branch/name :branch/demo] "/branches/demo"]
                  [[:seon.agent.eval/id u-ev] "/entity/seon.agent.eval~id/"]
                  [[:db/id 42] "/entity/db~id/42"]]]
           (let [p (router/entity-ref->path db ref)
                 op (router/path->show-user-op db p)
-                op-ex (router/path->show-user-op db (str p "?explain=1"))]
+                op-ex (router/path->show-user-op db (str p (if (str/includes? p "?") "&explain=1" "?explain=1")))]
             (is (str/starts-with? p expected-prefix) (str "Unexpected path for " ref ": " p))
             (is (= ref (:inspect-ref op)) (str "Round-trip mismatch for " ref " via " p))
             (is (= :inspect (:mode op)))
             (is (= ref (:inspect-ref op-ex)))
             (is (= :context (:mode op-ex)))))
         ;; Top-level & agent view routes + time-travel tx + user-state->path
-        (is (= :system (:mode (router/path->show-user-op db "/"))))
+        (is (= :canvas (:mode (router/path->show-user-op db "/"))))
+        (is (= :agent/root (:viewing (router/path->show-user-op db "/"))))
         (is (= :system (:mode (router/path->show-user-op db "/system"))))
-        (is (= :current (web/parse-deep-link db "/")))
+        (is (= (router/path->show-user-op db "/") (web/parse-deep-link db "/")))
         (is (= {:op :show-user :viewing :agent/root :mode :canvas :clear-inspect true :as-of-tx :live}
                (router/path->show-user-op db "/agent/root")))
         (is (= {:op :show-user :viewing :agent/root :mode :session :clear-inspect true :as-of-tx :live}
@@ -85,10 +86,10 @@
                (router/path->show-user-op db "/agent/root/explain")))
         (is (= {:op :show-user :viewing :ns/seon.web :mode :canvas :as-of-tx 536879000 :clear-inspect true}
         (router/path->show-user-op db "/agent/ns~seon.web/tx/536879000")))
-        (is (= "/agent/root" (router/user-state->path db {:viewing-id :agent/root :view-mode :canvas})))
-        (is (= "/agent/root/chat" (router/user-state->path db {:viewing-id :agent/root :view-mode :session})))
-        (is (= "/agent/root/explain" (router/user-state->path db {:viewing-id :agent/root :view-mode :context})))
-        (is (= "/agent/root/tx/123" (router/user-state->path db {:viewing-id :agent/root :view-mode :session :as-of-tx 123})))
+        (is (= "/" (router/user-state->path db {:viewing-id :agent/root :view-mode :canvas})))
+        (is (= "/chat" (router/user-state->path db {:viewing-id :agent/root :view-mode :session})))
+        (is (= "/explain" (router/user-state->path db {:viewing-id :agent/root :view-mode :context})))
+        (is (= "/chat?tx=123" (router/user-state->path db {:viewing-id :agent/root :view-mode :session :as-of-tx 123})))
         (is (= "/system" (router/user-state->path db {:viewing-id :agent/root :view-mode :system})))
         (is (= "/var/seon.web.router/compile-router?explain=1"
                (router/user-state->path db {:viewing-id :agent/root :view-mode :context
@@ -137,7 +138,7 @@
         (is (str/includes? (:body r-var) "history.pushState"))
         (is (not (str/includes? (:body r-var) "Render fault")))
         (is (= 200 (:status r-exp)))
-        (is (str/includes? (:body r-exp) "data-canonical-url=\"/agent/root/explain\""))
+        (is (str/includes? (:body r-exp) "data-canonical-url=\"/explain\""))
         (is (not (str/includes? (:body r-exp) "Render fault")))
         (is (= 404 (:status r-404)))))))
 
@@ -179,7 +180,7 @@
         (is (false? (:expert-mode? (ui/user-view-state @conn))))
         (let [h-day (render/hiccup->html (ui/header-unit @conn {:boot-seq 1 :agent-states {}}))]
           (is (str/includes? h-day "data-expert-mode=\"false\""))
-          (is (str/includes? h-day "data-canonical-url=\"/agent/root\""))
+          (is (str/includes? h-day "data-canonical-url=\"/\""))
           (is (not (str/includes? h-day "Pressure"))))
         (run-call! '(seon.web/toggle-expert-mode!))
         (is (true? (:expert-mode? (ui/user-view-state @conn))))

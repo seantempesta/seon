@@ -15,26 +15,16 @@
 (defonce ^:private ^:seon.flow/edge schema-used-by-cache (store/lru-cache 128))
 
 (defn db-schema
-  "Returns the schema map for `db` (delegates to canonical `seon.store/db-schema`)."
-  {:malli/schema [:=> [:cat :any] :map]
-   :cost/ticks 50000}
-  [db]
-  (store/db-schema db))
+  {:malli/schema [:=> [:cat :any] :map] :cost/ticks 50000}
+  [db] (store/db-schema db))
 
 (defn live-cid
- "Returns `(d/commit-id db)` for a live `datahike.db.DB`, else nil."
- {:malli/schema [:=> [:cat :any] :any]
-  :cost/ticks 50000}
- [db]
- (store/live-cid db))
+  {:malli/schema [:=> [:cat :any] :any] :cost/ticks 50000}
+  [db] (store/live-cid db))
 
 (defn db-cache-sig
- "Stable commit-based cache key for `DB` and `AsOfDB` handles (nil for un-cacheable values).
-  Delegates to `seon.store/db-cache-sig` so all stores/branches key identically."
- {:malli/schema [:=> [:cat :any] :any]
-  :cost/ticks 50000}
- [db]
- (store/db-cache-sig db))
+  {:malli/schema [:=> [:cat :any] :any] :cost/ticks 50000}
+  [db] (store/db-cache-sig db))
 
 (defn ^:seon.flow/edge safe-as-of
   "Safely returns `(d/as-of db tx)` when `tx` is an integer, falling back to `db`."
@@ -62,40 +52,49 @@
     :else nil))
 
 (defn ent-link
-  "Renders a bookmarkable semantic `.ent-link` `<a href>` dispatching `(seon.web/inspect-entity! [attr val])`,
-   or a plain `[:span]` when the ref is invalid. `render/hiccup->text` preserves `.ent-link` text cleanly."
+  "Renders a bookmarkable semantic `.ent-link` `<a href>` (optional leading `db` for DB-backed Reitit routes)."
   {:malli/schema [:function
                   [:=> [:cat :any :any] [:vector :any]]
                   [:=> [:cat :any :any [:maybe :string]] [:vector :any]]
-                  [:=> [:cat :any :any :any [:maybe :string]] [:vector :any]]]
+                  [:=> [:cat :any :any :any [:maybe :string]] [:vector :any]]
+                  [:=> [:cat :any :any :any :any [:maybe :string]] [:vector :any]]]
    :cost/ticks 500000}
-  ([ref lbl] (ent-link ref lbl "mono"))
-  ([ref lbl cls]
-   (if-let [r (rdata/normalize-inspect-ref ref)]
-     [:a {:href (router/entity-ref->path nil r)
-          :class (if cls (str "ent-link " cls) "ent-link")
-          :data-ref (pr-str r)
-          :data-preview-ref (pr-str r)
-          :interestfor "seon-hovercard"
-          :on-click (list 'seon.web/inspect-entity! r)}
-      [:span (str lbl)]]
-     [:span {:class (or cls "")} (str lbl)]))
-  ([a v lbl cls]
+  ([ref lbl] (ent-link nil ref lbl "mono"))
+  ([ref lbl cls] (ent-link nil ref lbl cls))
+  ([x y lbl cls]
+   (cond
+     (or (nil? x) (instance? datahike.db.interface.ISearch x))
+     (if-let [r (rdata/normalize-inspect-ref y)]
+       [:a {:href (router/entity-ref->path x r)
+            :class (if cls (str "ent-link " cls) "ent-link")
+            :data-ref (pr-str r) :data-preview-ref (pr-str r) :interestfor "seon-hovercard"
+            :on-click (list (quote seon.web/inspect-entity!) r)}
+        [:span (str lbl)]]
+       [:span {:class (or cls "")} (str lbl)])
+     (and (qualified-keyword? x) (some? y)) (ent-link nil [x y] lbl cls)
+     :else [:span {:class (or cls "")} (str lbl)]))
+  ([db a v lbl cls]
    (if (and (qualified-keyword? a) (some? v))
-     (ent-link [a v] lbl cls)
+     (ent-link db [a v] lbl cls)
      [:span {:class (or cls "")} (str lbl)])))
 
 (defn meta-link
   "Renders a muted right-aligned clickable metadata `.ent-link` when `v` is non-nil."
-  {:malli/schema [:=> [:cat :qualified-keyword :any] [:maybe [:vector :any]]], :cost/ticks 500000}
-  [a v]
-  (when (some? v) (ent-link [a v] (str v) "muted tiny mono ent-meta")))
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-keyword :any] [:maybe [:vector :any]]]
+                  [:=> [:cat :any :qualified-keyword :any] [:maybe [:vector :any]]]]
+   :cost/ticks 500000}
+  ([a v] (when (some? v) (ent-link nil [a v] (str v) "muted tiny mono ent-meta")))
+  ([db a v] (when (some? v) (ent-link db [a v] (str v) "muted tiny mono ent-meta"))))
 
 (defn link-pill
   "Renders a clickable `.ent-link.pill` chip."
-  {:malli/schema [:=> [:cat :qualified-keyword :any :any] [:vector :any]], :cost/ticks 500000}
-  [a v lbl]
-  (ent-link [a v] lbl "pill mono"))
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-keyword :any :any] [:vector :any]]
+                  [:=> [:cat :any :qualified-keyword :any :any] [:vector :any]]]
+   :cost/ticks 500000}
+  ([a v lbl] (ent-link nil [a v] lbl "pill mono"))
+  ([db a v lbl] (ent-link db [a v] lbl "pill mono")))
 
 (defn badge
   "Renders a colored status badge."
@@ -503,9 +502,7 @@
                         :schemed-n (count (filter :seon.code.var/schema pub)) :tests-n (count tlist) :est-tokens (long (or est-tok 0))}))))
 
 (defn enrich-ns-params
-  "Commit-id cached rich namespace metadata for `seon.render.entities.work/render-ns-full`
-   (Turn-0 `Requires:` aliases, Public API, Private helpers, Covering tests, Linked Docs, Working Schemas,
-   Static Health Alerts, Hygiene, and Router Subsystem Table)."
+  "Commit-cached namespace metadata for `render-ns-full`."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :map [:maybe :map]] :map]
    :cost/ticks 15000000}
   [db main-db ns-ent agent]

@@ -21,13 +21,12 @@
             [ring-chez.sse :as rsse]))
 
 (defn parse-deep-link
-  "Translates browser URL deep-links via `seon.web.router/path->show-user-op` (`/` -> `:current`)."
+  "Translates browser URL deep-links via `seon.web.router/path->show-user-op`."
   {:malli/schema [:function [:=> [:cat :string] :any] [:=> [:cat :any :string] :any]]
    :cost/ticks 1500000}
   ([^String uri] (parse-deep-link nil uri))
   ([db ^String uri]
-   (let [u (or uri "/")]
-     (if (or (= u "/") (= u "")) :current (router/path->show-user-op db u)))))
+   (router/path->show-user-op db (or uri "/"))))
 
 (defn- parse-kv-pairs [& args] (apply actions/parse-kv-pairs args))
 
@@ -141,7 +140,7 @@
           "<div id=\"seon-hovercard\" popover=\"hint\" role=\"tooltip\" class=\"hovercard\"></div></body></html>"))))
 
 (defn ^:seon.flow/edge start-http-listener!
-  {:malli/schema [:=> [:cat :int] :map], :seon.gen/skip true}
+  {:malli/schema [:=> [:cat :int] :map] :seon.gen/skip true}
   [port]
   (let [delegate (volatile! nil)
         latest-page (volatile! nil)
@@ -161,68 +160,49 @@
                                         (if (a/offer! ch merged)
                                           (assoc acc tid ch)
                                           (do (a/close! ch) acc)))
-                                      {}
-                                      tabs)))))))
+                                      {} tabs)))))))
         schedule-flush! (fn []
                           (when (not @flushing?)
                             (vreset! flushing? true)
-                            (a/go
-                              (a/<! (a/timeout 8))
-                              (vreset! flushing? false)
-                              (flush-now!))))
+                            (a/go (a/<! (a/timeout 8)) (vreset! flushing? false) (flush-now!))))
         handler (fn [req]
-                  (let [m (:request-method req)
-                      uri (:uri req)
-                      qs (:query-string req)
-                      full-uri (if (str/blank? qs) uri (str uri "?" qs))
-                      d @delegate
-                      dl (when (= m :get)
-                           (parse-deep-link (when-let [df (:db-fn d)] (df)) full-uri))]
-                  (cond
-                    (= [:get "/events"] [m uri])
-                    (let [ch (a/chan 64)
-                          tid (vswap! tab-seq inc)]
-                      (vswap! sse-tabs assoc tid ch)
-                      (when d ((:on-new-tab! d) ch))
-                      (rsse/event-response ch))
-
-                    dl
-                    (if (= :current dl)
-                      (if-let [html @latest-page]
-                        {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
-                        {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon booting..."})
+                  (let [m (:request-method req) uri (:uri req) qs (:query-string req)
+                        full-uri (if (str/blank? qs) uri (str uri "?" qs))
+                        d @delegate
+                        dl (when (= m :get) (parse-deep-link (when-let [df (:db-fn d)] (df)) full-uri))]
+                    (cond
+                      (= [:get "/events"] [m uri])
+                      (let [ch (a/chan 64) tid (vswap! tab-seq inc)]
+                        (vswap! sse-tabs assoc tid ch)
+                        (when d ((:on-new-tab! d) ch))
+                        (rsse/event-response ch))
+                      dl
                       (if d
-                        (let [html ((:sync-deep-link! d) dl)]
-                          {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html})
-                        {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."}))
-
-                    :else
-                    (if d
-                      ((:handle d) req)
-                      {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."}))))
+                        {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"}
+                         :body ((:sync-deep-link! d) dl)}
+                        (if-let [html (when (or (= uri "/") (= uri "")) @latest-page)]
+                          {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
+                          {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon booting..."}))
+                      :else
+                      (if d
+                        ((:handle d) req)
+                        {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."}))))
         handler (compress/wrap-compress handler)
         srv (when (not= 0 port)
               (adapter/run-server handler
                                   (cond-> {:port (if (neg? port) 0 port) :host "127.0.0.1"}
-                                    (poller/available?) (assoc :strategy :fibers))))
-        bound-port (if srv (:port srv) 0)]
-    {:server srv
-     :port bound-port
-     :handler handler
+                                    (poller/available?) (assoc :strategy :fibers))))]
+    {:server srv :port (if srv (:port srv) 0) :handler handler
      :set-page! (fn [^String html] (vreset! latest-page html))
      :broadcast! (fn [^String chunk]
                    (when (and (seq @sse-tabs) (not (str/blank? chunk)))
-                     (vswap! pending conj chunk)
-                     (schedule-flush!)))
+                     (vswap! pending conj chunk) (schedule-flush!)))
      :tab-count (fn [] (count @sse-tabs))
-     :set-delegate! (fn [d]
-                      (vreset! delegate d)
-                      (when d ((:on-delegate! d))))
+     :set-delegate! (fn [d] (vreset! delegate d) (when d ((:on-delegate! d))))
      :stop! (fn []
               (doseq [[_ ch] @sse-tabs] (a/close! ch))
               (vreset! sse-tabs {})
-              (when srv
-                (try (adapter/stop-server srv {:drain-timeout-ms 1500}) (catch Throwable _))))}))
+              (when srv (try (adapter/stop-server srv {:drain-timeout-ms 1500}) (catch Throwable _))))}))
 
 (defn- walk->summary [walk]
   (mapv (fn [uid]
@@ -250,7 +230,7 @@
          out-chunks (cond-> (vec patches) sig-patch (conj sig-patch))
          ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
          fault-reason? (and (vector? reason) (#{:fault :retract-fault :resolve-fault} (first reason)))
-         st1 (cond-> (-> st-render (assoc :walk walk :last-view-sig view-sig :last-agg-rate agg-rate) (update :frames inc))
+         st1 (cond-> (-> st-render (assoc :walk walk :walk-tx (:max-tx db) :last-view-sig view-sig :last-agg-rate agg-rate) (update :frames inc))
                (not= tx-datoms []) (assoc :walk-summary (walk->summary walk))
                (seq render-errors) (assoc :errors (vec (take 20 render-errors))))
          st2 (if (and (seq patches) (not fault-reason?) (:server-in-ch st1))
@@ -293,13 +273,7 @@
    {:route/id :preview     :route/method :get  :route/path "/preview"}])
 
 (defn match-http-route
-  "Pure Reitit HTTP route matcher — delegates to `seon.web.router/match-http-route`."
-  {:malli/schema [:=> {:examples [[[{:request-method :get :uri "/datastar.js"}]
-                                   {:route/id :datastar-js :route/method :get :route/path "/datastar.js"}]
-                                  [[{:request-method :post :uri "/mcp"}]
-                                   {:route/id :mcp :route/method :post :route/path "/mcp"}]
-                                  [[{:request-method :get :uri "/missing"}] nil]]}
-                  [:cat [:map [:request-method [:enum :get :post :put :delete]] [:uri :string]]]
+  {:malli/schema [:=> [:cat [:map [:request-method [:enum :get :post :put :delete]] [:uri :string]]]
                   [:maybe [:map [:route/id :keyword]]]]
    :cost/ticks 1000000 :cost/bytes 262144}
   ([req] (router/match-http-route nil req))
@@ -398,8 +372,7 @@
     (if due? (-> st1 (assoc :last-stream-emit-ns now-ns) (advance-walk-and-broadcast! [] :stream)) st1)))
 
 (defn url-enc
-  "Percent-encode `s` for an HTTP query-string (`?form=...` / `?h=...`)."
-  {:malli/schema [:=> {:examples [[["a b"] "a+b"]]} [:cat :string] :string] :cost/ticks 6000 :cost/bytes 4096}
+  {:malli/schema [:=> [:cat :string] :string] :cost/ticks 6000 :cost/bytes 4096}
   [s] (render/url-enc s))
 
 (defn ^:seon/callable pin-to-agent!
@@ -462,17 +435,42 @@
           {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html})
         {:status 404 :headers {"Content-Type" "text/plain"} :body "Not found"}))))
 
+(defn ^:seon/callable navigate-url!
+  {:malli/schema [:function [:=> [:cat :map :string] :map] [:=> [:cat :map :string [:maybe :map]] :map]]
+   :cost/ticks 500000}
+  [& args] (apply actions/navigate-url! args))
+
+(defn ^:seon/callable toggle-expert-mode!
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map] :cost/ticks 200000}
+  [& args] (apply actions/toggle-expert-mode! args))
+
+(defn ^:seon/callable eval-snippet!
+  {:malli/schema [:=> [:cat :map :string] :map] :cost/ticks 500000}
+  [& args] (apply actions/eval-snippet! args))
+
+(defn code-or-merge-commit?
+  "True when a `:db` notice represents a merge or code/route/rule/schema change requiring full UI walk refresh."
+  {:malli/schema [:=> [:cat :any [:maybe [:sequential :any]]] :boolean] :cost/ticks 200000}
+  [reason tx-ds]
+  (boolean
+   (or (contains? #{:merge :merged :code-merged :fork-merged} reason)
+       (and (vector? reason) (contains? #{:merge :merged :code-merged :fork-merged} (first reason)))
+       (and (coll? tx-ds) (not (map? tx-ds))
+            (some #(let [a (:a %)]
+                     (and (keyword? a)
+                          (contains? #{"seon.code.form" "seon.code.var" "seon.code.ns" "seon.code.doc"
+                                       "seon.route" "seon.rule" "seon.schema"}
+                                     (namespace a))))
+                  tx-ds)))))
+
 (defn web-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
-  ([] {:params {:port "HTTP port" :listener "Persistent HTTP listener map" :conn "Read access to store via :main conn"
-                :cfg "Pure store cfg" :repo-dir "Git repository dir" :store-path "LMDB store path"
-                :fork-parent-pid "PID of 1-thread Fork Parent" :fork-parent-ceiling "Chez GC ceiling of Fork Parent"
-                :server-in-ch "Channel to :server" :report-chan "Flow report channel" :error-chan "Flow error channel"
-                :on-power-loss "0-arg callback for Power-Loss reboot" :boot-seq "Boot sequence integer"}
-       :ins {:db "Commit notices from :transactor" :stream "Live token & agent stream deltas from :model"
-             :exits "Agent turn/branch completion notices from :agents" :snap "Latest live WKWebView screenshot from :browser"}
+  ([] {:params {:port "Port" :listener "Listener" :conn "Main conn" :cfg "Store cfg" :repo-dir "Git dir" :store-path "LMDB path"
+                :fork-parent-pid "Fork PID" :fork-parent-ceiling "GC ceiling" :server-in-ch "Server ch"
+                :report-chan "Report ch" :error-chan "Error ch" :on-power-loss "Reboot fn" :boot-seq "Boot seq"}
+       :ins {:db "Commits" :stream "Model stream" :exits "Agent exits" :snap "Browser snap"}
        :outs {} :workload :io
-       :doc "100% DB-driven inside-out Datastar render proc, Reagent /call dispatcher & /mcp endpoint."
+       :doc "100% DB-driven Datastar render proc, Reagent /call dispatcher & /mcp endpoint."
        :ping-map-fn (fn [st] {:port (:bound-port st) :tabs (if-let [tc (:tab-count st)] (tc) 0) :frames (:frames st)})})
   ([{:keys [port listener conn cfg repo-dir store-path fork-parent-pid fork-parent-ceiling
             server-in-ch report-chan error-chan on-power-loss boot-seq]}]
@@ -498,10 +496,21 @@
          :on-delegate! (fn [] (a/put! ui-ch {:ev :broadcast-keyframe}))
          :on-new-tab!  (fn [ch] (a/put! ui-ch {:ev :new-tab :ch ch}))
          :sync-deep-link! (fn [show-op]
-                            (call-server-edge! server-in-ch show-op 5000)
-                            (let [cur-st (or @live-st st0)
-                                res (render/step-walk (render/empty-walk) @conn nil (ui/page-unit-specs cur-st))]
-                            (page-shell (:walk res) @conn)))
+         (let [db0 @conn
+               vs0 (rdata/user-view-state db0)
+               tgt-tx (let [t (:as-of-tx show-op)] (when (integer? t) (long t)))
+               already? (and (or (nil? (:viewing show-op)) (= (:viewing show-op) (:viewing-id vs0)))
+                             (or (nil? (:mode show-op)) (= (:mode show-op) (:view-mode vs0)))
+                             (= (:inspect-ref show-op) (:inspect-ref vs0))
+                             (= tgt-tx (:as-of-tx vs0)))]
+           (when-not already? (call-server-edge! server-in-ch show-op 5000))
+           (let [db @conn cur-st (or @live-st st0)]
+             (if (and (:walk cur-st) (= (:walk-tx cur-st) (:max-tx db)))
+               (page-shell (:walk cur-st) db)
+               (let [ue (:e (first (d/datoms db :avet :seon.user/id :user/default)))
+                     uds (when ue (vec (d/datoms db :eavt ue)))
+                     res (render/step-walk (or (:walk cur-st) (render/empty-walk)) db uds (ui/page-unit-specs cur-st))]
+                 (page-shell (:walk res) db))))))
          :handle (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch :conn conn} req))}))
      (assoc st0 ::flow/in-ports (cond-> {:ui ui-ch} report-chan (assoc :report report-chan) error-chan (assoc :error error-chan)))))
   ([st transition]
@@ -519,10 +528,8 @@
                (if (contains? #{:context :debug} vm) [(advance-walk-and-broadcast! st1 []) nil] [st1 nil]))
        :stream [(handle-stream-msg st msg) nil]
        :exits [(handle-exit-msg st msg) nil]
-       :db (let [reason (:reason msg) tx-ds (:tx-data msg)
-                 code-or-merge? (or (= :merge reason) (and (vector? reason) (= :merge (first reason)))
-                                    (some #(= :seon.code.form/src (:a %)) tx-ds))]
-             [(advance-walk-and-broadcast! st (if code-or-merge? nil tx-ds) reason) nil])
+       :db (let [reason (:reason msg) tx-ds (:tx-data msg)]
+             [(advance-walk-and-broadcast! st (if (code-or-merge-commit? reason tx-ds) nil tx-ds) reason) nil])
        :ui (case (:ev msg)
              :new-tab
              (let [ch (:ch msg)
@@ -547,18 +554,3 @@
                      (launch-async-server-op! (:server-in-ch st1) (:ui-ch st1) async-spec))
                    [(advance-walk-and-broadcast! st1 []) nil])))
              [st nil])))))
-
-(defn ^:seon/callable navigate-url!
-  "Navigates to bookmarkable URL `path` via `seon.web.router/path->show-user-op`."
-  {:malli/schema [:=> [:cat :map :string] :map] :cost/ticks 500000}
-  [& args] (apply actions/navigate-url! args))
-
-(defn ^:seon/callable toggle-expert-mode!
-  "Toggles `:seon.user/expert-mode?` on `:user/default` between Everyday and Expert modes."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]]] :map] :cost/ticks 200000}
-  [& args] (apply actions/toggle-expert-mode! args))
-
-(defn ^:seon/callable eval-snippet!
-  "Evaluates Clojure snippet `code` on the viewed agent branch."
-  {:malli/schema [:=> [:cat :map :string] :map] :cost/ticks 500000}
-  [& args] (apply actions/eval-snippet! args))

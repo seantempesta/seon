@@ -105,17 +105,19 @@
      :inspect-forward (vec (keep normalize-inspect-ref (:inspect-forward p)))}))
 
 (defn entry-agent-id
-  "Resolves the user's default/home entry agent purely from Datahike data."
+  "Resolves the default entry agent (`:seon.agent/entry?`, `:agent/root`, or rootmost)."
   {:malli/schema [:=> [:cat :any] [:maybe :keyword]] :cost/ticks 5000000}
   [db]
   (let [dh (db-schema db)]
     (when (and db (contains? dh :seon.agent/id))
       (or (when (contains? dh :seon.agent/entry?)
             (->> (d/datoms db :avet :seon.agent/entry? true)
-                 (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
+                 (keep #(:seon.agent/id (d/pull db (quote [:seon.agent/id]) (:e %))))
                  (sort-by str) first))
+          (when (first (d/datoms db :avet :seon.agent/id :agent/root))
+            :agent/root)
           (->> (d/datoms db :aevt :seon.agent/id)
-               (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/interactive?] (:e %)))
+               (map #(d/pull db (quote [:seon.agent/id :seon.agent/parent :seon.agent/interactive?]) (:e %)))
                (remove #(let [aid (:seon.agent/id %)]
                           (or (nil? aid) (:seon.agent/interactive? %)
                               (= "example" (namespace aid)) (some? (:seon.agent/parent %)))))
@@ -136,14 +138,6 @@
     (cond (str/blank? s) nil
           (str/includes? s "~") (let [[ns-p nm] (str/split s #"~" 2)] (keyword ns-p nm))
           :else (keyword "agent" s))))
-
-(defn agent-href
-  {:malli/schema [:=> [:cat [:maybe :keyword]] :string], :cost/ticks 500000, :cost/bytes 1048576}
-  [aid] (str "/agent/" (agent-id->slug aid)))
-
-(defn debug-href
-  {:malli/schema [:=> [:cat [:maybe :keyword]] :string], :cost/ticks 500000, :cost/bytes 1048576}
-  [aid] (str "/agent/" (agent-id->slug aid) "/debug"))
 
 (defn friendly-agent-name [aid]
   (cond (nil? aid) "Agent"
@@ -177,21 +171,25 @@
   (boolean (or (= :main (:seon.agent/read-branch ag)) (:seon.agent/router? ag))))
 
 (defn user-view-state
-  "Reads the user's persistent viewport, inspector stack, and lab prefs (`:user/default`) from Datahike `db`."
-  {:malli/schema [:=> [:cat :any] :map], :cost/ticks 5000000}
+  "Reads `:user/default` view, nav stack, inspector trail, and lab prefs."
+  {:malli/schema [:=> [:cat :any] :map] :cost/ticks 5000000}
   [db]
   (let [dh (db-schema db)
         entry-id (entry-agent-id db)
         insp? (every? dh [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs])
-        pat (cond-> '[:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
-                      :seon.user/expanded-agents :seon.user/selected-branch
-                      :seon.user/as-of-tx :seon.user/theme :seon.user/viewport-w :seon.user/viewport-h
-                      {:seon.user/viewing [:seon.agent/id]}]
+        pat (cond-> (quote [:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
+                            :seon.user/expanded-agents :seon.user/selected-branch
+                            :seon.user/as-of-tx :seon.user/theme :seon.user/viewport-w :seon.user/viewport-h
+                            {:seon.user/viewing [:seon.agent/id]}])
               insp? (into [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs]))
         u (when (and db (contains? dh :seon.user/id) (first (d/datoms db :avet :seon.user/id :user/default)))
             (d/pull db pat [:seon.user/id :user/default]))
         viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)
-        raw-lp (when (map? (:seon.user/lab-prefs u)) (:seon.user/lab-prefs u))]
+        raw-lp (when (map? (:seon.user/lab-prefs u)) (:seon.user/lab-prefs u))
+        nav-back (vec (filter map? (:nav-back raw-lp)))
+        nav-fwd (vec (filter map? (:nav-forward raw-lp)))
+        itrail (vec (keep normalize-inspect-ref (:seon.user/inspect-trail u)))
+        ifwd (vec (keep normalize-inspect-ref (:inspect-forward raw-lp)))]
     {:user-id (or (:seon.user/id u) :user/default)
      :entry-id entry-id
      :viewing-id viewing-id
@@ -204,8 +202,14 @@
      :viewport-w (or (:seon.user/viewport-w u) 1280)
      :viewport-h (or (:seon.user/viewport-h u) 820)
      :inspect-ref (normalize-inspect-ref (:seon.user/inspect-ref u))
-     :inspect-trail (vec (keep normalize-inspect-ref (:seon.user/inspect-trail u)))
-     :inspect-forward (vec (keep normalize-inspect-ref (:inspect-forward raw-lp)))
+     :inspect-trail itrail
+     :inspect-forward ifwd
+     :nav-back nav-back
+     :nav-forward nav-fwd
+     :nav-can-back? (boolean (or (seq nav-back) (seq itrail)))
+     :nav-can-forward? (boolean (or (seq nav-fwd) (seq ifwd)))
+     :nav-seq (long (or (:nav-seq raw-lp) 0))
+     :nav-op (or (:nav-op raw-lp) :push)
      :lab-prefs (or raw-lp {})}))
 
 (defn branch-db-for [main-db conn branch]
@@ -285,7 +289,7 @@
           (take 32 eids)))
 
 (defn view-history-txs
-  "Generic entity-derived `d/as-of` history across projected entities, agent-linked entities, messages, and replies."
+  "Generic entity-derived `d/as-of` history across projected entities, agent links, messages, and replies."
   {:malli/schema [:function
                   [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:maybe [:vector :int]]]
                   [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:maybe [:vector :int]]]
@@ -297,25 +301,23 @@
    (when (and bdb agent-id)
      (let [mdb (or main-db bdb)
            eff-eids (vec (distinct (keep #(resolve-ref-eid bdb mdb %) entity-ids)))
-           ck (when (and (not (instance? datahike.db.AsOfDB bdb)) (not (instance? datahike.db.HistoricalDB bdb))
-                         (not (instance? datahike.db.AsOfDB mdb)) (not (instance? datahike.db.HistoricalDB mdb)))
+           live? #(and (not (instance? datahike.db.AsOfDB %)) (not (instance? datahike.db.HistoricalDB %)))
+           ck (when (and (live? bdb) (live? mdb))
                 [(store/store-id bdb) (get-in bdb [:config :branch] :main) (:max-tx bdb)
-                (store/store-id mdb) (:max-tx mdb) agent-id eff-eids])
+                 (store/store-id mdb) (:max-tx mdb) agent-id eff-eids])
            compute
            (fn []
              (let [bs (db-schema bdb) ms (db-schema mdb)
                    hdb (d/history bdb) hmdb (if (identical? mdb bdb) hdb (d/history mdb))
                    eid (when (bs :seon.agent/id) (:e (first (d/datoms bdb :avet :seon.agent/id agent-id))))
                    meid (if (identical? mdb bdb) eid (when (ms :seon.agent/id) (:e (first (d/datoms mdb :avet :seon.agent/id agent-id)))))
-                   ag-txs (concat
-                           (when eid (keep #(when (and (:added %) (not (agent-control-attrs (:a %)))) (:tx %)) (d/datoms hdb :eavt eid)))
-                           (when (and meid (not (identical? hmdb hdb)))
-                             (keep #(when (and (:added %) (not (agent-control-attrs (:a %)))) (:tx %)) (d/datoms hmdb :eavt meid))))
+                   non-ctrl (fn [hd e] (when e (keep #(when (and (:added %) (not (agent-control-attrs (:a %)))) (:tx %)) (d/datoms hd :eavt e))))
+                   ag-txs (concat (non-ctrl hdb eid) (when-not (identical? hmdb hdb) (non-ctrl hmdb meid)))
                    all-eids (into (set eff-eids) (linked-agent-eids bdb mdb hdb hmdb eid meid agent-id))
                    ent-txs (entity-mutation-txs hdb hmdb all-eids)
                    msg-txs (when (ms :seon.agent.message/to)
                              (for [dt (d/datoms hmdb :avet :seon.agent.message/to agent-id) :when (:added dt)
-                                   :let [m (d/pull mdb '[:seon.agent.message/type :seon.agent.message/from] (:e dt))]
+                                   :let [m (d/pull mdb (quote [:seon.agent.message/type :seon.agent.message/from]) (:e dt))]
                                    :when (not (#{:nudge :system} (:seon.agent.message/type m)))]
                                (:tx dt)))
                    reply-txs (keep #(when (and (str/blank? (str (:seon.agent.eval/code %)))
@@ -337,19 +339,20 @@
 (defn agent-evals-in
   {:malli/schema [:=> [:cat :seon.host/db :keyword] [:vector :map]]}
   [db agent-id]
-  (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
-       (map (fn [dt]
-              (assoc (d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
-                                  :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
-                                  :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
-                                  :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
-                                  :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
-                                  :seon.agent.eval/prefix-hash :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
-                                  :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
-                                  :seon.agent.eval/seen-messages] (:e dt))
-                     :db/id (:e dt) :seon.agent.eval/tx (:tx dt) :seon.agent.eval/agent agent-id)))
-       (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
-       vec))
+  (let [pat (quote [:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/call-index
+                    :seon.agent.eval/call-id :seon.agent.eval/handle :seon.agent.eval/result-schema
+                    :seon.agent.eval/thought :seon.agent.eval/reasoning :seon.agent.eval/intent
+                    :seon.agent.eval/code :seon.agent.eval/value :seon.agent.eval/out
+                    :seon.agent.eval/error :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
+                    :seon.agent.eval/prefix-hash :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
+                    :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
+                    :seon.agent.eval/seen-messages])]
+    (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
+         (map (fn [dt]
+                (assoc (d/pull db pat (:e dt))
+                       :db/id (:e dt) :seon.agent.eval/tx (:tx dt) :seon.agent.eval/agent agent-id)))
+         (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
+         vec)))
 
 (defn agent-messages-in [main-db agent-id]
   (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
@@ -459,18 +462,19 @@
            :task (when (:seon.task/id task-ent) task-ent) :incoming (vec incoming)})))))
 
 (defn delegation-progress-tree
-  "Builds a recursive work-progress tree for `agent-id` from outgoing calls and `:seon.agent/parent` child agents."
+  "Builds recursive work-progress tree for `agent-id` from outgoing calls and child agents."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/conn] [:maybe :keyword]] [:maybe [:vector :map]]]}
   [main-db conn agent-id]
-  (let [dh (db-schema main-db)]
+  (let [dh (db-schema main-db)
+        call-pat (quote [:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/callee
+                         :seon.agent.call/parent-call :seon.agent.call/status :seon.agent.call/prompt
+                         :seon.agent.call/created-tx])]
     (when (and main-db agent-id)
-      (let [direct-calls (if (dh :seon.agent.call/caller)
-                           (->> (d/datoms main-db :avet :seon.agent.call/caller agent-id)
-                                (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/callee
-                                                        :seon.agent.call/parent-call :seon.agent.call/status :seon.agent.call/prompt
-                                                        :seon.agent.call/created-tx] (:e %)))
-                                (sort-by #(or (:seon.agent.call/created-tx %) 0)) vec)
-                           [])
+      (let [pull-calls (fn [attr v]
+                         (->> (d/datoms main-db :avet attr v)
+                              (map #(d/pull main-db call-pat (:e %)))
+                              (sort-by #(or (:seon.agent.call/created-tx %) 0)) vec))
+            direct-calls (if (dh :seon.agent.call/caller) (pull-calls :seon.agent.call/caller agent-id) [])
             pending-calls (filterv #(= :pending (:seon.agent.call/status %)) direct-calls)
             call-roots (if (seq pending-calls)
                          pending-calls
@@ -481,7 +485,7 @@
             parent-children (when (dh :seon.agent/parent)
                               (->> (filter #(= agent-id (:v %)) (d/datoms main-db :aevt :seon.agent/parent))
                                    (keep (fn [dt]
-                                           (let [c (d/pull main-db '[:seon.agent/id :seon.agent/goal :seon.agent/archived?] (:e dt))
+                                           (let [c (d/pull main-db (quote [:seon.agent/id :seon.agent/goal :seon.agent/archived?]) (:e dt))
                                                  cid (:seon.agent/id c)]
                                              (when (and cid (not (:seon.agent/archived? c)) (not (seen-callees cid)))
                                                {:seon.agent.call/callee cid :seon.agent.call/status :child
@@ -491,12 +495,7 @@
                      (let [callee (:seon.agent.call/callee c)
                            prog (agent-branch-progress main-db conn callee)
                            kids (when (and has-pidx? (:seon.agent.call/id c) (< depth 4))
-                                  (->> (d/datoms main-db :avet :seon.agent.call/parent-call (:seon.agent.call/id c))
-                                       (map #(d/pull main-db '[:seon.agent.call/id :seon.agent.call/caller :seon.agent.call/callee
-                                                               :seon.agent.call/parent-call :seon.agent.call/status :seon.agent.call/prompt
-                                                               :seon.agent.call/created-tx] (:e %)))
-                                       (sort-by #(or (:seon.agent.call/created-tx %) 0))
-                                       (mapv #(enrich % (inc depth)))))]
+                                  (mapv #(enrich % (inc depth)) (pull-calls :seon.agent.call/parent-call (:seon.agent.call/id c))))]
                        (cond-> (assoc c :progress prog) (seq kids) (assoc :children kids))))
             all-roots (into (vec (take-last 8 call-roots)) (take 6 parent-children))]
         (when (seq all-roots) (mapv #(enrich % 0) all-roots))))))
