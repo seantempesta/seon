@@ -40,22 +40,23 @@
 
 (defn- header-signals-strip [db sigs]
   (let [{:keys [flow pressure context proof health]} sigs
-        pill-a (fn [label lvl val pulse? href oc]
-                 [:a {:href href
-                      :class (str "sig-pill sig-pill-btn nav-link " (sig-lvl-cls lvl) (when pulse? " sig-pulse"))
-                      :title (str label " (" (name (or lvl :calm)) ") — click to inspect") :on-click oc}
-                  [:span {:class (str "sig-dot " (sig-lvl-cls lvl))}]
-                  [:span {:class "sig-label"} label]
-                  [:span {:class "mono"} val]])
-        sig-a (fn [label lvl val pulse? sk]
-                (let [r [:seon.signal/kind sk]]
-                  (pill-a label lvl val pulse? (router/entity-ref->path db r) (list 'seon.web/inspect-entity! r))))]
-    [:div {:class "sig-strip" :data-min-width 220}
-     (sig-a "Flow" (:level flow) (str (:running flow) "/" (:active flow)) (:pulse? flow) :flow)
-     (sig-a "Pressure" (:level pressure) (str (:bytes-pct pressure) "%") false :pressure)
-     (pill-a "Context" (:level context) (str (:prefix-reuse-pct context) "%") false "/context" '(seon.web/set-view-mode! :context))
-     (sig-a "Proof" (:level proof) (if (:merge-ready? proof) (str (:green proof) " ok") (str (:failing proof) " fail")) false :proof)
-     (sig-a "Health" (:level health) (if (:ok? health) "ok" (str (:errors health) " err")) false :health)]))
+      pill-a (fn [label lvl val pulse? href oc preview-ref]
+               [:a (cond-> {:href href
+                            :class (str "sig-pill sig-pill-btn nav-link " (sig-lvl-cls lvl) (when pulse? " sig-pulse"))
+                            :title (str label " (" (name (or lvl :calm)) ") — click to inspect") :on-click oc}
+                     preview-ref (assoc :data-preview-ref (pr-str preview-ref) :interestfor "seon-hovercard"))
+                [:span {:class (str "sig-dot " (sig-lvl-cls lvl))}]
+                [:span {:class "sig-label"} label]
+                [:span {:class "mono"} val]])
+      sig-a (fn [label lvl val pulse? sk]
+              (let [r [:seon.signal/kind sk]]
+                (pill-a label lvl val pulse? (router/entity-ref->path db r) (list 'seon.web/inspect-entity! r) r)))]
+  [:div {:class "sig-strip" :data-min-width 220}
+   (sig-a "Flow" (:level flow) (str (:running flow) "/" (:active flow)) (:pulse? flow) :flow)
+   (sig-a "Pressure" (:level pressure) (str (:bytes-pct pressure) "%") false :pressure)
+   (pill-a "Context" (:level context) (str (:prefix-reuse-pct context) "%") false "/context" '(seon.web/set-view-mode! :context) [:seon.signal/kind :context])
+   (sig-a "Proof" (:level proof) (if (:merge-ready? proof) (str (:green proof) " ok") (str (:failing proof) " fail")) false :proof)
+   (sig-a "Health" (:level health) (if (:ok? health) "ok" (str (:errors health) " err")) false :health)]))
 
 (defn- render-agent-tree-node [children-by-parent viewing-id expanded-set agent-states depth ag]
   (let [aid (:seon.agent/id ag)
@@ -72,7 +73,7 @@
                   :on-click (list 'seon.web/toggle-expand! aid)}
          (if expanded? "▾" "▸")]
         [:span {:class "tree-exp-spacer"} "·"])
-      [:a {:href (router/entity-ref->path nil [:seon.agent/id aid])
+      [:a {:href (or (router/path-for nil :seon.route/agent-session {:slug (rdata/agent-id->slug aid)}) "/")
            :class "tree-select nav-link"
            :title (str aid)
            :data-preview-ref (pr-str [:seon.agent/id aid])
@@ -419,11 +420,11 @@
         [:button {:type "button" :class "icon-btn" :aria-label "Forward" :title "Forward"
                   :disabled (empty? inspect-forward) :on-click '(seon.web/inspect-forward!)} "→"]]
        [:a {:href "/system"
-            :class "brand-link nav-link"
-            :title "Seon Runtime — System Entity"
-            :data-preview-ref "[:seon.system/id :root]"
-            :interestfor "seon-hovercard"
-            :on-click '(seon.web/inspect-entity! [:seon.system/id :root])}
+           :class "brand-link nav-link"
+           :title "Seon Runtime — System Entity"
+           :data-preview-ref "[:seon.system/id :root]"
+           :interestfor "seon-hovercard"
+           :on-click '(seon.web/set-view-mode! :system)}
         [:span {:class "diamond"} "◆"]
         (when-not narrow? [:strong {:class "wordmark"} "seon"])]
        (when-not narrow? [:span {:class "crumb-sep"} "/"])
@@ -432,10 +433,12 @@
        sig-bar
        (when (< vw 900)
          [:a {:href (router/entity-ref->path db [:seon.signal/kind :health])
-              :class (str "status-pill nav-link " (if ok? "ok" "bad"))
-              :aria-label (if ok? "System healthy" (str err-n " error(s)"))
-              :title (if ok? "System healthy — inspect Health" (str err-n " error(s) — inspect Health"))
-              :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
+             :class (str "status-pill nav-link " (if ok? "ok" "bad"))
+             :data-preview-ref "[:seon.signal/kind :health]"
+             :interestfor "seon-hovercard"
+             :aria-label (if ok? "System healthy" (str err-n " error(s)"))
+             :title (if ok? "System healthy — inspect Health" (str err-n " error(s) — inspect Health"))
+             :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
           [:span {:class (str "dot " (if ok? "live" "bad"))}]])
        [:button {:type "button"
                  :id "expert-mode-toggle"

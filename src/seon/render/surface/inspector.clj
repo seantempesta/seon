@@ -10,7 +10,8 @@
             [seon.signals :as sig]
             [seon.signals.touches :as touches]
             [seon.store :as store :refer [live-cid]]
-            [seon.vector :as vec]))
+            [seon.vector :as vec]
+            [seon.web.router]))
 
 (defonce ^:private ^:seon.flow/edge ref-attrs-cache (store/lru-cache 16))
 
@@ -305,8 +306,10 @@
       (btn "btn sm" '(seon.web/inspect-forward!) "→ Forward" (empty? fwd))
       [:div {:class "insp-trail"}
        (for [[idx tr] (map-indexed vector trail)]
-         (list [:button {:type "button" :class "crumb-btn mono tiny" :on-click (list 'seon.web/jump-inspect-trail! idx)}
-                (rdata/entity-short-label tr)]
+         (list [:a {:href (seon.web.router/entity-ref->path nil tr) :class "crumb-btn ent-link mono tiny"
+                    :data-ref (pr-str tr) :data-preview-ref (pr-str tr) :interestfor "seon-hovercard"
+                    :on-click (list 'seon.web/jump-inspect-trail! idx)}
+               (rdata/entity-short-label tr)]
                [:span {:class "crumb-sep"} "›"]))
        [:span {:class "badge amber mono"} (rdata/entity-short-label (or (:entity focal) ref))]]]
      [:div {:class "pill-row"}

@@ -275,6 +275,7 @@
                        (update st1 :perf-alerts dissoc fid))
                    :else st1))
                st1)]
+     (when-let [lv (:live-st-vol st2)] (vreset! lv st2))
      (when-let [sp (:set-page! st2)] (sp (page-shell walk db)))
      (when (and (seq out-chunks) (:broadcast! st2)) ((:broadcast! st2) (apply str out-chunks)))
      st2)))
@@ -481,6 +482,7 @@
   ([{:keys [port listener conn cfg repo-dir store-path fork-parent-pid fork-parent-ceiling
             server-in-ch report-chan error-chan on-power-loss boot-seq]}]
    (let [ui-ch (a/chan 128)
+         live-st (volatile! nil)
          own-listener (when (and (nil? listener) (pos? (or port 0))) (start-http-listener! port))
          eff-listener (or listener own-listener)
          st-init {:conn conn :cfg cfg :repo-dir repo-dir :store-path store-path
@@ -488,7 +490,7 @@
                   :server-in-ch server-in-ch :ui-ch ui-ch :on-power-loss on-power-loss
                   :boot-seq (or boot-seq 1) :bound-port (:port eff-listener 0) :own-listener own-listener
                   :set-page! (:set-page! eff-listener) :broadcast! (:broadcast! eff-listener) :tab-count (:tab-count eff-listener)
-                  :walk (render/empty-walk) :live-streams {} :agent-states {}
+                  :walk (render/empty-walk) :live-st-vol live-st :live-streams {} :agent-states {}
                   :last-stream-emit-ns 0 :last-view-sig nil :last-agg-rate "" :viewport-screenshot nil
                   :reports [] :errors [] :frames 0}
          st0 (advance-walk-and-broadcast! st-init nil)]
@@ -502,8 +504,9 @@
          :on-new-tab!  (fn [ch] (a/put! ui-ch {:ev :new-tab :ch ch}))
          :sync-deep-link! (fn [show-op]
                             (call-server-edge! server-in-ch show-op 5000)
-                            (let [res (render/step-walk (render/empty-walk) @conn nil (ui/page-unit-specs st0))]
-                              (page-shell (:walk res) @conn)))
+                            (let [cur-st (or @live-st st0)
+                                res (render/step-walk (render/empty-walk) @conn nil (ui/page-unit-specs cur-st))]
+                            (page-shell (:walk res) @conn)))
          :handle (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch :conn conn} req))}))
      (assoc st0 ::flow/in-ports (cond-> {:ui ui-ch} report-chan (assoc :report report-chan) error-chan (assoc :error error-chan)))))
   ([st transition]

@@ -130,7 +130,7 @@
         {:entity (or eid ref) :schema :seon.system/entity :data ent :priority 100})
 
       :seon.signal/kind
-      {:entity ref :schema :seon.signal/snapshot :data (sig/all-signals mdb) :priority 100}
+      {:entity ref :virtual-signal? true :signal-kind rv :snapshot (sig/all-signals mdb) :priority 100}
 
       :seon.branch/name
       (let [tr (when ((db-schema mdb) :seon.test.run/branch)
@@ -156,30 +156,47 @@
             compute
             (fn []
               (if-let [item (resolve-preview-item main-db bdb norm)]
-                (if (:virtual-branch? item)
-                  (let [tr (:test-run item)
-                        h [:div {:class "hovercard-body" :data-preview-ref (pr-str norm) :data-chosen-fn "branch-preview"}
-                           [:div {:class "pill-row"}
-                            (badge "blue" "branch") [:strong {:class "mono tiny"} (str (:branch item))]
-                            (when tr (badge (if (:seon.test.run/pass? tr) "green" "red")
-                                            (if (:seon.test.run/pass? tr) "PASS" "FAIL")))]
-                           [:div {:class "hovercard-foot mono tiny muted"} "branch-preview · Click for full view"]]]
-                    {:ok? true :status 200 :chosen-fn :branch-preview :tokens 12 :html (render/hiccup->html h)})
-                  (let [fitted (first (:selected
-                                       (fit/fit-projections
-                                        bdb [item]
-                                        {:target :html :avail-w 360 :avail-h 220 :max-items 1 :area-budget 72000
-                                         :main-db main-db :fallback-renderers rwire/fallback-entity-renderers})))
-                        cfn (:chosen-fn fitted)
-                        toks (long (:tokens fitted 0))
-                        inner (or (:hiccup fitted)
-                                  [:div {:class "ent-row mono tiny"} (rdata/entity-short-label (or (:data item) norm))])
-                        h [:div {:class "hovercard-body" :data-preview-ref (pr-str norm) :data-chosen-fn (str cfn)}
-                           inner
-                           [:div {:class "hovercard-foot mono tiny muted"}
-                            (str (or (some-> cfn name) "entity") " · " toks " tok · Click for full view")]]]
-                    {:ok? true :status 200 :chosen-fn cfn :tokens toks :html (render/hiccup->html h)}))
-                {:ok? false :status 404 :html (str "<div class=\"hovercard-body mono tiny muted\">Not found: " (pr-str norm) "</div>")}))]
+              (cond
+                (:virtual-signal? item)
+                (let [sk (:signal-kind item)
+                      snap (:snapshot item)
+                      sm (get snap sk)
+                      lvl (or (:level sm) (:level snap) :calm)
+                      bcls (case lvl :hot "red" :warm "amber" "green")
+                      h [:div {:class "hovercard-body" :data-preview-ref (pr-str norm) :data-chosen-fn "signal-preview"}
+                         [:div {:class "pill-row"}
+                          (badge bcls (str (str/capitalize (name (or sk :signal))) " · " (name lvl)))
+                          (when-let [br (:branch snap)] [:span {:class "pill mono tiny"} (str br)])]
+                         [:div {:class "sm-copy mono tiny" :style "margin-top:6px"} (str (or (:summary sm) "Signal telemetry"))]
+                         [:div {:class "hovercard-foot mono tiny muted"} "signal-preview · Click for full view"]]]
+                  {:ok? true :status 200 :chosen-fn :signal-preview :tokens 16 :html (render/hiccup->html h)})
+
+                (:virtual-branch? item)
+                (let [tr (:test-run item)
+                      h [:div {:class "hovercard-body" :data-preview-ref (pr-str norm) :data-chosen-fn "branch-preview"}
+                         [:div {:class "pill-row"}
+                          (badge "blue" "branch") [:strong {:class "mono tiny"} (str (:branch item))]
+                          (when tr (badge (if (:seon.test.run/pass? tr) "green" "red")
+                                          (if (:seon.test.run/pass? tr) "PASS" "FAIL")))]
+                         [:div {:class "hovercard-foot mono tiny muted"} "branch-preview · Click for full view"]]]
+                  {:ok? true :status 200 :chosen-fn :branch-preview :tokens 12 :html (render/hiccup->html h)})
+
+                :else
+                (let [fitted (first (:selected
+                                     (fit/fit-projections
+                                      bdb [item]
+                                      {:target :html :avail-w 360 :avail-h 220 :max-items 1 :area-budget 72000
+                                       :main-db main-db :fallback-renderers rwire/fallback-entity-renderers})))
+                      cfn (:chosen-fn fitted)
+                      toks (long (:tokens fitted 0))
+                      inner (or (:hiccup fitted)
+                                [:div {:class "ent-row mono tiny"} (rdata/entity-short-label (or (:data item) norm))])
+                      h [:div {:class "hovercard-body" :data-preview-ref (pr-str norm) :data-chosen-fn (str cfn)}
+                         inner
+                         [:div {:class "hovercard-foot mono tiny muted"}
+                          (str (or (some-> cfn name) "entity") " · " toks " tok · Click for full view")]]]
+                  {:ok? true :status 200 :chosen-fn cfn :tokens toks :html (render/hiccup->html h)}))
+              {:ok? false :status 404 :html (str "<div class=\"hovercard-body mono tiny muted\">Not found: " (render/esc (pr-str norm)) "</div>")}))]
         (if ck (store/lru-get! preview-html-cache 128 ck compute) (compute))))))
 
 (defn- render-signals-cards [signals]
