@@ -1,0 +1,263 @@
+;; Declarative Seon Chronicle summaries (resources/seon/summaries.edn — loaded on fresh install, written back on green merge).
+[{:seon.summary/to-tx 536871043,
+  :seon.summary/from-tx 536870843,
+  :seon.summary/id #uuid "0780c12c-0015-5c09-8bd0-23f2f4cd761a",
+  :seon.summary/refs [:demo/live-architecture-tour :ns/seon.render :ns/seon.health],
+  :seon.summary/body ":ns/seon.render mapped canvas.live composable slots + lineage DAG helpers; :ns/seon.health reported 1 error / 24 advisories, 254 schemas, 13 open tasks.",
+  :seon.summary/created-ms 1795235006323,
+  :seon.summary/title "Architecture tour: both specialist audits merged",
+  :seon.summary/agent :agent/root,
+  :seon.summary/kind :milestone}
+ {:seon.summary/to-tx 536871613,
+  :seon.summary/from-tx 536871043,
+  :seon.summary/id #uuid "13213dd0-47d6-5fd3-9cc7-d21971fdeb5f",
+  :seon.summary/refs [[:seon.code.ns/name seon.rules]
+                      [:seon.code.ns/name seon.rules.context]
+                      [:seon.code.ns/name seon.rules.effects]
+                      [:seon.fix/id #uuid "9b177e78-c0bc-4d5a-86f9-6f2ce8ee9084"]
+                      [:seon.fix/id #uuid "7af88ffc-54e0-4a16-a2cc-add94d441934"]],
+  :seon.summary/body "Replaced procedural tile discovery with 43 editable :seon.rule/* Datahike entities (seon.rules, seon.rules.effects, seon.rules.context, resources/seon/rules.edn) running inside datahike.reads/with-reads with cached boundary effects, GTA-6 modifier tags, Graph->Tree projection, delegation-tree overlap boosting, Debug #dbg-rule-trace + true Human HTML, A/B diff-rules, and d/as-of turn replay. Verified visually across :agent/root, :ns/seon.render, and :ns/seon.health (0 console errors, 0 clipping) and benchmarked on Un-Rigged Real-Task Round 4: 3/3 genuine auto-merged & healthy (89.0% KV cache, :task-bench-rollup -35% evals 20->13).",
+  :seon.summary/created-ms 1795246303681,
+  :seon.summary/title "Shipped Datom-Native Logic Rules Engine (43 Rules, Unified HTML + Wire, 3/3 Un-Rigged Round 4 Pass)",
+  :seon.summary/agent :repl/rules-docs-and-ledger,
+  :seon.summary/kind :milestone}
+ {:seon.summary/to-tx 536873319,
+  :seon.summary/from-tx 536871613,
+  :seon.summary/id #uuid "22a46fa6-00b7-5a7b-bc82-00e47213bfee",
+  :seon.summary/refs [:agent/root seon.rule seon.render.print seon.error seon.code.migrate],
+  :seon.summary/body "Completed full staged refactor on branch `graph-refactor-v2` (`main` untouched at `420d062649`):\n- **Graph-Refactoring & Live Hot-Reload:** `seon.code.{rewrite,migrate,analyze,overlay}` + 3-phase `seon.merge/order-merge-tx-ops` + `seon.schema/*base-forms-override*`; dogfooded live renames of `seon.rule*`, `seon.agent`, `seon.test` across 105 namespaces with automatic atomic switch-over.\n- **Unified Data Graph & 58 Rules (Zero Tool Tags):** `seon.schema.index`, `seon.store.query`, `seon.cite` (`:seon.code.doc/references`), `seon.task.gate` (`:seon.agent/tasks`, `:seon.task/test-vars`, `:rule.gate/test-*`), `seon.error` (HTTP 429 surfacing, retired `:seon.health.fault/*`), and data-driven function discovery rules (`:rule.expand/schema-contract-fn`, `:rule.expand/direct-callee-fn`, `:rule.expand/doc-by-ref`).\n- **Unified 4-Stage Recursive Self-Printer & 120 fps Per-Tile UI:** `seon.render.print.*` + `(user/expand! ...)` (`10k` vec `2.43 ms`), `seon.render.walk` (`:debug` `229.09 ms -> 8.60 ms` warm / `0.02 ms` incremental), `seon.health/report` `4.6x` warm-edit reduction (`219.1 MB -> 47.6 MB`).\n- **Round 5 Un-Rigged Benchmark (`3/3` Pass/Merge):** Mean evals `20.7 -> 17.7` (`-14.5%`), wall clock `154.0s -> 110.9s` (`-28.0%`), KV cache `89.0% -> 90.65%`, `323/323` tests green, `0` health errors.",
+  :seon.summary/created-ms 1795259953742,
+  :seon.summary/title "Shipped graph-refactor-v2: Unified 4-Stage Printer, 58 Data-Driven Rules, Singular Co-Location & Round 5 Benchmark (3/3, 17.7 Mean Evals, 90.65% KV Cache)",
+  :seon.summary/agent :repl/check-post-s2b,
+  :seon.summary/kind :milestone}
+ {:seon.summary/to-tx 536873618,
+  :seon.summary/from-tx 536873325,
+  :seon.summary/id #uuid "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+  :seon.summary/refs [[:seon.board/id :seon.guide/how-seon-works]
+                      [:seon.query/id :seon.guide.q/graph-inventory]
+                      [:seon.rule/id :rule.view/default-by-schema-render]],
+  :seon.summary/body "Shipped universal cross-agent schema rendering (:rule.view/default-by-schema-render, :rule.view/default-by-main-schema-render, :rule.view/fallback-schema-printer), eval-triggered rendering + data-driven breadcrumbs (seon.render.breadcrumbs), reusable live queries (seon.query) and interactive boards (seon.board), lazy Hiccup step-walk datahike.reads capture, and O(1) reads-preserving registry-for-db caching. Verified with 335/335 green tests and live browser walkthrough on :agent/guide.",
+  :seon.summary/created-ms 1795264500000,
+  :seon.summary/title "Distributed Schema Rendering, Eval Breadcrumbs & Live Architecture Guide",
+  :seon.summary/agent :agent/guide,
+  :seon.summary/kind :architecture}
+ {:seon.summary/to-tx 536878975,
+  :seon.summary/from-tx 536873618,
+  :seon.summary/id #uuid "200debf0-4486-550b-b45d-1c4e235ea9e1",
+  :seon.summary/body "Completed full unification onto ONE context/candidate/wire/renderer pipeline (-31,840 tokens net shrink, 7 legacy namespaces deleted, 22 native :seon.rule/query rules), live bidirectional CtxAtom projection, native :seon.media/image WKWebView multi-width capture + OpenAI multimodal wire attachment, 1-click :op :spawn-on-entity, root-cause allocation (>268 MB -> 38.97 MB) & LMDB call/cc deadlock fixes, live datahike.reads -> :seon.agent.eval/touched -> ranker feedback, -58.8x assemble-unified-tail fix, and real DeepSeek A/B proof (13 turns PASS / 173.6k tok vs 32 turns FAIL / 320.8k tok; 3/3 backlog tasks merged + hierarchical :ns/* delegation resolved in 3 turns).",
+  :seon.summary/created-ms 1795422272895,
+  :seon.summary/title "1/1/1/1 Unified Render & Context Pipeline, Native Multi-Width Images, 1-Click Entity Spawn, Root-Cause Alloc/LMDB Fixes & Real DeepSeek A/B",
+  :seon.summary/agent :repl/repl,
+  :seon.summary/kind :milestone}
+ {:seon.summary/to-tx 536880776,
+  :seon.summary/from-tx 536878975,
+  :seon.summary/id #uuid "1d760add-aebc-5278-96cb-6e1d596ff2c7",
+  :seon.summary/refs [:agent/w2168
+                      seon.web
+                      seon.web.actions
+                      seon.render.links
+                      seon.code.reach
+                      seon.render.status],
+  :seon.summary/body "- **w2168** (`tx 536879118`)\n- **Subsystems:** `seon.web` (68), `seon.web.actions` (53), `seon.render.links` (36), `seon.code.reach` (30), `seon.render.status` (26) +41 more\n- **Health:** Healthy (95 advisories) · **Velocity:** 4/10 merged, 87% KV-cache",
+  :seon.summary/created-ms 1795436309685,
+  :seon.summary/title "System Pulse · 1 merge across seon.web, seon.web.actions, seon.render.links",
+  :seon.summary/agent :seon.wave-d/shrink-health-metrics,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536880800,
+  :seon.summary/from-tx 536880776,
+  :seon.summary/id #uuid "2a889a78-7f17-5c56-8832-23e594c38a69",
+  :seon.summary/body "- **Health:** 1 error(s) (96 advisories) · **Velocity:** 4/10 merged, 87% KV-cache",
+  :seon.summary/created-ms 1795436312820,
+  :seon.summary/title "Health Attention · 1 error(s)",
+  :seon.summary/agent :seon.wave-d/shrink-merge-autofix,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536881596,
+  :seon.summary/from-tx 536880800,
+  :seon.summary/id #uuid "3b689adb-9943-5514-bd49-69a72c0a02e4",
+  :seon.summary/refs [:seon.wave-d/shrink-health-metrics
+                      :seon.wave-d/shrink-merge-autofix
+                      seon.code.mine
+                      seon.git
+                      seon.health.contracts
+                      seon.git.forks
+                      seon.reconciler],
+  :seon.summary/body "- **seon.wave-d/shrink-health-metrics** (`tx 536880839`): Split seon.health.metrics/agent-learning-metrics below the :large-function budget\n- **seon.wave-d/shrink-merge-autofix** (`tx 536880829`): Split seon.merge/auto-fix-touched-nss below the :large-function budget\n- **Subsystems:** `seon.code.mine` (21), `seon.git` (16), `seon.health.contracts` (15), `seon.git.forks` (13), `seon.reconciler` (10) +18 more\n- **Health:** 2 error(s) (91 advisories) · **Velocity:** 6/10 merged, 89% KV-cache",
+  :seon.summary/created-ms 1795438336677,
+  :seon.summary/title "Split run-parallel-trial! below :large-function budget",
+  :seon.summary/agent :seon.wave-d/shrink-bench-cluster,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536881701,
+  :seon.summary/from-tx 536881596,
+  :seon.summary/id #uuid "0845464d-5130-5644-972c-5cdd55db469e",
+  :seon.summary/refs [:seon.wave-d/shrink-bench-cluster
+                      seon.model
+                      seon.render.tails
+                      seon.bench.cluster
+                      seon.ctx.project
+                      seon.transactor],
+  :seon.summary/body "- **seon.wave-d/shrink-bench-cluster** (`tx 536881602`): Split seon.bench.cluster/run-parallel-trial! below the :large-function budget\n- **Subsystems:** `seon.model` (20), `seon.render.tails` (17), `seon.bench.cluster` (11), `seon.ctx.project` (8), `seon.transactor` (8) +9 more\n- **Health:** Healthy (94 advisories) · **Velocity:** 5/10 merged, 90% KV-cache",
+  :seon.summary/created-ms 1795439597236,
+  :seon.summary/title "System Pulse · 1 merge across seon.model, seon.render.tails, seon.bench.cluster",
+  :seon.summary/agent :seon.wave-e/shrink-agents-proc,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536881931,
+  :seon.summary/from-tx 536881701,
+  :seon.summary/id #uuid "22f0b16b-0216-566e-bbce-3520e6eaeaa9",
+  :seon.summary/refs [:seon.wave-e/shrink-agents-proc seon.agent],
+  :seon.summary/body "- **seon.wave-e/shrink-agents-proc** (`tx 536881879`): Split seon.agent/agents-proc below the :large-function budget\n- **Subsystems:** `seon.agent` (12)\n- **Health:** Healthy (95 advisories) · **Velocity:** 6/10 merged, 91% KV-cache",
+  :seon.summary/created-ms 1795439657040,
+  :seon.summary/title "Split server-proc below :large-function budget",
+  :seon.summary/agent :seon.wave-e/shrink-server-proc,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536882302,
+  :seon.summary/from-tx 536881931,
+  :seon.summary/id #uuid "31b8a7ae-a74c-5d9e-a7a5-e406313766ea",
+  :seon.summary/refs [:seon.wave-e/shrink-move-vars-tx
+                      :seon.wave-e/shrink-server-proc
+                      seon.server
+                      seon.code.refactor
+                      seon.code.edit
+                      seon.model.wire
+                      seon.wave1-trace-fixes-test],
+  :seon.summary/body "- **seon.wave-e/shrink-move-vars-tx** (`tx 536881972`): Split seon.code.refactor/move-vars-tx below the :large-function budget\n- **seon.wave-e/shrink-server-proc** (`tx 536881939`): Split seon.server/server-proc below the :large-function budget\n- **Subsystems:** `seon.server` (7), `seon.code.refactor` (4), `seon.code.edit` (3), `seon.model.wire` (2), `seon.wave1-trace-fixes-test` (2) +5 more\n- **Health:** Healthy (95 advisories) · **Velocity:** 8/10 merged, 92% KV-cache",
+  :seon.summary/created-ms 1795440628870,
+  :seon.summary/title "System Pulse · 2 merges across seon.server, seon.code.refactor, seon.code.edit",
+  :seon.summary/agent :seon.wave-e1/store-cache-keys,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536882622,
+  :seon.summary/from-tx 536882302,
+  :seon.summary/id #uuid "20a68c04-50f1-5320-b707-f2e9e0fb2336",
+  :seon.summary/refs [:seon.wave-e1/context-cache-and-chars
+                      :seon.wave-e1/store-cache-keys
+                      :seon.wave-e1/health-oom-and-cleanup
+                      seon.health
+                      seon.health.efficiency
+                      seon.store
+                      seon.render.wire
+                      seon.health.static],
+  :seon.summary/body "- **seon.wave-e1/context-cache-and-chars** (`tx 536882383`): Eliminate cold (user/context) OOM via walk-prefix cache and persisted form chars\n- **seon.wave-e1/store-cache-keys** (`tx 536882327`): Centralize Datahike cache-key helpers in seon.store and fix cross-store cache keys\n- **seon.wave-e1/health-oom-and-cleanup** (`tx 536882309`): Fix seon.health allocation bloat, unmerged-branch failure leakage, and dead code\n- **Subsystems:** `seon.health` (8), `seon.health.efficiency` (5), `seon.store` (4), `seon.render.wire` (3), `seon.health.static` (2) +7 more\n- **Health:** Healthy (96 advisories) · **Velocity:** 9/10 merged, 92% KV-cache",
+  :seon.summary/created-ms 1795441768690,
+  :seon.summary/title "System Pulse · 3 merges across seon.health, seon.health.efficiency, seon.store",
+  :seon.summary/agent :seon.wave-e2/shrink-code-monoliths,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536882766,
+  :seon.summary/from-tx 536882622,
+  :seon.summary/id #uuid "2ccaeb24-944c-5504-b821-7ac691371a2d",
+  :seon.summary/refs [:seon.wave-e2/shrink-code-monoliths seon.code],
+  :seon.summary/body "- **seon.wave-e2/shrink-code-monoliths** (`tx 536882701`): Split seon.code/eval-forms and persist-forms-by-ns below :large-function budget\n- **Subsystems:** `seon.code` (10)\n- **Health:** Healthy (96 advisories) · **Velocity:** 9/10 merged, 92% KV-cache",
+  :seon.summary/created-ms 1795441811751,
+  :seon.summary/title "System Pulse · 1 merge across seon.code",
+  :seon.summary/agent :seon.wave-e2/unify-hiccup-to-text,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536882835,
+  :seon.summary/from-tx 536882766,
+  :seon.summary/id #uuid "014e1a72-14e6-5e20-9125-dbc80af59c29",
+  :seon.summary/refs [:seon.wave-e2/unify-hiccup-to-text
+                      seon.render
+                      seon.render.fit.measure
+                      seon.render-text-test
+                      seon.render.print.emit
+                      seon.render.text],
+  :seon.summary/body "- **seon.wave-e2/unify-hiccup-to-text** (`tx 536882822`): Unify duplicate Hiccup-to-text converters around seon.render/hiccup->text\n- **Subsystems:** `seon.render` (28), `seon.render.fit.measure` (14), `seon.render-text-test` (2), `seon.render.print.emit` (2), `seon.render.text` (2)\n- **Health:** Healthy (95 advisories) · **Velocity:** 9/10 merged, 92% KV-cache",
+  :seon.summary/created-ms 1795441868526,
+  :seon.summary/title "System Pulse · 1 merge across seon.render, seon.render.fit.measure, seon.render-text-test",
+  :seon.summary/agent :seon.wave-e2/shrink-test-proc,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536882861,
+  :seon.summary/from-tx 536882835,
+  :seon.summary/id #uuid "34bd108b-e1b5-50db-a2ed-12ecc2fd5aac",
+  :seon.summary/refs [:seon.wave-e2/shrink-test-proc seon.test],
+  :seon.summary/body "- **seon.wave-e2/shrink-test-proc** (`tx 536882855`): Split seon.test/test-proc below the :large-function budget\n- **Subsystems:** `seon.test` (16)\n- **Health:** Healthy (95 advisories) · **Velocity:** 9/10 merged, 92% KV-cache",
+  :seon.summary/created-ms 1795442100079,
+  :seon.summary/title "Round 7 Compounding Milestone: 9/9 Auto-Merges (Waves 2-4), Cold health/report < 256 MB & Unification Audit",
+  :seon.summary/agent :repl/wave-e-hygiene-and-docs,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536883718,
+  :seon.summary/from-tx 536882861,
+  :seon.summary/id #uuid "26f9334a-40d4-5bd3-8163-4ddb38fc5ffd",
+  :seon.summary/body "Recorded 2026-11-23 rulings (no guards/fences; compounding general rules). Shipped lossless CST move-vars! (seon.code.rewrite.move), single-owner git-proc :diff-branch with fast-import --force, unified branch schema/rule override parity + rule/transitive-schema Merkle reach, and Outside Auditor fixes. 698/698 green, 0 health errors.",
+  :seon.summary/created-ms 1795452982421,
+  :seon.summary/title "Overnight Cycle 1: Mechanical Root-Causes & Rulings Merged",
+  :seon.summary/agent :repl/cycle1-ledger,
+  :seon.summary/kind :milestone}
+ {:seon.summary/to-tx 536887157,
+  :seon.summary/from-tx 536883718,
+  :seon.summary/id #uuid "05c55143-4baa-5fb6-a744-8f5146119360",
+  :seon.summary/refs [seon.git-proc
+                      seon.ctx-tree-and-review-test
+                      seon.reconciler
+                      seon.reconciler-test
+                      seon.store],
+  :seon.summary/body "- **Subsystems:** `seon.git-proc` (2), `seon.ctx-tree-and-review-test` (1), `seon.reconciler` (1), `seon.reconciler-test` (1), `seon.store` (1)\n- **Health:** Healthy (104 advisories) · **Velocity:** 7/10 merged, 92% KV-cache",
+  :seon.summary/created-ms 1795453541098,
+  :seon.summary/title "Codebase Activity · 6 forms in seon.git-proc, seon.ctx-tree-and-review-test, seon.reconciler",
+  :seon.summary/agent :seon.model/split-oversized-namespace,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536887418,
+  :seon.summary/from-tx 536887157,
+  :seon.summary/id #uuid "162fa917-0419-5ed0-b6b4-a3186f36c9ef",
+  :seon.summary/body "Audited two live deepseek-flash splits (seon.model merged cleanly at 3,991t + seon.model.messages 4,320t). Fixed 3 live runtime root causes (seon.main Flow report/error channel wiring & web error preservation, seon.render.fit unloaded branch renderer resolution, non-wedging transactor merge error attribution) plus seon.schema/sync-dh-decls additive :db/index backfill, 5 compounding Datalog rules + producer/consumer compatible-fn + ctx/tail-rules-with-producers + :zone-filter, config-driven Turn-0 large-ns form outline, and smart move-vars! (:keep-private? :auto, existing-to-syms, :refer->ns). All Outside Auditor MF-1..MF-10 resolved; 0 new oversized namespaces.",
+  :seon.summary/created-ms 1795457800485,
+  :seon.summary/title "Overnight Cycle 2: Compounding Datalog Rules, Additive Index Sync, and Flow/Renderer Root Causes",
+  :seon.summary/agent :repl/cycle2-final,
+  :seon.summary/kind :milestone}
+ {:seon.summary/to-tx 536887789,
+  :seon.summary/from-tx 536887418,
+  :seon.summary/id #uuid "0d66e14d-47e5-52c9-bebb-30dfc29e44f2",
+  :seon.summary/refs [:seon.repl/split-oversized-namespace
+                      :seon.model/split-oversized-namespace
+                      konserve.jolt.lmdb-ffi
+                      seon.transactor.merge
+                      seon.reconciler
+                      seon.repl.search
+                      seon.task.gate],
+  :seon.summary/body "- **seon.repl/split-oversized-namespace** (`tx 536887560`): Split seon.repl below the 8k token namespace budget\n- **seon.model/split-oversized-namespace** (`tx 536887485`): Split seon.model below the 8k token namespace budget\n- **Subsystems:** `konserve.jolt.lmdb-ffi` (67), `seon.transactor.merge` (10), `seon.reconciler` (8), `seon.repl.search` (7), `seon.task.gate` (7) +34 more\n- **Health:** Healthy (105 advisories) · **Velocity:** 8/10 merged, 92% KV-cache",
+  :seon.summary/created-ms 1795461904469,
+  :seon.summary/title "Cycle 3: True 1 TB LMDB Growth & Phase 2 Derived Review->Restart Loop",
+  :seon.summary/agent :repl/repl,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536889407,
+  :seon.summary/from-tx 536887789,
+  :seon.summary/id #uuid "02d1f9d3-af90-5591-a76d-c83f21dcf056",
+  :seon.summary/body "Shipped 4 Hydrogen-researched, Outside-Audited, live-proven cycles: Cycle 1 mechanical root-causes (CST move-vars!, idempotent git diff, unified branch overrides + Merkle reach, GC pruned-branch loop fix); Cycle 2 Flow error-chan wiring, live additive indexes + 125-branch GC, 5 compounding rules, seon.model split; Cycle 3 1 TB sparse LMDB, Phase 2 derived Review->Cleanup->Fresh-Session Restart loop (7/7 live cycles merged cleanly), user/revert-ns!, seon.merge/lookup-datom fix, seon.repl split; Cycle 4 Merkle schema registry + store/head LRU, O(|Delta|) seon.health.branch, Wave E2-A ^:seon.repl/export (:large-function 5->3), 3 compounding rules + Datahike *query-result-cache?* db-fn soundness fix, and live seon.transactor split (:oversized-namespace 6->3, health 1210->187 MB, Turn N+1 wire build 327->65 MB, 771/771 tests green).",
+  :seon.summary/created-ms 1795470144062,
+  :seon.summary/title "Overnight Recursive Self-Improvement Loop Complete (Cycles 1-4)",
+  :seon.summary/agent :repl/repl,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536890356,
+  :seon.summary/from-tx 536889407,
+  :seon.summary/id #uuid "0eab08e0-b3bb-53e1-80fc-ec369b46b3a7",
+  :seon.summary/refs [:review/split-oversized-namespace-t536889975
+                      :seon.agent/multi-task-steering
+                      seon.fork.calls
+                      seon.task-gate-test
+                      seon.ctx.project
+                      seon.render.wire
+                      seon.ctx-tree-and-review-test],
+  :seon.summary/body "- **review/split-oversized-namespace-t536889975** (`tx 536890026`): Review :seon.rule/split-oversized-namespace (triggered by [:error-streak :no-writes])\n- **seon.agent/multi-task-steering** (`tx 536889614`): Complete multi-task :seon.agent/tasks steering across spawn, wire cache keys, scope rules, and REPL hel…\n- **Subsystems:** `seon.fork.calls` (9), `seon.task-gate-test` (7), `seon.ctx.project` (6), `seon.render.wire` (6), `seon.ctx-tree-and-review-test` (4) +29 more\n- **Health:** Healthy (125 advisories) · **Velocity:** 7/10 merged, 89% KV-cache",
+  :seon.summary/created-ms 1795492590779,
+  :seon.summary/title "Unified <agent> Prefix, COW-Forked Reviews, Multi-Task Steering & Live A/B Trace-Audited Fixes",
+  :seon.summary/agent :repl/chronicle-milestone,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536890414,
+  :seon.summary/from-tx 536890356,
+  :seon.summary/id #uuid "32e1509e-e49d-5e3e-b31e-b828352e6c64",
+  :seon.summary/refs [seon.signals.touches
+                      seon.code.files
+                      seon.code.io
+                      seon.core-test
+                      seon.health.contracts],
+  :seon.summary/body "- **Subsystems:** `seon.signals.touches` (24), `seon.code.files` (4), `seon.code.io` (4), `seon.core-test` (1), `seon.health.contracts` (1) +2 more\n- **Health:** Healthy (122 advisories) · **Velocity:** 8/10 merged, 90% KV-cache",
+  :seon.summary/created-ms 1795494983221,
+  :seon.summary/title "Serialized fixes.edn & summaries.edn + Prepared Jolt/PSS/Konserve/Datahike Cutover",
+  :seon.summary/agent :repl/export-ledgers,
+  :seon.summary/kind :system-pulse}
+ {:seon.summary/to-tx 536890417,
+  :seon.summary/from-tx 536889407,
+  :seon.summary/id #uuid "20261124-0002-4000-8000-000000000002",
+  :seon.summary/refs [seon.store seon.render.wire seon.code.files],
+  :seon.summary/body "Serialized all 33 :seon.fix/* class-fix records to resources/seon/fixes.edn and all Chronicle summaries to resources/seon/summaries.edn ahead of pinning synced jolt@e47047a5, persistent-sorted-set@b483901, konserve@f62b580 (with MDB_MAP_FULL auto-grow), and datahike@6ac4e413 and rebuilding a fresh zstd/bf=32/diff-buf=64/edge-append store.",
+  :seon.summary/created-ms 1795495026457,
+  :seon.summary/title "Pre-Cutover Ledger Export: Unified <agent> Fork, 9 Root-Cause Fixes & Synced Jolt/PSS/Konserve/Datahike",
+  :seon.summary/agent :repl/export-summaries,
+  :seon.summary/kind :milestone}]
