@@ -175,7 +175,7 @@
   "Mounted live `<style id=\"seon-css\">` unit (0 DB reads). Hot-patches open browsers via Datastar whenever CSS changes."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string] [:vector :any]], :cost/ticks 50000}
   [_db css-text]
-  [:style {:id "seon-css"} (render/raw-html css-text)])
+  [:style {:id "seon-css"} (render/raw-html (str css-text "\n.topbar.is-dev-mode{border-top:2px solid var(--signal);background:linear-gradient(180deg,rgba(240,180,41,.07),var(--base-950) 60%)}\n.nav-pill.is-dev-pill{background:rgba(240,180,41,.18);color:var(--signal);border:1px solid rgba(240,180,41,.55);font-weight:600}\n.root-canvas{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:14px}\n.root-canvas.is-user-canvas{min-height:calc(100vh - 160px);justify-content:center}\n.canvas-compact-deck{padding:11px 15px}"))])
 
 (defn stream-phase-info
   "Classifies a live-stream entry into its UI phase metadata `{:phase :label :css-class}`."
@@ -398,7 +398,7 @@
                       [:polyline {:points "1.5 8.5 4.2 8.5 6 3.5 9.6 12.5 11.4 8.5 14.5 8.5"}]]
         explain-ref (or inspect-ref (when (= canon :system) [:seon.system/id :root]))]
     [:header {:id "seon-header"
-              :class (str "topbar" (when narrow? " is-narrow"))
+              :class (str "topbar" (when narrow? " is-narrow") (when expert-mode? " is-dev-mode"))
               :data-canonical-url (router/user-state->path db vs)
               :data-expert-mode (if expert-mode? "true" "false")
               :data-viewport-w (str vw)
@@ -441,12 +441,12 @@
              :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
           [:span {:class (str "dot " (if ok? "live" "bad"))}]])
        [:button {:type "button"
-                 :id "expert-mode-toggle"
-                 :class (str "nav-pill expert-toggle" (when expert-mode? " active"))
-                 :aria-pressed (if expert-mode? "true" "false")
-                 :title (if expert-mode? "Expert mode ON — switch to Everyday mode" "Switch to Expert mode (full telemetry)")
-                 :on-click '(seon.web/toggle-expert-mode!)}
-        "Expert"]
+                :id "expert-mode-toggle"
+                :class (str "nav-pill expert-toggle" (when expert-mode? " active is-dev-pill"))
+                :aria-pressed (if expert-mode? "true" "false")
+                :title (if expert-mode? "Developer Mode ON (Active Context tiles, telemetry, branch tools) — click for clean User Canvas" "Switch to Developer Mode (Active Context tiles, telemetry, Explain)")
+                :on-click '(seon.web/toggle-expert-mode!)}
+       (if expert-mode? "Dev Mode · ON" "Dev Mode")]
        [:button {:type "button"
                  :class (str "icon-btn vision-toggle" (when vision-on? " active"))
                  :aria-label (if vision-on? "Disable viewport screenshot" "Enable viewport screenshot")
