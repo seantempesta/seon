@@ -87,7 +87,7 @@
 
 (defn- qtx [w m] (q w [:transactor :tx m]))
 
-(defn- safe! [f] (try (f) (catch Throwable _)))
+(defn- ^:seon.flow/edge safe! [f] (try (f) (catch Throwable _)))
 
 (defn- bdo! [cfg br f] (let [c (st/connect cfg br)] (try (f c) (finally (d/release c)))))
 

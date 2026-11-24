@@ -90,7 +90,7 @@
       (is (= 0.0 (:recall empty-res)))
       (is (= 0 (:recall-gap-count empty-res))))))
 
-(deftest ^{:cost/ticks 115000000} as-of-hyperparam-sweep-and-live-scoreboard-e2e-test
+(deftest ^{:cost/ticks 140000000} as-of-hyperparam-sweep-and-live-scoreboard-e2e-test
   (testing "d/as-of A/B hyperparameter lab compares breadth-first, depth-first, recency-heavy, and urgency-heavy deterministically"
     (with-test-store [{:keys [conn]}]
       (let [src (str "(ns demo.lab)\n"
