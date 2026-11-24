@@ -4,7 +4,8 @@
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]
             [rewrite-clj.zip :as z]
-            [seon.code.cst :as cst]))
+            [seon.code.cst :as cst]
+            [malli.core :as m]))
 
 (defn collect-body-refs
   {:malli/schema [:function [:=> [:cat [:maybe [:sequential :any]]] [:map [:qual-ns [:set :string]] [:unqual [:set :string]] [:raw-toks [:set :string]]]]]}
@@ -412,3 +413,49 @@
                                    [deg []] kids)
               next-ready (if (seq newly) (vec (sort-by orig-ord (into rest-r newly))) rest-r)]
           (recur next-ready deg' (conj out cur)))))))
+
+(defn extract-defn-malli-schema
+  "Extracts `:malli/schema` from a parsed `(defn ...)` / `(defn- ...)` form (var metadata or attr-map)."
+  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 500000}
+  [form-obj]
+  (when (and
+          (seq? form-obj)
+          (contains? #{'defn 'defn-} (first form-obj)))
+    (let [sym-meta (meta (second form-obj))
+          rest-forms (drop 2 form-obj)
+          after-doc (if (string? (first rest-forms))
+                      (next rest-forms)
+                      rest-forms)
+          attr-map (when (map? (first after-doc)) (first after-doc))]
+      (or (:malli/schema attr-map) (:malli/schema sym-meta)))))
+
+(defn fn-schema-arity
+  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 500000}
+  [fs]
+  (when (m/schema? fs)
+  (let [in (first (m/children fs))
+        it (when in (m/type in))
+        ch (when in (m/children in))]
+    (when (= it :cat)
+      (if (some #(contains? #{:* :? :+} (m/type %)) ch) :variadic (count ch))))))
+
+(defn check-examples-against-arities
+  {:malli/schema [:=> [:cat :any :any :any :any :any] :any], :cost/ticks 1000000}
+  [exs arities target key sch]
+  (when (some? exs)
+    (if-not (and (coll? exs) (not (map? exs)))
+      {:ok? false :error :invalid-malli-examples :target target :key key :schema sch
+       :hint ":examples must be a vector of [[arg1 ...] expected-out] pairs."}
+      (some (fn [ex]
+              (cond
+                (not (and (vector? ex) (= 2 (count ex)) (vector? (first ex))))
+                {:ok? false :error :invalid-malli-examples :target target :key key :example ex :expected-arities arities
+                 :hint (str "Each :examples entry must be [[arg1 ...] expected-out] (e.g. [[] out] for 0-arg, [[x] out] for 1-arg). Got: " (pr-str ex))}
+
+                (and (seq arities) (not (contains? arities :variadic)) (not (contains? arities (count (first ex)))))
+                {:ok? false :error :malli-examples-arity-mismatch :target target :key key :example ex
+                 :example-arity (count (first ex)) :expected-arities arities
+                 :hint (str "Example args " (pr-str (first ex)) " has arity " (count (first ex))
+                            " but schema expects arity " arities
+                            " (for 0-arg use [[] expected-out], NOT [[[]] expected-out]).")}))
+            exs))))

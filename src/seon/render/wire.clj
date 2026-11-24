@@ -302,7 +302,7 @@ rtails/fallback-entity-renderers)
                  [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch reset-tx
                  msig bsig
                  (:seon.agent/router? ag) (:seon.agent/scope ag) task-ids (:seon.agent/goal ag)
-                 (vec (:seon.agent/pinned ag)) (:seon.agent/summary ag) (vec (:seon.agent/curated ag))
+                 (vec (:seon.agent/pinned ag)) (when-not (:seon.agent/forked-from ag) (:seon.agent/summary ag)) (vec (:seon.agent/curated ag))
                  (:seon.agent/context-prefs ag) (:seon.agent/forked-from ag) (:seon.agent/fork-commit ag)
                  (vec (sort-by pr-str (:seon.agent/examples ag))) (vec (sort-by pr-str (:seon.agent/example-refs ag)))
                  anchor-turn task? dis-key])
@@ -392,10 +392,7 @@ rtails/fallback-entity-renderers)
                                             main-db opts)))))))
 
 (defn build-live-wire-request
-"ONE single source of truth for an agent's LLM context AND Context Lab:
- Datahike commit-id + `d/merge-base` KV-cache stability, ONE `seon.ctx/gather-agent-candidates`,
- recursive `:zone :agent-prefix` assembly (`:continue` forks + `:example` refs),
- `seon.render.fit/fit-projections`, and pure `ns-map -> ns-map` Hiccup ephemeral tail renderers."
+"Single source of truth for LLM wire context & Context Lab: KV-stable prefix, candidate rules, fit ladder, and pure Hiccup tail."
 {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]
  :cost/ticks 60000000}
 [main-db branch-db agent-id {:keys [viewport-screenshot vision? conn already-shown token-budget strategy
@@ -424,13 +421,21 @@ rtails/fallback-entity-renderers)
                     (rstatus/resolve-prefix-agents main-db branch-db conn ag (:prefix-items w0) d0 build-live-wire-request))
               {:keys [tile-projections walk-text walk-db walk-main-cid tail-tile-blocks rule-trace fit-trace shown
                       surface-stats explained candidates]}
-              (if (and (empty? already-shown) (empty? (:parent-shown pfx)) (nil? token-budget) (nil? strategy) (nil? weights) (not explain?))
-              @(:default-fit w0)
-              (assoc (fit-wire-pool (:pool w0) main-db
-                       (merge (:pref-fit w0) t-opt
-                              (when (seq (:parent-shown pfx))
-                                {:already-shown (merge (:parent-shown pfx) already-shown)})))
-                     :walk-main-cid (:walk-main-cid w0)))
+              (let [ps (:parent-shown pfx)
+                  dflt? (and (empty? already-shown) (nil? token-budget) (nil? strategy) (nil? weights) (not explain?))
+                  fmdb (if (seq ps) (or (:walk-main-db w0) main-db) main-db)]
+              (cond
+                (and dflt? (empty? ps)) @(:default-fit w0)
+                (and dflt? (seq ps) (:fork-fits w0))
+                (let [ff (:fork-fits w0)]
+                  (or (@ff ps)
+                      (let [v (assoc (fit-wire-pool (:pool w0) fmdb (merge (:pref-fit w0) t-opt {:already-shown ps}))
+                                     :walk-main-cid (:walk-main-cid w0))]
+                        (swap! ff assoc ps v) v)))
+                :else
+                (assoc (fit-wire-pool (:pool w0) fmdb
+                         (merge (:pref-fit w0) t-opt (when (seq ps) {:already-shown (merge ps already-shown)})))
+                       :walk-main-cid (:walk-main-cid w0))))
               manifest (when-let [fid (:forked-from pfx)] (rstatus/format-forked-eval-manifest walk-db fid))
               eff-walk (if manifest (str walk-text (when-not (str/blank? walk-text) "\n\n---\n\n") manifest) walk-text)
               tail-res (when inc-tail?

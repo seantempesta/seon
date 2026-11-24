@@ -347,7 +347,7 @@
            active? (and (not paused?) (not busy?) (not awaiting-blocked?))
            max-tool-turns (let [v (when (contains? (:schema main-db) :seon.config/max-tool-turns) (store/config-val main-db agent-id :seon.config/max-tool-turns))] (if (number? v) (long v) 24))
            under-turn-cap? (or (<= max-tool-turns 0) (< tool-streak max-tool-turns))
-           cutoff-reached? (and (some? (:seon.agent/merge-target ma)) (not= b :main) auto-merge? (pos? max-tool-turns) (>= tool-streak max-tool-turns) (not raw-ready?) (not waiting?) (not merged?))
+           cutoff-reached? (and (some? (:seon.agent/merge-target ma)) (not= b :main) auto-merge? (not raw-ready?) (not merged?) (empty? unread) (or (and (pos? max-tool-turns) (>= tool-streak max-tool-turns)) (and waiting? (pos? eval-count))))
            cutoff-ops (if (and active? cutoff-reached? (not (contains? gate-notified-set [agent-id head-tx :review])))
                         (gate/review-cutoff-ops main-db ma {:cutoff-reached? cutoff-reached? :gate-ok? gate-ok? :blockers (:blockers gate) :unread unread})
                         [])

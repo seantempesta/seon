@@ -1433,8 +1433,10 @@
                     $branch
                     $wm
                     :where
-                    [$wm ?ns :world/touched true]
-                    [$branch ?ns :seon.code.ns/name ?nsym]
+                    (or-join
+                     [?nsym]
+                     (and [$wm ?ns :world/touched true] [$branch ?ns :seon.code.ns/name ?nsym])
+                     (and [$wm ?v :world/touched true] [$branch ?v :seon.code.var/ns ?nsym]))
                     [(str ?nsym) ?s]
                     (or
                      [(clojure.string/starts-with? ?s "seon.rule")]
@@ -1454,7 +1456,7 @@
                              :seon.code.doc/heading
                              :seon.code.doc/body],
                       :zone :ephemeral-tail,
-                      :priority 74,
+                      :priority 92,
                       :tx ?tx}],
   :seon.rule/doc "Surface the Rules & Renderers primer whenever an agent touches rule, renderer, or coverage namespaces.",
   :seon.rule/stratum 22,
@@ -1559,6 +1561,10 @@
                     :where
                     [$branch ?ag :seon.agent/id ?agent]
                     [(not= $main $branch)]
+                    (not-join
+                     [?agent]
+                     [$main ?m :seon.agent.message/to ?agent]
+                     [$main ?m :seon.agent.message/type :review-note])
                     [(seon.rule/edited-form-eids $main $branch) ?eds]
                     [(count ?eds) ?ec]
                     [(zero? ?ec)]

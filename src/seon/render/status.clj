@@ -89,7 +89,12 @@
                                  (when (and (not= pbr :main) sc) (try (store/head sc pbr) (catch Throwable _ nil)))
                                  (when (= pbr (get-in branch-db [:config :branch])) branch-db)
                                  main-db)
-                         p-main (if (= pbr :main) fdb main-db)
+                         p-main (cond (= pbr :main) fdb
+                         (and fc sc) (or (try (when-let [mb (d/merge-base sc (d/commit-id main-db) fc)]
+                                                (d/commit-as-db sc mb))
+                                              (catch Throwable _ nil))
+                                         fdb)
+                         :else main-db)
                          pw (build-fn p-main fdb pid {:conn conn :vision? false :include-tail? false :depth (inc depth)})]
                      {:forked-from pid
                       :parent-shown (:shown pw)

@@ -17,39 +17,28 @@
           [seon.code.analyze :as analyze]
           [seon.code.io :as cio]))
 
-(defn- extract-defn-malli-schema
-  "Extracts `:malli/schema` from a parsed `(defn ...)` / `(defn- ...)` form (var metadata or attr-map)."
-  [form-obj]
-  (when (and
-          (seq? form-obj)
-          (contains? #{'defn 'defn-} (first form-obj)))
-    (let [sym-meta (meta (second form-obj))
-          rest-forms (drop 2 form-obj)
-          after-doc (if (string? (first rest-forms))
-                      (next rest-forms)
-                      rest-forms)
-          attr-map (when (map? (first after-doc)) (first after-doc))]
-      (or (:malli/schema attr-map) (:malli/schema sym-meta)))))
+(defn- extract-defn-malli-schema [& args] (apply cst-ns/extract-defn-malli-schema args))
 
 (defn- resolve-form-target [& args] (apply cio/resolve-form-target args))
 
 (defn- single-form-upsert-tx
-  "O(1-form) delta persistence for non-`#ns` form edits with compiler-exact var enrichment."
-  ([db nsym fkey path order lead new-fsrc] (single-form-upsert-tx db nsym fkey path order lead new-fsrc nil))
-  ([db nsym fkey path order lead new-fsrc acct]
-   (let [ns-src (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))
-         local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (code/ns-vars db nsym))
-         reparsed (parse/read-clj path (str (or ns-src (str "(ns " nsym ")")) "\n" new-fsrc) local-defs)
-         kept-forms (mapv (fn [f]
-                            (cond-> f
-                              (= (:seon.code.form/key f) fkey)
-                              (assoc :seon.code.form/order (or order 1)
-                                     :seon.code.form/lead (or lead "\n\n"))))
-                          (rest (:forms reparsed)))
-         kept-vars (mapv #(analyze/enrich-var-with-account db % acct code/boot-root-keys) (:vars reparsed))
-         stale-form-ops (cio/retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] kept-forms)
-         stale-var-ops (analyze/stale-var-edge-retracts db kept-vars {:preserve-analyzed? (nil? acct)})]
-     (vec (concat stale-form-ops stale-var-ops kept-forms kept-vars)))))
+"O(1-form) delta persistence for non-`#ns` edits."
+([db nsym fkey path order lead new-fsrc] (single-form-upsert-tx db nsym fkey path order lead new-fsrc nil nil))
+([db nsym fkey path order lead new-fsrc acct] (single-form-upsert-tx db nsym fkey path order lead new-fsrc acct nil))
+([db nsym fkey path order lead new-fsrc acct ns-ctx]
+ (let [ns-src (or (:ns-src ns-ctx) (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")])))
+       local-defs (or (:local-defs ns-ctx) (into #{} (map #(symbol (name (:seon.code.var/name %)))) (code/ns-vars db nsym)))
+       reparsed (parse/read-clj path (str (or ns-src (str "(ns " nsym ")")) "\n" new-fsrc) local-defs)
+       kept-forms (mapv (fn [f]
+                          (cond-> f
+                            (= (:seon.code.form/key f) fkey)
+                            (assoc :seon.code.form/order (or order 1)
+                                   :seon.code.form/lead (or lead "\n\n"))))
+                        (rest (:forms reparsed)))
+       kept-vars (mapv #(analyze/enrich-var-with-account db % acct code/boot-root-keys) (:vars reparsed))
+       stale-form-ops (cio/retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] kept-forms)
+       stale-var-ops (analyze/stale-var-edge-retracts db kept-vars {:preserve-analyzed? (nil? acct)})]
+   (vec (concat stale-form-ops stale-var-ops kept-forms kept-vars)))))
 
 (defn edit-fn!
   "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
@@ -57,16 +46,19 @@
    Also supports batched multi-edit in ONE parse + compile:
      `(edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` or `(edit-fn! 'ns/fn [[old1 new1] ...] opts)`."
   {:malli/schema [:function
-                  [:=> [:cat :any [:vector [:tuple :any :any]]] [:maybe :map]]
+                  [:=> [:cat :any [:vector :any]] [:maybe :map]]
                   [:=> [:cat :any :any :any] [:maybe :map]]
                   [:=> [:cat :any :any :any :map] [:maybe :map]]]
    :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}}
   ([target edits]
-   (edit-fn! target edits {}))
+   (if (and (vector? edits) (= 2 (count edits)) (not (vector? (first edits))))
+     (edit-fn! target (first edits) (second edits) {})
+     (edit-fn! target edits {})))
   ([target a b]
-   (if (and (vector? a) (seq a) (vector? (first a)) (map? b))
-     (edit-fn! target a nil b)
-     (edit-fn! target a b {})))
+   (cond
+     (and (vector? a) (seq a) (vector? (first a)) (map? b)) (edit-fn! target a nil b)
+     (and (vector? a) (= 2 (count a)) (not (vector? (first a))) (map? b)) (edit-fn! target (first a) (second a) b)
+     :else (edit-fn! target a b {})))
   ([target old-or-edits new-str {:keys [occurrence dry-run? eval?] :or {eval? true}}]
    (when-let [{:keys [conn branch]} *agent-ctx*]
      (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
@@ -320,31 +312,9 @@
                    :reordered (count tx),
                    :tx (:max-tx (:db-after r))}))))))
 
-(defn- fn-schema-arity [fs]
-  (let [in (first (m/children fs))
-        it (when in (m/type in))
-        ch (when in (m/children in))]
-    (when (= it :cat)
-      (if (some #(contains? #{:* :? :+} (m/type %)) ch) :variadic (count ch)))))
+(defn- fn-schema-arity [& args] (apply cst-ns/fn-schema-arity args))
 
-(defn- check-examples-against-arities [exs arities target key sch]
-  (when (some? exs)
-    (if-not (and (coll? exs) (not (map? exs)))
-      {:ok? false :error :invalid-malli-examples :target target :key key :schema sch
-       :hint ":examples must be a vector of [[arg1 ...] expected-out] pairs."}
-      (some (fn [ex]
-              (cond
-                (not (and (vector? ex) (= 2 (count ex)) (vector? (first ex))))
-                {:ok? false :error :invalid-malli-examples :target target :key key :example ex :expected-arities arities
-                 :hint (str "Each :examples entry must be [[arg1 ...] expected-out] (e.g. [[] out] for 0-arg, [[x] out] for 1-arg). Got: " (pr-str ex))}
-
-                (and (seq arities) (not (contains? arities :variadic)) (not (contains? arities (count (first ex)))))
-                {:ok? false :error :malli-examples-arity-mismatch :target target :key key :example ex
-                 :example-arity (count (first ex)) :expected-arities arities
-                 :hint (str "Example args " (pr-str (first ex)) " has arity " (count (first ex))
-                            " but schema expects arity " arities
-                            " (for 0-arg use [[] expected-out], NOT [[[]] expected-out]).")}))
-            exs))))
+(defn- check-examples-against-arities [& args] (apply cst-ns/check-examples-against-arities args))
 
 (defn- validate-defn-malli-schema
   "Validates `:malli/schema` against the live DB registry, checks arity match against `form-obj`, and validates `:examples` `[[args] out]` arity."
@@ -392,67 +362,71 @@
        :hint (str type-tip "Predicates are symbols (number?, set?); built-ins: :int, :string, :boolean, :keyword, :symbol, :map, :any, [:vector :any], [:set :any], :seon.host/db.")}))))
 
 (defn add-fn!
-  "Adds or replaces a top-level definition form inside `target-ns`, auto-formats 1-line minified
-   strings, auto-seeds `(ns ... (:require [clojure.test :refer [deftest is testing]]))` for brand-new
-   `*-test` namespaces, persists with automatic topological ordering, and live-evals in `target-ns`."
-  {:malli/schema [:function
-                  [:=> [:cat :any :any] [:maybe :map]]
-                  [:=> [:cat :any :any :map] [:maybe :map]]]
-   :seon.eval/budget-override {:ticks 300000000 :bytes 536870912}}
-  ([target-ns form-src] (add-fn! target-ns form-src {}))
-  ([target-ns form-src {:keys [eval?] :or {eval? true}}]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [nsym (if (string? target-ns) (symbol target-ns) target-ns)
-           fmt-form (fn [f]
-                      (binding [*print-meta* true *print-namespace-maps* false]
-                        (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta f) :dispatch pp/code-dispatch)))))
-           raw-src (if (string? form-src) (str/trim form-src) (fmt-form form-src))
-           db-pre @conn
-           _ (when (and eval? (nil? (find-ns nsym)) (not (str/starts-with? raw-src "(ns ")))
-               (when-let [pre-ns (:seon.code.form/src (d/pull db-pre [:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))]
-                 (analyze/eval-form-with-account! db-pre nsym pre-ns true)))
-           parsed (try (let [v (binding [*ns* (or (find-ns nsym) *ns*)] (read-string raw-src))]
-            (if (seq? v)
-              {:ok? true :val v}
-              {:ok? false :error :expected-list-form
-               :message "add-fn! expects a top-level list form like (defn ...), not a bare symbol or scalar"}))
-           (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
-       (if-not (:ok? parsed)
-         (assoc parsed :ns nsym)
-         (let [fv (:val parsed)
-               src (if (and (string? form-src) (not (str/includes? raw-src "\n")) (>= (count raw-src) 200))
-                     (fmt-form fv)
-                     raw-src)
-               fhead (when (and (seq? fv) (symbol? (first fv))) (symbol (name (first fv))))
-               vname (when (and (seq? fv) (symbol? (second fv))) (symbol (name nsym) (name (second fv))))
-               sch (extract-defn-malli-schema fv)
-               db0 @conn
-               sch-err (when (some? sch) (validate-defn-malli-schema db0 (or vname nsym) (str (or vname nsym)) fv sch))]
-           (if sch-err
-             sch-err
-             (let [existing-ns-src (:seon.code.form/src (d/pull db0 '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))
-                   seed-ns-src (when (and (str/ends-with? (name nsym) "-test") (not= fhead 'ns) (nil? existing-ns-src))
-                                 (str "(ns " nsym "\n  (:require [clojure.test :refer [deftest is testing]]))"))
-                   _ (when (and eval? (not= fhead 'ns) (nil? (find-ns nsym)))
-                       (when-let [ns-s (or seed-ns-src existing-ns-src)]
-                         (analyze/eval-form-with-account! db0 nsym ns-s true)))
-                   ev-res (when eval? (analyze/eval-form-with-account! db0 nsym src (= fhead 'ns)))
-                   eval-err (:error ev-res)
-                   ir-map (if (and vname (:account ev-res)) {vname (:account ev-res)} {})
-                   srcs (if seed-ns-src [seed-ns-src src] [src])
-                   tx (code/persist-forms-by-ns db0 {nsym srcs} ir-map)]
-               (if (empty? tx)
-                 {:ok? false :error :nothing-to-persist :ns nsym}
-                 (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
-                                :seon.tx/branch (or (:branch *agent-ctx*) :main)
-                                :seon.tx/reason (str "add-fn! " (or vname nsym))}
-                       r (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
-                       _ (reorder-ns-forms! nsym)
-                       db-now @conn]
-                   (ctx/refresh-active! db-now (:tx-data r))
-                   (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
-                     seed-ns-src (assoc :seeded-ns? true)
-                     eval-err (assoc :eval-error eval-err))))))))))))
+"Adds or replaces one or more top-level forms in `ns-sym`, validates `:malli/schema`, live-evals every form, and persists to Datahike."
+{:malli/schema [:function [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat :any :any :map] [:maybe :map]]]
+ :seon.eval/budget-override {:ticks 300000000 :bytes 536870912}}
+([ns-sym form-src] (add-fn! ns-sym form-src {}))
+([ns-sym form-src {:keys [eval?] :or {eval? true}}]
+ (when-let [{:keys [conn]} *agent-ctx*]
+   (let [nsym (if (symbol? ns-sym) ns-sym (symbol (name ns-sym)))
+         raw-src (if (string? form-src)
+                   (str/trim form-src)
+                   (binding [*print-meta* true *print-namespace-maps* false] (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta form-src) :dispatch pp/code-dispatch)))))]
+     (if (str/blank? raw-src)
+       {:ok? false :error :empty-form :ns nsym}
+       (let [db-pre @conn
+             _ (when (and eval? (nil? (find-ns nsym)) (not (str/starts-with? raw-src "(ns ")))
+                 (when-let [pre-ns (:seon.code.form/src (d/pull db-pre [:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))]
+                   (analyze/eval-form-with-account! db-pre nsym pre-ns true)))
+             parsed (try
+                      (binding [*ns* (or (find-ns nsym) *ns*)]
+                        (let [pbr (java.io.PushbackReader. (java.io.StringReader. raw-src))
+                              eof (Object.)
+                              fvs (loop [acc []] (let [x (read {:eof eof} pbr)] (if (identical? x eof) acc (recur (conj acc x)))))]
+                          (if (and (seq fvs) (every? seq? fvs))
+                            {:ok? true :vals fvs}
+                            {:ok? false :error :expected-list-form :message "add-fn! expects top-level list form(s) like (defn ...)"})))
+                      (catch Throwable ex {:ok? false :error :invalid-clojure-syntax :message (or (.getMessage ex) (str ex))}))]
+         (if-not (:ok? parsed)
+           (assoc parsed :ns nsym)
+           (let [fvs (:vals parsed)
+                 fv (first fvs)
+                 multi? (> (count fvs) 1)
+                 src (if (and (not multi?) (string? form-src) (not (str/includes? raw-src "\n")) (>= (count raw-src) 200))
+                       (str/trim (with-out-str (pp/write fv :dispatch pp/code-dispatch))) raw-src)
+                 fhead (when (symbol? (first fv)) (symbol (name (first fv))))
+                 vnames (vec (keep #(when (symbol? (second %)) (symbol (name nsym) (name (second %)))) fvs))
+                 vname (first vnames)
+                 db0 @conn
+                 sch-err (some #(when-let [s (extract-defn-malli-schema %)]
+                                  (let [vn (when (symbol? (second %)) (symbol (name nsym) (name (second %))))]
+                                    (validate-defn-malli-schema db0 (or vn nsym) (str (or vn nsym)) % s))) fvs)]
+             (if sch-err
+               sch-err
+               (let [existing-ns-src (:seon.code.form/src (d/pull db0 (quote [:seon.code.form/src]) [:seon.code.form/key (str nsym "#ns")]))
+                     seed-ns-src (when (and (str/ends-with? (name nsym) "-test") (not= fhead (quote ns)) (nil? existing-ns-src))
+                                   (str "(ns " nsym "\n  (:require [clojure.test :refer [deftest is testing]]))"))
+                     _ (when (and eval? (not= fhead (quote ns)) (nil? (find-ns nsym)))
+                         (when-let [ns-s (or seed-ns-src existing-ns-src)] (analyze/eval-form-with-account! db0 nsym ns-s true)))
+                     ev-parts (when eval?
+                                (mapv #(let [fh (when (symbol? (first %)) (symbol (name (first %))))
+                                             vn (when (symbol? (second %)) (symbol (name nsym) (name (second %))))]
+                                         (assoc (analyze/eval-form-with-account! db0 nsym (if multi? (pr-str %) src) (= fh (quote ns))) :var vn))
+                                      fvs))
+                     eval-err (some :error ev-parts)
+                     ir-map (into {} (keep #(when (and (:var %) (:account %)) [(:var %) (:account %)])) ev-parts)
+                     tx (code/persist-forms-by-ns db0 {nsym (if seed-ns-src [seed-ns-src src] [src])} ir-map)]
+                 (if (empty? tx)
+                   {:ok? false :error :nothing-to-persist :ns nsym}
+                   (let [r (binding [store/*tx-meta* {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl) :seon.tx/branch (or (:branch *agent-ctx*) :main) :seon.tx/reason (str "add-fn! " (or vname nsym))}]
+                             (d/transact conn {:tx-data tx}))
+                         _ (reorder-ns-forms! nsym)
+                         db-now @conn]
+                     (ctx/refresh-active! db-now (:tx-data r))
+                     (cond-> {:ok? (nil? eval-err) :ns nsym :var vname :head fhead :tx (:max-tx db-now)}
+                       multi? (assoc :vars vnames)
+                       seed-ns-src (assoc :seeded-ns? true)
+                       eval-err (assoc :eval-error eval-err))))))))))))))
 
 (defn- prep-meta-edit [conn db branch target meta-map]
   (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
@@ -468,9 +442,12 @@
             (assoc res :target target :key key)
             {:ok? true :ns ns :key key :path path :order order :lead lead :old-src src :src (:src res) :action (:action res)}))))))
 
+(defn- apply-live-var-meta! [db0 k m]
+(when-let [v (and (string? k) (str/includes? k "/") (find-var (symbol k)))]
+  (alter-meta! v merge m) (when (contains? m :malli/schema) (schema/arm-var! db0 v)) {:account nil}))
+
 (defn set-meta!
-  "Structurally inserts or merges metadata into a `(defn ...)` / `(defn- ...)` attr-map.
-   Validates `:malli/schema` upfront against the live registry. Supports single target or atomic 1-tx batch map."
+  "Merges metadata into `(defn ...)` attr-map(s), validating `:malli/schema` upfront."
   {:seon.eval/budget-override {:ticks 300000000 :bytes 536870912}
    :malli/schema [:function
                   [:=> [:cat :any] :map]
@@ -494,16 +471,22 @@
                                                 :target (or (:target prev) target)
                                                 :meta (merge (or (:meta prev) {}) meta-map)}))))
                            {} target-or-batch)
+           ns-ctxs (volatile! {})
+           get-ns-ctx #(or (@ns-ctxs %)
+                           (let [c {:ns-src (:seon.code.form/src (d/pull db0 '[:seon.code.form/src] [:seon.code.form/key (str % "#ns")]))
+                                    :local-defs (into #{} (map (comp symbol name :seon.code.var/name)) (code/ns-vars db0 %))}]
+                             (vswap! ns-ctxs assoc % c) c))
            step (reduce
                  (fn [{:keys [tx results ok-n]} [_ {:keys [target targets meta]}]]
                    (let [p (prep-meta-edit conn db0 branch target meta)]
                      (if-not (:ok? p)
                        {:tx tx :results (reduce #(assoc %1 %2 (assoc p :target %2)) results targets) :ok-n ok-n}
                        (let [{:keys [ns key path order lead src action]} p
-                             ev (analyze/eval-form-with-account! db0 ns src false)
+                             ev (or (apply-live-var-meta! db0 key meta)
+                                    (analyze/eval-form-with-account! db0 ns src false))
                              err (:error ev)
                              r-one (cond-> {:ok? (nil? err) :target target :key key :action action} err (assoc :eval-error err))]
-                         {:tx (into tx (single-form-upsert-tx db0 ns key path order lead src (:account ev)))
+                         {:tx (into tx (single-form-upsert-tx db0 ns key path order lead src (:account ev) (get-ns-ctx ns)))
                           :results (reduce #(assoc %1 %2 (assoc r-one :target %2)) results targets)
                           :ok-n (if (nil? err) (+ ok-n (count targets)) ok-n)}))))
                  {:tx [] :results {} :ok-n 0}

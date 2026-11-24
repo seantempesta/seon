@@ -196,8 +196,14 @@
         deleted-main-tests (when (and overlay (empty? vars))
                              (vec (sort (remove #(contains? (:tests cand-reach) %)
                                                 (keys (get-in st [:reach :tests]))))))
+        main-tests (get-in st [:reach :tests])
+        main-digests (get-in st [:reach :digests])
         all-tests (:tests cand-reach)
-        target-tests (if (seq vars) (select-keys all-tests vars) all-tests)
+        target-tests (cond
+                       (seq vars) (select-keys all-tests vars)
+                       (and overlay (not force?))
+                       (into {} (filter (fn [[sym dg]] (not= dg (get main-tests sym)))) all-tests)
+                       :else all-tests)
         uncached-tests (vec
                         (keep (fn [[sym dg]]
                                 (when (or force? (not (cached-green? db dg)))
@@ -208,12 +214,13 @@
         uncached-gens (vec
                        (keep (fn [[vsym fk]]
                                (when-let [dg (get-in cand-reach [:digests fk])]
-                                 (let [gdg (str "gen:" dg)]
-                                   (when (or force? (not (cached-green? db gdg)))
-                                     {:var vsym :digest gdg :ns (symbol (namespace vsym))
-                                      :est-ms 5.0}))))
+                                 (when (or force? (not overlay) (not= dg (get main-digests fk)))
+                                   (let [gdg (str "gen:" dg)]
+                                     (when (or force? (not (cached-green? db gdg)))
+                                       {:var vsym :digest gdg :ns (symbol (namespace vsym))
+                                        :est-ms 5.0})))))
                              (sort-by first contracted-map)))
-        cached-n (+ (- (count target-tests) (count uncached-tests))
+        cached-n (+ (- (count (if (seq vars) target-tests all-tests)) (count uncached-tests))
                     (- (count contracted-map) (count uncached-gens)))
         plat-reached (vec (sort (filter #(contains? (:platform-tests cand-reach) %)
                                         (map :var uncached-tests))))

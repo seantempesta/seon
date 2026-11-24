@@ -465,10 +465,10 @@
  :boolean
 
  :seon.code.var/name
- [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-symbol]
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Fully qualified var symbol 'ns/name. Pass symbols via :in $ ?sym in d/q — never write 'ns/var inside a quoted query vector."} :qualified-symbol]
 
  :seon.code.var/ns
- [:and {:seon.db/index true} :symbol]
+ [:and {:seon.db/index true, :seon.schema/doc "Namespace symbol (NOT an entity ref — use :seon.code.var/ns-ref to join onto :seon.code.ns/* entities)."} :symbol]
 
  :seon.code.var/ns-ref
  [:and {:seon.db/index true} :seon.store/ref]

@@ -1301,3 +1301,23 @@
                 stx nil]
             (is (= [fid] (mapv :seon.fix/id ftx)))
             (is (nil? stx))))))))
+
+(deftest hydrogen-audit-edit-fn-2arg-multiform-add-fn-and-fast-set-meta-test
+  (testing "edit-fn! accepts 2-arg [old new], add-fn! validates & evals all forms, and set-meta! uses fast low-alloc metadata path"
+    (with-test-store [{:keys [conn]}]
+      (binding [seon.fork.calls/*agent-ctx* {:conn conn :branch :main :agent-id :repl/h-edit}]
+        (let [r-ns (seon.code.edit/add-fn! 'seon.demo.h-edit "(ns seon.demo.h-edit)")
+              r-multi (seon.code.edit/add-fn! 'seon.demo.h-edit
+                        "(defn f1 [x] (+ x 1))\n(defn f2 [x] (+ (f1 x) 2))")
+              r-ed (seon.code.edit/edit-fn! 'seon.demo.h-edit/f1 ["(+ x 1)" "(+ x 10)"])
+              r-meta (seon.code.edit/set-meta!
+                       {'seon.demo.h-edit/f1 {:malli/schema [:=> [:cat :int] :int] :cost/ticks 5000}
+                        'seon.demo.h-edit/f2 {:malli/schema [:=> [:cat :int] :int] :cost/ticks 5000}})]
+          (is (true? (:ok? r-ns)))
+          (is (true? (:ok? r-multi)) (pr-str r-multi))
+          (is (= ['seon.demo.h-edit/f1 'seon.demo.h-edit/f2] (:vars r-multi)))
+          (is (true? (:ok? r-ed)) (pr-str r-ed))
+          (is (= 17 ((resolve 'seon.demo.h-edit/f2) 5)))
+          (is (true? (:ok? r-meta)) (pr-str r-meta))
+          (is (= 2 (:updated r-meta)))
+          (is (= 5000 (:cost/ticks (meta (resolve 'seon.demo.h-edit/f1))))))))))

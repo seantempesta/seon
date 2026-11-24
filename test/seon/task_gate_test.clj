@@ -427,3 +427,19 @@
                   (is (= :merging (:status st-m)))))
               (finally (d/release rconn))))
           (finally (d/release wconn)))))))
+
+(deftest hydrogen-audit-cutoff-waiting-and-unchanged-main-test-plan-test
+  (testing "reconciler cutoff-reached? fires when a bounded :merge-target reviewer stops in :waiting? without calling ready!"
+    (with-test-store [{:keys [conn]}]
+      (let [parent-id :w/parent-h
+            rev-id :r/waiting-h]
+        (d/transact conn {:tx-data [{:seon.agent/id parent-id :seon.agent/branch :branch/p-h :seon.agent/paused? true :seon.agent/goal "work"}
+                                    {:seon.agent/id rev-id :seon.agent/branch :branch/r-h :seon.agent/merge-target :branch/p-h
+                                     :seon.agent/forked-from [:seon.agent/id parent-id] :seon.agent/auto-merge? true
+                                     :seon.agent/waiting? true :seon.agent/ready? false :seon.agent/goal "review"}
+                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent rev-id :seon.agent.eval/turn 1
+                                     :seon.agent.eval/code "" :seon.agent.eval/thought "Done reviewing" :seon.agent.eval/out ""
+                                     :seon.agent.eval/ms 1.0 :seon.agent.eval/ticks 10 :seon.agent.eval/bytes 10}]})
+        (let [st (seon.reconciler/derive-agent-status @conn nil {} #{} #{} #{} #{} rev-id)]
+          (is (or (:needs-test? st) (seq (:review-ops st)))
+              (str "Waiting :merge-target reviewer must trigger cutoff/auto-merge instead of deadlocking parent: " (pr-str st))))))))
