@@ -79,7 +79,7 @@
                 :seon.agent/router? true
                 :seon.agent/label "Root"
                 :seon.agent/goal "Ship the unified surface"
-                :seon.agent/task :task/surface-demo
+                :seon.agent/tasks #{[:seon.task/id :task/surface-demo]}
                 :seon.agent/pinned [[:seon.task/id :task/surface-demo]
                                     [:seon.code.var/name 'demo.mod/compute]
                                     [:seon.code.doc/id "docs/surface.md#intro"]]}

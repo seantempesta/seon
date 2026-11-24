@@ -188,14 +188,6 @@
                      [?agent ?t ?tid ?tx]
                      (and
                       [$branch ?ag :seon.agent/id ?agent]
-                      [$branch ?ag :seon.agent/task ?tid]
-                      [$branch ?t :seon.task/id ?tid ?tx])
-                     (and
-                      [$main ?ag :seon.agent/id ?agent]
-                      [$main ?ag :seon.agent/task ?tid]
-                      [$main ?t :seon.task/id ?tid ?tx])
-                     (and
-                      [$branch ?ag :seon.agent/id ?agent]
                       [$branch ?ag :seon.agent/tasks ?t ?tx]
                       [$branch ?t :seon.task/id ?tid])
                      (and
@@ -460,23 +452,21 @@
                        [?agent ?tctx]
                        (and
                         [$branch ?ag :seon.agent/id ?agent]
-                        [$branch ?ag :seon.agent/task ?tid]
-                        [$branch ?tk :seon.task/id ?tid]
+                        [$branch ?ag :seon.agent/tasks ?tk]
                         [$branch ?tk :seon.task/title ?tctx])
                        (and
                         [$main ?ag :seon.agent/id ?agent]
-                        [$main ?ag :seon.agent/task ?tid]
-                        [$main ?tk :seon.task/id ?tid]
+                        [$main ?ag :seon.agent/tasks ?tk]
                         [$main ?tk :seon.task/title ?tctx])
                        (and
                         (not-join
                          [?agent]
                          [$branch ?ag1 :seon.agent/id ?agent]
-                         [$branch ?ag1 :seon.agent/task _])
+                         [$branch ?ag1 :seon.agent/tasks _])
                         (not-join
                          [?agent]
                          [$main ?ag2 :seon.agent/id ?agent]
-                         [$main ?ag2 :seon.agent/task _])
+                         [$main ?ag2 :seon.agent/tasks _])
                         [(ground "") ?tctx]))
                       [$main ?e :seon.fix/id _ ?tx]
                       [(get-else $main ?e :seon.fix/error-class :seon.rule/nil) ?cls]
@@ -487,11 +477,11 @@
                      (and
                       [$main ?ag :seon.agent/id ?agent]
                       [$main ?ag :seon.agent/router? true]
-                      (not [$main ?ag :seon.agent/task _])
+                      (not [$main ?ag :seon.agent/tasks _])
                       (not-join
                        [?agent]
                        [$branch ?ag2 :seon.agent/id ?agent]
-                       [$branch ?ag2 :seon.agent/task _])
+                       [$branch ?ag2 :seon.agent/tasks _])
                       [$main ?e :seon.task/template? true ?tx]
                       [(ground 68) ?pri]))],
   :seon.rule/target :any,
@@ -542,7 +532,7 @@
                          :seon.agent/interactive?
                          :seon.agent/branch
                          :seon.agent/scope
-                         :seon.agent/task
+                         {:seon.agent/tasks [:seon.task/id :seon.task/title]}
                          :seon.agent/waiting?
                          :seon.agent/paused?
                          :seon.agent/ready?
@@ -615,7 +605,6 @@
                      [?t ?e ?tx]
                      [$branch ?t :seon.agent/tasks ?e ?tx]
                      [$main ?t :seon.agent/tasks ?e ?tx]
-                     (and [$main ?t :seon.agent/task ?tid] [$main ?e :seon.task/id ?tid ?tx])
                      (and
                       [$main ?e :seon.error/agent-ref ?t]
                       [$main ?e :seon.error/status :open ?tx])
@@ -1123,16 +1112,6 @@
                      [?agent ?tx]
                      (and
                       [$branch ?ag :seon.agent/id ?agent]
-                      [$branch ?ag :seon.agent/task ?tid]
-                      [$branch ?t :seon.task/id ?tid ?tx]
-                      (not [$branch ?t :seon.task/done? true]))
-                     (and
-                      [$main ?ag :seon.agent/id ?agent]
-                      [$main ?ag :seon.agent/task ?tid]
-                      [$main ?t :seon.task/id ?tid ?tx]
-                      (not [$main ?t :seon.task/done? true]))
-                     (and
-                      [$branch ?ag :seon.agent/id ?agent]
                       [$branch ?ag :seon.agent/tasks ?t ?tx]
                       (not [$branch ?t :seon.task/done? true]))
                      (and
@@ -1546,11 +1525,11 @@
                       (not-join
                        [?agent]
                        [$main ?ag1 :seon.agent/id ?agent]
-                       [$main ?ag1 :seon.agent/task _])
+                       [$main ?ag1 :seon.agent/tasks _])
                       (not-join
                        [?agent]
                        [$branch ?ag2 :seon.agent/id ?agent]
-                       [$branch ?ag2 :seon.agent/task _]))
+                       [$branch ?ag2 :seon.agent/tasks _]))
                      (and
                       [$branch ?ev :seon.agent.eval/agent ?agent ?tx]
                       (or

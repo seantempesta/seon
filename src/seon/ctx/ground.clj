@@ -5,9 +5,11 @@
             [datahike.api :as d]
             [seon.render.links :refer [db-cache-sig db-schema]]
             [seon.store :as store]
-            [seon.vector :as vec]))
+            [seon.vector :as vec]
+            [seon.render.data :as rdata]))
 
 (defonce ^:private ^:seon.flow/edge effect-cache (store/lru-cache 64))
+
 (defonce ^:private ^:seon.flow/edge boot-tx-cache (store/lru-cache 16))
 
 (def ^:private domain-stop-words
@@ -173,7 +175,7 @@
   [main-db _branch-db ag candidates]
   (if (or (nil? main-db) (empty? candidates) (not ((db-schema main-db) :seon.vector/of)))
     candidates
-    (let [tid (:seon.agent/task ag) sc (:seon.agent/scope ag) p0 (first (:seon.agent/pinned ag))
+    (let [tid (first (rdata/agent-task-ids main-db ag)) sc (:seon.agent/scope ag) p0 (first (:seon.agent/pinned ag))
           qv (or (when tid (vec/vector-of main-db [:seon.task/id tid]))
                  (when sc (vec/vector-of main-db [:seon.code.ns/name sc]))
                  (when (vector? p0) (vec/vector-of main-db p0)))]
@@ -191,7 +193,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] :map]
    :cost/ticks 15000000}
   [main-db code-db task-db ag]
-  (let [tid (:seon.agent/task ag)
+  (let [tid (first (rdata/agent-task-ids (or task-db main-db) ag))
         aid (:seon.agent/id ag)
         scope (:seon.agent/scope ag)
         t-pull '[:seon.task/id :seon.task/title :seon.task/plan :seon.task/tests :seon.task/template? :seon.task/curated]

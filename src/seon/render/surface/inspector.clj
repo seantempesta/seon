@@ -31,7 +31,7 @@
    :seon.task/scope :seon.code.ns/name :seon.task/owner :seon.agent/id
    :seon.task/created-by :seon.agent/id :seon.task/template :seon.task/id
    :seon.task/needs :seon.task/id :seon.task/tests :seon.code.var/name
-   :seon.agent/task :seon.task/id :seon.agent/scope :seon.code.ns/name
+    :seon.agent/scope :seon.code.ns/name
    :seon.agent/parent :seon.agent/id :seon.agent.call/caller :seon.agent/id
    :seon.agent.call/callee :seon.agent/id :seon.agent.call/result-schema :seon.schema/key
    :seon.agent.call/parent-call :seon.agent.call/id :seon.error/agent :seon.agent/id
@@ -45,7 +45,7 @@
   {:seon.code.ns/name    [:seon.code.var/ns :seon.task/scope :seon.agent/scope :seon.code.ns/requires]
    :seon.code.var/name   [:seon.code.var/refs :seon.test/var :seon.error/var :seon.task/tests]
    :seon.code.form/key   [:seon.code.var/form]
-   :seon.task/id         [:seon.task/needs :seon.agent/task]
+   :seon.task/id         [:seon.task/needs]
    :seon.agent/id        [:seon.agent/parent :seon.error/agent :seon.agent.eval/agent :seon.task/owner
                           :seon.agent.call/caller :seon.agent.call/callee]
    :seon.error/kind      [:seon.fix/error-class]

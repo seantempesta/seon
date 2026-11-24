@@ -104,7 +104,7 @@
         (d/transact conn {:tx-data
                           [{:seon.task/id :task/lab-main :seon.task/title "Optimize demo.lab" :seon.task/scope 'demo.lab :seon.task/done? false}
                            (serr/error-tx {:kind :demo/stale-err :severity :error :source :eval :agent :ag/lab :message "Old warning"})
-                           {:seon.agent/id :ag/lab :seon.agent/branch :main :seon.agent/scope 'demo.lab :seon.agent/task :task/lab-main
+                           {:seon.agent/id :ag/lab :seon.agent/branch :main :seon.agent/scope 'demo.lab :seon.agent/tasks #{[:seon.task/id :task/lab-main]}
                             :seon.agent/pinned [[:seon.code.var/name 'demo.lab/stale-c]
                                                 [:seon.code.var/name 'demo.lab/stale-d]]}]})
         ;; Turns 1-2 BEFORE mid-tx: agent works heavily on recent-a and recent-b
@@ -200,7 +200,7 @@
             (is (= 100 (:ran res)) (str sym " expected 100 samples: " (pr-str res)))))
         ;; Deterministic seed=42 generative sweep over compare-as-of-hyperparams with real Datahike DB
         (d/transact conn {:tx-data [{:seon.task/id :task/gen-lab :seon.task/title "Gen Lab" :seon.task/done? false}
-                                    {:seon.agent/id :ag/gen-lab :seon.agent/branch :main :seon.agent/task :task/gen-lab}]})
+                                    {:seon.agent/id :ag/gen-lab :seon.agent/branch :main :seon.agent/tasks #{[:seon.task/id :task/gen-lab]}}]})
         (let [tx0 (:max-tx @conn)
               _ (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/gen-lab
                                              :seon.agent.eval/turn 1 :seon.agent.eval/handle 'result/e1
@@ -239,7 +239,7 @@
                     {:tx-data (concat
                                (code/file-import-tx @conn "src/demo/merged.clj" src false)
                                [{:seon.task/id :task/merged-demo :seon.task/title "Merged demo" :seon.task/scope 'demo.merged :seon.task/done? true}
-                                {:seon.agent/id :ns/demo.merged :seon.agent/branch :main :seon.agent/scope 'demo.merged :seon.agent/task :task/merged-demo
+                                {:seon.agent/id :ns/demo.merged :seon.agent/branch :main :seon.agent/scope 'demo.merged :seon.agent/tasks #{[:seon.task/id :task/merged-demo]}
                                  :seon.agent/pinned [[:seon.code.var/name 'demo.merged/alpha]]}
                                 {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ns/demo.merged :seon.agent.eval/turn 1
                                  :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(demo.merged/alpha 1)"}

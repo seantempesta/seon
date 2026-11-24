@@ -2,7 +2,8 @@
   "Production KV-cache prefix/delta anatomy (`analyze-wire-cache`) and incremental UI
    `datahike.reads` walk cache analyzer (`analyze-walk-cache`)."
   (:require [clojure.string :as str]
-            [datahike.api :as d]))
+            [datahike.api :as d]
+            [seon.render.data :as rdata]))
 
 (defn- round1 [x]
   (if (number? x)
@@ -281,8 +282,8 @@
         rule-moved? (boolean (some in-win? rule-txs))
         causes (cond-> []
                  (contains? ag-attrs :seon.agent/pinned) (conj "pins updated (:seon.agent/pinned)")
-                 (or (contains? ag-attrs :seon.agent/task) (contains? ag-attrs :seon.agent/tasks))
-                 (conj "active task changed (:seon.agent/task)")
+                 (contains? ag-attrs :seon.agent/tasks)
+                 (conj "active tasks changed (:seon.agent/tasks)")
                  (or (contains? ag-attrs :seon.agent/scope) (contains? ag-attrs :seon.agent/context-prefs))
                  (conj "scope/context-prefs changed")
                  (or (contains? ag-attrs :seon.agent/goal) (contains? ag-attrs :seon.agent/system-prompt))
@@ -318,8 +319,7 @@
         ag-eid (some #(when ((db-schema %) :seon.agent/id)
                         (:e (first (d/datoms % :avet :seon.agent/id agent-id))))
                      dbs)
-        tid (or (get-in w [:agent :seon.agent/task])
-                (when ag-eid (:seon.agent/task (d/pull (first dbs) '[:seon.agent/task] ag-eid))))
+        tid (first (or (seq (rdata/agent-task-ids (first dbs) (:agent w))) (when ag-eid (rdata/agent-task-ids (first dbs) agent-id))))
         task-eid (when tid
                    (some #(when ((db-schema %) :seon.task/id)
                             (:e (first (d/datoms % :avet :seon.task/id tid))))

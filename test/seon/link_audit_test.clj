@@ -162,14 +162,14 @@
                   :seon.agent/router? true
                   :seon.agent/label "Root"
                   :seon.agent/scope 'demo.audit
-                  :seon.agent/task :task/audit-dep
+                  :seon.agent/tasks #{[:seon.task/id :task/audit-dep]}
                   :seon.agent/goal "Coordinate link audit"}
                  {:seon.agent/id :agent/worker
                   :seon.agent/parent :agent/root
                   :seon.agent/branch :branch/audit
                   :seon.agent/label "Worker"
                   :seon.agent/scope 'demo.audit
-                  :seon.agent/task :task/audit-main
+                  :seon.agent/tasks #{[:seon.task/id :task/audit-main]}
                   :seon.agent/goal "Audit every UI link"
                   :seon.agent/pinned [[:seon.task/id :task/audit-main]
                                       [:seon.code.var/name 'demo.audit/compute]

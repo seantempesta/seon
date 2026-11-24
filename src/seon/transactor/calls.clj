@@ -140,7 +140,7 @@
                            (first (d/datoms db :avet :seon.task/id :template/subtask-research))
                            (first (d/datoms db :avet :seon.task/id :template/discover-and-plan))))
         caller-task (when (and caller (not= caller :user) (first (d/datoms db :avet :seon.agent/id caller)))
-                      (:seon.agent/task (d/pull db '[:seon.agent/task] [:seon.agent/id caller])))
+                      (some (fn [dt] (:v (first (d/datoms db :eavt (:v dt) :seon.task/id)))) (when (contains? (:schema db) :seon.agent/tasks) (d/datoms db :eavt (:e (first (d/datoms db :avet :seon.agent/id caller))) :seon.agent/tasks))))
         caller-is-real? (and caller-task (qualified-keyword? caller-task)
                              (first (d/datoms db :avet :seon.task/id caller-task))
                              (not (:seon.task/template? (d/pull db '[:seon.task/template?] [:seon.task/id caller-task]))))]
@@ -175,12 +175,7 @@
             eff-scope (or scope (:seon.task/scope tpl))
             eff-tests (into (set (:seon.task/tests tpl)) tests)
             eff-needs (into (set (:seon.task/needs tpl)) needs)
-            ent (cond-> {:seon.task/id tid
-                         :seon.task/title eff-title
-                         :seon.task/plan eff-plan
-                         :seon.task/done? false
-                         :seon.task/owner callee
-                         :seon.task/created-by (or caller :user)}
+            ent (cond-> {:db/id (str "task/" (namespace tid) "/" (name tid)) :seon.task/id tid :seon.task/title eff-title :seon.task/plan eff-plan :seon.task/done? false :seon.task/owner callee :seon.task/created-by (or caller :user)}
                   eff-scope (assoc :seon.task/scope eff-scope)
                   (and tpl-id (qualified-keyword? tpl-id)) (assoc :seon.task/template tpl-id)
                   (seq eff-tests) (assoc :seon.task/tests eff-tests)
@@ -235,7 +230,7 @@
             (let [bdb @bconn
                   tx (cond-> (vec task-ents)
                        (first (d/datoms bdb :avet :seon.agent/id callee))
-                       (conj {:seon.agent/id callee :seon.agent/task subtask-id}))]
+                       (conj {:seon.agent/id callee :seon.agent/tasks #{(or (:e (first (d/datoms bdb :avet :seon.task/id subtask-id))) (:db/id (first task-ents)) [:seon.task/id subtask-id])}}))]
               (when (seq tx)
                 (d/transact bconn {:tx-data tx}))
               true)
@@ -392,13 +387,12 @@
                              :seon.agent.message/body (format-call-request-body call-id caller prompt result-schema)}
                     subtask (build-subtask-tx db0 caller callee call-id inferred-scope msg)
                     subtask-id (:task-id subtask)
-                    spawn-ent (if (and spawn-ent subtask-id)
-                    (cond-> (assoc spawn-ent :seon.agent/task subtask-id)
-                      (contains? (:schema db0) :seon.agent/tasks)
-                      (assoc :seon.agent/tasks #{[:seon.task/id subtask-id]}))
-                    spawn-ent)
-                    callee-task-ent (when (and callee-exists? subtask-id)
-                                      {:seon.agent/id callee :seon.agent/task subtask-id})
+                    sub-ref (when subtask-id (or (:e (first (d/datoms db0 :avet :seon.task/id subtask-id))) (some #(when (= subtask-id (:seon.task/id %)) (:db/id %)) (:tx subtask)) [:seon.task/id subtask-id]))
+                    spawn-ent (if (and spawn-ent sub-ref (contains? (:schema db0) :seon.agent/tasks))
+                                (assoc spawn-ent :seon.agent/tasks #{sub-ref})
+                                spawn-ent)
+                    callee-task-ent (when (and callee-exists? sub-ref (contains? (:schema db0) :seon.agent/tasks))
+                                      {:seon.agent/id callee :seon.agent/tasks #{sub-ref}})
                     await-ent (when (and await? caller (not= caller :user))
                                 {:seon.agent/id caller :seon.agent/awaiting call-id})
                     tx-data (with-ref-mirrors db0 (concat ns-tx (:tx subtask)

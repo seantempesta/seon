@@ -91,7 +91,7 @@
         :seon.agent/router? true
         :seon.agent/label "Root"
         :seon.agent/scope 'demo.alpha
-        :seon.agent/task :task/holistic-demo
+        :seon.agent/tasks #{[:seon.task/id :task/holistic-demo]}
         :seon.agent/goal "Drive holistic UI"
         :seon.agent/pinned [[:seon.task/id :task/holistic-demo]
                             [:seon.code.var/name 'demo.alpha/compute]
@@ -100,7 +100,7 @@
         :seon.agent/parent :agent/root
         :seon.agent/branch :branch/demo-alpha
         :seon.agent/scope 'demo.alpha
-        :seon.agent/task :task/holistic-demo
+        :seon.agent/tasks #{[:seon.task/id :task/holistic-demo]}
         :seon.agent/ready? true
         :seon.agent/goal "Finished specialist"}
        {:seon.agent.message/id m1-id :seon.agent.message/seq 1 :seon.agent.message/from :user

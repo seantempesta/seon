@@ -9,7 +9,8 @@
             [seon.render.links :as rlinks :refer [db-schema db-cache-sig live-cid]]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.data :as rdata]))
 
 (defonce ^:private ^:seon.flow/edge rev-agent-attrs-cache (store/lru-cache 16))
 
@@ -251,7 +252,7 @@
         evs? (boolean (and aid (dh :seon.agent.eval/agent) (first (d/datoms bdb :avet :seon.agent.eval/agent aid))))
         has-scope? (some? (:seon.agent/scope ag))
         has-extra? (boolean (seq (get-in ag [:seon.agent/context-prefs :extra-namespaces])))
-        has-task? (boolean (or (:seon.agent/task ag) (seq (:seon.agent/tasks ag))))
+        has-task? (boolean (seq (:seon.agent/tasks ag)))
         any-docs? (boolean (and (mdh :seon.code.doc/id) (first (d/datoms mdb :aevt :seon.code.doc/id))))]
     (cond-> #{:rule.ctx/system-overview}
       (or green? (not any-tests?)) (conj :rule.ctx/failing-reach-tests)
@@ -473,9 +474,7 @@
                      [{:entity e :priority 90 :zone :static-prefix :tags #{:scope-ns} :rules [:seed/scope]}]))
                  (for [[e cnt] (take 6 (sort-by (comp - val) touch-counts)) :when (and (integer? e) (not= e aeid))]
                    {:entity e :priority 72 :zone :workspace :touches (long cnt) :tags #{:touched} :rules [:signal/eval-touched]})
-                 (when-let [tid (:seon.agent/task ag)]
-                   (when-let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid]) (res-eid [:seon.task/id tid]))]
-                     [{:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]}]))
+                 (for [tid (rdata/agent-task-ids (or task-db branch-db) ag) :let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid]) (res-eid [:seon.task/id tid]))] :when e] {:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]})
                  (for [item (:seon.agent/pinned ag)
                        :when (and (vector? item) (= 2 (count item)) (not= :seon.health/summary (first item)))
                        :let [e (res-eid item)] :when e]

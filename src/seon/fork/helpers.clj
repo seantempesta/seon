@@ -394,10 +394,7 @@
   {:seon.repl/export true :malli/schema [:=> [:cat] [:maybe :map]]}
   []
   (when-let [{:keys [conn agent-id]} *agent-ctx*]
-    (let [ag (d/pull @conn '[:seon.agent/task :seon.agent/goal :seon.agent/scope] [:seon.agent/id agent-id])]
-      (if-let [tid (:seon.agent/task ag)]
-        (d/pull @conn '[*] [:seon.task/id tid])
-        ag))))
+    (let [ag (d/pull @conn '[{:seon.agent/tasks [*]} :seon.agent/goal :seon.agent/scope] [:seon.agent/id agent-id]) ts (:seon.agent/tasks ag)] (if (seq ts) (if (= 1 (count ts)) (first ts) (vec ts)) ag))))
 
 (defn ^:seon.flow/edge config
   "Returns effective `:seon.config/*` map or single config key `k` for the current agent."

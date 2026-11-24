@@ -221,7 +221,7 @@
   (and (qualified-keyword? aid)
        (not= "repl" (namespace aid))
        (when-let [e (:e (first (d/datoms db :avet :seon.agent/id aid)))]
-         (boolean (or (first (d/datoms db :eavt e :seon.agent/task))
+         (boolean (or (and (contains? (:schema db) :seon.agent/tasks) (first (d/datoms db :eavt e :seon.agent/tasks)))
                       (first (d/datoms db :eavt e :seon.agent/scope)))))))
 
 (defn- recent-agents [db {:keys [agents limit min-evals]}]
@@ -258,7 +258,7 @@
         t0-db (if (and as-of? first-tx (not (instance? datahike.db.AsOfDB db)))
                 (try (d/as-of db (dec (long first-tx))) (catch Throwable _ db))
                 db)
-        ag (or (d/pull t0-db '[:seon.agent/id :seon.agent/router? :seon.agent/task :seon.agent/scope :seon.agent/branch :seon.agent/pinned] [:seon.agent/id aid])
+        ag (or (d/pull t0-db '[:seon.agent/id :seon.agent/router? :seon.agent/tasks :seon.agent/scope :seon.agent/branch :seon.agent/pinned] [:seon.agent/id aid])
                {:seon.agent/id aid})
         eval-rule? #(boolean (re-find #"eval|touch|error" (str %)))
         cands (->> (:candidates (ctx/gather-agent-candidates t0-db t0-db aid

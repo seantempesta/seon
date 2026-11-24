@@ -272,8 +272,8 @@
 (defn- linked-agent-eids [bdb mdb hdb hmdb eid meid agent-id]
   (let [bs (db-schema bdb) ms (db-schema mdb)
         raw-refs (concat
-                  (when (and eid (bs :seon.agent/task)) (map #(vector :seon.task/id (:v %)) (d/datoms bdb :eavt eid :seon.agent/task)))
-                  (when (and meid (ms :seon.agent/task)) (map #(vector :seon.task/id (:v %)) (d/datoms mdb :eavt meid :seon.agent/task)))
+                  (when (and eid (bs :seon.agent/tasks)) (map :v (d/datoms bdb :eavt eid :seon.agent/tasks)))
+                  (when (and meid (ms :seon.agent/tasks)) (map :v (d/datoms mdb :eavt meid :seon.agent/tasks)))
                   (when (and eid (bs :seon.agent/pinned)) (mapcat #(unpack-refs (:v %)) (filter :added (d/datoms hdb :eavt eid :seon.agent/pinned))))
                   (when (and meid (ms :seon.agent/pinned)) (mapcat #(unpack-refs (:v %)) (filter :added (d/datoms hmdb :eavt meid :seon.agent/pinned))))
                   (when (and eid (bs :seon.agent/curated)) (mapcat #(unpack-refs (:v %)) (filter :added (d/datoms hdb :eavt eid :seon.agent/curated)))))
@@ -446,9 +446,9 @@
   [main-db agent-id]
   (let [dh (db-schema main-db)]
     (when (and main-db agent-id (dh :seon.agent/id))
-      (let [ag (d/pull main-db '[:seon.agent/parent :seon.agent/task :seon.agent/goal] [:seon.agent/id agent-id])
+      (let [ag (d/pull main-db '[:seon.agent/parent {:seon.agent/tasks [:seon.task/id]} :seon.agent/goal] [:seon.agent/id agent-id])
             parent-id (:seon.agent/parent ag)
-            tid (:seon.agent/task ag)
+            tid (first (keep :seon.task/id (:seon.agent/tasks ag)))
             task-ent (when (and tid (dh :seon.task/id))
                        (d/pull main-db '[:seon.task/id :seon.task/title :seon.task/plan :seon.task/scope :seon.task/done?] [:seon.task/id tid]))
             incoming (when (dh :seon.agent.call/callee)
@@ -504,3 +504,27 @@
                        (cond-> (assoc c :progress prog) (seq kids) (assoc :children kids))))
             all-roots (into (vec (take-last 8 call-roots)) (take 6 parent-children))]
         (when (seq all-roots) (mapv #(enrich % 0) all-roots))))))
+
+(defn agent-task-ids
+  "Returns sorted distinct vector of `:seon.task/id` keywords assigned via `:seon.agent/tasks`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] [:vector :qualified-keyword]]
+   :cost/ticks 1000000}
+  [db ag-or-id]
+  (let [dh (when db (db-schema db))
+        raw (cond
+              (map? ag-or-id) (:seon.agent/tasks ag-or-id)
+              (and db (qualified-keyword? ag-or-id) (:seon.agent/id dh) (:seon.agent/tasks dh))
+              (when-let [eid (:e (first (d/datoms db :avet :seon.agent/id ag-or-id)))]
+                (map :v (d/datoms db :eavt eid :seon.agent/tasks)))
+              :else nil)
+        resolve-one (fn [x]
+                      (cond
+                        (qualified-keyword? x) x
+                        (and (vector? x) (= 2 (count x)) (= :seon.task/id (first x)) (qualified-keyword? (second x))) (second x)
+                        (and (map? x) (qualified-keyword? (:seon.task/id x))) (:seon.task/id x)
+                        (and db (:seon.task/id dh) (or (integer? x) (and (map? x) (integer? (:db/id x)))))
+                        (let [e (if (integer? x) x (:db/id x))
+                              v (:v (first (d/datoms db :eavt e :seon.task/id)))]
+                          (when (qualified-keyword? v) v))
+                        :else nil))]
+    (vec (sort-by str (distinct (keep resolve-one raw))))))

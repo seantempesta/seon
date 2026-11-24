@@ -167,12 +167,12 @@
                             :seon.task/scope 'seon.demo
                             :seon.task/plan "Check seon.demo.target functions and open tasks."
                             :seon.task/done? false}
-                           {:seon.agent/id :ag/targeted :seon.agent/branch :main :seon.agent/scope 'seon.demo :seon.agent/task :demo/targeted :seon.agent/goal "Work"}
+                           {:seon.agent/id :ag/targeted :seon.agent/branch :main :seon.agent/scope 'seon.demo :seon.agent/tasks #{[:seon.task/id :demo/targeted]} :seon.agent/goal "Work"}
                            {:seon.task/id :demo/vague
                             :seon.task/title "Fix slow debug wire profiler allocations"
                             :seon.task/scope 'seon.demo
                             :seon.task/done? false}
-                           {:seon.agent/id :ag/vague :seon.agent/branch :main :seon.agent/scope 'seon.demo :seon.agent/task :demo/vague :seon.agent/goal "Investigate"}
+                           {:seon.agent/id :ag/vague :seon.agent/branch :main :seon.agent/scope 'seon.demo :seon.agent/tasks #{[:seon.task/id :demo/vague]} :seon.agent/goal "Investigate"}
                            {:seon.agent/id :ag/coord :seon.agent/branch :main :seon.agent/router? true
                             :seon.agent/scope 'seon.demo :seon.agent/goal "Coord"
                             :seon.agent/pinned [[:seon.health/summary :main]]}

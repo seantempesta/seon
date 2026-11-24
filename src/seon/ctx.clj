@@ -151,9 +151,7 @@
          bdb (or branch-db main-db)
          ag (or (:agent o) (rdata/pull-agent-entity main-db bdb agent-id) {:seon.agent/id agent-id})
          tdb (or (:task-db o)
-                 (when (and (:seon.agent/task ag) ((rlinks/db-schema bdb) :seon.task/id)
-                            (first (d/datoms bdb :avet :seon.task/id (:seon.agent/task ag))))
-                   bdb)
+                 (let [tids (rdata/agent-task-ids bdb ag)] (when (and (seq tids) ((rlinks/db-schema bdb) :seon.task/id) (some #(first (d/datoms bdb :avet :seon.task/id %)) tids)) bdb))
                  main-db)
          target (case (:target o)
                   (:canvas :workspace :debug :wire :any) (:target o)
@@ -186,7 +184,7 @@
          ck (when (and (not (false? (:use-cache? o))) mc bc (empty? disabled) (or (nil? (:rules o)) (keyword? (:rules-tag o))))
             [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb)
              agent-id target (:rules-tag o) (:zone-filter o) (count eff-rs)
-             (:seon.agent/task ag) (:seon.agent/scope ag) (:seon.agent/context-prefs ag) (:seon.agent/target ag) (:seon.agent/pinned ag) (when rules/*base-rules-override* (System/identityHashCode rules/*base-rules-override*))])
+             (rdata/agent-task-ids bdb ag) (:seon.agent/scope ag) (:seon.agent/context-prefs ag) (:seon.agent/target ag) (:seon.agent/pinned ag) (when rules/*base-rules-override* (System/identityHashCode rules/*base-rules-override*))])
          ru (if ck (store/lru-get! ctx-ru-cache 24 ck run-ru) (run-ru))
          cands (proj/augment-and-hydrate-candidates main-db bdb tdb ag world (:projs ru) o)]
      {:agent ag :world world :candidates cands :ctx-trace (:trace ru)})))
@@ -294,8 +292,8 @@
        (add! 'curate!
              (fn [refs] (let [{:keys [conn agent-id]} (ctx-fn) db @conn
                               rs (vec (if (and (vector? refs) (= 2 (count refs)) (qualified-keyword? (first refs))) [refs] refs))
-                              ag (d/pull db '[:seon.agent/curated :seon.agent/task] [:seon.agent/id agent-id])
-                              merged (vec (distinct (concat (:seon.agent/curated ag) rs))) tid (:seon.agent/task ag)
+                              ag (d/pull db '[:seon.agent/curated {:seon.agent/tasks [:seon.task/id]}] [:seon.agent/id agent-id])
+                              merged (vec (distinct (concat (:seon.agent/curated ag) rs))) tid (first (keep :seon.task/id (:seon.agent/tasks ag)))
                               tx (cond-> [{:seon.agent/id agent-id :seon.agent/curated merged}]
                                    (and tid (first (d/datoms db :avet :seon.task/id tid)))
                                    (conj {:seon.task/id tid

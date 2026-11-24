@@ -326,8 +326,8 @@
     (with-test-store [{:keys [conn]}]
       (let [fid (random-uuid)
             _ (d/transact conn {:tx-data [{:seon.agent/id :agent/c1 :seon.agent/branch :branch/c1-fix
-                                           :seon.agent/task :seon.health/perf-fix}
-                                          {:seon.task/id :seon.health/perf-fix
+                                           :seon.agent/tasks #{"t-perf-fix"}}
+                                          {:db/id "t-perf-fix" :seon.task/id :seon.health/perf-fix
                                            :seon.task/title "Eliminate O(history) test scan in health"
                                            :seon.task/summary "Fetch top-2 live test eids via indexed eavt"}
                                           {:seon.fix/id fid :seon.fix/error-class :alloc-budget-overrun

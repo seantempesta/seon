@@ -300,10 +300,11 @@
                         (->> eids distinct
                              (keep #(:seon.task/id (d/pull db '[:seon.task/id] %)))
                              sort (take 8) vec not-empty)))
-            past-ags (when (dh :seon.agent/task)
-                       (->> (d/datoms db :avet :seon.agent/task tid)
-                            (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
-                            distinct sort (take 4) vec not-empty))]
+            past-ags (when (and (dh :seon.agent/tasks) (dh :seon.task/id))
+            (when-let [teid (:e (first (d/datoms db :avet :seon.task/id tid)))]
+              (->> (d/datoms db :avet :seon.agent/tasks teid)
+                   (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
+                   distinct sort (take 4) vec not-empty)))]
         (cond-> {}
           parents (assoc :seon.ui/task-needed-by parents)
           past-ags (assoc :seon.ui/task-past-agents past-ags))))))

@@ -182,11 +182,11 @@
   [spec]
   (when-let [{:keys [conn agent-id]} *agent-ctx*]
     (let [tid (or (:id spec)
-                  (:seon.agent/task (d/pull @conn '[:seon.agent/task] [:seon.agent/id agent-id]))
-                  (:seon.agent/task (d/pull (store/head conn :main) '[:seon.agent/task] [:seon.agent/id agent-id]))
+                  (some #(when-let [eid (if (map? %) (:db/id %) %)] (:seon.task/id (d/pull @conn '[:seon.task/id] eid))) (:seon.agent/tasks (d/pull @conn '[:seon.agent/tasks] [:seon.agent/id agent-id])))
+                  (some #(when-let [eid (if (map? %) (:db/id %) %)] (:seon.task/id (d/pull (store/head conn :main) '[:seon.task/id] eid))) (:seon.agent/tasks (d/pull (store/head conn :main) '[:seon.agent/tasks] [:seon.agent/id agent-id])))
                   (some #(when-let [eid (if (map? %) (:db/id %) %)] (:seon.task/id (d/pull (store/head conn :main) '[:seon.task/id] eid))) (:seon.agent/tasks (d/pull @conn '[:seon.agent/tasks] [:seon.agent/id agent-id]))))]
       (if-not tid
-        {:ok? false :error "No active :seon.agent/task on your agent; pass {:id :ns/task ...} or create one via (user/create-task! ...)."}
+        {:ok? false :error "No active :seon.agent/tasks on your agent; pass {:id :ns/task ...} or create one via (user/create-task! ...)."}
         (tx-main-sync! (assoc spec :op :update-task :id tid))))))
 
 (defn ^:seon.flow/edge assign-task!
@@ -203,7 +203,7 @@
             existing (when has-tasks?
                        (into #{} (keep #(if (map? %) (:db/id %) %))
                              (:seon.agent/tasks (d/pull @conn '[:seon.agent/tasks] [:seon.agent/id agent-id]))))
-            ent (cond-> {:seon.agent/id agent-id :seon.agent/task task-id}
+            ent (cond-> {:seon.agent/id agent-id}
                   (and te has-tasks?) (assoc :seon.agent/tasks (conj (or existing #{}) te))
                   (:seon.task/scope t) (assoc :seon.agent/scope (:seon.task/scope t)))
             r (d/transact conn {:tx-data [ent]})]

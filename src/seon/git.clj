@@ -449,17 +449,17 @@
          ag (when (and db (contains? sm :seon.agent/branch))
               (or (when-let [aid (:agent-id opts)]
                     (when (first (d/datoms db :avet :seon.agent/id aid))
-                      (d/pull db '[:seon.agent/id :seon.agent/task :seon.agent/archived?] [:seon.agent/id aid])))
+                      (d/pull db '[:seon.agent/id {:seon.agent/tasks [:seon.task/id]} :seon.agent/archived?] [:seon.agent/id aid])))
                   (let [dts (if (get-in sm [:seon.agent/branch :db/index])
                               (d/datoms db :avet :seon.agent/branch branch)
                               (filter #(= branch (:v %)) (d/datoms db :aevt :seon.agent/branch)))]
                     (->> dts
-                         (map #(d/pull db '[:seon.agent/id :seon.agent/task :seon.agent/archived?] (:e %)))
+                         (map #(d/pull db '[:seon.agent/id {:seon.agent/tasks [:seon.task/id]} :seon.agent/archived?] (:e %)))
                          (remove :seon.agent/archived?)
                          first))))
          agent-id (or (:agent-id opts) (:seon.agent/id ag))
          task-id (or (:task-id opts)
-                     (:seon.agent/task ag)
+                     (first (keep :seon.task/id (:seon.agent/tasks ag)))
                      (some (fn [{:keys [entity status]}]
                              (when (and (vector? entity) (= :seon.task/id (first entity)) (not= status :deleted))
                                (second entity)))

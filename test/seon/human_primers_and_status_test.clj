@@ -79,15 +79,15 @@
           ;; 4. Explicit scope still matches open task in scope
           _ (#'txr/handle-spawn-agent! st {:op :spawn-agent :id :agent/with-scope :goal "" :scope 'demo.sc} (d/commit-id @conn))
           ag-scope (d/pull @conn '[*] [:seon.agent/id :agent/with-scope])]
-      (is (nil? (:seon.agent/task ag-blank)))
+      (is (empty? (:seon.agent/tasks ag-blank)))
       (is (nil? (:seon.agent/auto-merge? ag-blank)))
       (is (some #{[:seon.system/id :root]} (:seon.agent/pinned ag-blank)))
       (is (false? (:seon.agent/auto-merge? ag-bf)))
-      (is (nil? (:seon.agent/task ag-bf)))
+      (is (empty? (:seon.agent/tasks ag-bf)))
       (is (true? (:seon.agent/auto-merge? ag-bm)))
-      (is (nil? (:seon.agent/task ag-bm)))
-      (is (qualified-keyword? (:seon.agent/task ag-goal)) "Non-blank goal must preserve discover-and-plan subtask")
-      (is (= :task/open-demo (:seon.agent/task ag-scope)) "Explicit scope must preserve best-task-for-scope matching")))))
+      (is (empty? (:seon.agent/tasks ag-bm)))
+      (is (qualified-keyword? (first (seon.render.data/agent-task-ids @conn ag-goal))) "Non-blank goal must preserve discover-and-plan subtask")
+      (is (= [:task/open-demo] (seon.render.data/agent-task-ids @conn ag-scope)) "Explicit scope must preserve best-task-for-scope matching")))))
 
 (deftest ^{:cost/ticks 120000000} jit-primer-rules-firing-and-reply-suppression-test
   (testing "All 7 JIT Datalog primer rules + live-status-card fire ONLY on matching facts and stop after reply"
@@ -160,7 +160,7 @@
 
       ;; 7. Open task -> primer-editing; open :missing-contract error -> primer-contracts; failing test -> primer-proofs
       (d/transact conn {:tx-data [{:seon.task/id :task/edit-me :seon.task/title "Edit" :seon.task/done? false}
-                                  {:seon.agent/id :agent/idle :seon.agent/task :task/edit-me}
+                                  {:seon.agent/id :agent/idle :seon.agent/tasks #{[:seon.task/id :task/edit-me]}}
                                   (serr/error-tx {:kind :missing-contract :severity :error :source :health
                                                   :agent :agent/idle :message "Missing :malli/schema"})
                                   {:seon.agent.call/id (random-uuid) :seon.agent.call/caller :agent/coord
@@ -300,7 +300,7 @@
       (let [r1 (d/transact
                 conn
                 {:tx-data [{:seon.task/id :task/ux-demo :seon.task/title "UX Polish Task" :seon.task/done? false}
-                           {:seon.agent/id :agent/ux :seon.agent/branch :branch/ux-demo :seon.agent/label "Assistant" :seon.agent/task :task/ux-demo
+                           {:seon.agent/id :agent/ux :seon.agent/branch :branch/ux-demo :seon.agent/label "Assistant" :seon.agent/tasks #{[:seon.task/id :task/ux-demo]}
                             :seon.agent/pinned [[:seon.task/id :task/ux-demo]
                                                 [:seon.code.var/name 'demo.ui/calc]]}
                            (rstatus/build-status-tx

@@ -20,7 +20,7 @@
           :seon.agent.eval/code "(user/health)" :seon.agent.eval/value "{:ok? true}"}
          {:seon.task/id :task/w-demo :seon.task/title "Demo worker task" :seon.task/plan "Build demo" :seon.task/done? false}
          {:seon.task/id :template/review-and-improve :seon.task/title "Review forked session" :seon.task/plan "Audit and compact." :seon.task/template? true :seon.task/done? false}
-         {:db/id "w1" :seon.agent/id :w/kv-demo :seon.agent/branch :branch/w-kv-demo :seon.agent/goal "Build demo" :seon.agent/task :task/w-demo :seon.agent/tasks #{[:seon.task/id :task/w-demo]}
+         {:db/id "w1" :seon.agent/id :w/kv-demo :seon.agent/branch :branch/w-kv-demo :seon.agent/goal "Build demo" :seon.agent/tasks #{[:seon.task/id :task/w-demo]}
           :seon.agent/example-refs #{"ex1"}}]})
       (store/branch! conn :main :branch/w-kv-demo)
       (let [wconn (store/connect cfg :branch/w-kv-demo)]

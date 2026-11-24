@@ -30,7 +30,7 @@
          {:seon.task/id :task/t2 :seon.task/title "Task Two"
           :seon.task/summary "Unrelated task summary" :seon.task/done? false}
          {:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/router? true
-          :seon.agent/task :task/t1
+          :seon.agent/tasks #{[:seon.task/id :task/t1]}
           :seon.agent/pinned [[:seon.task/id :task/t1] [:seon.code.doc/id "docs/d1.md#one"]]}
          {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
           :seon.user/view-mode :session :seon.user/sidebar-open? true}]})

@@ -98,7 +98,7 @@
       (d/transact conn {:tx-data
                         [{:seon.task/id :task/legacy :seon.task/title "Legacy task"
                           :seon.task/done? false :seon.task/tests #{'demo.gate-test/missing-upserted-test}}
-                         {:seon.agent/id :ag/legacy :seon.agent/branch :main :seon.agent/task :task/legacy}
+                         {:seon.agent/id :ag/legacy :seon.agent/branch :main :seon.agent/tasks #{[:seon.task/id :task/legacy]}}
                          {:seon.test/digest "dg-up-0001" :seon.test/var 'demo.gate-test/missing-upserted-test
                           :seon.test/kind :deftest :seon.test/pass? true :seon.test/ms 1.0 :seon.test/report "ok"}]})
       (is (false? (:ok? (gate/evaluate-agent-gate @conn @conn :ag/legacy))))
@@ -220,7 +220,7 @@
          (code/file-import-tx @conn "src/demo/fr_bug.clj" "(ns demo.fr-bug)\n(defn bug [] :broken)\n" false)
          [{:seon.task/id :task/fr-work :seon.task/title "Build fr-wip" :seon.task/plan "Initial plan" :seon.task/done? false}
           {:seon.task/id :template/review-and-improve :seon.task/title "Review" :seon.task/plan "Audit" :seon.task/template? true :seon.task/done? false}
-          {:db/id "w1" :seon.agent/id :w/fr :seon.agent/branch :branch/w-fr :seon.agent/goal "Build fr-wip" :seon.agent/task :task/fr-work :seon.agent/tasks #{[:seon.task/id :task/fr-work]} :seon.agent/paused? true}])})
+          {:db/id "w1" :seon.agent/id :w/fr :seon.agent/branch :branch/w-fr :seon.agent/goal "Build fr-wip" :seon.agent/tasks #{[:seon.task/id :task/fr-work]} :seon.agent/paused? true}])})
       (store/branch! conn :main :branch/w-fr)
       (let [wconn (store/connect cfg :branch/w-fr)]
         (try

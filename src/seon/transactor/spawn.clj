@@ -94,8 +94,9 @@
                 body (if (str/blank? prompt) (str "Focus on " (pr-str fref) " (" lbl ").") prompt)
                 is-task? (or (= fa :seon.task/id) (some? (:seon.task/id ent)))
                 eff-task (if is-task? (or (:seon.task/id ent) fv) (keyword "seon.focus" (name aid)))
+                task-tid (str "task/" (namespace eff-task) "/" (name eff-task))
                 task-op (when-not is-task?
-                          (cond-> {:seon.task/id eff-task :seon.task/title (str "Focus: " lbl)
+                          (cond-> {:db/id task-tid :seon.task/id eff-task :seon.task/title (str "Focus: " lbl)
                                    :seon.task/plan body :seon.task/done? false}
                             scope (assoc :seon.task/scope scope)
                             (contains? dh :seon.task/owner) (assoc :seon.task/owner aid :seon.task/created-by (or (:parent msg) :user))
@@ -105,9 +106,10 @@
                                 
                                 :seon.agent/goal (if (str/blank? prompt) (str "Focus on " lbl) prompt)
                                 :seon.agent/parent (or (:parent msg) :user)
-                                :seon.agent/task eff-task :seon.agent/pinned [fref]}
+                                :seon.agent/pinned [fref]}
                          scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope))
                          (and tref (contains? dh :seon.agent/target)) (assoc :seon.agent/target tref)
+                         (contains? dh :seon.agent/tasks) (assoc :seon.agent/tasks #{(or (:e (first (d/datoms db0 :avet :seon.task/id eff-task))) task-tid)})
                          (some? (:auto-merge? msg)) (assoc :seon.agent/auto-merge? (boolean (:auto-merge? msg))))
                 u-ops (when (contains? dh :seon.user/id)
                         (:tx-data (show-user-tx db0 {:user-id (or (:user-id msg) :user/default)
@@ -167,7 +169,7 @@
                blank? (assoc :seon.agent/pinned (vec (distinct (conj (vec (:seon.agent/pinned ag0)) [:seon.system/id :root]))))
                parent (assoc :seon.agent/parent parent)
                eff-scope (assoc :seon.agent/scope eff-scope :seon.agent/focus (str "ns/" eff-scope))
-               eff-task (assoc :seon.agent/task eff-task)
+               
                (seq task-refs) (assoc :seon.agent/tasks (set task-refs))
                target-ref (assoc :seon.agent/target target-ref)
                fork-eid (assoc :seon.agent/forked-from fork-eid)
@@ -274,8 +276,7 @@
                                                  (not (:seon.task/template? (d/pull db0 '[:seon.task/template?] [:seon.task/id parent]))))
                                         {:seon.task/id parent :seon.task/needs #{id}})]))
                   spawn-agent?
-                  (conj (cond-> {:seon.agent/id aid :seon.agent/branch b :seon.agent/task id
-                               :seon.agent/goal (or title (name id))}
+                  (conj (cond-> {:seon.agent/id aid :seon.agent/branch b :seon.agent/goal (or title (name id))}
                         (contains? (:schema db0) :seon.agent/tasks) (assoc :seon.agent/tasks #{(or (:e (first (d/datoms db0 :avet :seon.task/id id))) (str "task/" (namespace id) "/" (name id)))})
                         router? (assoc :seon.agent/router? true)
                         parent-agent (assoc :seon.agent/parent parent-agent)

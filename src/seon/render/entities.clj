@@ -470,7 +470,7 @@
   "Detail card (~440px) for `:seon.agent/entity`, surfacing attached 2-index tree refs (`:seon.agent.eval/_agent-ref`, `:seon.agent/tasks`, `:seon.agent/target`, `:seon.error/_agent-ref`) cleanly."
   {:malli/schema [:=> [:cat [:map [:seon.agent/entity :seon.agent/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1800000}
-  [{{:seon.agent/keys [id label router? interactive? branch scope task tasks target parent goal pinned summary ready? waiting? paused?] :as ag} :seon.agent/entity :as m}]
+  [{{:seon.agent/keys [id label router? interactive? branch scope tasks target parent goal pinned summary ready? waiting? paused?] :as ag} :seon.agent/entity :as m}]
   (let [[scls slbl] (agent-state-label ag)
         pins (seq-items pinned)
         sum-txt (nonblank summary)
@@ -486,7 +486,6 @@
          (kv-dl [["label" (when label (el :seon.agent/id id label))]
                  ["branch" (el :seon.branch/name br)]
                  ["scope" (when scope (el :seon.code.ns/name scope))]
-                 ["task" (when task (el :seon.task/id task))]
                  ["target" (when target-lbl (str target-lbl (when-let [tevs (seq-items (:seon.agent.eval/_agent-ref target))] (str " (" (count tevs) " evals)"))))]
                  ["parent" (when parent (el :seon.agent/id parent))]
                  ["flags" (str "ready?=" (boolean ready?) " · waiting?=" (boolean waiting?) (when paused? " · paused?=true"))]

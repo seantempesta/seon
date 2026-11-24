@@ -237,6 +237,7 @@
           :clojure.core.async.flow/report [(str "[:agents] " aid " (PID " (:pid msg) ") exited -> 0 OS resources held")]}]))
 
 (defn- handle-model-request
+  {:seon.flow/edge true}
   [st msg]
   (let [f (:frame msg)
         aid (:agent-id msg)

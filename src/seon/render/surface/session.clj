@@ -169,7 +169,7 @@
        :reviewer-id active-rev})))
 
 (defn- render-work-bar [main-db agent viewing-id label branch tx-num active? expert-mode?]
-  (let [scope (:seon.agent/scope agent) task (:seon.agent/task agent) parent (:seon.agent/parent agent)
+  (let [scope (:seon.agent/scope agent) tasks (rdata/agent-task-ids main-db agent) parent (:seon.agent/parent agent)
         {:keys [target-id reviewer-id]} (review-bar-links main-db agent viewing-id)
         role-b (cond (:seon.agent/router? agent) (badge "blue" "router") (:seon.agent/interactive? agent) (badge "muted" "repl") (:seon.agent/target agent) (badge "purple" "fork") :else nil)
         status-b (cond reviewer-id (badge "amber" "under review")
@@ -181,7 +181,7 @@
                   (when target-id (list "·" (ent-link [:seon.agent/id target-id] (str "→ " (name target-id)) "mono tiny")))
                   (when reviewer-id (list "·" (ent-link [:seon.agent/id reviewer-id] (str "reviewer: " (name reviewer-id)) "mono tiny")))
                   (when scope (list "·" (ent-link [:seon.code.ns/name scope] (str scope) "mono tiny")))
-                  (when task (list "·" (ent-link [:seon.task/id task] (str task) "mono tiny")))]
+                  (for [tk tasks] (list "·" (ent-link [:seon.task/id tk] (str tk) "mono tiny")))]
         br-acts (when (not= branch :main)
                   [:div {:class "pill-row"}
                    (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")

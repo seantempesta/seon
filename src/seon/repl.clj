@@ -110,7 +110,7 @@
    (when-let [{:keys [conn]} *agent-ctx*]
      (let [mdb (store/head conn :main)
            ag-ent (when (first (d/datoms mdb :avet :seon.agent/id branch-or-agent))
-                    (d/pull mdb '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/goal :seon.agent/task] [:seon.agent/id branch-or-agent]))
+                    (d/pull mdb '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/goal {:seon.agent/tasks [:seon.task/id]}] [:seon.agent/id branch-or-agent]))
            branch (or (:seon.agent/branch ag-ent) branch-or-agent)
            bdb (try (store/head conn branch) (catch Throwable _ nil))]
        (if-not bdb
@@ -140,7 +140,7 @@
 
 (defn save-example!
   "Snapshots a completed agent session into `:example/<name>` for `resources/seon/agents/examples.edn`."
-  {:malli/schema [:function [:=> [:cat :keyword :keyword] [:maybe :map]] [:=> [:cat :keyword :keyword :map] [:maybe :map]]]}
+  {:malli/schema [:function [:=> [:cat :keyword :keyword] [:maybe :map]] [:=> [:cat :keyword :keyword :map] [:maybe :map]]], :seon.flow/edge true}
   ([source-agent-id example-id] (save-example! source-agent-id example-id {}))
   ([source-agent-id example-id {:keys [goal max-evals] :or {max-evals 8}}]
    (when-let [{:keys [conn]} *agent-ctx*]
@@ -193,8 +193,7 @@
            parent template? owner created-by summary assign?]}]
   (when-let [{:keys [conn] cur-aid :agent-id} *agent-ctx*]
     (let [mdb (store/head conn :main)
-          cur-task (when cur-aid (or (:seon.agent/task (d/pull @conn '[:seon.agent/task] [:seon.agent/id cur-aid]))
-                                     (:seon.agent/task (d/pull mdb '[:seon.agent/task] [:seon.agent/id cur-aid]))))
+          cur-task (when cur-aid (or (first (keep :seon.task/id (:seon.agent/tasks (d/pull @conn '[{:seon.agent/tasks [:seon.task/id]}] [:seon.agent/id cur-aid])))) (first (keep :seon.task/id (:seon.agent/tasks (d/pull mdb '[{:seon.agent/tasks [:seon.task/id]}] [:seon.agent/id cur-aid]))))))
           tpl (when (and from-template (first (d/datoms mdb :avet :seon.task/id from-template)))
                 (d/pull mdb '[:seon.task/scope :seon.task/plan :seon.task/tests :seon.task/needs] [:seon.task/id from-template]))
           eff-scope (or scope (:seon.task/scope tpl))

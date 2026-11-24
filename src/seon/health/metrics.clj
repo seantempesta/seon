@@ -238,9 +238,7 @@
 (defn agent-learning-metrics
   "Derived anti-gaming sliding-window task completion & tool-frustration scorecard over the latest
  `window` (default 10) autonomous agents in Datahike. Cached per `(store-id, max-tx, window)`."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/conn :seon.host/db] :map]
-                  [:=> [:cat :seon.host/conn :seon.host/db :map] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/conn :seon.host/db] :map] [:=> [:cat :seon.host/conn :seon.host/db :map] :map]], :seon.flow/edge true}
   ([conn db] (agent-learning-metrics conn db {}))
   ([conn db {:keys [window] :or {window 10}}]
    (let [w (long (max 1 (min 30 (or window 10))))

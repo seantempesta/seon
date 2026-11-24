@@ -29,8 +29,7 @@
    :cost/ticks 500000}
   [db agent-id]
   (if-let [eid (eid-of db :seon.agent/id agent-id)]
-    (let [leg (eavt-val db eid :seon.agent/task)]
-      (vec (distinct (concat (when (qualified-keyword? leg) [leg]) (agent-ref-tasks db agent-id)))))
+    (vec (distinct (agent-ref-tasks db agent-id)))
     []))
 
 (defn gate-rules
@@ -119,9 +118,7 @@
                             (cond-> {:seon.task/id (:seon.task/id e) :seon.task/title (or (:seon.task/title e) (name (:seon.task/id e)))}
                               (:seon.task/scope e) (assoc :seon.task/scope (:seon.task/scope e))))
                   scope (:seon.task/scope (second (second (first found)))) kset (set tids)
-                  mk (fn [ts] (cond-> {:seon.agent/id agent-id :seon.agent/task (first ts)
-                                       :seon.agent/tasks (mapv #(vector :seon.task/id %) ts)}
-                                scope (assoc :seon.agent/scope scope)))
+                  mk (fn [ts] (cond-> {:seon.agent/id agent-id :seon.agent/tasks (mapv #(vector :seon.task/id %) ts)} scope (assoc :seon.agent/scope scope)))
                   r (d/transact conn {:tx-data (vec (concat seed-tx (stale-retracts bdb agent-id kset) [(mk tids)]))})]
               (when-let [rf (try-resolve 'seon.ctx/refresh-active!)] (rf (:db-after r) (:tx-data r)))
               (when (and in out (eid-of mdb :seon.agent/id agent-id))
@@ -182,9 +179,7 @@
  (let [tdbs (tagged-dbs main-db branch-db)
        tids (if (seq (:tasks opts))
               (vec (distinct (:tasks opts)))
-              (let [sc (when agent-id (latest-scalar tdbs :seon.agent/id agent-id :seon.agent/task))
-                    refs (sort-by str (distinct (mapcat #(agent-ref-tasks (second %) agent-id) tdbs)))]
-                (vec (distinct (concat (when (qualified-keyword? sc) [sc]) refs)))))]
+              (vec (sort-by str (distinct (mapcat #(agent-ref-tasks (second %) agent-id) tdbs)))))]
    (if (empty? tids)
      {:ok? true :tasks [] :passed-tasks [] :blocked-tasks [] :blockers []}
      (let [aid (or agent-id :gate/anonymous)

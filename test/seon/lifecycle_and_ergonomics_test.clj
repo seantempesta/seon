@@ -30,9 +30,8 @@
     (with-test-store [{:keys [conn cfg]}]
       ;; 1. Skip store/head when branch is :main or nil
       (d/transact conn {:tx-data [{:seon.agent/id :ag/main-only :seon.agent/branch :main }
-                                  {:seon.agent/id :ag/gate-w :seon.agent/branch :branch/gate-w :seon.agent/auto-merge? true :seon.agent/task :task/need-proof}
-                                  {:seon.task/id :task/need-proof :seon.task/title "Proof task"
-                                   :seon.task/done? false :seon.task/tests #{'demo.missing-test/alpha-test}}
+                                  {:seon.agent/id :ag/gate-w :seon.agent/branch :branch/gate-w :seon.agent/auto-merge? true :seon.agent/tasks #{"t-need-proof"}}
+                                  {:db/id "t-need-proof" :seon.task/id :task/need-proof :seon.task/title "Proof task" :seon.task/done? false :seon.task/tests #{'demo.missing-test/alpha-test}}
                                   {:seon.agent/id :ag/chat-w :seon.agent/branch :branch/chat-w :seon.agent/auto-merge? true}
                                   {:seon.agent/id :ag/task-w :seon.agent/branch :branch/task-w :seon.agent/auto-merge? true}]})
       (let [head-calls (volatile! [])]
@@ -178,7 +177,7 @@
       ;; 3. Call subtask auto-close on read-only research call + :create-call mirroring onto existing callee branch
       (d/transact conn {:tx-data [{:seon.task/id :template/subtask-research :seon.task/title "Research" :seon.task/template? true :seon.task/done? false}
                                   {:seon.task/id :task/coord-parent :seon.task/title "Coord Task" :seon.task/done? false}
-                                  {:seon.agent/id :ag/coord :seon.agent/branch :main :seon.agent/router? true :seon.agent/task :task/coord-parent}
+                                  {:seon.agent/id :ag/coord :seon.agent/branch :main :seon.agent/router? true :seon.agent/tasks #{[:seon.task/id :task/coord-parent]}}
                                   {:seon.agent/id :ag/res :seon.agent/branch :branch/res }
                                   {:seon.agent/id :ag/coder :seon.agent/branch :branch/coder }]})
       (store/branch! conn :main :branch/res)
@@ -195,7 +194,7 @@
         (is (true? (:ok? c-rep)))
         (is (qualified-keyword? sub-id))
         ;; Verify :seon.agent/task mirrored onto existing callee branch DB!
-        (is (= sub-id (:seon.agent/task (d/pull (store/head conn :branch/res) '[:seon.agent/task] [:seon.agent/id :ag/res]))))
+        (is (= [sub-id] (seon.render.data/agent-task-ids (store/head conn :branch/res) :ag/res)))
         ;; Parent coordinator is blocked by :rule.gate/task-needs-open before answer
         (is (false? (:ok? (gate/evaluate-agent-gate @conn @conn :ag/coord))))
         ;; Answer call with 0 code edits -> subtask auto-closes (:seon.task/done? true) + coordinator gate unblocks!

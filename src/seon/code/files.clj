@@ -56,7 +56,7 @@
   [:seon.agent/id :seon.agent/parent :seon.agent/entry? :seon.agent/label
    :seon.agent/hero-title :seon.agent/read-branch :seon.agent/router?
    :seon.agent/seed-path :seon.agent/scope :seon.agent/focus :seon.agent/branch
-   :seon.agent/task :seon.agent/interactive? :seon.agent/goal :seon.agent/system-prompt
+   :seon.agent/tasks :seon.agent/interactive? :seon.agent/goal :seon.agent/system-prompt
    :seon.agent/examples :seon.agent/pinned
    :seon.agent/auto-merge? :seon.agent/context-prefs :seon.config/viewport-screenshot? :seon.config/max-tool-turns :seon.ctx/pattern])
 
@@ -132,8 +132,15 @@
               keep-ks (if (or (nil? existing-eid) (example-agent? aid))
                         (into durable-agent-keys initial-only-agent-keys)
                         durable-agent-keys)
-              base-ent (-> (select-keys entry keep-ks)
-                           (assoc :seon.agent/seed-path path))
+              base-ent (let [b0 (-> (select-keys entry keep-ks) (assoc :seon.agent/seed-path path))]
+              (if-let [ts (seq (:seon.agent/tasks b0))]
+                (let [has-t? (boolean (and db (contains? (:schema db) :seon.task/id)))
+                      live-ts (into #{} (filter (fn [x] (and (vector? x) (= :seon.task/id (first x))
+                                                             (or (not has-t?)
+                                                                 (some? (first (d/datoms db :avet :seon.task/id (second x))))))))
+                                    ts)]
+                  (if (seq live-ts) (assoc b0 :seon.agent/tasks live-ts) (dissoc b0 :seon.agent/tasks)))
+                b0))
               focus (:seon.agent/focus base-ent)
               focus-ns (when (and (vector? focus) (= :seon.code.ns/name (first focus)))
                          (second focus))
@@ -231,7 +238,18 @@
                                      focus)
                             clean (cond-> (dissoc base :seon.agent/seed-path)
                                     focus' (assoc :seon.agent/focus focus')
-                                    (contains? base :seon.agent/examples) (update :seon.agent/examples set))
+                                    (contains? base :seon.agent/examples) (update :seon.agent/examples set)
+                                    (contains? base :seon.agent/tasks)
+                                    (as-> m
+                                      (let [ts (into #{}
+                                                     (keep (fn [x]
+                                                             (cond
+                                                               (and (map? x) (:db/id x))
+                                                               (when-let [tid (:seon.task/id (d/pull db '[:seon.task/id] (:db/id x)))]
+                                                                 [:seon.task/id tid])
+                                                               (and (vector? x) (= :seon.task/id (first x))) x)))
+                                                     (:seon.agent/tasks m))]
+                                        (if (seq ts) (assoc m :seon.agent/tasks ts) (dissoc m :seon.agent/tasks)))))
                             evals (when (and ex? (contains? (:schema db) :seon.agent.eval/agent))
                                     (->> (d/datoms db :avet :seon.agent.eval/agent aid)
                                          (map #(dissoc (d/pull db '[*] (:e %)) :db/id :seon.agent.eval/agent))

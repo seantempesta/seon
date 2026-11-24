@@ -155,7 +155,7 @@
         (d/transact conn {:tx-data (concat
                                     (code/file-import-tx @conn "src/demo/err.clj" src false)
                                     [{:seon.task/id :task/err-z :seon.task/title "Fix demo.err" :seon.task/scope 'demo.err :seon.task/done? false}
-                                     {:seon.agent/id :ag/err :seon.agent/branch :main :seon.agent/scope 'demo.err :seon.agent/task :task/err-z}
+                                     {:seon.agent/id :ag/err :seon.agent/branch :main :seon.agent/scope 'demo.err :seon.agent/tasks #{[:seon.task/id :task/err-z]}}
                                      (serr/error-tx {:kind :demo/var-fault :severity :error :source :eval
                                                      :agent :ag/err :var 'demo.err/err-var-fn :message "Fault in err-var-fn"})
                                      {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/err

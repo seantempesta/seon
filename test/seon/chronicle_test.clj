@@ -274,9 +274,9 @@
                                 :seon.task/scope 'seon.render.surface
                                 :seon.task/done? true
                                 :seon.task/summary "Split live blocks into composable helpers."}
-                               {:seon.agent/id :agent/top :seon.agent/branch :main :seon.agent/router? true :seon.agent/label "Top" :seon.agent/task :task/root-parent}
+                               {:seon.agent/id :agent/top :seon.agent/branch :main :seon.agent/router? true :seon.agent/label "Top" :seon.agent/tasks #{[:seon.task/id :task/root-parent]}}
                                {:seon.agent/id :agent/mid :seon.agent/parent :agent/top :seon.agent/branch :main
-                                :seon.agent/label "Mid" :seon.agent/task :task/demo}
+                                :seon.agent/label "Mid" :seon.agent/tasks #{[:seon.task/id :task/demo]}}
                                {:seon.agent/id :agent/leaf :seon.agent/parent :agent/mid :seon.agent/branch :main
                                 :seon.agent/label "Leaf" :seon.agent/ready? true}
                                {:seon.agent/id :agent/direct-kid :seon.agent/parent :agent/mid :seon.agent/branch :main
