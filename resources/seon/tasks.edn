@@ -440,6 +440,11 @@
   :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
   :seon.task/owner :agent/w2168}
  {:seon.task/done? false,
+  :seon.task/id :task.dogfood/clean-role-leftovers-and-tail-caps,
+  :seon.task/plan "Clean up remaining dead :role arguments in seon.bench.cluster and seon.repl, and remove raw Datahike index truncation caps in seon.render.tails that can silently drop newest entities before sorting by tx. Add regression tests proving newest entities on large tables always surface.",
+  :seon.task/scope seon.render.tails,
+  :seon.task/title "Remove dead :role leftovers and pre-sort index caps in seon.render.tails"}
+ {:seon.task/done? false,
   :seon.task/id :task.dogfood/split-transactor-calls,
   :seon.task/plan "Refactor seon.transactor.calls below both the 8,000-token namespace budget and the :large-function size limit on handle-call-op! by extracting cohesive helpers into a clean child namespace. Keep all call-delegation, subtask, and merge tests green.",
   :seon.task/scope seon.transactor.calls,
