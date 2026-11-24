@@ -274,9 +274,9 @@
       (store/branch! conn :main :branch/old-w)
       (store/branch! conn :main :branch/new-w)
       (d/transact conn
-        [{:seon.agent/id :w/old :seon.agent/branch :branch/old-w :seon.agent/role :worker :seon.agent/merged-tx 100}
-         {:seon.agent/id :w/new :seon.agent/branch :branch/new-w :seon.agent/role :worker :seon.agent/merged-tx 200}
-         {:seon.agent/id :w/ghost :seon.agent/branch :branch/never-existed :seon.agent/role :worker}
+        [{:seon.agent/id :w/old :seon.agent/branch :branch/old-w :seon.agent/merged-tx 100}
+         {:seon.agent/id :w/new :seon.agent/branch :branch/new-w :seon.agent/merged-tx 200}
+         {:seon.agent/id :w/ghost :seon.agent/branch :branch/never-existed }
          {:seon.agent.message/id (random-uuid) :seon.agent.message/to :w/ghost :seon.agent.message/seq 1
           :seon.agent.message/from :agent/root :seon.agent.message/type :chat :seon.agent.message/body "hi"}])
       (let [res (store/prune-merged-branches! conn 1)
@@ -301,7 +301,7 @@
       ;; 1. Create branch, add brand-new :seon.error/id + :seon.vector/of pointing at it -> merge/three-way must succeed!
       (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/review-every-turns 2}
                                   {:db/id "w1" :seon.agent/id :w/wake :seon.agent/branch :branch/w-wake
-                                   :seon.agent/role :worker :seon.agent/goal "Work" :seon.agent/paused? false}]})
+                                   :seon.agent/goal "Work" :seon.agent/paused? false}]})
       (store/branch! conn :main :branch/w-wake)
       (let [wconn (store/connect cfg :branch/w-wake)]
         (try

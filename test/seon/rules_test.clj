@@ -72,8 +72,7 @@
                                   (code/file-import-tx @conn "src/seon/demo/inc.clj"
                                                        "(ns seon.demo.inc \"Inc demo\")\n(defn f [x] x)"
                                                        false)
-                                  [{:seon.agent/id :ag/inc :seon.agent/branch :main :seon.agent/role :worker
-                                    :seon.agent/scope 'seon.demo.inc :seon.agent/goal "Test"}])})
+                                  [{:seon.agent/id :ag/inc :seon.agent/branch :main :seon.agent/scope 'seon.demo.inc :seon.agent/goal "Test"}])})
       (let [db @conn
             rs [{:seon.rule/id :r/scope :seon.rule/stratum 10 :seon.rule/enabled? true :seon.rule/target :any
                  :seon.rule/query '[:find ?v ?ns
@@ -125,8 +124,7 @@
                                                          "(ns seon.demo.tree \"Tree demo\")\n(defn leaf-op [x] (inc x))" false)
                                     (code/file-import-tx @conn "test/seon/demo_tree_test.clj"
                                                          "(ns seon.demo-tree-test (:require [clojure.test :refer [deftest is]] [seon.demo.tree :as dt]))\n(deftest leaf-op-test (is (= 2 (dt/leaf-op 1))))" false)
-                                    [{:seon.agent/id :ag/tree-demo :seon.agent/branch :main :seon.agent/role :worker
-                                      :seon.agent/scope 'seon.demo.tree :seon.agent/goal "Inspect tree"}])})
+                                    [{:seon.agent/id :ag/tree-demo :seon.agent/branch :main :seon.agent/scope 'seon.demo.tree :seon.agent/goal "Inspect tree"}])})
         (let [db @conn
               {:keys [candidates]} (ctx/gather-agent-candidates db db :ag/tree-demo {:enrich? true :semantic? false})
               ns-cand (first (filter #(= 'seon.demo.tree (get-in % [:data :seon.code.ns/name])) candidates))
@@ -169,15 +167,13 @@
                             :seon.task/scope 'seon.demo
                             :seon.task/plan "Check seon.demo.target functions and open tasks."
                             :seon.task/done? false}
-                           {:seon.agent/id :ag/targeted :seon.agent/branch :main :seon.agent/role :worker
-                            :seon.agent/scope 'seon.demo :seon.agent/task :demo/targeted :seon.agent/goal "Work"}
+                           {:seon.agent/id :ag/targeted :seon.agent/branch :main :seon.agent/scope 'seon.demo :seon.agent/task :demo/targeted :seon.agent/goal "Work"}
                            {:seon.task/id :demo/vague
                             :seon.task/title "Fix slow debug wire profiler allocations"
                             :seon.task/scope 'seon.demo
                             :seon.task/done? false}
-                           {:seon.agent/id :ag/vague :seon.agent/branch :main :seon.agent/role :worker
-                            :seon.agent/scope 'seon.demo :seon.agent/task :demo/vague :seon.agent/goal "Investigate"}
-                           {:seon.agent/id :ag/coord :seon.agent/branch :main :seon.agent/role :coordinator
+                           {:seon.agent/id :ag/vague :seon.agent/branch :main :seon.agent/scope 'seon.demo :seon.agent/task :demo/vague :seon.agent/goal "Investigate"}
+                           {:seon.agent/id :ag/coord :seon.agent/branch :main :seon.agent/router? true
                             :seon.agent/scope 'seon.demo :seon.agent/goal "Coord"
                             :seon.agent/pinned [[:seon.health/summary :main]]}
                            {:seon.agent.call/id (random-uuid) :seon.agent.call/caller :ag/coord :seon.agent.call/callee :ag/c1

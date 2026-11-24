@@ -149,7 +149,7 @@
   ([main-db branch-db agent-id opts]
    (let [o (if (map? opts) opts {})
          bdb (or branch-db main-db)
-         ag (or (:agent o) (rdata/pull-agent-entity main-db bdb agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
+         ag (or (:agent o) (rdata/pull-agent-entity main-db bdb agent-id) {:seon.agent/id agent-id})
          tdb (or (:task-db o)
                  (when (and (:seon.agent/task ag) ((rlinks/db-schema bdb) :seon.task/id)
                             (first (d/datoms bdb :avet :seon.task/id (:seon.agent/task ag))))

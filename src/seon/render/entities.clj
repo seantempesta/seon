@@ -461,26 +461,26 @@
   "Compact row (~200px) for `:seon.agent/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.agent/entity :seon.agent/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 500000}
-  [{{:seon.agent/keys [id label role] :as ag} :seon.agent/entity}]
+  [{{:seon.agent/keys [id label router? interactive?] :as ag} :seon.agent/entity}]
   (let [[scls slbl] (agent-state-label ag)]
-    (row 200 "ent-agent" (badge "blue" (kw-label role "worker"))
+    (row 200 "ent-agent" (badge "blue" (cond router? "router" interactive? "repl" :else "agent"))
          (el :seon.agent/id id (str (or label id))) (badge scls slbl))))
 
 (defn render-agent-card
   "Detail card (~440px) for `:seon.agent/entity`, surfacing attached 2-index tree refs (`:seon.agent.eval/_agent-ref`, `:seon.agent/tasks`, `:seon.agent/target`, `:seon.error/_agent-ref`) cleanly."
   {:malli/schema [:=> [:cat [:map [:seon.agent/entity :seon.agent/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1800000}
-  [{{:seon.agent/keys [id label role branch scope task tasks target parent goal pinned memory ready? waiting? paused?] :as ag} :seon.agent/entity :as m}]
+  [{{:seon.agent/keys [id label router? interactive? branch scope task tasks target parent goal pinned summary ready? waiting? paused?] :as ag} :seon.agent/entity :as m}]
   (let [[scls slbl] (agent-state-label ag)
         pins (seq-items pinned)
-        mem (seq-items memory)
+        sum-txt (nonblank summary)
         br (or branch :main)
         evs (seq-items (:seon.agent.eval/_agent-ref ag))
         errs (seq-items (:seon.error/_agent-ref ag))
         t-list (seq-items tasks)
         target-lbl (when (map? target) (or (:seon.agent/id target) (:seon.task/id target) (:seon.code.var/name target) (:seon.code.ns/name target) (:db/id target)))]
     (box "ent-card" 440 "ent-agent"
-         [(badge "blue" (kw-label role "worker")) (el :seon.agent/id id (str id)) (badge scls slbl)]
+         [(badge "blue" (cond router? "router" interactive? "repl" :else "agent")) (el :seon.agent/id id (str id)) (badge scls slbl)]
          (meta-link :seon.branch/name br)
          (when-let [g (nonblank goal)] [:p {:class "sm-copy"} (hl (clip g 360) (hl-terms m))])
          (kv-dl [["label" (when label (el :seon.agent/id id label))]
@@ -492,7 +492,7 @@
                  ["flags" (str "ready?=" (boolean ready?) " · waiting?=" (boolean waiting?) (when paused? " · paused?=true"))]
                  ["evals" (when evs (str (count evs) " attached on :seon.agent.eval/_agent-ref"))]
                  ["errors" (when errs (str (count errs) " on :seon.error/_agent-ref"))]
-                 ["memory" (when mem (str (count mem) " note(s)"))]])
+                 ["summary" (when sum-txt (clip sum-txt 120))]])
          (when t-list
            (pill-list "tasks:" (vec (keep :seon.task/id t-list)) :seon.task/id 6))
          (when (seq evs)

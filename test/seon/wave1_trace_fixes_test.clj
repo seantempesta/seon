@@ -136,7 +136,7 @@
             (is (= :flow-edge (:reason r3)))
             (is (= 0 @calls)))
           ;; run-fast-auto-proofs! skips ^:seon.flow/edge and flags tight :cost/ticks (>65% warm budget)
-          (d/transact conn {:tx-data [{:seon.agent/id :ag/w1-proof :seon.agent/branch :branch/w1-proof :seon.agent/role :worker}]})
+          (d/transact conn {:tx-data [{:seon.agent/id :ag/w1-proof :seon.agent/branch :branch/w1-proof }]})
           (store/branch! conn :main :branch/w1-proof)
           (let [bconn (store/connect cfg :branch/w1-proof)
                 before-cid (d/commit-id @bconn)
@@ -171,8 +171,8 @@
 (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)
 " false)
                                   [{:seon.config/key :seon.config/root :seon.config/max-tool-turns 2}
-                                   {:seon.agent/id :ag/w1-edited :seon.agent/branch :branch/w1-edited :seon.agent/role :worker :seon.agent/auto-merge? true}
-                                   {:seon.agent/id :ag/w1-clean :seon.agent/branch :branch/w1-clean :seon.agent/role :worker :seon.agent/auto-merge? true}])})
+                                   {:seon.agent/id :ag/w1-edited :seon.agent/branch :branch/w1-edited :seon.agent/auto-merge? true}
+                                   {:seon.agent/id :ag/w1-clean :seon.agent/branch :branch/w1-clean :seon.agent/auto-merge? true}])})
       (store/branch! conn :main :branch/w1-edited)
       (store/branch! conn :main :branch/w1-clean)
       (let [econn (store/connect cfg :branch/w1-edited)

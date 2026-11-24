@@ -102,7 +102,7 @@
                             (contains? dh :seon.task/curated) (assoc :seon.task/curated [fref])))
                 mseq (inc (:msg-seq st)) mid (random-uuid)
                 ag-ent (cond-> {:db/id "agent/new" :seon.agent/id aid :seon.agent/branch b
-                                :seon.agent/role (or (:role msg) :worker)
+                                
                                 :seon.agent/goal (if (str/blank? prompt) (str "Focus on " lbl) prompt)
                                 :seon.agent/parent (or (:parent msg) :user)
                                 :seon.agent/task eff-task :seon.agent/pinned [fref]}
@@ -130,7 +130,7 @@
   {:malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]] :seon.flow/edge true}
   [st msg prev-cid]
   (let [conn (:conn st) db0 @conn dh (:schema db0)
-        {:keys [id parent scope branch role goal task tasks target examples config pause-parent?]} msg
+        {:keys [id parent scope branch router? interactive? goal task tasks target examples config pause-parent?]} msg
         b (branch-for id branch) mseq (inc (:msg-seq st))
         fspec (tcalls/resolve-fork-spec conn db0 msg)
         resolve-agent-eid (:resolve-eid fspec)
@@ -145,13 +145,13 @@
                        (first (d/datoms db0 :avet :seon.task/id :template/discover-and-plan)))
               (tcalls/build-subtask-tx db0 (or parent :user) id (random-uuid) scope
                 {:title (or (not-empty (str goal)) (str "Discover & plan " (or scope id)))
-                 :plan (str (or goal "")) :from-template :template/discover-and-plan :role role}))
+                 :plan (str (or goal "")) :from-template :template/discover-and-plan}))
         eff-tasks (cond (seq given-tasks) given-tasks matched [matched] (:task-id sub) [(:task-id sub)] :else [])
         eff-task (first eff-tasks)
         eff-scope (or scope
                       (when eff-task (:seon.task/scope (d/pull db0 '[:seon.task/scope] [:seon.task/id eff-task])))
                       (:seon.agent/scope fork-parent))
-        ag0 (merge {:seon.agent/id id :seon.agent/branch b :seon.agent/role (or role :worker) :seon.agent/goal (or goal "")} config)
+        ag0 (merge (cond-> {:seon.agent/id id :seon.agent/branch b :seon.agent/goal (or goal "")} router? (assoc :seon.agent/router? true) interactive? (assoc :seon.agent/interactive? true)) config)
         ag (let [task-refs (when (and (seq eff-tasks) (contains? dh :seon.agent/tasks))
                              (into [] (keep (fn [tid]
                                               (or (:e (first (d/datoms db0 :avet :seon.task/id tid)))
@@ -253,8 +253,7 @@
   {:doc "Creates a `:seon.task/*` entity (optionally spawning its owning agent on a new branch) and commits it.", :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]], :seon.flow/edge true}
   [st msg prev-cid]
   (let [conn (:conn st) db0 @conn
-        {:keys [id scope title plan needs tests spawn-agent? agent-id role auto-merge?
-                parent template? template owner created-by summary parent-agent]} msg
+        {:keys [id scope title plan needs tests spawn-agent? agent-id router? auto-merge? parent template? template owner created-by summary parent-agent]} msg
         aid (or agent-id (keyword (namespace id) (name id)))
         b (branch-for aid nil) mseq (inc (:msg-seq st))
         ext? (contains? (:schema db0) :seon.task/owner)
@@ -276,8 +275,9 @@
                                         {:seon.task/id parent :seon.task/needs #{id}})]))
                   spawn-agent?
                   (conj (cond-> {:seon.agent/id aid :seon.agent/branch b :seon.agent/task id
-                               :seon.agent/role (or role :worker) :seon.agent/goal (or title (name id))}
+                               :seon.agent/goal (or title (name id))}
                         (contains? (:schema db0) :seon.agent/tasks) (assoc :seon.agent/tasks #{(or (:e (first (d/datoms db0 :avet :seon.task/id id))) (str "task/" (namespace id) "/" (name id)))})
+                        router? (assoc :seon.agent/router? true)
                         parent-agent (assoc :seon.agent/parent parent-agent)
                         (some? auto-merge?) (assoc :seon.agent/auto-merge? (boolean auto-merge?))
                         scope (assoc :seon.agent/scope scope :seon.agent/focus (str "ns/" scope)))

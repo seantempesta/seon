@@ -106,7 +106,7 @@
                 :branch branch
                 :turn turn-n
                 :scope (:seon.agent/scope me)
-                :role (:seon.agent/role me :worker)
+                :router? (boolean (:seon.agent/router? me))
                 :goal (:seon.agent/goal me "")
                 :parent (:seon.agent/parent me)
                 :history history
@@ -240,7 +240,7 @@
   (when-not (first (d/datoms @conn :avet :seon.agent/id agent-id))
     (d/transact conn {:tx-data [{:seon.agent/id agent-id
                                  :seon.agent/branch branch
-                                 :seon.agent/role :repl}]})))
+                                 :seon.agent/interactive? true}]})))
 
 (defn- run-agent-worker! [end {:keys [agent-id branch cfg mode initial-eval base-commit]}]
   (let [lean-cfg (store/child-cfg cfg 4)]

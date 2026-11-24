@@ -294,7 +294,7 @@
    (let [o (if (map? opts) opts {})
          edb (or branch-db main-db)
          disabled (if (coll? (:disabled-rules o)) (set (:disabled-rules o)) #{})
-         ag (or (rdata/pull-agent-entity main-db edb agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
+         ag (or (rdata/pull-agent-entity main-db edb agent-id) {:seon.agent/id agent-id})
          ut (when (integer? (:upto-turn o)) (long (:upto-turn o)))
          utx (when (and (nil? ut) (integer? (:upto-tx o))) (long (:upto-tx o)))
          {:keys [world candidates]}

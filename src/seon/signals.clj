@@ -88,7 +88,7 @@
         (reduce (fn [acc eid]
                   (let [a (eavt-map db eid)
                         aid (:seon.agent/id a)
-                        role (:seon.agent/role a)
+                        interactive? (boolean (:seon.agent/interactive? a))
                         awaiting? (boolean (seq (:seon.agent/awaiting a)))
                         is-paused? (boolean (:seon.agent/paused? a))
                         is-waiting? (boolean (:seon.agent/waiting? a))
@@ -98,7 +98,7 @@
                         paused? (and (not blocked?) (not stalled?) is-paused? (not is-ready?))
                         ready? (and (not blocked?) (not stalled?) is-ready?)
                         waiting? (and (not blocked?) (not stalled?) (not paused?) (not ready?) is-waiting?)
-                        running? (and (not blocked?) (not stalled?) (not paused?) (not ready?) (not waiting?) (not= :repl role))]
+                        running? (and (not blocked?) (not stalled?) (not paused?) (not ready?) (not waiting?) (not interactive?))]
                     (cond-> (update acc :active inc)
                       blocked? (update :blocked inc)
                       stalled? (update :stalled inc)

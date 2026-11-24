@@ -88,7 +88,7 @@
        {:seon.agent/id :agent/root
         :seon.agent/entry? true
         :seon.agent/branch :main
-        :seon.agent/role :coordinator
+        :seon.agent/router? true
         :seon.agent/label "Root"
         :seon.agent/scope 'demo.alpha
         :seon.agent/task :task/holistic-demo
@@ -99,7 +99,6 @@
        {:seon.agent/id :ns/demo.alpha
         :seon.agent/parent :agent/root
         :seon.agent/branch :branch/demo-alpha
-        :seon.agent/role :worker
         :seon.agent/scope 'demo.alpha
         :seon.agent/task :task/holistic-demo
         :seon.agent/ready? true

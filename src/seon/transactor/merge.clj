@@ -61,18 +61,18 @@
   (or agent-id
       (when (not= branch :main)
         (some (fn [dt]
-                (let [a (d/pull db (quote [:seon.agent/id :seon.agent/branch :seon.agent/role]) (:e dt))]
+                (let [a (d/pull db (quote [:seon.agent/id :seon.agent/branch :seon.agent/interactive?]) (:e dt))]
                   (when (and (= branch (:seon.agent/branch a))
-                             (not= :repl (:seon.agent/role a)))
+                             (not (:seon.agent/interactive? a)))
                     (:seon.agent/id a))))
               (d/datoms db :aevt :seon.agent/id)))))
 
 (defn- repl-aids-to-archive [db branch rest-ops]
   (when (and (not= branch :main) (contains? (:schema db) :seon.agent/archived?))
     (let [from-db (keep (fn [dt]
-                          (let [a (d/pull db (quote [:seon.agent/id :seon.agent/branch :seon.agent/role]) (:e dt))]
+                          (let [a (d/pull db (quote [:seon.agent/id :seon.agent/branch :seon.agent/interactive?]) (:e dt))]
                             (when (and (= branch (:seon.agent/branch a))
-                                       (= :repl (:seon.agent/role a))
+                                       (:seon.agent/interactive? a)
                                        (not= :repl/main (:seon.agent/id a)))
                               (:seon.agent/id a))))
                         (d/datoms db :aevt :seon.agent/id))
@@ -80,7 +80,7 @@
                            (when (and (map? op)
                                       (:seon.agent/id op)
                                       (= branch (:seon.agent/branch op))
-                                      (or (= :repl (:seon.agent/role op))
+                                      (or (:seon.agent/interactive? op)
                                           (= "repl" (namespace (:seon.agent/id op))))
                                       (not= :repl/main (:seon.agent/id op)))
                              (:seon.agent/id op)))
@@ -350,7 +350,7 @@
         has-ops? (or (seq (:schema-tx plan)) (some sync-domain-op? (:tx-data plan)))]
     (if-not has-ops?
       0
-      (let [coord-brs (->> (d/datoms mdb :avet :seon.agent/role :coordinator)
+      (let [coord-brs (->> (when (contains? (:schema mdb) :seon.agent/router?) (d/datoms mdb :avet :seon.agent/router? true))
                            (keep (fn [dt]
                                    (let [a (d/pull mdb '[:seon.agent/branch :seon.agent/archived?] (:e dt))
                                          br (:seon.agent/branch a)]

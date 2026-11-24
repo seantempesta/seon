@@ -186,9 +186,9 @@
       (testing "5. Inside-out DB-backed user viewport, recursive agent sidebar, agent `(user/show-user!)`, 403 allowlist, and live `/mcp`"
         ;; Seed a 3-level hierarchy: :agent/root -> :app/billing -> :billing/sub-a
         (main/call! sys {:op :transact
-                         :tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/waiting? true}
-                                   {:seon.agent/id :app/billing :seon.agent/parent :agent/root :seon.agent/branch :branch/billing :seon.agent/role :coordinator :seon.agent/waiting? true}
-                                   {:seon.agent/id :billing/sub-a :seon.agent/parent :app/billing :seon.agent/branch :branch/billing.a :seon.agent/role :worker :seon.agent/waiting? true}
+                         :tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/router? true :seon.agent/waiting? true}
+                                   {:seon.agent/id :app/billing :seon.agent/parent :agent/root :seon.agent/branch :branch/billing :seon.agent/router? true :seon.agent/waiting? true}
+                                   {:seon.agent/id :billing/sub-a :seon.agent/parent :app/billing :seon.agent/branch :branch/billing.a :seon.agent/waiting? true}
                                    {:seon.user/id :user/default
                                     :seon.user/viewing [:seon.agent/id :agent/root]
                                     :seon.user/view-mode :canvas

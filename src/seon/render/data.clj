@@ -119,9 +119,9 @@
                  (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
                  (sort-by str) first))
           (->> (d/datoms db :aevt :seon.agent/id)
-               (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/role] (:e %)))
+               (map #(d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/interactive?] (:e %)))
                (remove #(let [aid (:seon.agent/id %)]
-                          (or (nil? aid) (= :repl (:seon.agent/role %))
+                          (or (nil? aid) (:seon.agent/interactive? %)
                               (= "example" (namespace aid)) (some? (:seon.agent/parent %)))))
                (sort-by #(str (:seon.agent/id %))) first :seon.agent/id)))))
 
@@ -173,12 +173,12 @@
 (defn router-agent?
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean], :cost/ticks 500000, :cost/bytes 1048576}
   [ag]
-  (boolean (or (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag)))))
+  (boolean (:seon.agent/router? ag)))
 
 (defn reads-main?
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean], :cost/ticks 500000, :cost/bytes 1048576}
   [ag]
-  (boolean (or (= :main (:seon.agent/read-branch ag)) (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag)))))
+  (boolean (or (= :main (:seon.agent/read-branch ag)) (:seon.agent/router? ag))))
 
 (defn user-view-state
   "Reads the user's persistent viewport, inspector stack, and lab prefs (`:user/default`) from Datahike `db`."
@@ -230,7 +230,7 @@
         ba (when (and branch-db agent-id (not= branch-db main-db)
                       (first (d/datoms branch-db :avet :seon.agent/id agent-id)))
              (d/pull branch-db '[*] [:seon.agent/id agent-id]))
-        base (merge {:seon.agent/id agent-id :seon.agent/branch :main :seon.agent/role :worker :seon.agent/pinned []} ma ba)]
+        base (merge {:seon.agent/id agent-id :seon.agent/branch :main :seon.agent/pinned []} ma ba)]
     (if (and ma ba (not= branch-db main-db))
       (assoc base
              :seon.agent/pinned (or (latest-attr-val main-db branch-db ma ba :seon.agent/pinned) (:seon.agent/pinned base))
@@ -248,7 +248,7 @@
 (defonce ^:private ^:seon.flow/edge view-history-cache (store/lru-cache 32))
 
 (def ^:private agent-control-attrs
-  #{:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/label :seon.agent/entry?
+  #{:seon.agent/id :seon.agent/branch :seon.agent/interactive? :seon.agent/label :seon.agent/entry?
     :seon.agent/parent :seon.agent/waiting? :seon.agent/paused? :seon.agent/ready?
     :seon.agent/awaiting :seon.agent/archived? :seon.agent/auto-merge? :seon.agent/read-branch
     :seon.agent/router? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/last-proofs

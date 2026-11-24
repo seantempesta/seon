@@ -296,7 +296,7 @@
                              (or (nil? store) (nil? br) (= br :main) (store/branch? store br))))
                   eid))]
      (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
-              :seon.agent/task :seon.agent/target :seon.agent/forked-from :seon.agent/role :seon.agent/goal :seon.agent/paused?
+              :seon.agent/task :seon.agent/target :seon.agent/forked-from :seon.agent/router? :seon.agent/interactive? :seon.agent/goal :seon.agent/paused?
               :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/awaiting]) e)
            b (:seon.agent/branch ma)
            branch-db (safe-branch-head store main-db b)
@@ -352,7 +352,7 @@
            auto-settle-ops (compute-auto-settle-ops main-db agent-id b head-tx status eval-count
                            eval-ents last-eval seen inbox settling-set has-pending-outgoing? (and paused? (gate/has-active-reviewer? main-db e)))]
        {:id agent-id :parent (:seon.agent/parent ma) :scope (:seon.agent/scope ma) :branch b
-        :task (:seon.agent/task ma) :gate gate :role (:seon.agent/role ma) :goal (:seon.agent/goal ma)
+        :task (:seon.agent/task ma) :gate gate :router? (boolean (:seon.agent/router? ma)) :goal (:seon.agent/goal ma)
         :paused? paused? :branch-tx head-tx :evals eval-count :eval-eids cur-eval-eids :unread-count (count unread)
         :awaiting-count awaiting-count :live-pid (when-not merged? live-pid) :busy? busy?
         :needs-turn? needs-turn? :needs-test? needs-test? :needs-merge? needs-merge? :needs-release? needs-release?

@@ -183,18 +183,18 @@
   "Compact chip (~180px) for `:seon.ctx/snapshot`."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/snapshot :seon.ctx/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 400000}
-  [{{:seon.agent/keys [id branch role]} :seon.ctx/snapshot}]
+  [{{:seon.agent/keys [id branch router?]} :seon.ctx/snapshot}]
   {:seon.ui/hiccup
    [:span {:class "ent-chip ent-ctx" :data-min-width 180}
     (badge "amber" "@ctx") (ent-link [:seon.agent/id id] (str id) "mono strong")
-    (mut (str (or role :worker) " · " (or branch :main)))]})
+    (mut (str (if router? "router · " "") (or branch :main)))]})
 
 (defn render-ctx-snapshot
   "Full `@ctx` runtime card (~420px) for `:seon.ctx/snapshot` carrying agent summary, context-prefs,
    and static Core-12 REPL idioms (or Harbor `:container` workspace tools when `:mode :container`)."
   {:malli/schema [:=> [:cat [:map [:seon.ctx/snapshot :seon.ctx/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1000000}
-  [{{:seon.agent/keys [id branch role summary context-prefs] :as snap} :seon.ctx/snapshot}]
+  [{{:seon.agent/keys [id branch router? summary context-prefs] :as snap} :seon.ctx/snapshot}]
   (let [sum-lines (when (and (string? summary) (not (str/blank? summary)))
                     (vec (remove str/blank? (str/split-lines summary))))
         prefs (when (map? context-prefs) context-prefs)
@@ -204,8 +204,7 @@
       [:div {:class "card-head ent-head"}
        [:div {:class "pill-row"} (badge "amber" "@ctx") (ent-link [:seon.agent/id id] (str id) "mono strong")]
        (mut (str (or branch :main)))]
-      (kv-dl [[":seon.agent/role" (str (or role :worker))]
-              [":seon.agent/context-prefs" (when (seq prefs) (pr-str prefs))]])
+      (kv-dl [(when router? [":seon.agent/router?" "true"]) [":seon.agent/context-prefs" (when (seq prefs) (pr-str prefs))]])
       (when (seq sum-lines)
         [:div {:class "doc-box sm-copy"}
          [:p "Agent summary:"]

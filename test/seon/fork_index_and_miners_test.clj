@@ -218,7 +218,6 @@
                                        :seon.task/scope 'seon.mine-demo.a
                                        :seon.task/summary "data:image/png;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}
                                       {:seon.agent/id :seon.mine-demo/worker
-                                       :seon.agent/role :worker
                                        :seon.agent/scope 'seon.mine-demo.a
                                        :seon.agent/task :seon.mine-demo/t1}
                                       {:seon.agent.eval/id (random-uuid)

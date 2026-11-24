@@ -274,9 +274,7 @@ rtails/fallback-entity-renderers)
 (let [branch (:seon.agent/branch ag :main)
       prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
       pref-fit (select-keys prefs [:token-budget :strategy :weights])
-      read-main? (or (= :main (:seon.agent/read-branch ag))
-                     (:seon.agent/router? ag)
-                     (= :coordinator (:seon.agent/role ag)))
+      read-main? (or (= :main (:seon.agent/read-branch ag)) (:seon.agent/router? ag))
       store-or-conn (or conn (:store branch-db))
       reset-tx (rstatus/branch-reset-tx (if read-main? main-db branch-db) (:seon.agent/id ag))
       anchor-cid (cond (and (pos? reset-tx) (not read-main?) (not= branch :main))
@@ -306,7 +304,7 @@ rtails/fallback-entity-renderers)
                      bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))]
                  [(get-in main-db [:config :store :id]) (:seon.agent/id ag) eff-cid branch reset-tx
                  msig bsig
-                 (:seon.agent/role ag) (:seon.agent/scope ag) task-ids (:seon.agent/goal ag)
+                 (:seon.agent/router? ag) (:seon.agent/scope ag) task-ids (:seon.agent/goal ag)
                  (vec (:seon.agent/pinned ag)) (:seon.agent/summary ag) (vec (:seon.agent/curated ag))
                  (:seon.agent/context-prefs ag) (:seon.agent/forked-from ag) (:seon.agent/fork-commit ag)
                  (vec (sort-by pr-str (:seon.agent/examples ag))) (vec (sort-by pr-str (:seon.agent/example-refs ag)))
@@ -354,7 +352,7 @@ rtails/fallback-entity-renderers)
    :cost/ticks 50000000}
   ([main-db branch-db agent-id] (render-agent-context main-db branch-db agent-id {}))
   ([main-db branch-db agent-id opts]
-   (let [base-ag (or (rdata/pull-agent-entity main-db branch-db agent-id) {:seon.agent/id agent-id :seon.agent/role :worker})
+   (let [base-ag (or (rdata/pull-agent-entity main-db branch-db agent-id) {:seon.agent/id agent-id})
          tid (or (:task opts) (:seon.agent/task base-ag))
          task-ids (vec (distinct (concat (when tid [tid])
                                          (keep (fn [r] (let [eid (if (map? r) (:db/id r) r)] (when (integer? eid) (:seon.task/id (or (d/pull branch-db '[:seon.task/id] eid) (d/pull main-db '[:seon.task/id] eid))))))
@@ -451,7 +449,7 @@ rtails/fallback-entity-renderers)
               activity-text (when inc-tail? (not-empty (str/join "\n\n" (keep :text tail-blocks))))
               wire (model/build-agent-wire-messages
                     {:thinking? true :replay-reasoning? true :vision? (boolean vision?) :out-max-chars (store/config-val main-db agent-id :seon.config/eval-out-chars) :format-tool-fn rstatus/cached-format-tool-content}
-                    {:agent-id agent-id :branch branch :role (:seon.agent/role ag :worker)
+                    {:agent-id agent-id :branch branch :router? (boolean (:seon.agent/router? ag))
                      :goal (:seon.agent/goal ag) :system-prompt (:seon.agent/system-prompt ag)
                      :prefix-agents (:entries pfx) :forked-from (:forked-from pfx) :include-tail? inc-tail?
                      :walk-text eff-walk :tail-blocks tail-blocks :ephemeral-image (:image tail-res)

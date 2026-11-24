@@ -258,9 +258,8 @@
         t0-db (if (and as-of? first-tx (not (instance? datahike.db.AsOfDB db)))
                 (try (d/as-of db (dec (long first-tx))) (catch Throwable _ db))
                 db)
-        ag (or (d/pull t0-db '[:seon.agent/id :seon.agent/role :seon.agent/task :seon.agent/scope
-                               :seon.agent/branch :seon.agent/pinned] [:seon.agent/id aid])
-               {:seon.agent/id aid :seon.agent/role :worker})
+        ag (or (d/pull t0-db '[:seon.agent/id :seon.agent/router? :seon.agent/task :seon.agent/scope :seon.agent/branch :seon.agent/pinned] [:seon.agent/id aid])
+               {:seon.agent/id aid})
         eval-rule? #(boolean (re-find #"eval|touch|error" (str %)))
         cands (->> (:candidates (ctx/gather-agent-candidates t0-db t0-db aid
                                   {:agent ag :target :wire :include-evals? false :include-ctx-snapshot? false

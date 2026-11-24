@@ -160,7 +160,7 @@
                                 (take max-evals) vec)
                  trunc (fn [s n] (let [st (str s)] (if (> (count st) n) (str (subs st 0 n) "…") st)))
                  ex-ent (cond-> {:db/id (str "agent/" (name example-id))
-                               :seon.agent/id example-id :seon.agent/branch :main :seon.agent/role (or (:seon.agent/role ag) :worker)
+                               :seon.agent/id example-id :seon.agent/branch :main
                                :seon.agent/goal (or goal (:seon.agent/goal ag) "Curated real session example.")
                                :seon.agent/paused? true :seon.agent/waiting? true :seon.agent/seed-path "resources/seon/agents/examples.edn"}
                         (:seon.agent/scope ag) (assoc :seon.agent/scope (:seon.agent/scope ag)))

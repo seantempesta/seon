@@ -102,8 +102,7 @@
                              :seon.code.doc/references [metric-schema-eid]}
                             {:seon.demo.metric/id :m/latency :seon.demo.metric/score 42}
                             {:seon.demo.note/id :n/alpha :seon.demo.note/body "Fallback rendered cleanly"}
-                            {:seon.agent/id :ns/seon.health :seon.agent/branch :main :seon.agent/role :worker
-                             :seon.agent/scope 'seon.health
+                            {:seon.agent/id :ns/seon.health :seon.agent/branch :main :seon.agent/scope 'seon.health
                              :seon.agent/pinned [[:seon.demo.metric/id :m/latency]
                                                  [:seon.demo.note/id :n/alpha]]}]})
             db @conn
@@ -265,7 +264,7 @@
    :seon.agent/entity
    {:seon.agent/entity
     {:seon.agent/id :agent/guide :seon.agent/label "Architecture Guide"
-     :seon.agent/role :worker :seon.agent/branch :main
+     :seon.agent/branch :main
      :seon.agent/scope 'seon.rule :seon.agent/waiting? true
      :seon.agent/goal "Explain Seon's unified rule-driven context & rendering pipeline using real Datahike entities."
      :seon.agent/pinned [[:seon.code.ns/name 'seon.rule]]
@@ -429,7 +428,6 @@
                                                                  :seon.task/done? false}
                                                                 {:seon.agent/id :agent/hist-test
                                                                  :seon.agent/branch :main
-                                                                 :seon.agent/role :worker
                                                                  :seon.agent/label "Hist Agent"
                                                                  :seon.agent/pinned [[:seon.task/id :task/hist-1]]}]})))
             tx2 (:max-tx (:db-after (d/transact conn {:tx-data [{:seon.task/id :task/hist-2

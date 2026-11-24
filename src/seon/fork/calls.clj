@@ -68,7 +68,7 @@
   [conn target-id]
   (let [main-db (or (store/head conn :main) @conn)
         aid (or target-id (entry-agent-id main-db))
-        ag (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/label
+        ag (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/label
                              :seon.agent/parent :seon.agent/task]
                    [:seon.agent/id aid])
         br (or (:seon.agent/branch ag) :main)
@@ -109,7 +109,7 @@
                              (seq (:children n)) (assoc :children (mapv summarize-node (:children n))))))]
     {:agent aid
      :branch br
-     :role (:seon.agent/role ag)
+     :router? (boolean (:seon.agent/router? ag))
      :unread-count unread-count
      :parent-request (when parent-req
                        {:parent (:parent-id parent-req)

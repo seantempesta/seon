@@ -308,7 +308,7 @@
             ev-id (random-uuid)]
         (d/transact conn {:tx-data [{:seon.error/id err-id :seon.error/kind :slow-render :seon.error/severity :warning
                                      :seon.error/source :web :seon.error/status :open :seon.error/message "slow" :seon.error/at 1}
-                                    {:seon.agent/id :w/dref :seon.agent/branch :branch/w-dref :seon.agent/role :worker :seon.agent/goal "test"}]})
+                                    {:seon.agent/id :w/dref :seon.agent/branch :branch/w-dref :seon.agent/goal "test"}]})
         (store/branch! conn :main :branch/w-dref)
         ;; :main retracts transient error while branch records an eval touching it
         (d/transact conn {:tx-data [[:db/retractEntity [:seon.error/id err-id]]]})

@@ -61,7 +61,7 @@
                                     (code/file-import-tx @conn "src/demo/ft.clj" src false)
                                     [{:seon.code.doc/id "docs/primers.md#proofs" :seon.code.doc/path "docs/primers.md"
                                       :seon.code.doc/order 1 :seon.code.doc/heading "Proofs" :seon.code.doc/body "Run tests."}
-                                     {:seon.agent/id :ag/ft :seon.agent/branch :main :seon.agent/role :worker}])})
+                                     {:seon.agent/id :ag/ft :seon.agent/branch :main }])})
         (let [db0 @conn
               dead-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.ft/dead-fn)))
               live-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.ft/live-fn)))
@@ -122,8 +122,8 @@
                                     (code/file-import-tx @conn "test/bbb/t2_test.clj" (mk-test "bbb.t2-test") false)
                                     (code/file-import-tx @conn "test/ccc/t3_test.clj" (mk-test "ccc.t3-test") false)
                                     (code/file-import-tx @conn "test/demo/pkg/core_test.clj" (mk-test "demo.pkg.core-test") false)
-                                    [{:seon.agent/id :ag/viewer :seon.agent/branch :main :seon.agent/role :worker :seon.agent/scope 'demo.pkg.core}
-                                     {:seon.agent/id :ag/old :seon.agent/branch :main :seon.agent/role :worker :seon.agent/archived? true}])})
+                                    [{:seon.agent/id :ag/viewer :seon.agent/branch :main :seon.agent/scope 'demo.pkg.core}
+                                     {:seon.agent/id :ag/old :seon.agent/branch :main :seon.agent/archived? true}])})
         (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn)})
         (let [db0 @conn
               old-eid (:e (first (d/datoms db0 :avet :seon.agent/id :ag/old)))
@@ -155,8 +155,7 @@
         (d/transact conn {:tx-data (concat
                                     (code/file-import-tx @conn "src/demo/err.clj" src false)
                                     [{:seon.task/id :task/err-z :seon.task/title "Fix demo.err" :seon.task/scope 'demo.err :seon.task/done? false}
-                                     {:seon.agent/id :ag/err :seon.agent/branch :main :seon.agent/role :worker
-                                      :seon.agent/scope 'demo.err :seon.agent/task :task/err-z}
+                                     {:seon.agent/id :ag/err :seon.agent/branch :main :seon.agent/scope 'demo.err :seon.agent/task :task/err-z}
                                      (serr/error-tx {:kind :demo/var-fault :severity :error :source :eval
                                                      :agent :ag/err :var 'demo.err/err-var-fn :message "Fault in err-var-fn"})
                                      {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/err

@@ -25,7 +25,7 @@
             h2 (store/head conn :main)]
         (is (identical? h1 h2) "store/head must hit cid LRU when branch head unchanged"))
       (let [r1 (schema/registry-for-db @conn)
-            _ (d/transact conn {:tx-data [{:seon.agent/id :ag/c4-noop :seon.agent/branch :main :seon.agent/role :worker :seon.agent/goal "Noop"}]})
+            _ (d/transact conn {:tx-data [{:seon.agent/id :ag/c4-noop :seon.agent/branch :main :seon.agent/goal "Noop"}]})
             r2 (schema/registry-for-db @conn)
             h3 (store/head conn :main)]
         (is (identical? (:registry r1) (:registry r2)) "Non-schema tx must promote anchored registry via d/changes")
@@ -53,8 +53,8 @@
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/c4/b.clj"
                                    "(ns demo.c4.b)\n(defn f1 [x] (inc x))\n(defn f2 [x] (dec x))\n" false)})
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/c4-w :seon.agent/branch :main :seon.agent/role :worker :seon.agent/goal "Init"}
-                                  {:seon.agent/id :review/c4-r :seon.agent/branch :main :seon.agent/role :worker :seon.agent/goal "Review"
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/c4-w :seon.agent/branch :main :seon.agent/goal "Init"}
+                                  {:seon.agent/id :review/c4-r :seon.agent/branch :main :seon.agent/goal "Review"
                                    :seon.agent/target [:seon.agent/id :ag/c4-w]}]})
       ;; 1. Single-tx atomic batch set-meta!
       (do (create-ns 'demo.c4.b)
@@ -138,8 +138,8 @@
                   {:seon.rule/id :rule.test/missing-fn
                    :seon.rule/query '[:find ?x :in $branch :where [(seon.nonexistent.ns/ghost-fn $branch) ?x]]})))
       ;; MF-2: review-diagnosis asserts :wm/active-var :error and compounds into active-var-covering-tests
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/c4-t :seon.agent/branch :main :seon.agent/role :worker :seon.agent/goal "Work"}
-                                  {:seon.agent/id :review/c4-t :seon.agent/branch :main :seon.agent/role :worker :seon.agent/goal "Review"
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/c4-t :seon.agent/branch :main :seon.agent/goal "Work"}
+                                  {:seon.agent/id :review/c4-t :seon.agent/branch :main :seon.agent/goal "Review"
                                    :seon.agent/target [:seon.agent/id :ag/c4-t]}
                                   {:seon.error/id (java.util.UUID/randomUUID) :seon.error/kind :eval-error
                                    :seon.error/severity :error :seon.error/source :eval :seon.error/status :open

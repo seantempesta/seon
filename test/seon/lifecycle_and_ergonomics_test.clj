@@ -29,15 +29,12 @@
   (testing "Skip store/head for :main/nil, prune :testing/:merging/:settling, wake on :gate-blocked, and allow 1 post-ready! chat prose turn"
     (with-test-store [{:keys [conn cfg]}]
       ;; 1. Skip store/head when branch is :main or nil
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/main-only :seon.agent/branch :main :seon.agent/role :worker}
-                                  {:seon.agent/id :ag/gate-w :seon.agent/branch :branch/gate-w :seon.agent/role :worker
-                                   :seon.agent/auto-merge? true :seon.agent/task :task/need-proof}
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/main-only :seon.agent/branch :main }
+                                  {:seon.agent/id :ag/gate-w :seon.agent/branch :branch/gate-w :seon.agent/auto-merge? true :seon.agent/task :task/need-proof}
                                   {:seon.task/id :task/need-proof :seon.task/title "Proof task"
                                    :seon.task/done? false :seon.task/tests #{'demo.missing-test/alpha-test}}
-                                  {:seon.agent/id :ag/chat-w :seon.agent/branch :branch/chat-w :seon.agent/role :worker
-                                   :seon.agent/auto-merge? true}
-                                  {:seon.agent/id :ag/task-w :seon.agent/branch :branch/task-w :seon.agent/role :worker
-                                   :seon.agent/auto-merge? true}]})
+                                  {:seon.agent/id :ag/chat-w :seon.agent/branch :branch/chat-w :seon.agent/auto-merge? true}
+                                  {:seon.agent/id :ag/task-w :seon.agent/branch :branch/task-w :seon.agent/auto-merge? true}]})
       (let [head-calls (volatile! [])]
         (with-redefs [store/head (fn [s b] (vswap! head-calls conj b) nil)]
           (let [st (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} :ag/main-only)]
@@ -135,7 +132,7 @@
       ;; 1. Merge conflict clears :seon.agent/ready? false on branch and sends :merge-conflict message
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/c.clj"
                                                       "(ns demo.c)\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))\n" false)})
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/conf :seon.agent/branch :branch/conf :seon.agent/role :worker}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/conf :seon.agent/branch :branch/conf }]})
       (store/branch! conn :main :branch/conf)
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/c.clj"
                                                       "(ns demo.c)\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))\n" false)})
@@ -160,7 +157,7 @@
           (finally (d/release bconn))))
 
       ;; 2. Health-only merge block sends :health-block and clears :ready? false
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/hb :seon.agent/branch :branch/hb :seon.agent/role :worker}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/hb :seon.agent/branch :branch/hb }]})
       (store/branch! conn :main :branch/hb)
       (let [hbconn (store/connect cfg :branch/hb)]
         (try
@@ -181,9 +178,9 @@
       ;; 3. Call subtask auto-close on read-only research call + :create-call mirroring onto existing callee branch
       (d/transact conn {:tx-data [{:seon.task/id :template/subtask-research :seon.task/title "Research" :seon.task/template? true :seon.task/done? false}
                                   {:seon.task/id :task/coord-parent :seon.task/title "Coord Task" :seon.task/done? false}
-                                  {:seon.agent/id :ag/coord :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/task :task/coord-parent}
-                                  {:seon.agent/id :ag/res :seon.agent/branch :branch/res :seon.agent/role :worker}
-                                  {:seon.agent/id :ag/coder :seon.agent/branch :branch/coder :seon.agent/role :worker}]})
+                                  {:seon.agent/id :ag/coord :seon.agent/branch :main :seon.agent/router? true :seon.agent/task :task/coord-parent}
+                                  {:seon.agent/id :ag/res :seon.agent/branch :branch/res }
+                                  {:seon.agent/id :ag/coder :seon.agent/branch :branch/coder }]})
       (store/branch! conn :main :branch/res)
       (store/branch! conn :main :branch/coder)
       (let [replies (volatile! [])
@@ -289,8 +286,7 @@
   (testing ":examples arity rail, *-test auto-ns, enrich-eval-error, search/grep schemas, explore! errors, run-tests! :main-pass?, work.clj guidance, and scoped health < 20 MB"
     (with-test-store [{:keys [conn cfg]}]
       ;; 1. Write-time :examples arity validation in add-fn! and set-meta! + auto-seed *-test ns
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/ergo :seon.agent/branch :branch/ergo :seon.agent/role :worker
-                                   :seon.agent/scope 'demo.ergo}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/ergo :seon.agent/branch :branch/ergo :seon.agent/scope 'demo.ergo}]})
       (store/branch! conn :main :branch/ergo)
       (let [bconn (store/connect cfg :branch/ergo)]
         (try
@@ -362,7 +358,7 @@
       (is (str/includes? e-aevt "Pass the attribute as 3rd arg: (d/datoms db :aevt :attr/name)")))
 
     ;; 3. work.clj guidance clarifies with-test-store is ONLY inside deftest bodies
-    (let [txt (render/hiccup->text (:seon.ui/hiccup (rwork/render-ctx-snapshot {:seon.ctx/snapshot {:seon.agent/id :ag/w :seon.agent/branch :branch/w :seon.agent/role :worker}})))]
+    (let [txt (render/hiccup->text (:seon.ui/hiccup (rwork/render-ctx-snapshot {:seon.ctx/snapshot {:seon.agent/id :ag/w :seon.agent/branch :branch/w }})))]
       (is (str/includes? txt "never wrap"))
       (is (str/includes? txt "(seon.test-fixture/with-test-store [{:keys [conn]}] ...)")))))
 
@@ -370,7 +366,7 @@
   (testing "handle-transactor-error! on :merge records attributed :merge-error fault, clears branch :ready? false, notifies agent; eval-forms reports effective budget"
     (with-test-store [{:keys [conn cfg]}]
       (store/branch! conn :main :branch/merr)
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/merr :seon.agent/branch :branch/merr :seon.agent/role :worker}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/merr :seon.agent/branch :branch/merr }]})
       (let [bconn (store/connect cfg :branch/merr)]
         (try
           (d/transact bconn {:tx-data [{:seon.agent/id :ag/merr :seon.agent/ready? true}]})

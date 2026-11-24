@@ -53,7 +53,7 @@
    :cost/ticks 25000000}
   [main-db branch-db conn ag prefix-items depth build-fn]
   (let [sc (or conn (:store main-db) (:store branch-db))
-        pat '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/goal]
+        pat '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/goal]
         forked-aid (when-let [ff (:seon.agent/forked-from ag)]
                      (let [feid (if (map? ff) (:db/id ff) ff)]
                        (cond

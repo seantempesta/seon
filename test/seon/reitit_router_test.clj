@@ -113,7 +113,7 @@
                                   @conn "src/seon/web/router.clj"
                                   "(ns seon.web.router)\n(defn compile-router \"Compiles router.\" [routes] routes)\n" false)})
       (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main
-                                   :seon.agent/role :coordinator :seon.agent/label "Root"}
+                                   :seon.agent/router? true :seon.agent/label "Root"}
                                   {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
                                    :seon.user/view-mode :session}]})
       (let [sync-fn (fn [op]
@@ -142,9 +142,9 @@
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (router/core-routes-tx)})
       (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main
-                                   :seon.agent/role :coordinator :seon.agent/label "Root"}
+                                   :seon.agent/router? true :seon.agent/label "Root"}
                                   {:seon.agent/id :ns/seon.web :seon.agent/parent :agent/root :seon.agent/branch :branch/web
-                                   :seon.agent/role :worker :seon.agent/label "Web"}
+                                   :seon.agent/label "Web"}
                                   {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
                                    :seon.user/view-mode :session :seon.user/sidebar-open? true
                                    :seon.user/expanded-agents #{:agent/root}}]})
@@ -219,7 +219,7 @@
           (d/transact conn {:tx-data (code/file-import-tx @conn path src false)})))
       (let [db @conn
             ns-ent (d/pull db '[:db/id :seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] [:seon.code.ns/name 'seon])
-            worker {:seon.agent/id :agent/w-seon :seon.agent/role :worker :seon.agent/scope 'seon}
+            worker {:seon.agent/id :agent/w-seon :seon.agent/scope 'seon}
             alloc-fn (try (requiring-resolve 'jolt.host/bytes-allocated) (catch Throwable _ nil))
             b0 (if alloc-fn (long (alloc-fn)) 0)
             res (#'rlinks/compute-ns-enrichment db db ns-ent worker)

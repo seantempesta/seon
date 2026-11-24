@@ -82,7 +82,7 @@
           ;; Add an unrelated non-code datom to advance tx & miss report-commit-cache, while per-form/per-ns caches are warm!
           (d/transact conn {:tx-data [{:seon.agent/id (keyword "perf" (str "ag-" run-id))
                                        :seon.agent/branch :main
-                                       :seon.agent/role :worker}]})
+                                       }]})
           (let [db2 @conn
                 warm-hit (code/measure-call #(health/report db2))
                 ;; Force report-cache miss by editing 1 single form in 1 small ns:
@@ -326,7 +326,7 @@
     (with-test-store [{:keys [conn]}]
       (let [fid (random-uuid)
             _ (d/transact conn {:tx-data [{:seon.agent/id :agent/c1 :seon.agent/branch :branch/c1-fix
-                                           :seon.agent/role :worker :seon.agent/task :seon.health/perf-fix}
+                                           :seon.agent/task :seon.health/perf-fix}
                                           {:seon.task/id :seon.health/perf-fix
                                            :seon.task/title "Eliminate O(history) test scan in health"
                                            :seon.task/summary "Fetch top-2 live test eids via indexed eavt"}

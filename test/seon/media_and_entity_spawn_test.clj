@@ -243,7 +243,7 @@
     (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/alpha.clj"
                                                     "(ns demo.alpha \"Alpha ns.\")\n(defn compute {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] (inc x))\n" false)})
     (let [err-id (random-uuid)]
-      (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/label "Root"}
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/router? true :seon.agent/label "Root"}
                                   {:seon.task/id :task/demo-focus :seon.task/title "Demo Focus Task" :seon.task/scope 'demo.alpha :seon.task/plan "Do work" :seon.task/done? false}
                                   (serr/error-tx {:id err-id :kind :eval/demo-boom :severity :error :source :eval
                                                   :var 'demo.alpha/compute :message "Boom on compute"})

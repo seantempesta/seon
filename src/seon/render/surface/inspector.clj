@@ -167,9 +167,9 @@
         pcls (when (dh :seon.agent.call/status) (map #(mk (:e %) :system/pending-call 92 (:tx %)) (take 4 (d/datoms mdb :avet :seon.agent.call/status :pending))))
         ags  (when (dh :seon.agent/id)
                (->> (d/datoms mdb :aevt :seon.agent/id)
-                    (keep #(let [a (d/pull mdb '[:seon.agent/id :seon.agent/role :seon.agent/archived? :seon.agent/entry?] (:e %))
+                    (keep #(let [a (d/pull mdb '[:seon.agent/id :seon.agent/interactive? :seon.agent/archived? :seon.agent/entry?] (:e %))
                                  id (:seon.agent/id a)]
-                             (when (and id (not (:seon.agent/archived? a)) (not= :repl (:seon.agent/role a))
+                             (when (and id (not (:seon.agent/archived? a)) (not (:seon.agent/interactive? a))
                                         (not= "example" (namespace id)))
                                (mk (:e %) :system/agent (if (:seon.agent/entry? a) 91 89) (:tx %)))))
                     (sort-by #(vector (- (:priority %)) (- (:tx %)))) (take 8)))

@@ -118,14 +118,12 @@
         t1 (:max-tx (:db-after r1))
         r2 (d/transact c [{:seon.code.form/key "seon.render.surface/f1" :seon.code.form/ns 'seon.render.surface
                            :seon.code.form/order 1 :seon.code.form/src "(defn f1 [] 1)" :seon.code.form/hash "bbbbbbbb"}
-                          {:seon.agent/id :work/canvas :seon.agent/branch :branch/canvas :seon.agent/role :worker
-                           :seon.agent/scope 'seon.render.surface :seon.agent/goal "Polish living Canvas"
+                          {:seon.agent/id :work/canvas :seon.agent/branch :branch/canvas :seon.agent/scope 'seon.render.surface :seon.agent/goal "Polish living Canvas"
                            :seon.agent/merged-tx 9001}])
         t2 (:max-tx (:db-after r2))
         r3 (d/transact c [{:seon.code.form/key "seon.code.parse/p1" :seon.code.form/ns 'seon.code.parse
                            :seon.code.form/order 1 :seon.code.form/src "(defn p1 [] 1)" :seon.code.form/hash "cccccccc"}
-                          {:seon.agent/id :work/parse :seon.agent/branch :branch/parse :seon.agent/role :worker
-                           :seon.agent/scope 'seon.code.parse :seon.agent/goal "Add Malli contracts"
+                          {:seon.agent/id :work/parse :seon.agent/branch :branch/parse :seon.agent/scope 'seon.code.parse :seon.agent/goal "Add Malli contracts"
                            :seon.agent/merged-tx 9002}])]
     (let [t3 (:max-tx (:db-after r3))
           d12 (chronicle/distill-tx-window @c t1 t2)
@@ -168,8 +166,7 @@
                                           :from-tx 200 :to-tx 300 :created-ms 1795110000000 :agent :agent/root :refs [:a/two]})
           _ (chronicle/record-summary! c {:kind :compaction :title "Wave 3" :body "Compacted root history cleanly"
                                           :from-tx 300 :to-tx 400 :created-ms 1795120000000 :agent :agent/root :refs [:a/three]})
-          _ (d/transact c [{:seon.agent/id :work/tail :seon.agent/branch :branch/tail :seon.agent/role :worker
-                            :seon.agent/goal "Late merge" :seon.agent/merged-tx 9999}])
+          _ (d/transact c [{:seon.agent/id :work/tail :seon.agent/branch :branch/tail :seon.agent/goal "Late merge" :seon.agent/merged-tx 9999}])
           full (chronicle/chronicle-for-compaction @c :agent/root {:max-chars 2400})
           tight (chronicle/chronicle-for-compaction @c :agent/root {:max-chars 260})]
       (is (< (.indexOf ^String (:text full) "Wave 1") (.indexOf ^String (:text full) "Wave 3"))
@@ -186,18 +183,15 @@
 (deftest ^{:cost/ticks 28000000} living-canvas-chronicle-and-summary-tile-render-test
   (testing "Unified surface renders agent canvas with Chronicle summaries, freshness, d/as-of rewind, and summary-tile"
     (let [c (mem-conn)
-          r-root (d/transact c [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/role :coordinator
-                                 :seon.agent/router? true :seon.agent/entry? true :seon.agent/label "Root"}])
+          r-root (d/transact c [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/router? true :seon.agent/entry? true :seon.agent/label "Root"}])
           t-root (:max-tx (:db-after r-root))
-          r-m1 (d/transact c [{:seon.agent/id :work/alpha :seon.agent/branch :branch/alpha :seon.agent/role :worker
-                               :seon.agent/scope 'seon.render :seon.agent/goal "Upgrade canvas" :seon.agent/merged-tx 101}])
+          r-m1 (d/transact c [{:seon.agent/id :work/alpha :seon.agent/branch :branch/alpha :seon.agent/scope 'seon.render :seon.agent/goal "Upgrade canvas" :seon.agent/merged-tx 101}])
           t-m1 (:max-tx (:db-after r-m1))
           rec (chronicle/record-summary! c {:kind :milestone :title "Canvas & Chronicle Milestone"
                                             :body "- Shipped Unified Surface\n- Added Chronicle stream"
                                             :from-tx t-root :to-tx t-m1 :created-ms 1795172750000
                                             :agent :agent/root :refs [:work/alpha 'seon.render.chronicle]})
-          r-m2 (d/transact c [{:seon.agent/id :work/beta :seon.agent/branch :branch/beta :seon.agent/role :worker
-                               :seon.agent/scope 'seon.code :seon.agent/goal "Speed up parser" :seon.agent/merged-tx 102}
+          r-m2 (d/transact c [{:seon.agent/id :work/beta :seon.agent/branch :branch/beta :seon.agent/scope 'seon.code :seon.agent/goal "Speed up parser" :seon.agent/merged-tx 102}
                               {:seon.agent/id :agent/root :seon.agent/pinned [[:seon.summary/id (:id rec)]]}])
           _t-m2 (:max-tx (:db-after r-m2))
           fr (chronicle/chronicle-freshness @c)
@@ -280,13 +274,13 @@
                                 :seon.task/scope 'seon.render.surface
                                 :seon.task/done? true
                                 :seon.task/summary "Split live blocks into composable helpers."}
-                               {:seon.agent/id :agent/top :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/label "Top" :seon.agent/task :task/root-parent}
+                               {:seon.agent/id :agent/top :seon.agent/branch :main :seon.agent/router? true :seon.agent/label "Top" :seon.agent/task :task/root-parent}
                                {:seon.agent/id :agent/mid :seon.agent/parent :agent/top :seon.agent/branch :main
-                                :seon.agent/role :worker :seon.agent/label "Mid" :seon.agent/task :task/demo}
+                                :seon.agent/label "Mid" :seon.agent/task :task/demo}
                                {:seon.agent/id :agent/leaf :seon.agent/parent :agent/mid :seon.agent/branch :main
-                                :seon.agent/role :worker :seon.agent/label "Leaf" :seon.agent/ready? true}
+                                :seon.agent/label "Leaf" :seon.agent/ready? true}
                                {:seon.agent/id :agent/direct-kid :seon.agent/parent :agent/mid :seon.agent/branch :main
-                                :seon.agent/role :worker :seon.agent/label "DirectKid" :seon.agent/goal "Audit schema"}
+                                :seon.agent/label "DirectKid" :seon.agent/goal "Audit schema"}
                                {:seon.agent.call/id cid-in :seon.agent.call/caller :agent/top :seon.agent.call/callee :agent/mid
                                 :seon.agent.call/status :pending :seon.agent.call/prompt "Coordinate live canvas work" :seon.agent.call/created-tx 1}
                                {:seon.agent.call/id cid-out :seon.agent.call/caller :agent/mid :seon.agent.call/callee :agent/leaf
@@ -326,7 +320,7 @@
               self-prog (rdata/agent-branch-progress db2 conn :agent/mid)
               mon (fcalls/agent-monitor-snapshot conn :agent/mid)
               surf-txt (render/hiccup->text (surface/render-surface db2 db2 {:conn conn :viewing-id :agent/mid :view-mode :canvas}))
-              nb-txt (rwire/neighborhood-recent-activity db2 db2 {:seon.agent/id :agent/mid :seon.agent/role :worker})]
+              nb-txt (rwire/neighborhood-recent-activity db2 db2 {:seon.agent/id :agent/mid })]
           ;; Unified candidate discovery catches reverse needed-by parent task + render-task-lineage renders chain, history & templates
           (is (some #(= :task/root-parent (get-in % [:data :seon.task/id])) mid-cands))
           (is (= [:task/root-parent] (get-in task-cand [:params :seon.ui/task-needed-by])))

@@ -99,7 +99,7 @@
   [a]
   (let [aid (:seon.agent/id a)]
     (boolean
-     (or (= :repl (:seon.agent/role a))
+     (or (boolean (:seon.agent/interactive? a))
          (and aid (= "repl" (namespace aid)))
          (and aid (= "example" (namespace aid)))
          (= :agent/root aid)))))
@@ -250,8 +250,7 @@
       (fn []
         (let [all-brs (set (d/branches conn))
               ags (->> (d/datoms db :aevt :seon.agent/id)
-                       (map #(d/pull db '[:db/id :seon.agent/id :seon.agent/role :seon.agent/branch
-                                          :seon.agent/ready? :seon.agent/merged-tx] (:e %)))
+                       (map #(d/pull db '[:db/id :seon.agent/id :seon.agent/interactive? :seon.agent/branch :seon.agent/ready? :seon.agent/merged-tx] (:e %)))
                        (remove skip-agent?)
                        (sort-by (comp - :db/id)))
               chosen (volatile! [])]

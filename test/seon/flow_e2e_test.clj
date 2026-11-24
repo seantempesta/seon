@@ -82,7 +82,7 @@
                                         :scope 'seon.app.tree
                                         :title "Build parallel helpers"
                                         :spawn-agent? true
-                                        :role :coordinator})]
+                                        :router? true})]
           (is (:ok? created))
           (let [done-state
                 (await-until
@@ -237,7 +237,7 @@
                 :latency-ms 5000})]
       (try
         ;; 1. Spawn coordinator + 2 active workers + 1 paused worker
-        (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/coord :role :coordinator :scope 'seon :config {:seon.agent/paused? true}})))
+        (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/coord :router? true :scope 'seon :config {:seon.agent/paused? true}})))
         (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/a :parent :ag/coord :role :worker :scope 'seon.code})))
         (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/b :parent :ag/coord :role :worker :scope 'seon.web})))
         (is (:ok? (main/call! sys {:op :spawn-agent :id :ag/paused :parent :ag/coord :role :worker :scope 'seon.git :config {:seon.agent/paused? true}})))
@@ -355,7 +355,6 @@
                                               :seon.agent/branch :branch/atlas
                                               :seon.agent/read-branch :main
                                               :seon.agent/router? true
-                                              :seon.agent/role :coordinator
                                               :seon.agent/scope 'demo
                                               :seon.agent/focus "ns/demo"
                                               :seon.agent/system-prompt "Custom intermediary instructions."
@@ -388,7 +387,7 @@
 
       (testing "3. 3-level recursive delegation (coord -> [mid-a, mid-b] -> [leaf-1..4]) flows results back up cleanly"
         ;; Coordinator paused; mid/leaf active (so reconciler won't auto-fail them with :callee-paused!)
-        (is (:ok? (main/call! sys {:op :spawn-agent :id :rec/coord :role :coordinator :scope 'demo :config {:seon.agent/paused? true}})))
+        (is (:ok? (main/call! sys {:op :spawn-agent :id :rec/coord :router? true :scope 'demo :config {:seon.agent/paused? true}})))
         (doseq [[id parent] [[:rec/mid-a :rec/coord] [:rec/mid-b :rec/coord]
                              [:rec/leaf-1 :rec/mid-a] [:rec/leaf-2 :rec/mid-a]
                              [:rec/leaf-3 :rec/mid-b] [:rec/leaf-4 :rec/mid-b]]]

@@ -30,8 +30,7 @@
                                           [{:seon.task/id :demo/t3 :seon.task/title "Leaf task" :seon.task/done? false}
                                            {:seon.task/id :demo/t2 :seon.task/title "Mid task" :seon.task/needs #{:demo/t3} :seon.task/done? false}
                                            {:seon.task/id :demo/t1 :seon.task/title "Top task" :seon.task/needs #{:demo/t2} :seon.task/done? false}
-                                           {:seon.agent/id :ag/inc-test :seon.agent/branch :main :seon.agent/role :worker
-                                            :seon.agent/task :demo/t1}])})
+                                           {:seon.agent/id :ag/inc-test :seon.agent/branch :main :seon.agent/task :demo/t1}])})
             _ (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn)})
             db1 @conn
             ctx-rs (filterv #(= :context (:seon.rule/category %)) (rules/load-rules db1 (rseed/starter-rules)))
@@ -169,8 +168,7 @@
                                  {:seon.task/id :demo/pre :seon.task/title "Prereq Task" :seon.task/done? false}
                                  {:seon.task/id :demo/main-task :seon.task/title "Main Task" :seon.task/needs #{:demo/pre} :seon.task/done? false}
                                  {:seon.demo.widget/id :w/pinned-one}
-                                 {:seon.agent/id :ag/full :seon.agent/branch :branch/full :seon.agent/role :worker
-                                  :seon.agent/task :demo/main-task
+                                 {:seon.agent/id :ag/full :seon.agent/branch :branch/full :seon.agent/task :demo/main-task
                                   :seon.agent/pinned [[:seon.demo.widget/id :w/pinned-one]]}]})]
         ;; Fork :branch/full, edit core-op, record old + recent evals with :result-schemas, and record a failing reach test!
         (store/branch! conn :main :branch/full)
@@ -266,8 +264,7 @@
                                        [:seon.custom.lab/ticket-id :seon.custom.lab/ticket-id]
                                        [:seon.custom.lab/assigned-agent :seon.custom.lab/assigned-agent]]
               "Custom ticket entity"))
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/generic :seon.agent/branch :main :seon.agent/role :worker
-                                   :seon.custom.lab/mood "curious"}
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/generic :seon.agent/branch :main :seon.custom.lab/mood "curious"}
                                   {:seon.custom.lab/ticket-id :tkt/num-42
                                    :seon.custom.lab/assigned-agent [:seon.agent/id :ag/generic]}]})
       (let [db @conn
@@ -341,7 +338,6 @@
                                    :seon.task/done? false}
                                   {:seon.agent/id :ag/nb-live
                                    :seon.agent/branch :main
-                                   :seon.agent/role :worker
                                    :seon.agent/task :task/nb-live
                                    :seon.agent/goal "Initial goal"}]})
       (let [ca (ctx/ctx-atom conn [:seon.agent/id :ag/nb-live])
@@ -379,10 +375,9 @@
                                    {:seon.task/id :template/starter :seon.task/title "Starter Template" :seon.task/template? true :seon.task/done? false}
                                    {:seon.fix/id (random-uuid) :seon.fix/error-class :demo/scoped-bug :seon.fix/symptom "boom"
                                     :seon.fix/root-cause "nil" :seon.fix/change-summary "Guarded demo.scoped/f" :seon.fix/regression-test 'demo.scoped-test/t1}
-                                   {:seon.agent/id :ag/scoped-worker :seon.agent/branch :main :seon.agent/role :worker
-                                    :seon.agent/scope 'demo.scoped :seon.agent/task :task/child-cur
+                                   {:seon.agent/id :ag/scoped-worker :seon.agent/branch :main :seon.agent/scope 'demo.scoped :seon.agent/task :task/child-cur
                                     :seon.agent/context-prefs {:extra-namespaces ['demo.extra]}}
-                                   {:seon.agent/id :ag/unassigned-coord :seon.agent/branch :main :seon.agent/role :coordinator :seon.agent/router? true}])})
+                                   {:seon.agent/id :ag/unassigned-coord :seon.agent/branch :main :seon.agent/router? true}])})
       (let [db @conn
             w-res (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/scoped-worker :seon.view/target :wire :seon.view/token-budget 32000})
             w-eids (into #{} (map :entity) (:seon.ctx/projections w-res))
@@ -415,7 +410,7 @@
                                   {:seon.error/id (random-uuid) :seon.error/kind :demo.c2/boom :seon.error/severity :error
                                    :seon.error/source :eval :seon.error/status :open :seon.error/agent :ag/c2
                                    :seon.error/var 'demo.c2/use-widget :seon.error/message "boom"}
-                                  {:seon.agent/id :ag/c2 :seon.agent/branch :branch/c2 :seon.agent/role :worker :seon.agent/scope 'demo.c2}]})
+                                  {:seon.agent/id :ag/c2 :seon.agent/branch :branch/c2 :seon.agent/scope 'demo.c2}]})
       (store/branch! conn :main :branch/c2)
       (let [bconn (store/connect cfg :branch/c2)]
         (try

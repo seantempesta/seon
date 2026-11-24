@@ -22,8 +22,7 @@
 (deftest ^{:cost/ticks 90000000} accretive-refs-world-discovery-and-kv-stability-test
   (testing "with-ref-mirrors populates *-ref lookup-refs/tempids, agent-world-datoms finds reverse refs without busting KV-cache prefix, and delegation-tree projects children + pending/resolved calls"
     (with-test-store [{:keys [conn]}]
-      (d/transact conn {:tx-data [{:seon.agent/id :agent/h2-root :seon.agent/branch :main :seon.agent/role :coordinator
-                                   :seon.agent/router? true :seon.agent/goal "Coordinate children"}
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/h2-root :seon.agent/branch :main :seon.agent/router? true :seon.agent/goal "Coordinate children"}
                                   {:seon.task/id :task/h2-sub :seon.task/title "Subtask" :seon.task/done? false}]})
       ;; Turn 1 baseline wire request (before child agents / calls exist)
       (let [db1 @conn
@@ -35,9 +34,9 @@
             mirrored (tcalls/with-ref-mirrors
                        db1
                        [{:seon.agent/id :agent/h2-kid-active :seon.agent/branch :branch/h2-kid-active
-                         :seon.agent/role :worker :seon.agent/parent :agent/h2-root :seon.agent/goal "Active kid"}
+                         :seon.agent/parent :agent/h2-root :seon.agent/goal "Active kid"}
                         {:seon.agent/id :agent/h2-kid-arch :seon.agent/branch :branch/h2-kid-arch
-                         :seon.agent/role :worker :seon.agent/parent :agent/h2-root :seon.agent/archived? true}
+                         :seon.agent/parent :agent/h2-root :seon.agent/archived? true}
                         {:seon.agent.call/id cid1 :seon.agent.call/caller :agent/h2-root
                          :seon.agent.call/callee :agent/h2-kid-active :seon.agent.call/prompt "Audit metrics"
                          :seon.agent.call/status :resolved :seon.agent.call/result {:ok? true}
@@ -96,7 +95,7 @@
       (let [long-body (str "Detailed prompt with call-id #uuid \"" (random-uuid) "\" " (apply str (repeat 200 "x")))
             sum-id (random-uuid)]
         (d/transact conn {:tx-data [{:seon.agent/id :agent/h2-router :seon.agent/branch :main
-                                     :seon.agent/role :coordinator :seon.agent/router? true :seon.agent/goal "Route"}
+                                     :seon.agent/router? true :seon.agent/goal "Route"}
                                     {:seon.summary/id sum-id :seon.summary/kind :milestone :seon.summary/from-tx 1
                                      :seon.summary/to-tx 42 :seon.summary/title "Horizon 2 unified tails"
                                      :seon.summary/body "Body"}

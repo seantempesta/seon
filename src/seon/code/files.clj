@@ -56,7 +56,7 @@
   [:seon.agent/id :seon.agent/parent :seon.agent/entry? :seon.agent/label
    :seon.agent/hero-title :seon.agent/read-branch :seon.agent/router?
    :seon.agent/seed-path :seon.agent/scope :seon.agent/focus :seon.agent/branch
-   :seon.agent/task :seon.agent/role :seon.agent/goal :seon.agent/system-prompt
+   :seon.agent/task :seon.agent/interactive? :seon.agent/goal :seon.agent/system-prompt
    :seon.agent/examples :seon.agent/pinned
    :seon.agent/auto-merge? :seon.agent/context-prefs :seon.config/viewport-screenshot? :seon.config/max-tool-turns :seon.ctx/pattern])
 

@@ -171,7 +171,7 @@
 (defn- render-work-bar [main-db agent viewing-id label branch tx-num active? expert-mode?]
   (let [scope (:seon.agent/scope agent) task (:seon.agent/task agent) parent (:seon.agent/parent agent)
         {:keys [target-id reviewer-id]} (review-bar-links main-db agent viewing-id)
-        role-b (badge "blue" (name (or (:seon.agent/role agent) :worker)))
+        role-b (cond (:seon.agent/router? agent) (badge "blue" "router") (:seon.agent/interactive? agent) (badge "muted" "repl") (:seon.agent/target agent) (badge "purple" "fork") :else nil)
         status-b (cond reviewer-id (badge "amber" "under review")
                        (and target-id (nil? (:seon.agent/merged-tx agent)) (not (:seon.agent/archived? agent))) (badge "purple" "reviewing")
                        :else (honest-status-badge agent active?))

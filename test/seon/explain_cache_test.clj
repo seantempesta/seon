@@ -128,8 +128,7 @@
   (testing "analyze-wire-cache classifies prefix, delta zones, already-shown, and diagnoses prefix busts; analyze-walk-cache classifies UI units"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data [{:seon.task/id :task/wc :seon.task/title "Wire cache test" :seon.task/done? false}
-                                  {:seon.agent/id :ag/wc :seon.agent/branch :main :seon.agent/role :worker
-                                   :seon.agent/task :task/wc}]})
+                                  {:seon.agent/id :ag/wc :seon.agent/branch :main :seon.agent/task :task/wc}]})
       ;; Turn 1 & Turn 2 share prefix hash "aaaa1111"
       (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/wc
                                    :seon.agent.eval/turn 1 :seon.agent.eval/code "(+ 1 1)"
@@ -198,8 +197,7 @@
                      "(defn unused-helper \"Helper fn\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x))\n")
             _ (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/demo/reas.clj" src false)
                                                  [{:seon.task/id :task/reas :seon.task/title "Reas test" :seon.task/scope 'demo.reas :seon.task/done? false}
-                                                  {:seon.agent/id :ag/reas :seon.agent/branch :main :seon.agent/role :worker
-                                                   :seon.agent/scope 'demo.reas :seon.agent/task :task/reas}])})
+                                                  {:seon.agent/id :ag/reas :seon.agent/branch :main :seon.agent/scope 'demo.reas :seon.agent/task :task/reas}])})
             _ (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/reas
                                            :seon.agent.eval/turn 1 :seon.agent.eval/handle 'result/e1
                                            :seon.agent.eval/code "(+ 1 1)"
@@ -261,8 +259,8 @@
     (with-test-store [{:keys [conn]}]
       ;; 3 idle paused agents + 11 light evals + 1 huge historical 260 MB spike -> Flow :calm, Pressure NOT :hot!
       (d/transact conn {:tx-data (concat
-                                  [{:seon.agent/id :ag/p1 :seon.agent/branch :main :seon.agent/role :worker :seon.agent/paused? true}
-                                   {:seon.agent/id :ag/p2 :seon.agent/branch :main :seon.agent/role :worker :seon.agent/paused? true}
+                                  [{:seon.agent/id :ag/p1 :seon.agent/branch :main :seon.agent/paused? true}
+                                   {:seon.agent/id :ag/p2 :seon.agent/branch :main :seon.agent/paused? true}
                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/p1 :seon.agent.eval/turn 1
                                     :seon.agent.eval/code "(big)" :seon.agent.eval/bytes 272629760 :seon.agent.eval/ticks 1000000 :seon.agent.eval/ms 10.0}]
                                   (for [i (range 2 10)]
@@ -278,8 +276,7 @@
         (is (> (get-in snap1 [:pressure :peak-mb]) 250.0)))
 
       ;; Agent stuck awaiting -> :stalled 1, Flow :warm; 2 slow renders > 100ms -> Pressure :hot
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/stuck :seon.agent/branch :main :seon.agent/role :worker
-                                   :seon.agent/waiting? true :seon.agent/awaiting #{(random-uuid)}}
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/stuck :seon.agent/branch :main :seon.agent/waiting? true :seon.agent/awaiting #{(random-uuid)}}
                                   (serr/error-tx {:kind :slow-render :severity :warning :source :web :message "Slow frame 140ms" :data {:ms 140.0}})
                                   (serr/error-tx {:kind :slow-render :severity :warning :source :web :message "Slow frame 165ms" :data {:ms 165.0}})]})
       (let [snap2 (sig/all-signals @conn)]
@@ -313,8 +310,8 @@
                                       {:seon.code.var/name (quote seon.demo.scope/target-fn) :seon.code.var/ns (quote seon.demo.scope) :seon.code.var/doc "Target helper"}
                                       {:seon.code.doc/id "docs/demo.md#demo-note" :seon.code.doc/heading "Demo Note" :seon.code.doc/body "Mentions seon.demo.scope/target-fn" :seon.code.doc/path "docs/demo.md"}
                                       {:seon.task/id task-id :seon.task/title "Minimal vs full context test" :seon.task/scope (quote seon.demo.scope) :seon.task/plan "Verify context prefs" :seon.task/done? false}
-                                      {:seon.agent/id aid-full :seon.agent/branch :main :seon.agent/role :worker :seon.agent/scope (quote seon.demo.scope) :seon.agent/task task-id}
-                                      {:seon.agent/id aid-min :seon.agent/branch :main :seon.agent/role :worker :seon.agent/scope (quote seon.demo.scope) :seon.agent/task task-id
+                                      {:seon.agent/id aid-full :seon.agent/branch :main :seon.agent/scope (quote seon.demo.scope) :seon.agent/task task-id}
+                                      {:seon.agent/id aid-min :seon.agent/branch :main :seon.agent/scope (quote seon.demo.scope) :seon.agent/task task-id
                                        :seon.agent/context-prefs {:minimal? true :disabled-rules #{:rule.ctx/scope-and-extra-namespaces :rule.ctx/scope-task-history-and-fixes :rule.ctx/citing-docs :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns}}}]})
         var-eid (:db/id (d/pull @conn (quote [:db/id]) [:seon.code.var/name (quote seon.demo.scope/target-fn)]))
         _ (is (integer? var-eid))

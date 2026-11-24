@@ -143,7 +143,7 @@
       (let [agent-id :agent/touched-probe
             sample-src "(ns seon.touched-demo)\n\n(defn target-fn \"Demo doc.\" [x] (inc x))\n"
             import-tx (code/file-import-tx @conn "src/seon/touched_demo.clj" sample-src false)]
-        (d/transact conn {:tx-data (conj import-tx {:seon.agent/id agent-id :seon.agent/role :repl :seon.agent/branch :main})})
+        (d/transact conn {:tx-data (conj import-tx {:seon.agent/id agent-id :seon.agent/interactive? true :seon.agent/branch :main})})
         (let [db0 @conn
               var-eid (:e (first (d/datoms db0 :avet :seon.code.var/name (quote seon.touched-demo/target-fn))))
               agent-eid (:e (first (d/datoms db0 :avet :seon.agent/id agent-id)))
@@ -153,7 +153,7 @@
               tc (code/eval-tool-calls
                   conn {:agent-id agent-id :turn 1}
                   [{:id "tc-pull"
-                    :code "(do (datahike.api/pull user/_touched_test_db (quote [:seon.code.var/name :seon.code.var/doc]) [:seon.code.var/name (quote seon.touched-demo/target-fn)]) (datahike.api/pull user/_touched_test_db (quote [*]) [:seon.schema/key :seon.agent/entity]) (datahike.api/pull user/_touched_test_db (quote [:seon.agent/id :seon.agent/role]) [:seon.agent/id :agent/touched-probe]) :ok)"}])
+                    :code "(do (datahike.api/pull user/_touched_test_db (quote [:seon.code.var/name :seon.code.var/doc]) [:seon.code.var/name (quote seon.touched-demo/target-fn)]) (datahike.api/pull user/_touched_test_db (quote [*]) [:seon.schema/key :seon.agent/entity]) (datahike.api/pull user/_touched_test_db (quote [:seon.agent/id :seon.agent/router?]) [:seon.agent/id :agent/touched-probe]) :ok)"}])
               db1 @conn
               eval-e (:e (first (d/datoms db1 :avet :seon.agent.eval/agent agent-id)))
               touched (:seon.agent.eval/touched (d/pull db1 (quote [:seon.agent.eval/touched]) eval-e))

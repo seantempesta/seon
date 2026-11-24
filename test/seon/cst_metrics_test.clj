@@ -360,7 +360,7 @@
   (testing "render-agent-context renders <walk-context> (ctx, task, ns + Requires) and <ephemeral-tail>"
     (tf/with-test-store [{:keys [conn]}]
       (let [db0 @conn
-            _ (d/transact conn {:tx-data (into [{:seon.agent/id :repl/demo :seon.agent/branch :branch/demo :seon.agent/role :repl}
+            _ (d/transact conn {:tx-data (into [{:seon.agent/id :repl/demo :seon.agent/branch :branch/demo :seon.agent/interactive? true}
                                                 {:seon.task/id :seon.demo/t1 :seon.task/scope 'seon.demo
                                                  :seon.task/title "Demo task" :seon.task/plan "Do demo" :seon.task/done? false}]
                                                (code/file-import-tx nil "src/seon/demo.clj"

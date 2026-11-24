@@ -112,8 +112,8 @@
             _ (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn {:analyze-compiler? true})})
             imp-eid (:e (first (d/datoms @conn :avet :seon.code.var/name 'seon.signals/impure-signals-view)))
             _ (when imp-eid (d/transact conn {:tx-data [[:db/add imp-eid :seon.code.var/ops :mutate]]}))
-            _ (d/transact conn {:tx-data [{:seon.agent/id :ag/w1 :seon.agent/branch :main :seon.agent/role :worker :seon.agent/waiting? false}
-                                          {:seon.agent/id :ag/w2 :seon.agent/branch :main :seon.agent/role :worker :seon.agent/paused? true}
+            _ (d/transact conn {:tx-data [{:seon.agent/id :ag/w1 :seon.agent/branch :main :seon.agent/waiting? false}
+                                          {:seon.agent/id :ag/w2 :seon.agent/branch :main :seon.agent/paused? true}
                                           {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/w1 :seon.agent.eval/turn 1
                                            :seon.agent.eval/code "(+ 1 2)" :seon.agent.eval/ticks 2500000 :seon.agent.eval/bytes 10485760
                                            :seon.agent.eval/ms 12.0 :seon.agent.eval/prompt-tokens 10000 :seon.agent.eval/cache-hit-tokens 8800}

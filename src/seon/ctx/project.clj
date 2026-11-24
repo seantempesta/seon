@@ -202,11 +202,11 @@
      (keep (fn [[eid item]]
              (cond
                (and (vector? eid) (= 2 (count eid)) (= :seon.agent/id (first eid)))
-               (let [b (d/pull branch-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/goal] eid)
+               (let [b (d/pull branch-db '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/goal] eid)
                      ent (if (:seon.agent/id b)
                            b
                            (when-not same-mb?
-                             (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/goal] eid)))]
+                             (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/goal] eid)))]
                  (when (:seon.agent/id ent)
                    (assoc item :entity eid :data ent)))
 
@@ -260,7 +260,7 @@
       (or same? (and (some? (:seon.agent/forked-from ag)) (not evs?))) (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
       (not has-task?) (conj :rule.ctx/active-task-and-lineage)
       (and (not has-scope?) (not has-extra?)) (conj :rule.ctx/scope-and-extra-namespaces)
-      (and (not has-scope?) (or has-task? (not (or (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag))))))
+      (and (not has-scope?) (or has-task? (not (:seon.agent/router? ag))))
       (conj :rule.ctx/scope-task-history-and-fixes)
       (not any-docs?) (conj :rule.ctx/citing-docs)
       (not evs?) (conj :rule.ctx/recent-eval-results)
@@ -500,7 +500,7 @@
                      :data (with-meta
                              (into {:seon.ctx/tx (:max-tx branch-db)}
                                    (filter (comp some? val))
-                                   (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/pinned :seon.agent/summary :seon.agent/context-prefs]))
+                                   (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/pinned :seon.agent/summary :seon.agent/context-prefs]))
                              {:seon/schema :seon.ctx/snapshot})
                      :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
         combined (mapv (fn [c] (let [tc (long (get touch-counts (:entity c) 0))] (if (pos? tc) (assoc c :touches tc) c)))

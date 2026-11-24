@@ -34,8 +34,7 @@
                        {:seon.task/id :task/beta :seon.task/title "Beta ref proofs"
                         :seon.task/done? false :seon.task/test-vars #{[:seon.code.var/name 'demo.gate-test/beta-test]}
                         :seon.task/needs #{:task/prereq}}
-                       {:seon.agent/id :ag/multi :seon.agent/branch :main :seon.agent/role :worker
-                        :seon.agent/tasks [[:seon.task/id :task/alpha] [:seon.task/id :task/beta]]}]})
+                       {:seon.agent/id :ag/multi :seon.agent/branch :main :seon.agent/tasks [[:seon.task/id :task/alpha] [:seon.task/id :task/beta]]}]})
     (let [db0 @conn]
       (is (= :db.type/ref (get-in db0 [:schema :seon.agent/tasks :db/valueType])))
       (is (= :db.type/ref (get-in db0 [:schema :seon.task/test-vars :db/valueType])))
@@ -99,8 +98,7 @@
       (d/transact conn {:tx-data
                         [{:seon.task/id :task/legacy :seon.task/title "Legacy task"
                           :seon.task/done? false :seon.task/tests #{'demo.gate-test/missing-upserted-test}}
-                         {:seon.agent/id :ag/legacy :seon.agent/branch :main :seon.agent/role :worker
-                          :seon.agent/task :task/legacy}
+                         {:seon.agent/id :ag/legacy :seon.agent/branch :main :seon.agent/task :task/legacy}
                          {:seon.test/digest "dg-up-0001" :seon.test/var 'demo.gate-test/missing-upserted-test
                           :seon.test/kind :deftest :seon.test/pass? true :seon.test/ms 1.0 :seon.test/report "ok"}]})
       (is (false? (:ok? (gate/evaluate-agent-gate @conn @conn :ag/legacy))))
@@ -116,8 +114,7 @@
                           :seon.test/kind :deftest :seon.test/pass? true :seon.test/ms 1.0 :seon.test/report "ok"}
                          {:seon.test/digest "dg-m2-fail" :seon.test/var 'demo.gate-test/beta-test
                           :seon.test/kind :deftest :seon.test/pass? false :seon.test/ms 1.0 :seon.test/report "fail"}
-                         {:seon.agent/id :ag/rec :seon.agent/branch :branch/rec :seon.agent/role :worker
-                          :seon.agent/auto-merge? true
+                         {:seon.agent/id :ag/rec :seon.agent/branch :branch/rec :seon.agent/auto-merge? true
                           :seon.agent/tasks [[:seon.task/id :task/m1] [:seon.task/id :task/m2]]}]})
       (store/branch! conn :main :branch/rec)
       (let [bconn (store/connect cfg :branch/rec)]
@@ -157,7 +154,7 @@
           (let [tmp-ns-sym 'seon.test.temp-gate-user
                 u (create-ns tmp-ns-sym)]
             (try
-              (d/transact bconn {:tx-data [{:seon.agent/id :ag/helper :seon.agent/branch :branch/rec :seon.agent/role :worker}]})
+              (d/transact bconn {:tx-data [{:seon.agent/id :ag/helper :seon.agent/branch :branch/rec }]})
               (gate/install-user-helpers! u (fn [] {:conn bconn :agent-id :ag/helper :branch :branch/rec}))
               (let [assign! @(ns-resolve u 'assign-tasks!)
                     gate-st @(ns-resolve u 'gate-status)
@@ -187,8 +184,7 @@
                          {:seon.task/id :task/scope-two :seon.task/title "Scope two" :seon.task/done? false
                           :seon.task/scope 'demo.other-test
                           :seon.task/test-vars #{[:seon.code.var/name 'demo.other-test/other-one]}}
-                         {:seon.agent/id :ag/steer :seon.agent/branch :main :seon.agent/role :worker
-                          :seon.agent/scope 'demo.gate-test
+                         {:seon.agent/id :ag/steer :seon.agent/branch :main :seon.agent/scope 'demo.gate-test
                           :seon.agent/tasks [[:seon.task/id :task/scope-one] [:seon.task/id :task/scope-two]]}]})
       (let [db @conn]
         (is (= [:task/scope-one :task/scope-two] (gate/agent-task-ids db :ag/steer)))
@@ -224,8 +220,7 @@
          (code/file-import-tx @conn "src/demo/fr_bug.clj" "(ns demo.fr-bug)\n(defn bug [] :broken)\n" false)
          [{:seon.task/id :task/fr-work :seon.task/title "Build fr-wip" :seon.task/plan "Initial plan" :seon.task/done? false}
           {:seon.task/id :template/review-and-improve :seon.task/title "Review" :seon.task/plan "Audit" :seon.task/template? true :seon.task/done? false}
-          {:db/id "w1" :seon.agent/id :w/fr :seon.agent/branch :branch/w-fr :seon.agent/role :worker
-           :seon.agent/goal "Build fr-wip" :seon.agent/task :task/fr-work :seon.agent/tasks #{[:seon.task/id :task/fr-work]} :seon.agent/paused? true}])})
+          {:db/id "w1" :seon.agent/id :w/fr :seon.agent/branch :branch/w-fr :seon.agent/goal "Build fr-wip" :seon.agent/task :task/fr-work :seon.agent/tasks #{[:seon.task/id :task/fr-work]} :seon.agent/paused? true}])})
       (store/branch! conn :main :branch/w-fr)
       (let [wconn (store/connect cfg :branch/w-fr)]
         (try
@@ -283,10 +278,8 @@
   (testing "2-arg remember!, forked parent :last-proofs inheritance, and move-vars! :seon.code/reexport stress-var continuity"
     (with-test-store [{:keys [conn cfg]}]
       ;; 1. 2-arg remember! writes durable memory onto target agent
-      (d/transact conn {:tx-data [{:seon.agent/id :w/tr1 :seon.agent/branch :branch/w-tr1 :seon.agent/role :worker
-                                   :seon.agent/goal "work" :seon.agent/last-proofs {:ok? false :failures [{:var 'foo/bar}]}}
-                                  {:seon.agent/id :rev/tr1 :seon.agent/branch :branch/rev-tr1 :seon.agent/role :worker
-                                   :seon.agent/goal "rev" :seon.agent/forked-from [:seon.agent/id :w/tr1]}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :w/tr1 :seon.agent/branch :branch/w-tr1 :seon.agent/goal "work" :seon.agent/last-proofs {:ok? false :failures [{:var 'foo/bar}]}}
+                                  {:seon.agent/id :rev/tr1 :seon.agent/branch :branch/rev-tr1 :seon.agent/goal "rev" :seon.agent/forked-from [:seon.agent/id :w/tr1]}]})
       (binding [fcalls/*agent-ctx* {:conn conn :agent-id :rev/tr1 :branch :branch/rev-tr1}]
         (let [res (fcalls/remember! :w/tr1 "Verified split plan")]
           (is (true? (:ok? res)))
@@ -304,8 +297,7 @@
   (testing "1. Organic graph-driven :example/* matching via shared :seon.agent/tasks (zero hardcoded :examples on spawn)"
     (with-test-store [{:keys [conn cfg]}]
       (d/transact conn {:tx-data [{:seon.task/id :template/review-and-improve :seon.task/title "Review & improve" :seon.task/done? false}
-                                  {:seon.agent/id :example/clean-fork-review :seon.agent/branch :main :seon.agent/role :worker
-                                   :seon.agent/paused? true :seon.agent/goal "Clean fork review"
+                                  {:seon.agent/id :example/clean-fork-review :seon.agent/branch :main :seon.agent/paused? true :seon.agent/goal "Clean fork review"
                                    :seon.agent/tasks #{[:seon.task/id :template/review-and-improve]}}]})
       (let [ex-eid (:e (first (d/datoms @conn :avet :seon.agent/id :example/clean-fork-review)))]
         (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :example/clean-fork-review

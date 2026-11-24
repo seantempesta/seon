@@ -114,7 +114,7 @@
           (http/s-close s)))))))
 
 (defn- built-in-agent-synthesis
-  [{:keys [agent-id scope role goal parent unread turn]}]
+  [{:keys [agent-id scope router? goal parent unread turn]}]
   (let [explicit-code (some (fn [m]
                               (let [b (:seon.agent.message/body m "")]
                                 (when (str/starts-with? (str/triml b) "(") b)))
@@ -131,7 +131,7 @@
       {:thought "Recorded test/merge failure notice; awaiting next directive."
        :tool-calls [{:id (str "tc-" turn "-0") :intent "Wait for updated directive" :code "(user/wait-for-mail!)"}]}
 
-      (and (= role :coordinator) (= turn 1))
+      (and router? (= turn 1))
       (let [wa (keyword ns-part "worker-a")
             wb (keyword ns-part "worker-b")
             base-sc (or scope 'seon.generated)]
@@ -140,11 +140,11 @@
                        :intent "Spawn scoped workers and await reports"
                        :code (pr-str
                               `(do
-                                 (user/spawn-agent! {:id ~wa :scope (quote ~(symbol (str base-sc ".a"))) :role :worker :goal ~(str "Implement helper for " goal)})
-                                 (user/spawn-agent! {:id ~wb :scope (quote ~(symbol (str base-sc ".b"))) :role :worker :goal ~(str "Verify & message peer for " goal)})
+                                 (user/spawn-agent! {:id ~wa :scope (quote ~(symbol (str base-sc ".a"))) :goal ~(str "Implement helper for " goal)})
+                                 (user/spawn-agent! {:id ~wb :scope (quote ~(symbol (str base-sc ".b"))) :goal ~(str "Verify & message peer for " goal)})
                                  (user/wait-for-mail!)))}]})
 
-      (= role :coordinator)
+      router?
       (let [reports (filter #(= :report (:seon.agent.message/type %)) unread)]
         (if (seq reports)
           {:thought "Synthesizing worker reports and marking coordinator branch ready for test + merge."

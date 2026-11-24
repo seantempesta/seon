@@ -104,9 +104,9 @@
       (seed-primers-doc! conn)
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/p.clj"
                                                       "(ns demo.p)\n(defn f {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] (inc x))\n" false)})
-      (d/transact conn {:tx-data [{:seon.agent/id :agent/idle :seon.agent/branch :main :seon.agent/role :worker}
-                                  {:seon.agent/id :agent/coord :seon.agent/branch :main :seon.agent/role :coordinator}
-                                  {:seon.agent/id :agent/editor :seon.agent/branch :branch/ed :seon.agent/role :worker}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/idle :seon.agent/branch :main }
+                                  {:seon.agent/id :agent/coord :seon.agent/branch :main :seon.agent/router? true}
+                                  {:seon.agent/id :agent/editor :seon.agent/branch :branch/ed }]})
       ;; 1. Idle worker fires ZERO primers
       (let [f0 (fired-rule-ids @conn @conn :agent/idle)]
         (doseq [rid [:rule.ctx/primer-messaging :rule.ctx/primer-live-progress :rule.ctx/primer-data-modeling
@@ -206,7 +206,7 @@
                                                            "(defn render-status-card {:malli/schema [:=> [:cat [:map [:seon.ui.status/entity :seon.ui.status/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"k\"]})\n")
                                                       false)})
       (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn {:analyze-compiler? true})})
-      (d/transact conn {:tx-data [{:seon.agent/id :agent/helper :seon.agent/branch :main :seon.agent/role :worker}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/helper :seon.agent/branch :main }]})
       (let [disc (fit/discover-renderers @conn :seon.ui.status/entity)]
         (is (= '[seon.render.status/render-status-card seon.render.status/render-status-chip] disc)))
 
@@ -300,8 +300,7 @@
       (let [r1 (d/transact
                 conn
                 {:tx-data [{:seon.task/id :task/ux-demo :seon.task/title "UX Polish Task" :seon.task/done? false}
-                           {:seon.agent/id :agent/ux :seon.agent/branch :branch/ux-demo :seon.agent/role :worker
-                            :seon.agent/label "Assistant" :seon.agent/task :task/ux-demo
+                           {:seon.agent/id :agent/ux :seon.agent/branch :branch/ux-demo :seon.agent/label "Assistant" :seon.agent/task :task/ux-demo
                             :seon.agent/pinned [[:seon.task/id :task/ux-demo]
                                                 [:seon.code.var/name 'demo.ui/calc]]}
                            (rstatus/build-status-tx

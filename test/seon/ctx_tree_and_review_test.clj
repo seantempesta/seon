@@ -41,8 +41,7 @@
         [{:db/id "ord1" :demo.shop/id :order/a1 :demo.shop/customer "Ada"}
          {:demo.shop.line/sku "WIDGET-1" :demo.shop.line/order-ref "ord1"}
          {:demo.shop.line/sku "WIDGET-2" :demo.shop.line/order-ref "ord1"}
-         {:db/id "ag1" :seon.agent/id :ag/ctx-demo :seon.agent/branch :main :seon.agent/role :worker
-          :seon.agent/goal "Demo 2-index ctx" :seon.agent/target "ord1"}
+         {:db/id "ag1" :seon.agent/id :ag/ctx-demo :seon.agent/branch :main :seon.agent/goal "Demo 2-index ctx" :seon.agent/target "ord1"}
          {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/ctx-demo :seon.agent.eval/agent-ref "ag1"
           :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/value "2" :seon.agent.eval/ticks 100}
          {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/ctx-demo :seon.agent.eval/agent-ref "ag1"
@@ -77,7 +76,7 @@
   (with-test-store [{:keys [conn cfg]}]
     (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/review-every-turns 12}
                                 {:db/id "w1" :seon.agent/id :w/stalled :seon.agent/branch :branch/w-stalled
-                                 :seon.agent/role :worker :seon.agent/goal "Fix foo" :seon.agent/paused? false}]})
+                                 :seon.agent/goal "Fix foo" :seon.agent/paused? false}]})
     (store/branch! conn :main :branch/w-stalled)
     (let [wconn (store/connect cfg :branch/w-stalled)]
       (try
@@ -161,8 +160,7 @@
          {:db/id "inv1" :demo.inv/id :item/bolt :demo.inv/qty 42}
          {:db/id "fn1" :seon.code.var/name 'demo.inv/total-qty :seon.code.var/ns 'demo.inv
           :seon.code.var/input ["sc1"]}
-         {:seon.agent/id :ag/du-demo :seon.agent/branch :main :seon.agent/role :worker
-          :seon.agent/goal "Inspect inventory" :seon.agent/target "inv1"}]})
+         {:seon.agent/id :ag/du-demo :seon.agent/branch :main :seon.agent/goal "Inspect inventory" :seon.agent/target "inv1"}]})
       (let [db @conn
             sc-eid (:e (first (d/datoms db :avet :seon.schema/key :demo.inv/item)))
             fn-eid (:e (first (d/datoms db :avet :seon.code.var/name 'demo.inv/total-qty)))
@@ -176,10 +174,10 @@
       (doseq [b [:branch/m1 :branch/m2 :branch/m3 :branch/active-1]]
         (store/branch! conn :main b))
       (d/transact conn {:tx-data
-        [{:seon.agent/id :ag/m1 :seon.agent/branch :branch/m1 :seon.agent/role :worker :seon.agent/goal "m1" :seon.agent/merged-tx 100}
-         {:seon.agent/id :ag/m2 :seon.agent/branch :branch/m2 :seon.agent/role :worker :seon.agent/goal "m2" :seon.agent/merged-tx 200}
-         {:seon.agent/id :ag/m3 :seon.agent/branch :branch/m3 :seon.agent/role :worker :seon.agent/goal "m3" :seon.agent/merged-tx 300}
-         {:seon.agent/id :ag/act1 :seon.agent/branch :branch/active-1 :seon.agent/role :worker :seon.agent/goal "active"}]})
+        [{:seon.agent/id :ag/m1 :seon.agent/branch :branch/m1 :seon.agent/goal "m1" :seon.agent/merged-tx 100}
+         {:seon.agent/id :ag/m2 :seon.agent/branch :branch/m2 :seon.agent/goal "m2" :seon.agent/merged-tx 200}
+         {:seon.agent/id :ag/m3 :seon.agent/branch :branch/m3 :seon.agent/goal "m3" :seon.agent/merged-tx 300}
+         {:seon.agent/id :ag/act1 :seon.agent/branch :branch/active-1 :seon.agent/goal "active"}]})
       (let [pruned (store/prune-merged-branches! conn 1)
             brs (set (d/branches @conn))]
         (is (= {:ok? true :deleted 2 :archived 2 :kept 1} pruned))
@@ -199,7 +197,7 @@
          (code/file-import-tx @conn "src/demo/p2_shared.clj" "(ns demo.p2-shared)\n(defn v [] 1)\n" false)
          [{:seon.config/key :seon.config/root :seon.config/review-every-turns 12}
           {:db/id "w1" :seon.agent/id :w/p2 :seon.agent/branch :branch/w-p2 :seon.agent/scope 'demo.p2-target
-           :seon.agent/role :worker :seon.agent/goal "Improve demo.p2-target" :seon.agent/paused? false}])})
+           :seon.agent/goal "Improve demo.p2-target" :seon.agent/paused? false}])})
       (store/branch! conn :main :branch/w-p2)
       (let [wconn (store/connect cfg :branch/w-p2)
             call-id (random-uuid)]
@@ -227,7 +225,7 @@
                                         {:seon.agent.call/id call-id :seon.agent.call/caller :agent/root :seon.agent.call/callee :w/p2
                                          :seon.agent.call/status :pending :seon.agent.call/delivered? false}
                                         {:seon.agent/id :review/p2 :seon.agent/branch :branch/rev-p2 :seon.agent/scope 'demo.p2-target
-                                         :seon.agent/role :worker :seon.agent/goal "Review :w/p2" :seon.agent/target we-main}
+                                         :seon.agent/goal "Review :w/p2" :seon.agent/target we-main}
                                         {:seon.agent.message/id del-mid :seon.agent.message/seq 1 :seon.agent.message/from :w/p2
                                          :seon.agent.message/to :review/p2 :seon.agent.message/type :delegate :seon.agent.message/body "Review"}]})
             (let [st-paused (rec/derive-agent-status @conn (:store @conn) {:w/p2 {:pid 101 :busy? false}} #{} #{} #{} #{} :w/p2)]
@@ -338,7 +336,7 @@
         (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/rev/orig.clj" src false)})
         (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/review-every-turns 2}
                                     {:db/id "w1" :seon.agent/id :w/scoped :seon.agent/branch :branch/w-scoped
-                                     :seon.agent/role :worker :seon.agent/scope 'demo.rev.orig
+                                     :seon.agent/scope 'demo.rev.orig
                                      :seon.agent/goal "Split orig" :seon.agent/paused? false}]})
         (store/branch! conn :main :branch/w-scoped)
         (let [wconn (store/connect (:config @conn) :branch/w-scoped)]
@@ -387,7 +385,7 @@
   (testing "2. Compaction detection derives missing turns from d/history and fires history doc hop, plus ctx-friction progressive disclosure"
     (with-test-store [{:keys [conn]}]
       (let [aid :agent/compact-probe]
-        (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main :seon.agent/role :worker}
+        (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main }
                                     {:seon.code.doc/id "docs/primers.md#history-and-time-travel"
                                      :seon.code.doc/path "docs/primers.md" :seon.code.doc/order 10
                                      :seon.code.doc/heading "## History & Time-Travel" :seon.code.doc/body "Use d/history"}

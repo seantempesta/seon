@@ -409,10 +409,10 @@
                      [?agent ?tx]
                      (and
                       [$main ?ag :seon.agent/id ?agent]
-                      [$main ?ag :seon.agent/role :coordinator ?tx])
+                      [$main ?ag :seon.agent/router? true ?tx])
                      (and
                       [$branch ?ag :seon.agent/id ?agent]
-                      [$branch ?ag :seon.agent/role :coordinator ?tx])
+                      [$branch ?ag :seon.agent/router? true ?tx])
                      [$main ?c :seon.agent.call/caller ?agent ?tx]
                      [$main ?c :seon.agent.call/callee ?agent ?tx]
                      [$branch ?c :seon.agent.call/caller ?agent ?tx]
@@ -427,7 +427,7 @@
                       :zone :static-prefix,
                       :priority 87,
                       :tx ?tx}],
-  :seon.rule/doc "Surface docs/primers.md#delegation when ?agent has :role :coordinator or any :seon.agent.call/*.",
+  :seon.rule/doc "Surface docs/primers.md#delegation when ?agent has :seon.agent/router? true or any :seon.agent.call/*.",
   :seon.rule/stratum 17,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/primer-delegation}
@@ -486,9 +486,7 @@
                       [(ground 76) ?pri])
                      (and
                       [$main ?ag :seon.agent/id ?agent]
-                      (or
-                       [$main ?ag :seon.agent/router? true]
-                       [$main ?ag :seon.agent/role :coordinator])
+                      [$main ?ag :seon.agent/router? true]
                       (not [$main ?ag :seon.agent/task _])
                       (not-join
                        [?agent]
@@ -540,7 +538,8 @@
                       [(ground
                         [:seon.agent/id
                          :seon.agent/label
-                         :seon.agent/role
+                         :seon.agent/router?
+                         :seon.agent/interactive?
                          :seon.agent/branch
                          :seon.agent/scope
                          :seon.agent/task
@@ -669,7 +668,7 @@
                       [(namespace ?aid) ?ans]
                       [(not= ?ans "example")]
                       (not [$main ?e :seon.agent/archived? true])
-                      (not [$main ?e :seon.agent/role :repl])
+                      (not [$main ?e :seon.agent/interactive? true])
                       [(ground 90) ?pri]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,

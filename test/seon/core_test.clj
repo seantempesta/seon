@@ -105,7 +105,6 @@
   (with-test-store [{:keys [conn]}]
     (d/transact conn {:tx-data [{:seon.agent/id :ag/limited
                                  :seon.agent/branch :main
-                                 :seon.agent/role :worker
                                  :seon.agent/goal "test"
                                  :seon.config/eval-ticks 5000000}]})
     (testing "1. Agent entity overrides `:seon.config/root` in 1 lookup"
@@ -293,7 +292,6 @@
                                                                "# Demo Architecture\n\n## Alpha Flow\nDetails on `seon.demo.a` invariants.\n" false)
                                            [{:seon.agent/id :ag/compact
                                              :seon.agent/branch :main
-                                             :seon.agent/role :worker
                                              :seon.agent/scope 'seon.demo.a
                                              :seon.agent/goal "Test compaction"}
                                             {:seon.agent.message/id msg-id
@@ -380,12 +378,10 @@
                                                          false)
                                     [{:seon.agent/id :ns/seon.demo
                                       :seon.agent/branch :main
-                                      :seon.agent/role :worker
                                       :seon.agent/scope 'seon.demo
                                       :seon.agent/goal "Own seon.demo"}
                                      {:seon.agent/id :ns/seon.other
                                       :seon.agent/branch :main
-                                      :seon.agent/role :worker
                                       :seon.agent/scope 'seon.other
                                       :seon.agent/goal "Own seon.other"}
                                      ;; Test verdict 1 (fast baseline)
@@ -470,7 +466,6 @@
           ;; (invalidating report-cache-key) once all agents on that branch are archived!
           (d/transact conn {:tx-data [{:seon.agent/id :tmp/failer
                                        :seon.agent/branch :branch/tmp-fail
-                                       :seon.agent/role :worker
                                        :seon.agent/goal "Tmp failer"}
                                       {:seon.test/digest "0000000000000003"
                                        :seon.test/var 'seon.demo/broken-test
@@ -552,7 +547,7 @@
 
     (testing "2. Agent seed file imports durable data, renders back, and NEVER clobbers live runtime state on re-import"
       (let [apath "resources/seon/agents/custom-root.edn"
-            src "[{:seon.agent/id :agent/custom-root :seon.agent/entry? true :seon.agent/label \"Home\" :seon.agent/hero-title \"Ask anything\" :seon.agent/branch :branch/custom-root :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/role :coordinator :seon.agent/scope seon :seon.agent/focus [:seon.code.ns/name seon] :seon.agent/goal \"Route work\" :seon.agent/system-prompt \"Farm work to specialists.\" :seon.agent/waiting? true :seon.agent/auto-merge? false}]"
+            src "[{:seon.agent/id :agent/custom-root :seon.agent/entry? true :seon.agent/label \"Home\" :seon.agent/hero-title \"Ask anything\" :seon.agent/branch :branch/custom-root :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/scope seon :seon.agent/focus [:seon.code.ns/name seon] :seon.agent/goal \"Route work\" :seon.agent/system-prompt \"Farm work to specialists.\" :seon.agent/waiting? true :seon.agent/auto-merge? false}]"
             tx1 (code/file-import-tx @conn apath src false)]
         (d/transact conn {:tx-data tx1})
         (d/transact conn {:tx-data [{:seon.agent/id :agent/custom-root
@@ -741,12 +736,11 @@
     (with-test-store [{:keys [conn cfg]}]
       (d/transact conn {:tx-data [{:seon.agent/id :test/coord
                                    :seon.agent/branch :main
-                                   :seon.agent/role :coordinator
+                                   :seon.agent/router? true
                                    :seon.agent/scope 'seon
                                    :seon.config/viewport-screenshot? true}
                                   {:seon.agent/id :test/worker
                                    :seon.agent/branch :branch/tw
-                                   :seon.agent/role :worker
                                    :seon.agent/scope 'seon.demo
                                    :seon.config/viewport-screenshot? false}]})
       (store/branch! conn :main :branch/tw)
@@ -875,7 +869,7 @@
               aid :ag/callee-nudge
               abr :branch/callee-nudge]
           (store/branch! conn :main abr)
-          (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch abr :seon.agent/role :worker :seon.agent/goal "Answer call"}
+          (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch abr :seon.agent/goal "Answer call"}
                                       {:seon.agent.message/id mid :seon.agent.message/seq 1 :seon.agent.message/from :agent/root
                                        :seon.agent.message/to aid :seon.agent.message/type :call :seon.agent.message/body "Compute result"}
                                       {:seon.agent.call/id cid :seon.agent.call/caller :agent/root :seon.agent.call/callee aid
@@ -936,9 +930,9 @@
       (store/branch! conn :main :branch/arch-a)
       (store/branch! conn :main :branch/live-a)
       (d/transact conn {:tx-data [{:seon.agent/id :ag/archived :seon.agent/branch :branch/arch-a
-                                   :seon.agent/role :worker :seon.agent/goal "Done" :seon.agent/archived? true}
+                                   :seon.agent/goal "Done" :seon.agent/archived? true}
                                   {:seon.agent/id :ag/live :seon.agent/branch :branch/live-a
-                                   :seon.agent/role :worker :seon.agent/goal "Active"}]})
+                                   :seon.agent/goal "Active"}]})
       (let [db @conn
             snap (server/system-status-snapshot conn cfg nil)]
         (is (nil? (seon.reconciler/derive-agent-status db (:store db) {} #{} #{} :ag/archived)))
@@ -957,7 +951,6 @@
                                                        false)
                                   [{:seon.agent/id :test/kv-w
                                     :seon.agent/branch :branch/kv-w
-                                    :seon.agent/role :worker
                                     :seon.agent/scope 'seon.demo.kv
                                     :seon.agent/goal "Refactor kv cleanly"}])})
       (store/branch! conn :main :branch/kv-w)
@@ -1051,10 +1044,10 @@
             step-walk (requiring-resolve 'seon.render/step-walk)
             full-css (requiring-resolve 'seon.web.styles/full-css)
             scroll-js @(requiring-resolve 'seon.web.css/sticky-scroll-js)]
-        (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/role :coordinator}]})
-        (d/transact conn {:tx-data [{:seon.agent/id :work/alpha :seon.agent/parent :agent/root :seon.agent/branch :branch/alpha :seon.agent/role :worker}]})
-        (d/transact conn {:tx-data [{:seon.agent/id :work/beta :seon.agent/parent :agent/root :seon.agent/branch :branch/beta :seon.agent/role :worker}]})
-        (d/transact conn {:tx-data [{:seon.agent/id :work/gamma :seon.agent/parent :agent/root :seon.agent/branch :branch/gamma :seon.agent/role :worker}]})
+        (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/router? true}]})
+        (d/transact conn {:tx-data [{:seon.agent/id :work/alpha :seon.agent/parent :agent/root :seon.agent/branch :branch/alpha }]})
+        (d/transact conn {:tx-data [{:seon.agent/id :work/beta :seon.agent/parent :agent/root :seon.agent/branch :branch/beta }]})
+        (d/transact conn {:tx-data [{:seon.agent/id :work/gamma :seon.agent/parent :agent/root :seon.agent/branch :branch/gamma }]})
         (d/transact conn {:tx-data [{:seon.user/id :user/default
                                      :seon.user/viewing [:seon.agent/id :agent/root]
                                      :seon.user/view-mode :canvas
@@ -1230,16 +1223,14 @@
       (is (= :wrong-arity (classify "Wrong number of args (2) passed to: foo")))
       (is (= :unresolved-var (classify "No such var: user/nope")))
       (with-test-store [{:keys [conn]}]
-        (d/transact conn {:tx-data [{:seon.agent/id :w/good :seon.agent/branch :main :seon.agent/role :worker
-                                     :seon.agent/goal "Good" :seon.agent/merged-tx 100}
+        (d/transact conn {:tx-data [{:seon.agent/id :w/good :seon.agent/branch :main :seon.agent/goal "Good" :seon.agent/merged-tx 100}
                                     {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/good :seon.agent.eval/turn 1
                                      :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(user/grep-src [\"a\" \"b\"])"
                                      :seon.agent.eval/bytes 4194304 :seon.agent.eval/cache-hit-tokens 4000 :seon.agent.eval/cache-miss-tokens 200}
                                     {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/good :seon.agent.eval/turn 2
                                      :seon.agent.eval/handle 'result/e2 :seon.agent.eval/code "(user/edit-fn! 'seon.x/f [[1 2]])"
                                      :seon.agent.eval/bytes 8388608 :seon.agent.eval/cache-hit-tokens 4200 :seon.agent.eval/cache-miss-tokens 200}
-                                    {:seon.agent/id :w/fail :seon.agent/branch :main :seon.agent/role :worker
-                                     :seon.agent/goal "Fail"}
+                                    {:seon.agent/id :w/fail :seon.agent/branch :main :seon.agent/goal "Fail"}
                                     {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/fail :seon.agent.eval/turn 1
                                      :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(user/diff)"
                                      :seon.agent.eval/error "Eval exceeded allocation budget (limit 268435456 bytes)."

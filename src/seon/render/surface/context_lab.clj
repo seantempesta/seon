@@ -434,12 +434,11 @@
         (card nil (str "Live @seon.ctx/ctx Atom Value (" viewing-id ")") [(badge "mono" (str "tx " (:max-tx branch-db)))]
               (rlinks/kv-dl [["agent" (el [:seon.agent/id viewing-id] (str viewing-id) "mono tiny strong")]
                              ["branch" (el [:seon.branch/name branch] (str branch) "mono tiny")]
-                             ["role" (:seon.agent/role agent)]
+                             ["router?" (when (:seon.agent/router? agent) "true")]
                              ["scope" (when-let [sc (:seon.agent/scope agent)] (el [:seon.code.ns/name sc] (str sc) "mono tiny"))]
                              ["task" (when-let [tk (:seon.agent/task agent)] (el [:seon.task/id tk] (str tk) "mono tiny"))]
                              ["parent" (when-let [p (:seon.agent/parent agent)] (el [:seon.agent/id p] (str p) "mono tiny"))]])
               (rlinks/pill-list "pinned:" (:seon.agent/pinned agent) :ref 10)
-              (code-pre (pr-str (select-keys agent [:seon.agent/id :seon.agent/branch :seon.agent/role
-                                                    :seon.agent/scope :seon.agent/task :seon.agent/pinned]))))
+              (code-pre (pr-str (select-keys agent [:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/scope :seon.agent/task :seon.agent/pinned]))))
         (when (:hiccup signals-fit)
           [:section {:id "dbg-signals-card" :class "card"} (:hiccup signals-fit)])]])))

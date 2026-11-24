@@ -70,7 +70,7 @@
                {:seon.agent/id :agent/root
                 :seon.agent/entry? true
                 :seon.agent/branch :main
-                :seon.agent/role :coordinator
+                :seon.agent/router? true
                 :seon.agent/label "Root"
                 :seon.agent/goal "Ship the unified surface"
                 :seon.agent/task :task/surface-demo
@@ -401,8 +401,7 @@
           (is (str/includes? html-tools "Running tools…"))))
 
       ;; 5. Consecutive turns on :main produce EXACT byte-identical <walk-context> & identical :prefix-hash (0 KV-cache prefix busts!)
-      (d/transact conn {:tx-data [{:seon.agent/id :agent/main-worker :seon.agent/branch :main :seon.agent/role :worker
-                                   :seon.agent/scope 'demo.mod :seon.agent/goal "Explain demo.mod cleanly"}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/main-worker :seon.agent/branch :main :seon.agent/scope 'demo.mod :seon.agent/goal "Explain demo.mod cleanly"}]})
       (let [w1 (rwire/build-live-wire-request @conn @conn :agent/main-worker {:conn conn})
             open-1 (:content (second (:messages w1)))]
         (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/main-worker

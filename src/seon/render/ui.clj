@@ -100,12 +100,10 @@
                :data-viewport-w (str vw)}]
       (let [all-agents (->> (d/datoms db :aevt :seon.agent/id)
                             (map (fn [dt]
-                                   (assoc (d/pull db '[:seon.agent/id :seon.agent/parent
-                                                       :seon.agent/role :seon.agent/label
-                                                       :seon.agent/entry? :seon.agent/archived?] (:e dt))
+                                   (assoc (d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/interactive? :seon.agent/label :seon.agent/entry? :seon.agent/archived?] (:e dt))
                                           :seon.agent/entity-tx (:tx dt))))
                             (remove #(or (:seon.agent/archived? %)
-                                         (= :repl (:seon.agent/role %))
+                                         (:seon.agent/interactive? %)
                                          (str/starts-with? (str (namespace (:seon.agent/id %))) "example")))
                             (sort-by (fn [a]
                                        [(if (:seon.agent/entry? a) 0 1)

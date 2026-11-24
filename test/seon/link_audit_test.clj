@@ -159,7 +159,7 @@
                  {:seon.agent/id :agent/root
                   :seon.agent/entry? true
                   :seon.agent/branch :main
-                  :seon.agent/role :coordinator
+                  :seon.agent/router? true
                   :seon.agent/label "Root"
                   :seon.agent/scope 'demo.audit
                   :seon.agent/task :task/audit-dep
@@ -167,7 +167,6 @@
                  {:seon.agent/id :agent/worker
                   :seon.agent/parent :agent/root
                   :seon.agent/branch :branch/audit
-                  :seon.agent/role :worker
                   :seon.agent/label "Worker"
                   :seon.agent/scope 'demo.audit
                   :seon.agent/task :task/audit-main
