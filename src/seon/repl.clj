@@ -15,69 +15,17 @@
             [seon.health.metrics :as hmetrics]
             [seon.repl.search :as search]))
 
-(def ^:private user-helper-docs
-  '{edit-fn! {:arglists ([t old new] [t old new opts]) :doc "CST-replace in 'ns/fn ('ns = header only)."}
-    add-require! {:arglists ([nsym spec] [nsym spec opts]) :doc "Add :require spec(s) to nsym."}
-    set-meta! {:arglists ([batch] [t m] [t m opts]) :doc "Insert/merge defn attr-map."}
-    ns-requires {:arglists ([nsym]) :doc "Return parsed :require specs."}
-    grep-src {:arglists ([pat] [pat opts]) :doc "Cached grep (+ :seon.schema/* for seon.*)."}
-    unused-requires {:arglists ([nsym]) :doc "Analyze unused :require specs."}
-    prune-requires! {:arglists ([nsym] [nsym opts]) :doc "Remove unused :require specs."}
-    run-tests! {:arglists ([] [t & more]) :doc "Variadic: (user/run-tests! 't1 't2). Pass individual test vars to stay fast."}
-    diff {:arglists ([] [t]) :doc "Branch upserts, retractions, schemas, diffs."}
-    context {:arglists ([] [t] [t opts]) :doc "Render <walk-context> + tail."}
-    help {:arglists ([] [sym]) :doc "List or inspect user/* helpers."}
-    source {:arglists ([t] [t opts]) :doc "Read var, ns, schema, or doc source."}
-    ns-outline {:arglists ([nsym] [nsym & more]) :doc "Return {:ns :total-tokens :form-count :forms [{:sym :key :lines :chars :tokens :private? :local-deps :callers}]} (no :source)."}
-    move-vars! {:arglists ([spec]) :doc "Move vars atomically. Spec: {:from 'ns :to 'ns.child :vars '[v1 v2] :alias 'child :doc \"...\" :include-deps? true :re-export-public? true :keep-private? :auto :dry-run? false}."}
-    register-schema! {:arglists ([k form] [k form opts]) :doc "Register Malli schema -> Datahike attr."}
-    remove-var! {:arglists ([sym] [sym opts]) :doc "Retract var & form."}
-    add-fn! {:arglists ([nsym src] [nsym src opts]) :doc "Add/overwrite form (auto-seeds *-test ns)."}
-    callers {:arglists ([sym] [sym & more]) :doc "Returns vector of caller symbols (not maps), or {sym [caller-syms]} for multiple/collection."}
-    callees {:arglists ([sym]) :doc "List :refs, :input, :output, :keywords."}
-    tests-for {:arglists ([sym-or-ns]) :doc "List reaching tests."}
-    search {:arglists ([q]) :doc "Search vars (name/doc), schemas (key/doc/form), docs."}
-    health {:arglists ([] [which]) :doc "Fast scoped health (<15 MB); :all/:main for full."}
-    past-evals {:arglists ([] [opts]) :doc "Query historical evals via d/history."}
-    autofix-health! {:arglists ([] [opts]) :doc "Run programmatic :fix health actions."}
-    inspect-branch {:arglists ([target]) :doc "Inspect branch diff, errors, proofs, evals."}
-    save-example! {:arglists ([src ex] [src ex opts]) :doc "Snapshot session into :example/<name>."}
-    create-task! {:arglists ([spec]) :doc "Create linked task on :main."}
-    update-task! {:arglists ([spec]) :doc "Update active task on :main."}
-    assign-task! {:arglists ([tid]) :doc "Attach :seon.task/id to agent."}
-    metrics {:arglists ([] [w]) :doc "Sliding-window completion & frustration metrics."}
-    chat! {:arglists ([msg] [ag msg]) :doc "Send live chat message to agent."}
-    monitor {:arglists ([] [ag]) :doc "Inspect perspective, merge-gate, children."}
-    expand! {:arglists ([target] [target opts]) :doc "Returns Markdown string by default; pass {:raw? true :path [...]} for raw Clojure data."}
-    record-summary! {:arglists ([] [opts]) :doc "Record Chronicle summary: {:kind :milestone :title \"...\" :body \"...\"}."}
-    ready! {:arglists ([]) :doc "Mark branch ready for test + merge."}})
-
 (defn- intern-doc! [u sym f]
   (let [target (if (var? f) (fn [& args] (apply @f args)) f)
         v (intern u sym target)
-        base-m (get user-helper-docs sym)
-        ov (when (var? f) (:seon.eval/budget-override (meta f)))]
-    (when (or base-m ov)
-      (alter-meta! v merge base-m (when ov {:seon.eval/budget-override ov})))
+        m (when (var? f) (meta f))
+        src (when (and (:ns m) (:name m))
+              (symbol (str (ns-name (:ns m))) (name (:name m))))
+        keep-m (cond-> (select-keys m [:doc :arglists :malli/schema :seon.eval/budget-override])
+                 src (assoc :seon.repl/source src))]
+    (when (seq keep-m)
+      (alter-meta! v merge keep-m))
     v))
-
-(defn help
-  "Lists available `user/*` REPL helpers with signatures & one-line docs, or shows one helper in full."
-  {:malli/schema [:function
-                  [:=> [:cat] :map]
-                  [:=> [:cat :any] :map]]}
-  ([]
-   (into (sorted-map)
-         (map (fn [[k {:keys [arglists doc]}]]
-                [k (str (pr-str arglists) " — " doc)]))
-         user-helper-docs))
-  ([sym]
-   (let [nm (symbol (name sym))]
-     (if-let [info (get user-helper-docs nm)]
-       (assoc info :var (symbol "user" (name nm)))
-       (if-let [v (ns-resolve 'user nm)]
-         (merge {:var (symbol "user" (name nm))} (select-keys (meta v) [:arglists :doc]))
-         {:error :unknown-helper :sym sym :available (vec (sort (keys user-helper-docs)))})))))
 
 (defn autofix-health!
   "Executes programmatic `:fix` actions from `seon.health/report` (filtered by `:ns`, `:class`, or `{:dry-run? true}`)."
@@ -361,14 +309,94 @@
             :retracted (vec (sort (:retracted-keys ops))) :schemas (vec (sort (:schema-keys ops)))
             :health-errors errs :recent-evals recent-evals :diffs diffs}))))))
 
+(defn- first-sentence [doc]
+  (when (and (string? doc) (not (str/blank? doc)))
+    (let [flat (str/replace (str/trim doc) #"\s+" " ")]
+      (loop [from 0]
+        (let [idx (.indexOf ^String flat ". " (int from))]
+          (cond
+            (neg? idx) flat
+            (or (str/ends-with? (subs flat 0 (inc idx)) "e.g.")
+                (str/ends-with? (subs flat 0 (inc idx)) "i.e."))
+            (recur (+ idx 2))
+            :else (subs flat 0 (inc idx))))))))
+
+(defn- helper-detail [sym v]
+  (let [m (meta v)]
+    (cond-> {:var (symbol "user" (name sym))}
+      (:arglists m) (assoc :arglists (:arglists m))
+      (:doc m) (assoc :doc (:doc m))
+      (:malli/schema m) (assoc :malli/schema (:malli/schema m))
+      (:seon.repl/source m) (assoc :source (:seon.repl/source m)))))
+
+(defn- helper-summary-line [v]
+  (let [m (meta v)
+        al (:arglists m)
+        doc (first-sentence (:doc m))]
+    (cond
+      (and (seq al) doc) (str (pr-str al) " — " doc)
+      (seq al) (pr-str al)
+      doc doc
+      :else "")))
+
+(defn- user-helper-vars []
+  (let [u (or (find-ns 'user) (create-ns 'user))]
+    (when-not (ns-resolve u 'help)
+      (when-let [inst (requiring-resolve 'seon.fork.helpers/install-agent-helpers!)]
+        (inst)))
+    (into {}
+          (filter (fn [[_ v]]
+                    (let [m (meta v)]
+                      (or (:doc m) (:arglists m) (and (bound? v) (fn? @v))))))
+          (ns-publics u))))
+
+(defn help
+  "Dynamically introspects `(ns-publics 'user)`: `(help)` lists every installed `user/*` helper with its live `:arglists` and first-sentence `:doc`; `(help 'fn-name)` returns full `:doc`, `:arglists`, and `:malli/schema`; `(help \"term\")` searches names and docs."
+  {:malli/schema [:function
+                  [:=> [:cat] :map]
+                  [:=> [:cat :any] :map]]
+   :cost/ticks 25000000}
+  ([]
+   (into (sorted-map)
+         (map (fn [[k v]] [k (helper-summary-line v)]))
+         (user-helper-vars)))
+  ([sym-or-str]
+   (let [vars (user-helper-vars)]
+     (cond
+       (or (symbol? sym-or-str) (keyword? sym-or-str))
+       (let [nm (symbol (name sym-or-str))]
+         (if-let [v (get vars nm)]
+           (helper-detail nm v)
+           {:error :unknown-helper :sym sym-or-str :available (vec (sort (keys vars)))}))
+
+       (string? sym-or-str)
+       (let [q (str/trim sym-or-str)
+             bare (if (str/starts-with? q "user/") (subs q 5) q)
+             exact-sym (when (and (not (str/blank? bare)) (not (re-find #"\s" bare)))
+                         (symbol bare))]
+         (if-let [v (and exact-sym (get vars exact-sym))]
+           (helper-detail exact-sym v)
+           (let [ql (str/lower-case q)
+                 matches (when-not (str/blank? ql)
+                           (filter (fn [[k v]]
+                                     (or (str/includes? (str/lower-case (name k)) ql)
+                                         (str/includes? (str/lower-case (str (:doc (meta v)))) ql)))
+                                   vars))]
+             (if (seq matches)
+               (into (sorted-map) (map (fn [[k v]] [k (helper-detail k v)])) matches)
+               {:error :no-matching-helpers :query sym-or-str :available (vec (sort (keys vars)))}))))
+
+       :else
+       {:error :unknown-helper :sym sym-or-str :available (vec (sort (keys vars)))}))))
+
 (defn install-repl-helpers!
   "Interns `user/*` editing, inspection, test, health, search, and task helpers into `u`."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
   [u]
   (doseq [[s v] [['add-fn! #'edit/add-fn!] ['edit-fn! #'edit/edit-fn!] ['add-require! #'edit/add-require!]
                  ['set-meta! #'edit/set-meta!] ['ns-requires #'edit/ns-requires] ['unused-requires #'edit/unused-requires]
-                 ['prune-requires! #'edit/prune-requires!] ['diff #'edit/diff] ['grep-src #'grep-src]
-                 ['run-tests! #'run-tests!] ['health #'health] ['search #'search] ['help #'help]
+                 ['prune-requires! #'edit/prune-requires!] ['diff #'edit/diff] ['grep-src #'search/grep-src]
+                 ['run-tests! #'run-tests!] ['health #'health] ['search #'search/search] ['help #'help]
                  ['autofix-health! #'autofix-health!] ['inspect-branch #'inspect-branch] ['save-example! #'save-example!]
                  ['create-task! #'create-task!] ['metrics #'metrics]]]
     (intern-doc! u s v)))

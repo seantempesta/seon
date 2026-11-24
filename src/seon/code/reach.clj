@@ -330,7 +330,7 @@
     {:upserts [] :retracted-keys #{} :schema-keys #{} :retracted-schemas #{}
      :rule-ids #{} :retracted-rules #{} :boot-affected? false}
     (let [ds (d/changes conn from-cid to-cid)
-          db (or (try (d/commit-as-db conn to-cid) (catch Throwable _ nil)) @conn)
+          db (let [cur @conn] (cond (= to-cid (d/commit-id cur)) cur (uuid? to-cid) (or (d/commit-as-db conn to-cid) cur) :else cur))
           id-map (:ident-ref-map db)
           aid? (fn [dt kw] (or (= (:a dt) kw) (= (:a dt) (get id-map kw))))
           retracted-keys (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.code.form/key)) (:v %))) ds)
