@@ -1,7 +1,6 @@
 (ns seon.fork.helpers
   "Agent REPL `user/*` inspection, Datahike time-travel, code-editing, schema, and health helpers."
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.code :as code]
             [seon.ctx :as ctx]
@@ -16,53 +15,45 @@
             [seon.vector.flow :as vflow]))
 
 (defn ^:seon.flow/edge render-preview!
-  "Renders Hiccup or a uniform renderer across display widths (default `[360 640 1100]`, `:dark`),
-   persists full `:seon.media/image` entities into the branch DB, and returns a compact
-   `{:seon.media/frames [...] :summary ...}` summary (`{:seon/schema :seon.media/frames}`)."
-  {:seon.repl/export true, :malli/schema [:function [:=> [:cat :any] :seon.media/frames] [:=> [:cat :any :map] :seon.media/frames]], :cost/ticks 45000000}
+  "Renders Hiccup or a `:seon.ui/hiccup` renderer (auto-deriving input for a var symbol) across
+   display widths (default `[360 640 1100]`, `:dark`). Defaults to `:persist? false` (0 LMDB writes);
+   pass `:persist? true` to persist `:seon.media/image` entities."
+  {:seon.repl/export true
+   :malli/schema [:function [:=> [:cat :any] :seon.media/frames] [:=> [:cat :any :map] :seon.media/frames]]
+   :cost/ticks 45000000}
   ([hiccup-or-renderer] (render-preview! hiccup-or-renderer nil))
   ([hiccup-or-renderer opts]
    (let [o (if (map? opts) opts {})
-         raw (if (or (fn? hiccup-or-renderer) (var? hiccup-or-renderer) (qualified-symbol? hiccup-or-renderer))
-               (let [f (cond (fn? hiccup-or-renderer) hiccup-or-renderer
-                             (var? hiccup-or-renderer) @hiccup-or-renderer
-                             :else @(requiring-resolve hiccup-or-renderer))]
-                 (cond (contains? o :input) (f (:input o))
-                       (contains? o :data) (f (:data o))
-                       :else (f)))
-               hiccup-or-renderer)
-         node (if (and (map? raw) (contains? raw :seon.ui/hiccup)) (:seon.ui/hiccup raw) raw)
-         html (if (string? node) node (str ((requiring-resolve 'seon.render/hiccup->html) node)))
+         eff-conn (or (:conn o) (:conn *agent-ctx*))
+         has-in? (or (contains? o :input) (contains? o :data) (contains? o :args))
+         vsym (cond (qualified-symbol? hiccup-or-renderer) hiccup-or-renderer (var? hiccup-or-renderer) (symbol hiccup-or-renderer) :else nil)
          cap-opts (merge {:widths [360 640 1100] :theme :dark}
-                         (select-keys o [:widths :theme :height :quality :max-width
-                                         :label-prefix :timeout-ms :settle-ms :binary-path]))
-         port (or (:port o) (System/getenv "SEON_PORT") 9998)
-         url (or (:url o) (str "http://127.0.0.1:" port "/"))
-         cap (if (fn? (:render-fn o))
-               ((:render-fn o) html cap-opts)
-               (let [via-op (when-not (:direct? o)
-                              (try (let [post-fn (requiring-resolve 'seon.model.wire/http-post!)
-                                         resp (post-fn (str "http://127.0.0.1:" port "/op")
-                                                       [["Content-Type" "application/edn"]]
-                                                       (pr-str (assoc cap-opts :op :render-hiccup-frames
-                                                                      :html html :url url)))]
-                                     (when (= 200 (:status resp)) (edn/read-string (:body resp))))
-                                   (catch Throwable _ nil)))]
-                 (if (and (map? via-op) (:ok? via-op) (seq (:frames via-op)))
-                   via-op
-                   ((requiring-resolve 'seon.browser/render-hiccup-frames!) url html cap-opts))))
-         eff-conn (or (:conn o) (:conn *agent-ctx*))]
+                         (select-keys o [:widths :theme :height :quality :max-width :label-prefix :timeout-ms :settle-ms :binary-path]))
+         target (or (:render-fn o) (select-keys o [:port :url :direct? :browser-ch]))
+         derived (when (and vsym (not has-in?))
+                   ((requiring-resolve (quote seon.browser.preview/render-var-preview-frames!))
+                    target (when eff-conn @eff-conn) vsym (merge cap-opts (select-keys o [:no-cache? :direct?]))))
+         cap (or derived
+                 (let [raw (if (or (fn? hiccup-or-renderer) vsym)
+                             (let [f (cond (fn? hiccup-or-renderer) hiccup-or-renderer (var? hiccup-or-renderer) @hiccup-or-renderer :else @(requiring-resolve hiccup-or-renderer))]
+                               (cond (contains? o :args) (apply f (:args o)) (contains? o :input) (f (:input o)) (contains? o :data) (f (:data o)) :else (f)))
+                             hiccup-or-renderer)
+                       node (if (and (map? raw) (contains? raw :seon.ui/hiccup)) (:seon.ui/hiccup raw) raw)
+                       html (if (string? node) node (str ((requiring-resolve (quote seon.render/hiccup->html)) node)))]
+                   ((requiring-resolve (quote seon.browser.preview/capture-html-frames!)) target html cap-opts o)))]
      (if-not (and (:ok? cap) (seq (:frames cap)))
-       (with-meta {:ok? false :error (or (:error cap) :render-preview-failed)
-                   :seon.media/frames [] :summary (str "Preview failed: " (or (:error cap) :render-preview-failed))}
+       (with-meta {:ok? false :error (or (:error cap) :render-preview-failed) :persisted? false :seon.media/frames []
+                   :summary (str "Preview failed: " (or (:message cap) (:error cap) :render-preview-failed))}
                   {:seon/schema :seon.media/frames})
-       (let [norm-fn (requiring-resolve 'seon.render.media/normalize-preview-frame)
-             comp-fn (requiring-resolve 'seon.render.media/compact-preview-result)
-             img-ents (mapv norm-fn (:frames cap))]
-         (when (and eff-conn (contains? (:schema @eff-conn) :seon.media/id))
+       (let [img-ents (mapv (requiring-resolve (quote seon.render.media/normalize-preview-frame)) (:frames cap))
+             comp-fn (requiring-resolve (quote seon.render.media/compact-preview-result))]
+         (if (and (true? (:persist? o)) eff-conn (contains? (:schema @eff-conn) :seon.media/id))
            (let [r (d/transact eff-conn {:tx-data img-ents})]
-             (when (:conn *agent-ctx*) (ctx/refresh-active! (:db-after r) (:tx-data r)))))
-         (comp-fn img-ents))))))
+             (when (:conn *agent-ctx*) (ctx/refresh-active! (:db-after r) (:tx-data r)))
+             (cond-> (assoc (comp-fn img-ents) :persisted? true) (:source derived) (assoc :source (:source derived) :var vsym)))
+           (cond-> (assoc (comp-fn (mapv #(dissoc % :seon.media/id) img-ents)) :persisted? false)
+             (:source derived) (assoc :source (:source derived) :var vsym)
+             (some? (:cached? derived)) (assoc :cached? (:cached? derived)))))))))
 
 (defn ^:seon.flow/edge install-agent-helpers!
   "Installs all `user/*` REPL helpers via declarative `^:seon.repl/export` plus module installers."
@@ -497,3 +488,48 @@
            (when r (ctx/refresh-active! (:db-after r) (:tx-data r)))
            {:ok? true :removed s :retracted-form? has-form? :retracted-var? has-var?
             :tx (when r (:max-tx (:db-after r)))}))))))
+
+(defn ^:seon.flow/edge ui-patch!
+  "1-turn UI edit + derived preview shortcut: edits `target` via `(ui-patch! sym new-defn-str)`
+   or `(ui-patch! sym old-str new-str [opts])`, evaluates its derived preview via `seon.browser.preview`
+   (0 DB image writes), and returns `{:ok? :edit :preview :dom}`."
+  {:seon.repl/export true
+   :malli/schema [:function
+                  [:=> [:cat :any :any] :map]
+                  [:=> [:cat :any :any :any] :map]
+                  [:=> [:cat :any :any :any :map] :map]]
+   :cost/ticks 60000000}
+  ([target patch-or-defn] (ui-patch! target patch-or-defn nil {}))
+  ([target old-str new-str]
+   (if (and (vector? old-str) (map? new-str))
+     (ui-patch! target old-str nil new-str)
+     (ui-patch! target old-str new-str {})))
+  ([target old-or-defn new-str opts]
+   (let [o (if (map? opts) opts {})
+         sym (if (string? target) (symbol target) target)
+         edit-res (cond
+                    (some? new-str) ((requiring-resolve (quote seon.code.edit/edit-fn!)) sym old-or-defn new-str)
+                    (vector? old-or-defn) ((requiring-resolve (quote seon.code.edit/edit-fn!)) sym old-or-defn)
+                    :else (let [nsym (if (namespace sym) (symbol (namespace sym)) sym)]
+                            ((requiring-resolve (quote seon.code.edit/add-fn!)) nsym old-or-defn)))]
+     (if-not (:ok? edit-res)
+       {:ok? false :edit edit-res :preview nil :dom nil}
+       (let [eff-db (when-let [c (or (:conn o) (:conn *agent-ctx*))] @c)
+             var-sym (or (:var edit-res) (when (qualified-symbol? sym) sym))
+             prev ((requiring-resolve (quote seon.browser.preview/eval-renderer-preview))
+                   eff-db var-sym (assoc o :no-cache? true))
+             want-browser? (and (:ok? prev) (not= false (:browser? o))
+                                (or (true? (:browser? o)) (fn? (:render-fn o))
+                                    (:browser-ch o) (:port o) (:url o)))
+             fr-res (when want-browser?
+                      ((requiring-resolve (quote seon.browser.preview/render-var-preview-frames!))
+                       (or (:render-fn o) (select-keys o [:port :url :direct? :browser-ch]))
+                       eff-db var-sym (merge {:widths [360 640] :theme :dark :no-cache? true} o)))
+             dom (if (and (:ok? fr-res) (seq (:frames fr-res)))
+                   (mapv #(select-keys % [:label :width :height :dom]) (:frames fr-res))
+                   (when (:ok? prev)
+                     ((requiring-resolve (quote seon.render.fit/measure-hiccup)) (:hiccup prev))))]
+         {:ok? (boolean (:ok? prev))
+          :edit edit-res
+          :preview (select-keys prev [:ok? :var :source :input-hash :html :hiccup :error :message])
+          :dom dom})))))

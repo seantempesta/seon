@@ -192,8 +192,13 @@
                                             :seon.media/dom {:w w :h 150 :overflow-x? false}})
                                          widths)})
             res (binding [fcalls/*agent-ctx* {:conn conn :branch :main :agent-id :agent/prev}]
+                  (let [tx-before (:max-tx @conn)
+                      eph (helpers/render-preview! [:div {:class "card"} "Hello preview"]
+                                                   {:widths [360] :theme :dark :render-fn mock-render})]
+                  (is (false? (:persisted? eph)))
+                  (is (= tx-before (:max-tx @conn)) "Default :persist? false writes 0 datoms to LMDB")
                   (helpers/render-preview! [:div {:class "card"} "Hello preview"]
-                                           {:widths [360 640 1100] :theme :dark :render-fn mock-render}))
+                                           {:widths [360 640 1100] :theme :dark :persist? true :render-fn mock-render})))
             res-fn (binding [fcalls/*agent-ctx* {:conn conn :branch :main :agent-id :agent/prev}]
                      (helpers/render-preview! (fn [m] {:seon.ui/hiccup [:div (:txt m)]})
                                               {:input {:txt "Hello preview"} :widths [360] :render-fn mock-render}))]
@@ -217,7 +222,7 @@
           (when live-up?
             (let [res (binding [fcalls/*agent-ctx* {:conn conn :branch :main :agent-id :agent/real-prev}]
                         (helpers/render-preview! [:div {:class "card"} [:strong "Real WKWebView"]]
-                                                 {:widths [360] :theme :dark :direct? true}))]
+                        {:widths [360] :theme :dark :direct? true :persist? true}))]
               (is (= 1 (count (:seon.media/frames res))))
               (let [fid (:seon.media/id (first (:seon.media/frames res)))
                     stored (d/pull @conn '[*] [:seon.media/id fid])]
