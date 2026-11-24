@@ -178,3 +178,32 @@
                                               :max-in-flight 3 :max-requests nil :max-tokens 600000
                                               :upstream-url "https://api.deepseek.com"})))
           (is (not (:ok? (schema/validate-against db :seon.bench.run/proxy-stats "not-a-map")))))))))
+
+(deftest ^{:cost/ticks 60000000} activity-samples-surface-newest-entity-on-large-tables-test
+  (testing "gather-activity-data must surface the newest entity by tx even when an attribute has >250 datoms (no raw avet truncation cap drops it before the tx sort)"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/h2-sample :seon.agent/branch :main
+                                   :seon.agent/scope 'seon.render.tails
+                                   :seon.agent/context-prefs {:extra-schemas [:seon.task/id]
+                                                              :recent-data-limit 4}}]})
+      ;; Seed 260 tasks whose :seon.task/id values sort LOW in avet order (first 250 by value).
+      (d/transact conn {:tx-data (mapv (fn [i] {:seon.task/id (keyword "task" (format "a%04d" i))
+                                                :seon.task/title (str "Seed " i)})
+                                       (range 260))})
+      ;; Newest task by tx: its :seon.task/id value sorts LAST in avet order, so it lies
+      ;; beyond any raw `(take 250 (d/datoms ... :avet ...))` window and would be dropped
+      ;; by the old pre-sort cap.
+      (d/transact conn {:tx-data [{:seon.task/id :task/zzzz-newest :seon.task/title "Newest by tx"}]})
+      (let [db @conn
+            newest-eid (:e (first (d/datoms db :avet :seon.task/id :task/zzzz-newest)))
+            res (rtails/gather-activity-data db db {:seon.agent/id :agent/h2-sample
+                                                    :seon.agent/scope 'seon.render.tails
+                                                    :seon.agent/context-prefs {:extra-schemas [:seon.task/id]
+                                                                               :recent-data-limit 4}})
+            samples (:samples res)]
+        (is (> (count (d/datoms db :avet :seon.task/id)) 250) "large table seeded (>250 rows)")
+        (is (seq samples) "samples populated for :seon.task/id")
+        (is (some #(= newest-eid (:eid %)) samples)
+            "newest entity by tx must surface despite >250 datoms on the attribute")
+        (is (= newest-eid (:eid (first samples)))
+            "newest entity sorts first (descending tx)")))))

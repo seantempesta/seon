@@ -325,7 +325,7 @@
                                    (filter #(and (mdh %) (first (take 1 (d/datoms main-db :avet %))))) (take 5))]
                     (->> cands
                          (mapcat (fn [a] (map #(hash-map :attr a :tx (:tx %) :eid (:e %))
-                                              (take-last 2 (sort-by :tx (take 250 (d/datoms main-db :avet a)))))))
+                                              (take-last 2 (sort-by :tx (d/datoms main-db :avet a))))))
                          (sort-by (comp - :tx)) (take rec-lim)
                          (mapv #(assoc % :preview (rdata/compact-entity-preview (d/pull main-db '[*] (:eid %)) 150))))))]
     {:scope scope :incoming incoming :outgoing outgoing :open-errors open-errs :samples samples}))
