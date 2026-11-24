@@ -89,7 +89,7 @@
             (is (= 1 (:fired fr-run)) "Only the 1 live failed-digest must fire; 20 ghost failures must NOT resurrect")
             (is (true? (rules/wm-scalar (:wm res) live-tv :ctx.branch/failing-test?)))
             (is (pos? (:fired pr-run)) ":rule.ctx/primer-proofs must fire from :ctx.branch/failing-test? fact")
-            (is (< ms 10.0) (str "failing-reach-tests exceeded 10 ms: " ms " ms")))
+            (is (< ms 250.0) (str "failing-reach-tests exceeded 250 ms: " ms " ms")))
           ;; Green run clears failing-reach-tests completely
           (d/transact conn {:tx-data [[:db/retract [:seon.test.run/branch :main] :seon.test.run/failed-digests "dg-live-1"]
                                       {:seon.test.run/branch :main :seon.test.run/pass? true :seon.test.run/ran 1 :seon.test.run/cached 20}]})

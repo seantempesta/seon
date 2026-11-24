@@ -3,8 +3,7 @@
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [datahike.reads :as reads]
-            [seon.render.links :as rlinks]
-            [seon.store :as store]))
+            [seon.render.links :as rlinks]))
 
 (def readonly-env-keys
   "Computed metadata keys attached to `@ctx` maps that are never written back as entity datoms."
@@ -274,41 +273,3 @@
   (let [db @conn
         tx (diff-entity-tx db eid old-val new-val)]
     (when (seq tx) (d/transact conn {:tx-data tx}))))
-
-(defn ^:seon.flow/edge commit-target-diff!
-  "Commits cross-branch edits to `:seon.agent/target` (eval retractions/edits on target branch, `:paused?` on `:main`; zero process hacks)."
-  {:malli/schema [:=> [:cat :seon.host/conn :keyword :map :map] :map]
-   :cost/ticks 15000000}
-  [conn cur-branch old-target new-target]
-  (let [taid (:seon.agent/id old-target)
-        tb (:seon.agent/branch old-target :main)
-        teid (:db/id old-target)]
-    (if-not (and taid (integer? teid) (not= tb cur-branch))
-      {:handled? false :tx-count 0}
-      (let [tdb (or (try (store/head conn tb) (catch Throwable _ nil)) @conn)
-            raw-tx (diff-entity-tx tdb teid old-target new-target)]
-        (if (empty? raw-tx)
-          {:handled? true :tx-count 0}
-          (let [main-attrs #{:seon.agent/paused? :seon.agent/auto-merge?}
-                main-tx (vec (keep (fn [op]
-                                     (when (and (vector? op) (>= (count op) 3) (main-attrs (nth op 2)))
-                                       (assoc op 1 [:seon.agent/id taid])))
-                                   raw-tx))
-                br-tx (vec (remove #(and (vector? %) (>= (count %) 3) (main-attrs (nth % 2))) raw-tx))
-                sync-fn (when-let [actx-v (try (requiring-resolve 'seon.fork.calls/*agent-ctx*) (catch Throwable _ nil))]
-                        (when-let [actx @actx-v]
-                          (when (and (:conn actx)
-                                     (= (get-in @conn [:config :store :id])
-                                        (get-in @(:conn actx) [:config :store :id])))
-                            (try (requiring-resolve 'seon.fork.calls/tx-main-sync!) (catch Throwable _ nil)))))]
-            (when (seq br-tx)
-              (if sync-fn
-                (sync-fn {:op :transact-branch :branch tb :tx-data br-tx :reason [:ctx-target-edit taid]})
-                (let [bconn (store/connect (:config @conn) tb)]
-                  (try (d/transact bconn {:tx-data br-tx}) (finally (d/release bconn))))))
-            (when (seq main-tx)
-              (if sync-fn
-                (sync-fn {:op :transact :tx-data main-tx :reason [:ctx-target-main taid]})
-                (let [mconn (store/connect (:config @conn) :main)]
-                  (try (d/transact mconn {:tx-data main-tx}) (finally (d/release mconn))))))
-            {:handled? true :tx-count (+ (count br-tx) (count main-tx)) :branch tb}))))))

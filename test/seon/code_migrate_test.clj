@@ -300,3 +300,28 @@
             (is (= "b?!" ((resolve 'tmp.m2-core/stays-fn) "b"))))
           (finally
             (doseq [n ['tmp.m2-core 'tmp.m2-sub]] (when (find-ns n) (remove-ns n)))))))))
+
+(deftest ^{:cost/ticks 60000000} merge-drops-dangling-retracted-ref-set-entries-test
+  (testing "three-way merge drops ref-set entries targeting transient entities deleted on :main (e.g. :seon.error/id in :touched-refs)"
+    (with-test-store [{:keys [conn cfg]}]
+      (let [err-id (random-uuid)
+            ev-id (random-uuid)]
+        (d/transact conn {:tx-data [{:seon.error/id err-id :seon.error/kind :slow-render :seon.error/severity :warning
+                                     :seon.error/source :web :seon.error/status :open :seon.error/message "slow" :seon.error/at 1}
+                                    {:seon.agent/id :w/dref :seon.agent/branch :branch/w-dref :seon.agent/role :worker :seon.agent/goal "test"}]})
+        (store/branch! conn :main :branch/w-dref)
+        ;; :main retracts transient error while branch records an eval touching it
+        (d/transact conn {:tx-data [[:db/retractEntity [:seon.error/id err-id]]]})
+        (let [bconn (store/connect cfg :branch/w-dref)]
+          (try
+            (let [ee (:e (first (d/datoms @bconn :avet :seon.error/id err-id)))
+                  ae (:e (first (d/datoms @bconn :avet :seon.agent/id :w/dref)))]
+              (d/transact bconn {:tx-data [{:seon.agent.eval/id ev-id :seon.agent.eval/agent :w/dref :seon.agent.eval/agent-ref ae
+                                            :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "1"
+                                            :seon.agent.eval/touched-refs #{ee}}]}))
+            (let [plan (seon.merge/three-way conn cfg :branch/w-dref)]
+              (is (true? (:ok? plan)))
+              ;; Transacting plan onto :main must NOT throw Nothing found for entity id [:seon.error/id ...]
+              (is (some? (d/transact conn {:tx-data (:tx-data plan)})))
+              (is (= :w/dref (:seon.agent.eval/agent (d/pull @conn '[:seon.agent.eval/agent] [:seon.agent.eval/id ev-id])))))
+            (finally (d/release bconn))))))))

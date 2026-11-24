@@ -7,7 +7,7 @@
 
 (deftest repl-eval-keeps-worker-warm-and-persists-results
   (let [dir (str "/tmp/seon-agent-test-" (System/nanoTime))
-        {:keys [conn cfg]} (store/open! dir)]
+        {:keys [conn cfg] :as s} (store/open! dir)]
     (try
       (testing "eval-route normalizes :agent into :agent-id"
         (let [ch (a/chan 1)
@@ -34,5 +34,5 @@
             (is (false? (get-in st3 [:eval-waiters "eval-1" :keep-warm?])))
             (is (= :repl/oneshot (get-in st3 [:eval-waiters "eval-1" :agent-id]))))))
       (finally
-        (store/close! conn)
+        (store/close! s)
         (doseq [f (reverse (file-seq (java.io.File. dir)))] (.delete ^java.io.File f))))))
