@@ -204,6 +204,8 @@
           frames (vec (:frames job))
           res (cond-> {:ok? (and (nil? err) (boolean (seq frames))) :widths (:all-widths job) :frames frames}
                 err (assoc :error err))]
+      (when-let [send! (get-in st [:handle :send!])]
+        (send! {:id 0 :op "resize" :width (or (:width st) 1280) :height (or (:height st) 820)}))
       (when reply-ch (a/put! reply-ch res) (a/close! reply-ch))
       [st nil])
 
