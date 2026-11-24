@@ -28,7 +28,9 @@
           [datahike.index.interface :as di]
           [datahike.reads :as reads]
           [seon.error :as serr]
-          [seon.health.branch :as hbranch]))
+          [seon.health.branch :as hbranch]
+          [seon.ctx.diff :as diff]
+          [seon.health.liveness :as liveness]))
 
 (defn ns-in-scope?
   "True when namespace symbol `nsym` belongs to `scope` (exact match or descendant `scope.*`,
@@ -265,124 +267,31 @@
         (compute)))))
 
 (defn- report-cache-key-with-sigs
-([db form-hash-sig form-order-sig var-name-sig]
- (report-cache-key-with-sigs db form-hash-sig form-order-sig var-name-sig nil))
-([db form-hash-sig form-order-sig var-name-sig test-pass-sig]
- (when (and db
-            (not (instance? datahike.db.AsOfDB db))
-            (not (instance? datahike.db.HistoricalDB db)))
-   [(get-in db [:config :store :id])
-    (get-in db [:config :branch] :main)
-    (count (:schema db))
-    (or form-hash-sig (attr-sig db :seon.code.form/hash))
-    (or form-order-sig (attr-sig db :seon.code.form/order))
-    (or var-name-sig (attr-sig db :seon.code.var/name))
-    (attr-sig db :seon.schema/key)
-    (or test-pass-sig (attr-sig db :seon.test/pass?))
-    (attr-sig db :seon.test.run/pass?)
-    (attr-sig db :seon.test.run/failed-digests)
-    (attr-sig db :seon.agent/archived?)
-    (attr-sig db :seon.error/id)
-    (attr-sig db :seon.error/status)])))
-
-(defonce ^:private ^:seon.flow/edge test-state-cache (store/lru-cache 8))
+  ([db] (report-cache-key-with-sigs db nil nil))
+  ([db csig tsnap]
+   (when (and db
+              (not (instance? datahike.db.AsOfDB db))
+              (not (instance? datahike.db.HistoricalDB db)))
+     (when-let [code-sig (or csig (diff/code-db-sig db))]
+       (let [ts (or tsnap (eff/test-snapshot db))]
+         [(get-in db [:config :store :id])
+          (get-in db [:config :branch] :main)
+          (count (:schema db))
+          code-sig
+          (:var-sig ts)
+          (:pass-sig ts)
+          (attr-sig db :seon.test.run/pass?)
+          (attr-sig db :seon.test.run/failed-digests)
+          (attr-sig db :seon.agent/archived?)
+          (attr-sig db :seon.error/id)
+          (attr-sig db :seon.error/status)])))))
 
 (defn- cached-test-state [db]
-(let [base-ck (when (and db
-                         (not (instance? datahike.db.AsOfDB db))
-                         (not (instance? datahike.db.HistoricalDB db)))
-                [(get-in db [:config :store :id])
-                 (get-in db [:config :branch] :main)])
-      compute (fn []
-                (let [tsnap (eff/test-snapshot db)]
-                  {:supersession (:supersession tsnap)
-                   :var-sig (:var-sig tsnap)
-                   :pass-sig (:pass-sig tsnap)
-                   :test-eff (eff/test-efficiency-warnings db tsnap)}))
-      hit (when (and base-ck (pos? (count @test-state-cache)))
-            (let [ck (conj base-ck (attr-sig db :seon.test/var) (attr-sig db :seon.test/pass?))]
-              (when (contains? @test-state-cache ck)
-                (store/lru-get! test-state-cache 8 ck compute))))]
-  (or hit
-      (let [[data rset] (if di/*reads* (reads/with-reads compute) [(compute) nil])]
-        (when-let [outer di/*reads*]
-          (when (seq rset) (swap! outer into rset)))
-        (when base-ck
-          (let [ck (conj base-ck (:var-sig data) (:pass-sig data))]
-            (store/lru-get! test-state-cache 8 ck
-                            (fn []
-                              (when-let [outer di/*reads*]
-                                (when (seq rset) (swap! outer into rset)))
-                              data))))
-        data))))
-
-(defn- compute-report-data
-"Computes single-pass health report payload with shared snapshots."
-[db]
-(let [vsnap (static/var-snapshot db {:schemas? true :catches? true})
-      vmap (:vmap vsnap)
-      fsnap (static/form-meta-snapshot db)
-      tstate (cached-test-state db)
-      probs (vec (concat (blocking-in-flow-procs db vmap)
-                         (state-outside-flow db vmap)
-                         (used-before-defined db nil fsnap)
-                         (missing-ns-forms db nil fsnap)
-                         (unschemed-attributes db)
-                         (silent-catch-warnings db nil vsnap)
-                         (contracts/broken-symbol-refs db vsnap)
-                         (contracts/broken-doc-refs db nil vsnap)
-                         (contracts/impure-generatable-fns db nil vsnap)
-                         (contracts/invalid-contract-violations db vsnap)
-                         (eff/static-efficiency-warnings db nil fsnap)
-                         (failing-tests db tstate)
-                         (:test-eff tstate)
-                         (open-faults db)))
-      counts (frequencies (map :class probs))
-      errors? (boolean (some #(= :error (:severity %)) probs))]
-  {:report (with-meta
-             {:ok? (not errors?)
-              :branch (get-in db [:config :branch] :main)
-              :counts counts
-              :problems probs}
-             {:seon/schema :seon.health/report})
-   :var-name-sig (:var-name-sig vsnap)
-   :form-order-sig (:form-order-sig fsnap)
-   :form-hash-sig (:form-hash-sig fsnap) :test-pass-sig (:pass-sig tstate)}))
-
-(defn report
-  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
-   `:ok?` is true whenever zero `:error`-severity problems exist. Shares single-pass snapshots across
-   all sub-checks and caches per-form/per-ns static checks so cold & warm allocations stay low."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.health/report]}
-  [db]
-  (let [sk (db-snapshot-key db)
-        compute-full
-        (fn []
-          (let [pre-ck (when (pos? (count @report-cache)) (report-cache-key-with-sigs db nil nil nil))
-                raw-hit (when pre-ck (get @report-cache pre-ck ::miss))
-                hit-entry (if (and (map? raw-hit) (contains? raw-hit :seon.store/lru-val))
-                            (:seon.store/lru-val raw-hit)
-                            raw-hit)
-                [rep rs]
-                (if (and pre-ck (not (identical? ::miss hit-entry)))
-                  (store/lru-get! report-cache 12 pre-ck (constantly hit-entry))
-                  (let [[data rset] (if di/*reads* (reads/with-reads #(compute-report-data db)) [(compute-report-data db) nil])
-                        rep (:report data)
-                        ck (or pre-ck
-                               (report-cache-key-with-sigs
-                               db (:form-hash-sig data) (:form-order-sig data) (:var-name-sig data) (:test-pass-sig data)))
-                        entry [rep rset]]
-                    (if ck
-                      (store/lru-get! report-cache 12 ck (constantly entry))
-                      entry)))]
-            {:report rep :reads rs}))
-        entry (if sk
-                (store/lru-get! report-commit-cache 32 sk compute-full)
-                (compute-full))]
-    (when-let [outer di/*reads*]
-      (when (seq (:reads entry))
-        (swap! outer into (:reads entry))))
-    (:report entry)))
+  (let [tsnap (eff/test-snapshot db)]
+    {:supersession (:supersession tsnap)
+     :var-sig (:var-sig tsnap)
+     :pass-sig (:pass-sig tsnap)
+     :test-eff (eff/test-efficiency-warnings db tsnap)}))
 
 (defn- fast-scoped-test-alerts [db scope]
   (when (and db scope (get-in (:schema db) [:seon.test/var :db/index]))
@@ -472,3 +381,122 @@
       :blocking-fn blocking-in-flow-procs
       :ubd-fn used-before-defined
       :mns-fn missing-ns-forms})))
+
+(defonce ^:private ^:seon.flow/edge liveness-cache (atom nil))
+
+(defn- ^:seon.flow/edge cached-liveness-check []
+  (let [pns (find-ns 'seon.reconciler.policy)
+        sig (when pns
+              (into [liveness/check-liveness]
+                    (map #(when (bound? %) (var-get %)))
+                    (vals (ns-interns pns))))
+        cur @liveness-cache]
+    (if (and sig (= sig (:sig cur)))
+      (:res cur)
+      (let [res (liveness/check-liveness)]
+        (when sig (reset! liveness-cache {:sig sig :res res}))
+        res))))
+
+(defn liveness-violations
+  "Runs finite-state liveness verification (`seon.health.liveness/check-liveness`, cached by `seon.reconciler.policy` var identities) on live DBs containing `seon.reconciler.policy/decide-agent-step`, surfacing any livelock, orphan-paused-parent, wedged inflight, crashed auto-merge, or stranded ready bug as `:error`."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] :cost/ticks 60000000}
+  [db]
+  (if-not (and db
+               (not (instance? datahike.db.AsOfDB db))
+               (not (instance? datahike.db.HistoricalDB db))
+               (contains? (:schema db) :seon.code.form/key)
+               (first (d/datoms db :avet :seon.code.form/key "seon.reconciler.policy/decide-agent-step")))
+    []
+    (let [res (cached-liveness-check)]
+      (if (:ok? res)
+        []
+        (let [br (get-in db [:config :branch] :main)
+              mk (fn [cls subj msg]
+                   {:class cls :severity :error :kind :static :ns 'seon.reconciler.policy
+                    :subject subj :branch br :message msg})]
+          (cond-> []
+            (:truncated? res)
+            (conj (mk :reconciler-liveness-truncated "seon.reconciler.policy/decide-agent-step"
+                      (str "Liveness BFS truncated after " (:states-explored res) " states.")))
+            (seq (:livelocks res))
+            (conj (mk :reconciler-livelock "seon.reconciler.policy/decide-agent-step"
+                      (str "Reconciler policy has " (count (:livelocks res)) " livelock SCC(s).")))
+            (seq (:orphan-pauses res))
+            (conj (mk :reconciler-orphan-pause "seon.reconciler.policy/decide-agent-step"
+                      (str "Reconciler policy has " (count (:orphan-pauses res)) " orphan paused-parent terminal state(s).")))
+            (seq (:wedged-inflight res))
+            (conj (mk :reconciler-wedged-inflight "seon.reconciler.policy/decide-agent-step"
+                      (str "Reconciler policy has " (count (:wedged-inflight res)) " wedged inflight terminal state(s).")))
+            (seq (:crashed-auto-merges res))
+            (conj (mk :reconciler-crashed-auto-merge "seon.reconciler.policy/decide-agent-step"
+                      (str "Reconciler policy allows " (count (:crashed-auto-merges res)) " crashed auto-merge state(s).")))
+            (seq (:stranded-ready res))
+            (conj (mk :reconciler-stranded-ready "seon.reconciler.policy/decide-agent-step"
+                      (str "Reconciler policy has " (count (:stranded-ready res)) " stranded ready terminal state(s).")))))))))
+
+(defn- compute-report-data
+  "Computes single-pass health report payload with shared snapshots."
+  [db]
+  (let [vsnap (static/var-snapshot db {:schemas? true :catches? true})
+        vmap (:vmap vsnap)
+        fsnap (static/form-meta-snapshot db)
+        tstate (cached-test-state db)
+        probs (vec (concat (blocking-in-flow-procs db vmap)
+                           (state-outside-flow db vmap)
+                           (used-before-defined db nil fsnap)
+                           (missing-ns-forms db nil fsnap)
+                           (unschemed-attributes db)
+                           (silent-catch-warnings db nil vsnap)
+                           (contracts/broken-symbol-refs db vsnap)
+                           (contracts/broken-doc-refs db nil vsnap)
+                           (contracts/impure-generatable-fns db nil vsnap)
+                           (contracts/invalid-contract-violations db vsnap)
+                           (eff/static-efficiency-warnings db nil fsnap)
+                           (liveness-violations db)
+                           (failing-tests db tstate)
+                           (:test-eff tstate)
+                           (open-faults db)))
+        counts (frequencies (map :class probs))
+        errors? (boolean (some #(= :error (:severity %)) probs))]
+    {:report (with-meta
+               {:ok? (not errors?)
+                :branch (get-in db [:config :branch] :main)
+                :counts counts
+                :problems probs}
+               {:seon/schema :seon.health/report})
+     :code-sig (diff/code-db-sig db)
+     :test-snap tstate}))
+
+(defn report
+  "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
+   `:ok?` is true whenever zero `:error`-severity problems exist. Shares single-pass snapshots across
+   all sub-checks and caches per-form/per-ns static checks so cold & warm allocations stay low."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.health/report]}
+  [db]
+  (let [sk (db-snapshot-key db)
+        compute-full
+        (fn []
+          (let [pre-ck (when (pos? (count @report-cache)) (report-cache-key-with-sigs db))
+                raw-hit (when pre-ck (get @report-cache pre-ck ::miss))
+                hit-entry (if (and (map? raw-hit) (contains? raw-hit :seon.store/lru-val))
+                            (:seon.store/lru-val raw-hit)
+                            raw-hit)
+                [rep rs]
+                (if (and pre-ck (not (identical? ::miss hit-entry)))
+                  (store/lru-get! report-cache 12 pre-ck (constantly hit-entry))
+                  (let [[data rset] (if di/*reads* (reads/with-reads #(compute-report-data db)) [(compute-report-data db) nil])
+                        rep (:report data)
+                        ck (or pre-ck
+                               (report-cache-key-with-sigs db (:code-sig data) (:test-snap data)))
+                        entry [rep rset]]
+                    (if ck
+                      (store/lru-get! report-cache 12 ck (constantly entry))
+                      entry)))]
+            {:report rep :reads rs}))
+        entry (if sk
+                (store/lru-get! report-commit-cache 32 sk compute-full)
+                (compute-full))]
+    (when-let [outer di/*reads*]
+      (when (seq (:reads entry))
+        (swap! outer into (:reads entry))))
+    (:report entry)))

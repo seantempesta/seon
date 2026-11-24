@@ -10,7 +10,8 @@
             [seon.render.text :as rtext]
             [seon.schema :as schema]
             [seon.store :as st]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.fork.calls :as fcalls]))
 
 (defn- tx-branch! [cfg branch tx-data]
   (let [bc (st/connect cfg branch)]
@@ -143,3 +144,46 @@
                      'seon.render.entities.diagnostics/render-friction-card]]
           (let [res (schema/stress-var @conn sym)]
             (is (:ok? res) (str "seed=42 stress-var failed for " sym ": " (pr-str res)))))))))
+
+(deftest r-rog-no-lookbehind-oom-and-repl-friction-ergonomics-test
+  (testing "r-rog has zero negative-lookbehind OOM on 5,000-char code (< 20 ms / < 10 MB) and matches fs/write & jolt.fs/write accurately"
+    (let [r-rog @#'friction/r-rog
+          pad (apply str (repeat 250 "(let [x (+ 1 2)] x) "))
+          big-clean (str "(do " pad " (my-fs/write \"a\" \"b\") (user/fs-write \"c\" \"d\"))")
+          big-rog-1 (str "(do " pad " (fs/write \"a\" \"b\"))")
+          big-rog-2 (str "(do " pad " (jolt.fs/write \"a\" \"b\"))")
+          m-clean (code/measure-call #(re-find r-rog big-clean))
+          m-rog1 (code/measure-call #(re-find r-rog big-rog-1))
+          m-rog2 (code/measure-call #(re-find r-rog big-rog-2))]
+      (is (>= (count big-clean) 5000))
+      (is (nil? (:val m-clean)) "my-fs/write and user/fs-write must not match r-rog")
+      (is (some? (:val m-rog1)) "(fs/write ...) must match r-rog")
+      (is (some? (:val m-rog2)) "(jolt.fs/write ...) must match r-rog")
+      (is (some? (re-find r-rog "fs/write")) "start-of-string fs/write must match r-rog")
+      (is (some? (re-find r-rog "jolt.fs/write")) "start-of-string jolt.fs/write must match r-rog")
+      (doseq [[lbl m] [["clean" m-clean] ["rog1" m-rog1] ["rog2" m-rog2]]]
+        (is (< (:ms m) 20.0) (str lbl " took " (:ms m) " ms (>= 20 ms)"))
+        (is (< (:bytes m) 10485760) (str lbl " allocated " (:bytes m) " B (>= 10 MB)")))))
+
+  (testing "repl-friction accepts keyword :agent/root, {:agent :agent/root}, and {:agents [:agent/root]}"
+    (with-test-store [{:keys [conn cfg]}]
+      (st/branch! conn :main :branch/root-erg)
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/branch :branch/root-erg}]})
+      (let [pad (apply str (repeat 250 "(let [x (+ 1 2)] x) "))
+            big-code (str "(do " pad " (user/fs-write \"ok.txt\" \"hi\"))")]
+        (tx-branch! cfg :branch/root-erg
+          [(eval-tx :agent/root 1 0 'result/e1 {:seon.agent.eval/code big-code})])
+        (let [mdb (st/head conn :main)
+              m-an (code/measure-call #(friction/analyze-agent-friction (st/head conn :branch/root-erg) :agent/root {:main-db mdb}))
+              rep-map (friction/friction-report conn mdb {:agent :agent/root :include-renderers? false :include-static? false})
+              [rep-kw rep-opt] (binding [fcalls/*agent-ctx* {:conn conn :branch :main :agent-id :agent/root}]
+                                 [(friction/repl-friction :agent/root)
+                                  (friction/repl-friction {:agent :agent/root})])]
+          (is (< (:ms m-an) 20.0) (str "analyze-agent-friction 5k code took " (:ms m-an) " ms"))
+          (is (< (:bytes m-an) 10485760) (str "analyze-agent-friction 5k code allocated " (:bytes m-an) " B"))
+          (is (= 0 (:rogue-fs-count (:val m-an))))
+          (is (= [:agent/root] (mapv :agent (:agents rep-map))))
+          (is (= [:agent/root] (mapv :agent (:agents rep-kw))))
+          (is (= [:agent/root] (mapv :agent (:agents rep-opt))))
+          (is (= {:seon/schema :seon.health/friction} (meta rep-kw)))
+          (is (:ok? (schema/validate-against mdb :seon.health/friction rep-kw))))))))

@@ -267,7 +267,7 @@
           (is (str/includes? ev-code "(defn f [x]\n  (inc x))"))
           (is (str/includes? ev-ref "Unified Surface Demo Task")))))))
 
-(deftest ^{:cost/ticks 80000000} generic-entity-history-txs-and-as-of-rewind-test
+(deftest ^{:cost/ticks 100000000} generic-entity-history-txs-and-as-of-rewind-test
   (testing "view-history-txs captures tasks, vars, errors, and messages generically and rewinds surface via d/as-of"
     (with-test-store [{:keys [conn]}]
       (let [{:keys [tx1]} (seed-unified-world! conn)

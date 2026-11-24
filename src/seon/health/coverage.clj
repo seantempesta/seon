@@ -165,12 +165,14 @@
       (catch Throwable t {:measured? false :measure-error (or (.getMessage t) (str (class t)))}))
     {:measured? false}))
 
-(defn- ^:seon.flow/edge inspect-renderer [db dh ps sk sample rsym]
+(defn- ^:seon.flow/edge inspect-renderer [db dh _ps sk sample rsym]
   (let [ve (when (dh :seon.code.var/name) (:e (first (d/datoms db :avet :seon.code.var/name rsym))))
-        p (if (and ve (seq ps)) (d/pull db ps ve) {})
+        rd-ks (fn [a] (if (and ve (dh a))
+                        (into #{} (keep #(:v (first (d/datoms db :eavt (:v %) :seon.schema/key)))) (d/datoms db :eavt ve a))
+                        #{}))
         m (measure-renderer rsym sk sample)]
-    (cond-> {:fn rsym :inputs (into #{} (keep :seon.schema/key) (:seon.code.var/input p))
-             :optional-inputs (into #{} (keep :seon.schema/key) (:seon.code.var/optional-input p))
+    (cond-> {:fn rsym :inputs (rd-ks :seon.code.var/input)
+             :optional-inputs (rd-ks :seon.code.var/optional-input)
              :measured? (boolean (:measured? m))}
       (:measured? m) (assoc :tokens (:tokens m) :min-width (:min-width m) :area (:area m))
       (:measure-error m) (assoc :measure-error (:measure-error m)))))
@@ -268,10 +270,10 @@
         orphan (for [r enabled a (:wm-reads r) :when (and (keyword? a) (not= :* a) (not (allowed a)))]
                  {:class :orphan-wm-consumer :severity :warning :rule (:id r) :attr a
                   :subject (str (:id r) "<-" a) :message (str (:id r) " reads unproduced $wm " a ".")})
-        lvars (when (and db (dh :seon.code.var/name)) (into #{} (map :v) (d/datoms db :aevt :seon.code.var/name)))
-        dead (when lvars
+        has-vars? (and db (dh :seon.code.var/name) (first (d/datoms db :aevt :seon.code.var/name)))
+        dead (when has-vars?
                (for [r enabled f (or (:seon.coverage/fns (meta r)) (->> (rule-projs db r) (mapcat :fns) distinct sort))
-                     :when (and (qualified-symbol? f) (not (lvars f)))]
+                     :when (and (qualified-symbol? f) (nil? (first (d/datoms db :avet :seon.code.var/name f))))]
                  {:class :dead-rule-fn :severity :error :rule (:id r) :fn f
                   :subject (str (:id r) "->" f) :message (str (:id r) " asserts missing :fn " f ".")}))
         claims (for [r enabled p (rule-projs db r) :when (seq (:pattern p)) z (:zones p) f (:fns p)]
@@ -280,25 +282,43 @@
     (->> (concat orphan dead confs) (sort-by (juxt #(name (:class %)) :subject)) vec)))
 
 (defn- ^:seon.flow/edge compute-coverage-report [db include-atlas?]
-  (let [atlas (rule-atlas db)
+  (let [dh (db-schema db)
+        raw-rules (if (and db (contains? dh :seon.rule/id)) (rules/load-rules db) [])
+        atlas (->> raw-rules (map analyze-rule) (sort-by (juxt :stratum #(str (:id %)))) vec)
         stored-es (stored-entity-schemas db)
         matrix (schema-renderer-matrix* db stored-es)
         rb (group-by :class (detect-renderer-holes* db matrix atlas stored-es))
         missing (vec (:missing-entity-renderer rb)) single (vec (:single-footprint-renderer rb))
         ambiguous (vec (:ambiguous-renderer-pair rb))
-        rule-holes (detect-rule-holes db atlas) hb (group-by :class rule-holes)
+        base-holes (detect-rule-holes db atlas)
+        audit-fn (when (seq raw-rules) (requiring-resolve 'seon.health.coverage.rules/check-rule-bindings-and-refs))
+        raw-audit (when audit-fn (@audit-fn db raw-rules))
+        has-docs? (boolean (and db (contains? dh :seon.code.doc/id) (first (d/datoms db :aevt :seon.code.doc/id))))
+        rules-audit (if raw-audit
+                      (let [ps (if has-docs? (:problems raw-audit) (filterv #(not= :missing-rule-doc-ref (:class %)) (:problems raw-audit)))]
+                        (assoc raw-audit :ok? (empty? ps) :counts (frequencies (map :class ps)) :problems ps))
+                      {:ok? true :rules-checked 0 :counts {} :problems [] :wm-producers {} :wm-consumers {} :unreferenced-wm-producers []})
+        seen-rh (into #{} (map (juxt :class :subject)) base-holes)
+        extra-rh (filterv #(not (contains? seen-rh [(:class %) (:subject %)])) (:problems rules-audit))
+        rule-holes (vec (sort-by (juxt #(name (:class %)) :subject) (concat base-holes extra-rh)))
+        hb (group-by :class rule-holes)
         orphan (vec (:orphan-wm-consumer hb)) dead (vec (:dead-rule-fn hb)) confs (vec (:conflicting-rule-priority hb))
+        unk-in (vec (:unknown-rule-input hb)) miss-doc (vec (:missing-rule-doc-ref hb)) miss-fn (vec (:missing-rule-fn hb))
         rn (count (filter #(pos? (:renderer-count %)) matrix))
         counts {:entity-schemas (count matrix) :rendered-schemas rn :total-renderers (reduce + 0 (map :renderer-count matrix))
                 :missing-renderers (count missing) :single-footprint (count single) :ambiguous-renderers (count ambiguous)
                 :rules (count atlas) :enabled-rules (count (filter :enabled? atlas)) :rule-holes (count rule-holes)
-                :orphan-wm-consumer (count orphan) :dead-rule-fn (count dead) :conflicting-rule-priority (count confs)}
+                :orphan-wm-consumer (count orphan) :dead-rule-fn (count dead) :conflicting-rule-priority (count confs)
+                :unknown-rule-input (count unk-in) :missing-rule-doc-ref (count miss-doc) :missing-rule-fn (count miss-fn)
+                :unreferenced-wm-producers (count (:unreferenced-wm-producers rules-audit))}
         summary (str (count matrix) " entity schemas (" rn " rendered, " (count missing) " missing, "
                      (count single) " single-footprint, " (count ambiguous) " ambiguous) | "
-                     (count atlas) " rules (" (count orphan) " orphan-wm, " (count dead) " dead-fn, " (count confs) " conflict)")
-        base (array-map :ok? (and (empty? ambiguous) (empty? dead) (empty? orphan))
+                     (count atlas) " rules (" (count orphan) " orphan-wm, " (count dead) " dead-fn, "
+                     (count unk-in) " unknown-in, " (count miss-doc) " missing-doc, " (count confs) " conflict)")
+        base (array-map :ok? (and (empty? ambiguous) (empty? dead) (empty? orphan)
+                                  (empty? unk-in) (empty? miss-doc) (empty? miss-fn))
                         :summary summary :counts counts :missing-renderers missing :ambiguous-renderers ambiguous
-                        :single-footprint single :rule-holes rule-holes)]
+                        :single-footprint single :rule-holes rule-holes :rules-audit rules-audit)]
     (with-meta (if include-atlas? (assoc base :rule-atlas atlas) base)
                {:seon/schema :seon.health/coverage})))
 
