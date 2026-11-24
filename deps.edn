@@ -49,7 +49,12 @@
         ;; jolt-lang/router mirrors reitit.Trie so metosin/reitit-core runs natively on Jolt
         jolt-lang/router {:git/url "https://github.com/jolt-lang/router.git"
                           :git/sha "5186f7864e9bc429c47433205fa5c3cc59527680"}
-        metosin/reitit-core {:mvn/version "0.7.2"}}
+        metosin/reitit-core {:mvn/version "0.7.2"}
+        ;; Wu et al. O(NP) multi-hunk unified diff (zero-dep CLJC, replaces prefix/suffix trim)
+        borkdude/text-diff {:git/url "https://github.com/borkdude/text-diff.git"
+                            :git/sha "78422c5aec36862825d0c781373a388fb95c2b92"}}
+ ;; AOT-bake stdlib jolt.fs, jolt.process, and borkdude.text-diff for 0ms runtime & REPL load
+ :jolt/build {:include [jolt.fs jolt.process borkdude.text-diff]}
  :aliases {;; Datahike's own tests, for gating a merge onto reference-code/datahike
            :dhtest {:extra-paths ["reference-code/datahike/test"]}
            ;; bin/build's smoke binary
