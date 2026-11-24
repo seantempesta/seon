@@ -1426,6 +1426,41 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/primer-proofs}
  {:seon.rule/query [:find
+                    ?doc
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    $wm
+                    :where
+                    [$wm ?ns :world/touched true]
+                    [$branch ?ns :seon.code.ns/name ?nsym]
+                    [(str ?nsym) ?s]
+                    (or
+                     [(clojure.string/starts-with? ?s "seon.rule")]
+                     [(clojure.string/starts-with? ?s "seon.render.entities")]
+                     [(clojure.string/starts-with? ?s "seon.render.fit")]
+                     [(clojure.string/starts-with? ?s "seon.health.coverage")])
+                    [$main
+                     ?doc
+                     :seon.code.doc/id
+                     "docs/primers.md#writing-general-rules-renderers"
+                     ?tx]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?doc,
+                      :pull [:seon.code.doc/id
+                             :seon.code.doc/path
+                             :seon.code.doc/heading
+                             :seon.code.doc/body],
+                      :zone :ephemeral-tail,
+                      :priority 74,
+                      :tx ?tx}],
+  :seon.rule/doc "Surface the Rules & Renderers primer whenever an agent touches rule, renderer, or coverage namespaces.",
+  :seon.rule/stratum 22,
+  :seon.rule/category :health,
+  :seon.rule/id :rule.ctx/rule-and-renderer-coverage}
+ {:seon.rule/query [:find
                     ?s
                     ?v
                     ?tx
@@ -1683,9 +1718,9 @@
                     ?retry-ms
                     :in
                     $main
-                    $wm
+                    $agent
                     :where
-                    [$wm ?v :ctx/viewer ?aid]
+                    [$main ?v :seon.agent/id $agent]
                     [$main ?err :seon.error/status :open]
                     [$main ?err :seon.error/kind :model/rate-limit]
                     [(get-else $main ?err :seon.error/data {}) ?data]
@@ -1804,10 +1839,7 @@
                     :where
                     [$wm ?e :ctx/total ?n]
                     [(> ?n 20)]
-                    (or-join
-                     [?e ?lim]
-                     [$wm ?e :ctx/limit ?lim]
-                     (and (not [$wm ?e :ctx/limit _]) [(ground 20) ?lim]))
+                    [(ground 20) ?lim]
                     [(str "Large collection (" ?n " items) — bounded smart preview") ?why]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
@@ -1820,29 +1852,11 @@
   :seon.rule/stratum 36,
   :seon.rule/category :present,
   :seon.rule/id :rule.preview/large-collection}
- {:seon.rule/query [:find
-                    ?e
-                    ?n
-                    ?sch
-                    ?why
-                    :in
-                    $branch
-                    $wm
-                    :where
-                    [$wm ?e :ctx/kind ?primary]
-                    [(seon.rule/entity-facets $branch ?e) ?fs]
-                    [(count ?fs) ?n]
-                    [(>= ?n 2)]
-                    [(identity ?fs) [?sch ...]]
-                    [(not= ?sch ?primary)]
-                    [(str "Multi-facet entity (" ?n " schemas, also " ?sch ")") ?why]],
+ {:seon.rule/query [:find ?p :in $wm :where [$wm ?p :policy/subject :print]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
-  :seon.rule/assert [[?e :view/tag :tag/multi-facet]
-                     [?e :view.param/facet-count ?n]
-                     [?e :view.param/extra-facet ?sch]
-                     [?e :ctx/why ?why]],
-  :seon.rule/doc "Tag entities satisfying >= 2 Malli schemas via `seon.schema.index/facets-of`.",
+  :seon.rule/assert [[?p :policy/annotate-multi-facet? true]],
+  :seon.rule/doc "Enable multi-facet schema annotation via `seon.schema.index/facets-of` in print policy.",
   :seon.rule/stratum 36,
   :seon.rule/category :present,
   :seon.rule/id :rule.preview/multi-facet-entity}]

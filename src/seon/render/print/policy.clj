@@ -32,9 +32,7 @@
     :seon.rule/query '[:find ?e ?lim ?why :in $wm
                        :where [$wm ?e :ctx/total ?n]
                               [(> ?n 20)]
-                              (or-join [?e ?lim]
-                                [$wm ?e :ctx/limit ?lim]
-                                (and (not [$wm ?e :ctx/limit _]) [(ground 20) ?lim]))
+                              [(ground 20) ?lim]
                               [(str "Large collection (" ?n " items) — bounded smart preview") ?why]]
     :seon.rule/assert '[[?e :view/tag :tag/preview-sliced]
                         [?e :view.param/preview-limit ?lim]
@@ -42,20 +40,10 @@
                         [?e :view/layout :compact-card]
                         [?e :ctx/why ?why]]}
    {:seon.rule/id :rule.preview/multi-facet-entity
-    :seon.rule/doc "Tag entities satisfying >= 2 Malli schemas via `seon.schema.index/facets-of`."
-    :seon.rule/category :present :seon.rule/stratum 36 :seon.rule/enabled? true :seon.rule/target :any
-    :seon.rule/query '[:find ?e ?n ?sch ?why :in $branch $wm
-                       :where [$wm ?e :ctx/kind ?primary]
-                              [(seon.rule/entity-facets $branch ?e) ?fs]
-                              [(count ?fs) ?n]
-                              [(>= ?n 2)]
-                              [(identity ?fs) [?sch ...]]
-                              [(not= ?sch ?primary)]
-                              [(str "Multi-facet entity (" ?n " schemas, also " ?sch ")") ?why]]
-    :seon.rule/assert '[[?e :view/tag :tag/multi-facet]
-                        [?e :view.param/facet-count ?n]
-                        [?e :view.param/extra-facet ?sch]
-                        [?e :ctx/why ?why]]}])
+   :seon.rule/doc "Enable multi-facet schema annotation via `seon.schema.index/facets-of` in print policy."
+   :seon.rule/category :present :seon.rule/stratum 36 :seon.rule/enabled? true :seon.rule/target :any
+   :seon.rule/query '[:find ?p :in $wm :where [$wm ?p :policy/subject :print]]
+   :seon.rule/assert '[[?p :policy/annotate-multi-facet? true]]}])
 
 (def ^:private preview-rule-ids
   [:rule.preview/nested-sub-schema :rule.preview/errors-by-kind
@@ -104,8 +92,7 @@
                                  {:rule :seed/print :stratum 0}))
         res (rules/step-rules nil wm0 {:main db :branch db} rs nil :any)
         wm (:wm res)
-        multi-on? (boolean (some #(and (= :rule.preview/multi-facet-entity (:seon.rule/id %))
-                                       (:seon.rule/enabled? % true)) rs))]
+        multi-on? (boolean (rules/wm-scalar wm :policy :policy/annotate-multi-facet?))]
     {:depth-layouts {0 (or (rules/wm-scalar wm :policy :policy/depth-0-layout) :expanded-card)
                      1 (or (rules/wm-scalar wm :policy :policy/depth-1-layout) :compact-row)
                      :deep (or (rules/wm-scalar wm :policy :policy/deep-layout) :ref-pill)}
