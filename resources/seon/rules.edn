@@ -1140,7 +1140,10 @@
                     ?s
                     ?tx
                     :in
+                    $main
                     $branch
+                    $code
+                    $task
                     $wm
                     ?agent
                     :where
@@ -1160,6 +1163,10 @@
                        (and
                         [$wm ?e :world/connected true]
                         [$wm ?e :world/tx ?tx]
+                        [(identity ?agent) ?agent])
+                       (and
+                        [$wm ?e :world/touched true]
+                        [$wm ?e :world/touched-tx ?tx]
                         [(identity ?agent) ?agent])
                        (and
                         [(seon.rule/agent-max-eval-turn $branch ?agent) ?t]
@@ -1192,7 +1199,7 @@
                       :zone :workspace,
                       :priority 86,
                       :tx ?tx}],
-  :seon.rule/doc "Unified Distributed Understanding rule: discovers schemas of eval results, :world/connected entities, and latest-turn eval :touched-refs in O(N) via agent-max-eval-turn.",
+  :seon.rule/doc "Unified Distributed Understanding rule: discovers schemas of eval results, :world/connected entities, and derived :world/touched (live datahike.reads + d/changes writes) entities with zero persisted :touched-refs.",
   :seon.rule/stratum 22,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/eval-touched-schemas}

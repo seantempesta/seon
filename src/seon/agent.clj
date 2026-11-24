@@ -11,7 +11,8 @@
             [hasch.core :as hasch]
             [seon.code :as code]
             [seon.render.ui :as ui]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.ctx.touches :as ctouches]))
 
 (defn- build-wire-monitored [st main-db bdb aid opts]
   (let [t0 (System/nanoTime)
@@ -261,6 +262,8 @@
   (let [f (:frame msg)
         aid (:agent-id msg)
         pid (:pid msg)
+        _ (when-let [eids (seq (mapcat :touched-eids (:tool-results f)))]
+            (ctouches/record-live-reads-by-key! (get-in st [:cfg :store :id]) (:branch f) aid (long (or (:turn f) 1)) eids))
         st' (-> st
                 (update :turns-done inc)
                 (cond-> (contains? (:live st) aid)

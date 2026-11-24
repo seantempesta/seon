@@ -10,7 +10,8 @@
             [seon.schema :as schema]
             [seon.schema.index :as six]
             [seon.store :as store]
-            [seon.render.data :as rdata]))
+            [seon.render.data :as rdata]
+            [seon.ctx.touches :as ctouches]))
 
 (defonce ^:private ^:seon.flow/edge rev-agent-attrs-cache (store/lru-cache 16))
 
@@ -181,7 +182,9 @@
                                   :rules (vec (distinct (concat (:rules prev) (:rules it))))
                                   :tags (into (set (:tags prev)) (:tags it))
                                   :params (merge (:params prev) (:params it)))
-                           (cond-> (:ctx.match/score it) (assoc :ctx.match/score (:ctx.match/score it)))))
+                           (cond-> (:ctx.match/score it) (assoc :ctx.match/score (:ctx.match/score it))
+                           (or (:touches prev) (:touches it)) (assoc :touches (max (long (:touches prev 0)) (long (:touches it 0))))
+                           (or (:written? prev) (:written? it)) (assoc :written? true))))
                 (assoc acc e it))))
           {} all-raw))
 
@@ -190,15 +193,16 @@
         extra-ns-set (into (if scope-ns #{scope-ns} #{}) (get-in ag [:seon.agent/context-prefs :extra-namespaces]))
         same-mb? (same-db? main-db branch-db)
         same-tb? (or (nil? task-db) (same-db? task-db branch-db))
-        ordered (if (> (count merged) max-cands)
-                  (take max-cands
-                        (sort-by (fn [[eid item]]
-                                   [(if (:pinned? item) 0 1)
-                                    (- (long (:priority item 50)))
-                                    (- (long (:tx item 0)))
-                                    (str eid)])
-                                 merged))
-                  merged)]
+        ordered (if (and (integer? max-cands) (pos? (long max-cands)) (> (count merged) (long max-cands)))
+        (take (long max-cands)
+              (sort-by (fn [[eid item]]
+                         [(if (:pinned? item) 0 1)
+                          (- (long (:touches item 0)))
+                          (- (long (:priority item 50)))
+                          (- (long (:tx item 0)))
+                          (str eid)])
+                       merged))
+        merged)]
     (vec
      (keep (fn [[eid item]]
              (cond
@@ -267,35 +271,8 @@
       (not evs?) (conj :rule.ctx/recent-eval-results)
       (and (not (:seon.agent/target ag)) (not (:seon.agent/forked-from ag))) (conj :rule.ctx/review-target)
       (and (not (:seon.agent/forked-from ag)) (empty? (:seon.agent/example-refs ag)) (empty? (:seon.agent/examples ag)) (not has-task?)) (conj :rule.ctx/agent-prefix-sessions)
-      (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?))
+      (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?) (empty? (ctouches/live-reads-for bdb aid)))
       (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
-
-(defn- agent-eval-touch-counts [main-db branch-db aid]
-  (let [dh (db-schema branch-db)
-        mdh (db-schema main-db)
-        archived? (fn [e]
-                    (boolean
-                     (or (and (dh :seon.agent/archived?)
-                              (true? (:v (first (d/datoms branch-db :eavt e :seon.agent/archived?)))))
-                         (and main-db (not (same-db? main-db branch-db)) (mdh :seon.agent/archived?)
-                              (true? (:v (first (d/datoms main-db :eavt e :seon.agent/archived?))))))))
-        has-refs? (boolean (and (dh :seon.agent.eval/touched-refs) (first (d/datoms branch-db :aevt :seon.agent.eval/touched-refs))))
-        has-vec? (boolean (and (dh :seon.agent.eval/touched) (first (d/datoms branch-db :aevt :seon.agent.eval/touched))))]
-    (if (and aid (dh :seon.agent.eval/agent) (or has-refs? has-vec?))
-      (reduce (fn [acc dt]
-                (let [ee (:e dt)
-                      r-ds (when has-refs? (seq (d/datoms branch-db :eavt ee :seon.agent.eval/touched-refs)))]
-                  (if r-ds
-                    (reduce (fn [a rdt] (let [e (:v rdt)] (if (and (integer? e) (not (archived? e))) (update a e (fnil inc 0)) a))) acc r-ds)
-                    (if-let [tdt (when has-vec? (first (d/datoms branch-db :eavt ee :seon.agent.eval/touched)))]
-                      (let [ts (:v tdt)]
-                        (if (coll? ts)
-                          (reduce (fn [a e] (if (and (integer? e) (not (archived? e))) (update a e (fnil inc 0)) a)) acc ts)
-                          acc))
-                      acc))))
-              {}
-              (d/datoms branch-db :avet :seon.agent.eval/agent aid))
-      {})))
 
 (def ^:private volatile-rev-ref-attrs
   #{:seon.agent/parent-ref :seon.agent/forked-from :seon.agent/target :seon.agent/example-refs :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.agent.eval/agent-ref :seon.error/agent-ref})
@@ -359,13 +336,7 @@
 
 (defn- group-and-order-projs [raw-projections]
   (let [grouped (group-by :entity raw-projections)
-        capped (if (> (count grouped) 48)
-                 (take 48 (sort-by (fn [[eid ps]]
-                                     [(- (reduce max 50 (map #(long (or (:priority %) 50)) ps)))
-                                      (- (reduce max 0 (map #(long (or (:tx %) 0)) ps)))
-                                      (str eid)])
-                                   grouped))
-                 grouped)]
+        capped grouped]
     (mapv (fn [[eid ps]]
             (let [ordered (sort-by (fn [p] [(long (or (:stratum p) 50)) (long (or (:priority p) 50)) (str (:rule p))]) ps)]
               {:entity eid :ordered ordered
@@ -449,7 +420,12 @@
         {:keys [pinned curated extra-nss]} world
         res-eid #(ground/resolve-lookup-eid main-db branch-db %)
         rev-zone (if (= :wire (or (:target o) :wire)) :ephemeral-tail :workspace)
-        touch-counts (if (opt-bool :use-live-touches? (not minimal?)) (agent-eval-touch-counts main-db branch-db aid) {})
+        derived-t (or (:derived-touches o)
+                      (when (opt-bool :use-live-touches? (not minimal?))
+                        (ctouches/derived-agent-touches main-db branch-db aid)))
+        touch-counts (or (:counts derived-t) {})
+        written-set (or (:written derived-t) #{})
+        touch-max-tx (or (:max-tx derived-t) {})
         base-ru (into [] (comp (remove #(and (not inc-evals?)
                                              (or (contains? (:tags %) :eval)
                                                  (some #{:rule.ctx/recent-eval-results} (:rules %)))))
@@ -460,11 +436,11 @@
                  base-ru (:extra sit)
                  (when-not minimal? (active-rev-ephemeral-items main-db branch-db (:reverse-ephemeral world) aeid rev-zone))
                  (when-not minimal?
-                   (for [[e tx] (take 12 (sort-by (comp - val) (:connected world))) :when (not= e aeid)]
-                     {:entity e :tx tx :priority (cond (pinned e) 88 (curated e) 90 (extra-nss e) 88 :else 60)
-                      :pinned? (boolean (pinned e)) :zone (if (or (pinned e) (curated e) (extra-nss e)) :static-prefix :workspace)
-                      :tags (cond-> #{} (pinned e) (conj :pinned) (curated e) (conj :tag/curated) (extra-nss e) (conj :extra-ns))
-                      :rules [:seed/world]}))
+                 (for [[e tx] (sort-by (comp - val) (:connected world)) :when (not= e aeid)]
+                   {:entity e :tx tx :priority (cond (pinned e) 88 (curated e) 90 (extra-nss e) 88 :else 60)
+                    :pinned? (boolean (pinned e)) :zone (if (or (pinned e) (curated e) (extra-nss e)) :static-prefix :workspace)
+                    :tags (cond-> #{} (pinned e) (conj :pinned) (curated e) (conj :tag/curated) (extra-nss e) (conj :extra-ns))
+                    :rules [:seed/world]}))
                  (when-not minimal?
                    (keep #(when-let [e (and (symbol? %) (res-eid [:seon.code.ns/name %]))]
                             {:entity e :priority 88 :zone :static-prefix :tags #{:extra-ns} :rules [:seed/world]})
@@ -472,16 +448,21 @@
                  (when-not minimal?
                    (when-let [e (some->> (:seon.agent/scope ag) (vector :seon.code.ns/name) res-eid)]
                      [{:entity e :priority 90 :zone :static-prefix :tags #{:scope-ns} :rules [:seed/scope]}]))
-                 (for [[e cnt] (take 6 (sort-by (comp - val) touch-counts)) :when (and (integer? e) (not= e aeid))]
-                   {:entity e :priority 72 :zone :workspace :touches (long cnt) :tags #{:touched} :rules [:signal/eval-touched]})
+                 (for [[e cnt] (sort-by (comp - val) touch-counts) :when (and (integer? e) (not= e aeid))]
+                 (let [w? (contains? written-set e)]
+                   (cond-> {:entity e :priority (if w? 82 72) :zone :workspace :touches (long cnt)
+                            :tx (long (get touch-max-tx e 0))
+                            :tags (if w? #{:touched :edited} #{:touched})
+                            :rules (if w? [:signal/eval-touched :signal/branch-written] [:signal/eval-touched])}
+                     w? (assoc :written? true))))
                  (for [tid (rdata/agent-task-ids (or task-db branch-db) ag) :let [e (or (ground/resolve-lookup-eid task-db branch-db [:seon.task/id tid]) (res-eid [:seon.task/id tid]))] :when e] {:entity e :priority 96 :zone :static-prefix :tags #{:active-task} :rules [:seed/task]})
                  (for [item (:seon.agent/pinned ag)
                        :when (and (vector? item) (= 2 (count item)) (not= :seon.health/summary (first item)))
                        :let [e (res-eid item)] :when e]
                    {:entity e :priority 92 :zone :static-prefix :pinned? true :tags #{:pinned} :rules [:seed/pinned]}))
         hydrated (hydrate-merged-candidates main-db branch-db task-db ag (merge-raw-candidates all-raw)
-                                            (:demote-eid sit) inc-evals? enrich? (flag :rich-ns? (not minimal?))
-                                            (long (or (:max-candidates o) 32)))
+                 (:demote-eid sit) inc-evals? enrich? (flag :rich-ns? (not minimal?))
+                 (:max-candidates o))
         vpins (distinct (concat (:virtual-pins world)
                                 (filter #(and (vector? %) (= :seon.health/summary (first %))) (:seon.agent/pinned ag))))
         h-fn (:health-summary-fn o)
@@ -502,8 +483,14 @@
                                    (select-keys ag [:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/pinned :seon.agent/summary :seon.agent/context-prefs]))
                              {:seon/schema :seon.ctx/snapshot})
                      :priority 100 :zone :static-prefix :source :ctx :rules [:seed/ctx] :tx (:max-tx branch-db)}])
-        combined (mapv (fn [c] (let [tc (long (get touch-counts (:entity c) 0))] (if (pos? tc) (assoc c :touches tc) c)))
-                       (concat ctx-item h-items hydrated))]
+        combined (mapv (fn [c]
+                   (let [e (:entity c)
+                         tc (long (get touch-counts e 0))
+                         w? (contains? written-set e)]
+                     (cond-> c
+                       (pos? tc) (assoc :touches (max tc (long (:touches c 0))))
+                       w? (assoc :written? true))))
+                 (concat ctx-item h-items hydrated))]
     (if sem? (ground/attach-semantic-scores main-db branch-db ag combined) combined)))
 
 (defn fix-matches-scope?

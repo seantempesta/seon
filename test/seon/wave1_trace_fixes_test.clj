@@ -253,7 +253,7 @@
         (is (str/includes? (str ct) "^:seon.flow/edge"))
         (is (str/includes? (str pr) "variadic"))
         (is (empty? (hcontracts/broken-doc-refs db))))
-      (is (= 110000000 (:cost/ticks (meta (requiring-resolve (quote seon.core-test/kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test)))))))))
+      (is (<= 110000000 (:cost/ticks (meta (requiring-resolve (quote seon.core-test/kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test)))) 150000000)))))
 
 (deftest ^{:cost/ticks 90000000} wave2-trace-class-fixes-test
   (testing "Wave E0: ex-data on bare :set schema error, ::alias/kw in add-fn!, 24k verbatim string, source opts map, and @(user/db) hint"

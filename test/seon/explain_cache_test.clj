@@ -24,7 +24,9 @@
             [seon.store :as store]
             [seon.test-fixture :refer [with-test-store]]
             [seon.ctx :as ctx]
-            [seon.render.wire :as wire]))
+            [seon.render.wire :as wire]
+            [seon.ctx.touches :as ctouches]
+            [seon.code.analyze :as analyze]))
 
 (deftest ^{:cost/ticks 25000000} four-signal-rank-modifiers-and-phase-weights-test
   (testing "Optional 4th :semantic signal, :rank/boost / :rank/suppress modifiers, and phase-rank-weights"
@@ -324,3 +326,54 @@
     (is (some? touched-c) "Live :seon.agent.eval/touched EID enters unified candidate pool")
     (is (= 2 (:touches touched-c)) "Cumulative live touch count populates :touches for rank-candidates")
     (is (< (count (:tiles w-min)) (count (:tiles w-full))) "Minimal context-prefs trims non-essential tiles cleanly"))))
+
+(deftest ^{:cost/ticks 70000000} derived-raw-datahike-touches-set-diff-and-zero-storage-test
+  (testing "Uncapped extraction (>300 EIDs), pure set-difference novelty/recurrence, raw d/changes branch writes, and $wm :world/touched schema rule firing with zero persisted :touched-refs"
+    (let [entries (mapv (fn [i] [{:e (+ 2000 i) :a :seon.code.var/name} {:e (+ 2000 i) :a :seon.code.var/name}]) (range 340))
+          uncapped (analyze/extract-domain-touched-eids nil entries nil nil nil)]
+      (is (= 340 (count uncapped)) "Uncapped extract-domain-touched-eids must not clip at 64 or 256"))
+    (let [an (ctouches/analyze-touch-sets
+              [{:turn 1 :tx 10 :read-eids #{101 102 103}}
+               {:turn 2 :tx 20 :read-eids #{102 104}}
+               {:turn 3 :tx 30 :read-eids #{102 104 105}}]
+              {104 {:writes 1 :max-tx 25}})]
+      (is (= #{101 102 103} (:novel (nth (:by-turn an) 0))))
+      (is (= #{} (:recurrent (nth (:by-turn an) 0))))
+      (is (= #{104} (:novel (nth (:by-turn an) 1))))
+      (is (= #{102} (:recurrent (nth (:by-turn an) 1))))
+      (is (= #{105} (:novel (nth (:by-turn an) 2))))
+      (is (= #{102 104} (:recurrent (nth (:by-turn an) 2))))
+      (is (= 3 (get (:counts an) 102)) "3 reads => 3 touches")
+      (is (= 4 (get (:counts an) 104)) "2 reads + 1 write (+2) => 4 touches")
+      (is (= #{104} (:written an)))
+      (is (= 5 (:total-unique an))))
+    (is (:ok? (schema/stress-var nil 'seon.ctx.touches/analyze-touch-sets {:samples 100 :seed 42})))
+    (with-test-store [{:keys [conn cfg]}]
+      (let [aid :agent/derived-probe
+            src-v1 "(ns demo.derived.mod)\n\n(defn alpha [x] (inc x))\n(defn beta [x] (dec x))\n"
+            src-v2 "(ns demo.derived.mod)\n\n(defn alpha [x] (+ x 10))\n(defn beta [x] (dec x))\n"]
+        (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/demo/derived/mod.clj" src-v1 false)
+                                           [{:seon.agent/id aid :seon.agent/branch :branch/derived-probe}])})
+        (store/branch! conn :main :branch/derived-probe)
+        (let [bconn (store/connect cfg :branch/derived-probe)]
+          (try
+            (let [alpha-eid (:e (first (d/datoms @bconn :avet :seon.code.var/name 'demo.derived.mod/alpha)))
+                  beta-eid (:e (first (d/datoms @bconn :avet :seon.code.var/name 'demo.derived.mod/beta)))]
+              (ctouches/clear-live-reads! @bconn aid)
+              ;; Mutate alpha on branch (zero eval :touched persisted) + record live reads on beta
+              (d/transact bconn {:tx-data (code/file-import-tx @bconn "src/demo/derived/mod.clj" src-v2 false)})
+              (ctouches/record-live-reads! @bconn aid 1 [beta-eid])
+              (ctouches/record-live-reads! @bconn aid 2 [beta-eid])
+              (let [dt (ctouches/derived-agent-touches @conn @bconn aid)
+                    {:keys [candidates]} (ctx/gather-agent-candidates @conn @bconn aid {:target :wire :use-cache? false :semantic? false})
+                    by-e (into {} (map (juxt :entity identity)) candidates)
+                    var-sch-eid (:e (first (d/datoms @bconn :avet :seon.schema/key :seon.code.var/entity)))]
+                (is (contains? (:written dt) alpha-eid) "d/changes branch write must resolve owning var EID")
+                (is (>= (long (get (:counts dt) alpha-eid 0)) 2) "Written var gets +2 write weight")
+                (is (= 2 (get (:counts dt) beta-eid)) "Live in-memory reads accumulate across turns")
+                (is (true? (:written? (get by-e alpha-eid))) "Written flag propagates to unified candidates")
+                (is (= 2 (:touches (get by-e beta-eid))) "Derived live read count propagates to candidates")
+                (is (contains? by-e var-sch-eid) ":rule.ctx/eval-touched-schemas must fire from $wm :world/touched with zero persisted :touched-refs")))
+            (finally
+              (ctouches/clear-live-reads! @bconn aid)
+              (d/release bconn))))))))

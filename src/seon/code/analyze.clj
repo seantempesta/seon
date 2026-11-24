@@ -502,16 +502,17 @@
       (or (= a :db/ident)
           (= ns-s "db")
           (= ns-s "seon.schema")
+          (= ns-s "seon.tx")
           (= ns-s "seon.agent.eval")))))
 
 (defn extract-domain-touched-eids
-  "Extracts up to `limit` (<= 64) distinct domain entity EIDs from bounded `datahike.reads`
-   entries and `persist-tx` ops, excluding `:db/*`, `:seon.schema/*`, `:seon.agent.eval/*`,
-   and `self-agent-eid` with zero extra DB seeks on normal domain reads."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any :any [:maybe :int] :int] [:vector :int]]
-   :cost/ticks 5000000}
+  "Extracts distinct domain entity EIDs from `datahike.reads` entries and `persist-tx` ops,
+   excluding `:db/*`, `:seon.tx/*`, `:seon.schema/*`, `:seon.agent.eval/*`, and `self-agent-eid`.
+   Uncapped when `limit` is nil or non-positive."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any :any [:maybe :int] [:maybe :int]] [:vector :int]]
+   :cost/ticks 15000000}
   [db read-entries persist-tx self-agent-eid limit]
-  (let [lim (min 256 (max 1 (long (or limit 256))))
+  (let [lim (when (and (integer? limit) (pos? (long limit))) (long limit))
         dh-sch (when db (:schema db))
         excluded (volatile! (if (integer? self-agent-eid) #{(long self-agent-eid)} #{}))
         saw-excluded-avet? (volatile! false)
@@ -525,11 +526,11 @@
                                       (and dh-sch (contains? dh-sch el)))
                           (when untyped? (vswap! untyped-eids conj el))
                           (when (and (not (contains? @seen el))
-                                     (< (count @cands) (* 2 lim)))
+                                     (or (nil? lim) (< (count @cands) (* 2 lim))))
                             (vswap! seen conj el)
                             (vswap! cands conj el))))))]
     (when (sequential? read-entries)
-      (doseq [pair (take 512 read-entries)]
+      (doseq [pair read-entries]
         (when (and (vector? pair) (= 2 (count pair)))
           (let [lo (nth pair 0)
                 hi (nth pair 1)
@@ -545,7 +546,7 @@
               (and a (excluded-touched-attr? a))
               (vreset! saw-excluded-avet? true))))))
     (when (sequential? persist-tx)
-      (doseq [op (take 256 persist-tx)]
+      (doseq [op persist-tx]
         (cond
           (and (map? op) (integer? (:db/id op)) (pos? (long (:db/id op))))
           (when-not (some excluded-touched-attr? (remove #{:db/id} (keys op)))
@@ -556,9 +557,10 @@
           (when-not (excluded-touched-attr? (nth op 2))
             (add-cand! (nth op 1) false)))))
     (when (and db @saw-excluded-avet? (seq @untyped-eids))
-      (doseq [el (take 64 @untyped-eids)]
+      (doseq [el @untyped-eids]
         (when-not (contains? @excluded el)
           (when (some #(excluded-touched-attr? (:a %)) (take 4 (d/datoms db :eavt el)))
             (vswap! excluded conj el)))))
-    (let [ex @excluded]
-      (into [] (comp (remove #(contains? ex %)) (take lim)) @cands))))
+    (let [ex @excluded
+          xf (if lim (comp (remove #(contains? ex %)) (take lim)) (remove #(contains? ex %)))]
+      (into [] xf @cands))))

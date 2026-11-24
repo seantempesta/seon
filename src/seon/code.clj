@@ -22,7 +22,8 @@
             [seon.schema.index :as six]
             [datahike.reads :as reads]
             [seon.code.analyze :as analyze]
-            [seon.code.overlay :as overlay]))
+            [seon.code.overlay :as overlay]
+            [seon.ctx.touches :as ctouches]))
 
 (def ^:private ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 
@@ -504,11 +505,6 @@
       (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
       (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage)))
       ok?        (assoc :seon.agent.eval/value (pr-str value))
-      (and (contains? (:schema db) :seon.agent.eval/touched) (seq touched-eids))
-      (assoc :seon.agent.eval/touched touched-eids)
-      (and (contains? (:schema db) :seon.agent.eval/touched-refs) (seq touched-eids))
-      (as-> m (let [refs (into #{} (filter #(and (integer? %) (not= % ag-eid) (first (d/datoms db :eavt %)))) touched-eids)]
-                (if (seq refs) (assoc m :seon.agent.eval/touched-refs refs) m)))
       error      (assoc :seon.agent.eval/error error))))
 
 (defn eval-forms
@@ -551,10 +547,12 @@
             (register-result-var! res-handle value eid res-schema dms dk out-sw code-str))
         persist-tx (when (seq by-ns)
                      (persist-forms-by-ns db by-ns @ir-by-var))
-        touched-eids (when (contains? (:schema db) :seon.agent.eval/touched)
-                       (analyze/extract-domain-touched-eids db @touched-all persist-tx
-                       (when (and db agent-id (contains? (:schema db) :seon.agent/id))
-                         (:e (first (d/datoms db :avet :seon.agent/id agent-id)))) 256))
+        touched-eids (let [ag-eid (when (and db agent-id (contains? (:schema db) :seon.agent/id))
+                    (:e (first (d/datoms db :avet :seon.agent/id agent-id))))
+            eids (analyze/extract-domain-touched-eids db @touched-all persist-tx ag-eid nil)]
+        (when (seq eids)
+          (ctouches/record-live-reads! db (or agent-id :repl) (long (or turn 1)) eids))
+        eids)
         eval-ent (build-eval-entity db {:agent-id agent-id :turn turn :call-index call-index
                                         :call-id call-id :seen-messages seen-messages
                                         :thought thought :reasoning reasoning :intent intent
@@ -578,6 +576,7 @@
      :lmdb-txn-aborted? (boolean (:lmdb-txn-aborted? outcome))
      :poisoned-worker? (boolean (:poisoned-worker? outcome))
      :final-ns final-ns
+     :touched-eids touched-eids
      :tx-data (vec (concat persist-tx [eval-ent]))}))
 
 (defn eval-tool-calls
@@ -621,11 +620,12 @@
                (:final-ns res cur-ns)
                (rest remaining)
                (conj results {:id (or id (str "call-" idx))
-                              :handle (:handle res)
-                              :result-schema (:result-schema res)
-                              :ok? (:ok? res)
-                              :value (:value-str res)
-                              :out (:out res)
-                              :error (:error res)
-                              :ticks (:ticks res)
-                              :ms (:ms res)}))))))
+               :handle (:handle res)
+               :result-schema (:result-schema res)
+               :ok? (:ok? res)
+               :value (:value-str res)
+               :out (:out res)
+               :error (:error res)
+               :ticks (:ticks res)
+               :ms (:ms res)
+               :touched-eids (:touched-eids res)}))))))

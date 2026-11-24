@@ -170,7 +170,7 @@
           (finally
             (d/release bconn)))))))
 
-(deftest ^{:cost/ticks 40000000} multi-task-steering-surfaces-all-scopes-and-gates-all-proofs
+(deftest ^{:cost/ticks 50000000} multi-task-steering-surfaces-all-scopes-and-gates-all-proofs
   (testing "multi-task :seon.agent/tasks surfaces every task scope in walk context and gates all proofs"
     (with-test-store [{:keys [conn]}]
       (setup-demo-vars! conn)

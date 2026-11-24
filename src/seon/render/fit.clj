@@ -98,8 +98,8 @@
                    (or (false? (:seon.test/pass? data)) (:failing-test? c)
                        (tags :failing-test) (rules :rule.ctx/failing-reach-tests)) 0.95
                    (or (some? (:seon.fix/id data)) (:matching-fix? c) (tags :fix)) 0.90
-                   (or (:edited? c) (:branch-edited? c)
-                       (tags :edited) (rules :rule.ctx/edited-var-on-branch)) 0.85
+                   (or (:edited? c) (:branch-edited? c) (:written? c)
+                   (tags :edited) (rules :rule.ctx/edited-var-on-branch)) 0.85
                    (or (and (some? (:seon.task/id data)) (not (:seon.task/done? data)))
                        (:active-task? c) (tags :active-task) (rules :rule.ctx/active-task-and-lineage)) 0.75
                    (or (:pinned? c) (tags :pinned) (rules :rule.ctx/pinned-entities)) 0.70

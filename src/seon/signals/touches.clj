@@ -323,9 +323,9 @@
                        {:counts {} :max-tx {}} (:by-turn prior-evs))
          p-extra (if (contains? disabled :rule.ctx/eval-frontier)
                    []
-                   (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen (key %)))) (take 14)
-                                  (map (fn [[e tx]] {:entity e :tx tx :priority 66 :zone :workspace :rules [:rule.ctx/eval-frontier]})))
-                         (sort-by (comp - val) (:max-tx prior))))
+                   (into [] (comp (remove #(or (= (key %) (:agent-eid world)) (seen (key %))))
+                            (map (fn [[e tx]] {:entity e :tx tx :priority 66 :zone :workspace :rules [:rule.ctx/eval-frontier]})))
+                   (sort-by (comp - val) (:max-tx prior))))
          seen2 (into seen (map :entity) p-extra)
          sc-extra (if (contains? disabled :rule.scope/neighbor)
                     []

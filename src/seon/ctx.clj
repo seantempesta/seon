@@ -12,7 +12,8 @@
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
             [seon.store :as store]
-            [seon.ctx.tree :as tree]))
+            [seon.ctx.tree :as tree]
+            [seon.ctx.touches :as ctouches]))
 
 (defonce ^:private ^:seon.flow/edge ctx-rules-cache (store/lru-cache 16))
 
@@ -77,14 +78,25 @@
                              all)))]
       (if (and ms bs) (store/lru-get! ctx-rules-cache 16 [ms bs] load*) (load*)))))
 
-(defn- seed-world-wm [world]
-  (let [conn-facts (mapcat (fn [[e tx]]
-                             (cond-> [[e :world/connected true]]
-                               (pos? (long tx)) (conj [e :world/tx (long tx)])))
-                           (:connected world))
-        pin-facts (map (fn [e] [e :world/pinned true]) (:pinned world))
-        ex-facts (map (fn [e] [e :world/extra-ns true]) (:extra-nss world))]
-    (rules/add-facts (rules/empty-wm) (concat conn-facts pin-facts ex-facts) {:rule :seed/world :stratum 0})))
+(defn- seed-world-wm
+([world] (seed-world-wm world nil))
+([world derived-touches]
+ (let [conn-facts (mapcat (fn [[e tx]]
+                            (cond-> [[e :world/connected true]]
+                              (pos? (long tx)) (conj [e :world/tx (long tx)])))
+                          (:connected world))
+       pin-facts (map (fn [e] [e :world/pinned true]) (:pinned world))
+       ex-facts (map (fn [e] [e :world/extra-ns true]) (:extra-nss world))
+       max-tx-m (or (:max-tx derived-touches) {})
+       written-s (or (:written derived-touches) #{})
+       touch-facts (mapcat (fn [[e cnt]]
+                             (let [tx (long (get max-tx-m e 0))]
+                               (cond-> [[e :world/touched true]
+                                      [e :world/touches (long cnt)]
+                                      [e :world/touched-tx tx]]
+                               (contains? written-s e) (conj [e :world/written? true]))))
+                           (:counts derived-touches))]
+   (rules/add-facts (rules/empty-wm) (concat conn-facts pin-facts ex-facts touch-facts) {:rule :seed/world :stratum 0}))))
 
 (defn related-updates
   "Normal `ns-map -> ns-map` incremental context engine over native Datahike `d/q` + `d/pull` + `datahike.reads`."
@@ -115,7 +127,7 @@
         budget (long (or token-budget 16000))
         ctx-rules (load-context-rules main eff-branch (:seon.ctx/rules req))
         world (or (:seon.ctx/world req) (agent-world-datoms main eff-branch id))
-        base-wm (seed-world-wm world)
+        base-wm (seed-world-wm world (ctouches/derived-agent-touches main eff-branch id))
         step-res (rules/step-rules (:rule-state prev-session) dbs {:agent-id id :base-wm base-wm} ctx-rules tx-datoms eff-target)
         merged (merge-projections dbs (:projections step-res))
         {:keys [projections shown]} (compute-shown-delta (:shown prev-session) merged)
@@ -167,12 +179,15 @@
                 (false? (:include-evals? o)) (conj :rule.ctx/recent-eval-results))
          eff-rs (filterv #(not (skip (:seon.rule/id %))) all-rs)
          world (agent-world-datoms main-db bdb agent-id)
+         minimal? (boolean (if (contains? o :minimal?) (:minimal? o) (:minimal? prefs)))
+         use-lt? (if (contains? o :use-live-touches?) (boolean (:use-live-touches? o)) (not minimal?))
+         derived-t (when use-lt? (ctouches/derived-agent-touches main-db bdb agent-id))
          run-ru (fn []
                   (if (empty? eff-rs)
                     {:projs [] :trace {:agent agent-id :target target :rules-total (count all-rs)
                                        :fired-rules [] :skipped-rules [] :recomputed 0 :skipped (count all-rs)}}
                     (let [dbs {:main main-db :branch bdb :code bdb :task tdb}
-                          sr (rules/step-rules nil dbs {:agent-id agent-id :base-wm (seed-world-wm world)} eff-rs nil target)
+                          sr (rules/step-rules nil dbs {:agent-id agent-id :base-wm (seed-world-wm world derived-t)} eff-rs nil target)
                           runs-s (sort-by (juxt :stratum #(str (:rule-id %))) (vals (:runs sr)))]
                       {:projs (proj/collapse-rule-projections (if-let [zf (:zone-filter o)] (filterv #(= zf (:zone %)) (:projections sr)) (:projections sr)))
                        :trace {:agent agent-id :target target :rules-total (count all-rs)
@@ -184,9 +199,9 @@
          ck (when (and (not (false? (:use-cache? o))) mc bc (empty? disabled) (or (nil? (:rules o)) (keyword? (:rules-tag o))))
             [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb)
              agent-id target (:rules-tag o) (:zone-filter o) (count eff-rs)
-             (rdata/agent-task-ids bdb ag) (:seon.agent/scope ag) (:seon.agent/context-prefs ag) (:seon.agent/target ag) (:seon.agent/pinned ag) (when rules/*base-rules-override* (System/identityHashCode rules/*base-rules-override*))])
+             (rdata/agent-task-ids bdb ag) (:seon.agent/scope ag) (:seon.agent/context-prefs ag) (:seon.agent/target ag) (:seon.agent/pinned ag) (:sig derived-t) (when rules/*base-rules-override* (System/identityHashCode rules/*base-rules-override*))])
          ru (if ck (store/lru-get! ctx-ru-cache 24 ck run-ru) (run-ru))
-         cands (proj/augment-and-hydrate-candidates main-db bdb tdb ag world (:projs ru) o)]
+         cands (proj/augment-and-hydrate-candidates main-db bdb tdb ag world (:projs ru) (cond-> o derived-t (assoc :derived-touches derived-t)))]
      {:agent ag :world world :candidates cands :ctx-trace (:trace ru)})))
 
 (defn- build-filtered-neighborhood [db aid]

@@ -16,7 +16,8 @@
             [seon.test :as stest]
             [seon.repl :as repl]
             [seon.code.reach :as reach]
-            [seon.fork.calls :as fcalls]))
+            [seon.fork.calls :as fcalls]
+            [seon.ctx.touches :as ctouches]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -138,34 +139,39 @@
                                   (store/validate-tx-data! db1 [{:seon.alloc.guard/tag 12345}])))))))))
 
 (deftest eval-touched-domain-eids-test
-  (testing "eval-forms/eval-tool-calls records <= 64 distinct domain EIDs in :seon.agent.eval/touched, excluding meta/schema/eval/self EIDs"
-    (with-test-store [{:keys [conn]}]
-      (let [agent-id :agent/touched-probe
-            sample-src "(ns seon.touched-demo)\n\n(defn target-fn \"Demo doc.\" [x] (inc x))\n"
-            import-tx (code/file-import-tx @conn "src/seon/touched_demo.clj" sample-src false)]
-        (d/transact conn {:tx-data (conj import-tx {:seon.agent/id agent-id :seon.agent/interactive? true :seon.agent/branch :main})})
-        (let [db0 @conn
-              var-eid (:e (first (d/datoms db0 :avet :seon.code.var/name (quote seon.touched-demo/target-fn))))
-              agent-eid (:e (first (d/datoms db0 :avet :seon.agent/id agent-id)))
-              sch-eid (:e (first (d/datoms db0 :avet :seon.schema/key :seon.agent/entity)))
-              ;; Evaluate pulls touching the target var, a schema entity, and the agent itself
-              _ (intern (create-ns (quote user)) (quote _touched_test_db) db0)
-              tc (code/eval-tool-calls
-                  conn {:agent-id agent-id :turn 1}
-                  [{:id "tc-pull"
-                    :code "(do (datahike.api/pull user/_touched_test_db (quote [:seon.code.var/name :seon.code.var/doc]) [:seon.code.var/name (quote seon.touched-demo/target-fn)]) (datahike.api/pull user/_touched_test_db (quote [*]) [:seon.schema/key :seon.agent/entity]) (datahike.api/pull user/_touched_test_db (quote [:seon.agent/id :seon.agent/router?]) [:seon.agent/id :agent/touched-probe]) :ok)"}])
-              db1 @conn
-              eval-e (:e (first (d/datoms db1 :avet :seon.agent.eval/agent agent-id)))
-              touched (:seon.agent.eval/touched (d/pull db1 (quote [:seon.agent.eval/touched]) eval-e))
-              tset (set touched)]
-          (is (true? (:ok? tc)))
-          (is (vector? touched))
-          (is (<= (count touched) 64))
-          (is (every? integer? touched))
-          (is (contains? tset var-eid) "Touched domain var EID must be recorded")
-          (is (not (contains? tset agent-eid)) "Agent own EID must be excluded")
-          (is (not (contains? tset sch-eid)) "Schema entity EID must be excluded")
-          (is (not (contains? tset eval-e)) "Eval entity EID must be excluded"))))))
+(testing "eval-forms/eval-tool-calls captures uncapped domain EIDs in live memory and :results with ZERO persisted :touched/:touched-refs LMDB bloat"
+  (with-test-store [{:keys [conn]}]
+    (let [agent-id :agent/touched-probe
+          sample-src "(ns seon.touched-demo)\n\n(defn target-fn \"Demo doc.\" [x] (inc x))\n"
+          import-tx (code/file-import-tx @conn "src/seon/touched_demo.clj" sample-src false)]
+      (d/transact conn {:tx-data (conj import-tx {:seon.agent/id agent-id :seon.agent/interactive? true :seon.agent/branch :main})})
+      (let [db0 @conn
+            var-eid (:e (first (d/datoms db0 :avet :seon.code.var/name (quote seon.touched-demo/target-fn))))
+            agent-eid (:e (first (d/datoms db0 :avet :seon.agent/id agent-id)))
+            sch-eid (:e (first (d/datoms db0 :avet :seon.schema/key :seon.agent/entity)))
+            _ (ctouches/clear-live-reads! db0 agent-id)
+            _ (intern (create-ns (quote user)) (quote _touched_test_db) db0)
+            tc (code/eval-tool-calls
+                conn {:agent-id agent-id :turn 1}
+                [{:id "tc-pull"
+                  :code "(do (datahike.api/pull user/_touched_test_db (quote [:seon.code.var/name :seon.code.var/doc]) [:seon.code.var/name (quote seon.touched-demo/target-fn)]) (datahike.api/pull user/_touched_test_db (quote [*]) [:seon.schema/key :seon.agent/entity]) (datahike.api/pull user/_touched_test_db (quote [:seon.agent/id :seon.agent/router?]) [:seon.agent/id :agent/touched-probe]) :ok)"}])
+            db1 @conn
+            eval-e (:e (first (d/datoms db1 :avet :seon.agent.eval/agent agent-id)))
+            stored (d/pull db1 (quote [:seon.agent.eval/touched :seon.agent.eval/touched-refs]) eval-e)
+            returned (:touched-eids (first (:results tc)))
+            live-set (get (ctouches/live-reads-for db1 agent-id) 1 #{})
+            tset (set returned)]
+        (is (true? (:ok? tc)))
+        (is (nil? (:seon.agent.eval/touched stored)) "Zero derived :seon.agent.eval/touched persisted to LMDB")
+        (is (nil? (:seon.agent.eval/touched-refs stored)) "Zero derived :seon.agent.eval/touched-refs persisted to LMDB")
+        (is (vector? returned))
+        (is (every? integer? returned))
+        (is (contains? tset var-eid) "Touched domain var EID must be captured live")
+        (is (contains? live-set var-eid) "Touched domain var EID recorded in live in-memory ring")
+        (is (not (contains? tset agent-eid)) "Agent own EID must be excluded")
+        (is (not (contains? tset sch-eid)) "Schema entity EID must be excluded")
+        (is (not (contains? tset eval-e)) "Eval entity EID must be excluded")
+        (ctouches/clear-live-reads! db1 agent-id))))))
 
 (deftest stale-branch-base-merged-candidate-overlay-and-overrides-test
   (testing "Parallel branch forked before :main advances tests exact post-merge candidate schemas, rules, and spliced callers"

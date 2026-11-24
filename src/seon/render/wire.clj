@@ -202,7 +202,7 @@ rtails/fallback-entity-renderers)
 (defn- fit-wire-pool [{:keys [all-items walk-db rule-trace]} main-db opts]
   (let [budget (long (or (:token-budget opts) 16000))
         tail-budget (min budget (long (or (:tail-token-budget opts) 2000)))
-        strategy (or (:strategy opts) :breadth-first)
+        strategy (or (:strategy opts) :depth-first)
         base-opts (cond-> {:target :wire :strategy strategy :main-db main-db
                :already-shown (:already-shown opts) :weights (:weights opts)
                :fallback-renderers fallback-entity-renderers}
