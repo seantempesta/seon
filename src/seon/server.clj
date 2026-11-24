@@ -242,13 +242,14 @@
 (defn- ^:seon.flow/edge eval-route
   "Resolves the target branch for an `:eval` request and returns the `:eval` out-map."
   [st req reply-ch]
-  (let [aid (:agent-id req)
-        raw-b (or (:branch req)
-                  (when aid
-                    (:seon.agent/branch (d/pull @(:conn st) '[:seon.agent/branch] [:seon.agent/id aid])))
-                  :branch/repl)
-        b (if (= raw-b :main) :branch/repl raw-b)]
-    {:eval [(assoc req :branch b :reply-ch reply-ch)]}))
+  (let [aid (or (:agent-id req) (:agent req))
+      raw-b (or (:branch req)
+                (when aid
+                  (:seon.agent/branch (d/pull @(:conn st) (quote [:seon.agent/branch]) [:seon.agent/id aid])))
+                :branch/repl)
+      b (if (= raw-b :main) :branch/repl raw-b)]
+  {:eval [(cond-> (assoc req :branch b :reply-ch reply-ch)
+            aid (assoc :agent-id aid))]}))
 
 (defn- ^:seon.flow/edge import-file-op
   "Handles an `:import-file` request: imports `path`/`text` into `b` and returns the routing out-map."
