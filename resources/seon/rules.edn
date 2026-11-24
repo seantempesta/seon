@@ -250,7 +250,6 @@
   :seon.rule/id :rule.ctx/active-task-and-lineage}
  {:seon.rule/query [:find
                     ?other-id
-                    ?mode
                     ?pri
                     ?tx
                     :in
@@ -259,10 +258,10 @@
                     ?agent
                     :where
                     (or-join
-                     [?agent ?other-id ?mode ?pri ?tx]
+                     [?agent ?other-id ?pri ?tx]
                      (and
                       (or-join
-                       [?agent ?ag ?other-id ?tx]
+                       [?agent ?other-id ?tx]
                        (and
                         [$branch ?ag :seon.agent/id ?agent]
                         [$branch ?ag :seon.agent/forked-from ?other ?tx]
@@ -271,25 +270,6 @@
                         [$main ?ag :seon.agent/id ?agent]
                         [$main ?ag :seon.agent/forked-from ?other ?tx]
                         [$main ?other :seon.agent/id ?other-id]))
-                      (or-join
-                       [?agent ?mode]
-                       (and
-                        [$branch ?a1 :seon.agent/id ?agent]
-                        [$branch ?a1 :seon.agent/prefix-mode ?mode])
-                       (and
-                        [$main ?a2 :seon.agent/id ?agent]
-                        [$main ?a2 :seon.agent/prefix-mode ?mode])
-                       (and
-                        (not-join
-                         [?agent]
-                         [$branch ?a3 :seon.agent/id ?agent]
-                         [$branch ?a3 :seon.agent/prefix-mode _])
-                        (not-join
-                         [?agent]
-                         [$main ?a4 :seon.agent/id ?agent]
-                         [$main ?a4 :seon.agent/prefix-mode _])
-                        [(ground :continue) ?mode]))
-                      [(not= ?mode :fresh)]
                       [(ground 100) ?pri])
                      (and
                       (or-join
@@ -326,16 +306,14 @@
                         [$main ?ex :seon.agent/paused? true]
                         [$main ?ex :seon.agent/id ?other-id]
                         [(not= ?other-id ?agent)]))
-                      [(ground :example) ?mode]
                       [(ground 90) ?pri]))],
   :seon.rule/target :wire,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity [:seon.agent/id ?other-id],
                       :zone :agent-prefix,
                       :priority ?pri,
-                      :tx ?tx,
-                      :params {:seon.agent.prefix/mode ?mode, :seon.agent.prefix/agent-id ?other-id}}],
-  :seon.rule/doc "Unified agent-prefix projection: surfaces :seon.agent/forked-from (honoring :seon.agent/prefix-mode, default :continue, skipped when :fresh), explicit :example-refs/:examples, AND paused :example/* sessions sharing an assigned :seon.agent/tasks entity.",
+                      :tx ?tx}],
+  :seon.rule/doc "Self-assembling agent-prefix projection: surfaces :seon.agent/forked-from parent, explicit :example-refs/:examples, and paused :example/* sessions sharing an assigned :seon.agent/tasks entity with zero mode enums.",
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/agent-prefix-sessions}

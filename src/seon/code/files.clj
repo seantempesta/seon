@@ -461,7 +461,7 @@
 (def ledger-files
   "Declarative append-only EDN ledgers serialized to disk on merge and re-imported on fresh store boot."
   {"resources/seon/fixes.edn"     {:id-attr :seon.fix/id     :header ";; Declarative Seon class-fix ledger (resources/seon/fixes.edn — loaded on fresh install, written back on green merge).\n"}
-   "resources/seon/summaries.edn" {:id-attr :seon.summary/id :header ";; Declarative Seon Chronicle summaries (resources/seon/summaries.edn — loaded on fresh install, written back on green merge).\n"}})
+   })
 
 (defn ledger-file-path?
   "True for declarative EDN ledger paths (`resources/seon/fixes.edn`, `resources/seon/summaries.edn`)."

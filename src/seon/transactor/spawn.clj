@@ -172,7 +172,7 @@
                target-ref (assoc :seon.agent/target target-ref)
                fork-eid (assoc :seon.agent/forked-from fork-eid)
                fork-commit (assoc :seon.agent/fork-commit fork-commit)
-               (:prefix-mode fspec) (assoc :seon.agent/prefix-mode (:prefix-mode fspec))
+               
                (some? (:merge-target fspec)) (assoc :seon.agent/merge-target (:merge-target fspec))
                (seq ex-kws) (assoc :seon.agent/examples ex-kws)
                (seq ex-refs) (assoc :seon.agent/example-refs ex-refs)))

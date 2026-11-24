@@ -2370,3 +2370,9 @@ Questions still waiting on the owner; THE PLAN's blockers are in [plan](plan.md)
 - Root's external channels (`:to-writer`, `:back`, `:ext`, `:events`) as declared Flow `:conns`?
 - The render proc's render-once caches as units with a `:container`?
 - Do `seon.cost` and `seon.profile` belong in the release binary or with the drivers?
+## 2026-11-24: Self-assembling agents, real data returns, derived touches, and live Canvas
+- **Retire all role enums (`:seon.agent/role`) and hand-crafted mode enums (`:seon.agent/prefix-mode`)** (owner, 2026-11-24): One unified agent entity whose context and UI self-assemble purely from Datahike graph edges (`:seon.agent/tasks`, `:seon.agent/forked-from`, `:seon.agent/target`, `:seon.agent/example-refs`, `:seon.agent/read-branch`, `:seon.agent/router?`).
+- **Real data returns from REPL tool calls, never fake `; comment` headers** (owner, 2026-11-24): This REPL is for agents, not humans; return structured Clojure data stored automatically in `result/<id>` so agents can inspect and pass results directly.
+- **No artificial caps and no storing derived read-sets** (owner, 2026-11-24): Derive touched/important entities from raw Datahike (`d/history`, `:seon.tx/agent`, indexes, and uncapped live `datahike.reads` sets with `set/difference`) rather than writing capped `:touched-refs` copies into LMDB.
+- **1-or-more `:seon.agent/tasks`, retire scalar `:seon.agent/task` and untyped `:seon.agent/memory`** (owner, 2026-11-24): All assigned tasks must pass; keep task ownership distinct from example/review agent linkage; store durable notes in task fields or schemad graph entities.
+- **Auto-updating live Canvas + optional agent override** (owner, 2026-11-24): Canvas updates automatically from live agent activity (thinking, spawned/forked subagents, streaming call results, diffs) while still allowing an agent to directly write/override a focal display slot; time-travel uses `d/as-of`, not static `summaries.edn` lists.

@@ -276,12 +276,13 @@
                         m2 ref-ks))))
           tx-data)))
 
-(defn resolve-fork-spec
-  "Resolves `:fork-from` / `:forked-from`, `:prefix-mode`, and `:merge-target` against `conn` / `db0` into `{:fork-eid :fork-parent :src-branch :fork-commit :prefix-mode :merge-target :auto-merge? :resolve-eid}`."
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map] :map], :seon.flow/edge true}
+(defn ^:seon.flow/edge resolve-fork-spec
+  "Resolves `:fork-from` / `:forked-from` (session+branch continuation), `:branch-from` (code branch without transcript continuation), and `:merge-target` against `conn` / `db0`."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map] :map] :seon.flow/edge true}
   [conn db0 msg]
   (let [dh (:schema db0)
         raw-fork (or (:fork-from msg) (:forked-from msg))
+        raw-bfrom (:branch-from msg)
         res-eid (fn [x]
                   (cond (integer? x) x
                         (and (vector? x) (= 2 (count x))) (:e (first (d/datoms db0 :avet (first x) (second x))))
@@ -289,8 +290,12 @@
                         :else nil))
         fork-eid (when (and raw-fork (contains? dh :seon.agent/forked-from)) (res-eid raw-fork))
         fork-parent (when fork-eid (d/pull db0 '[:seon.agent/id :seon.agent/branch :seon.agent/scope] fork-eid))
-        parent-branch (or (:seon.agent/branch fork-parent) :main)
-        src-branch (if (and fork-eid (not= parent-branch :main) (store/branch? conn parent-branch))
+        bf-branch (when raw-bfrom
+                    (or (when (and (keyword? raw-bfrom) (store/branch? conn raw-bfrom)) raw-bfrom)
+                        (when-let [be (res-eid raw-bfrom)]
+                          (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] be)))))
+        parent-branch (or (:seon.agent/branch fork-parent) bf-branch :main)
+        src-branch (if (and (not= parent-branch :main) (store/branch? conn parent-branch))
                      parent-branch :main)
         fork-commit (when (and fork-eid (contains? dh :seon.agent/fork-commit))
                       (when-let [fdb (try (store/head conn src-branch) (catch Throwable _ nil))]
@@ -300,12 +305,11 @@
                  (if (or (= mt :main) (= mt :none) (keyword? mt))
                    mt
                    (or (res-eid mt) mt)))
-        pm (when (and (:prefix-mode msg) (contains? dh :seon.agent/prefix-mode)) (:prefix-mode msg))
         eff-auto (if (some? (:auto-merge? msg))
                    (boolean (:auto-merge? msg))
                    (when (= mt :none) false))]
     {:fork-eid fork-eid :fork-parent fork-parent :src-branch src-branch
-     :fork-commit fork-commit :prefix-mode pm :merge-target mt-val
+     :fork-commit fork-commit :merge-target mt-val
      :auto-merge? eff-auto :resolve-eid res-eid}))
 
 (defn handle-call-op!
@@ -366,7 +370,7 @@
                              :seon.agent/auto-merge? eff-auto}
                       fork-eid (assoc :seon.agent/forked-from fork-eid)
                       (:fork-commit fspec) (assoc :seon.agent/fork-commit (:fork-commit fspec))
-                      (:prefix-mode fspec) (assoc :seon.agent/prefix-mode (:prefix-mode fspec))
+                      
                       (some? (:merge-target fspec)) (assoc :seon.agent/merge-target (:merge-target fspec))
                       (and (nil? fork-eid) (first (d/datoms db0 :avet :seon.agent/id :example/recursive-fanout)))
                       (assoc :seon.agent/examples #{:example/recursive-fanout})))

@@ -351,9 +351,9 @@
             (if (seq reasons)
               (let [rid (keyword "review" (str (name aid) "-t" (long (or head-tx 0))))]
               [{:op :transact :tx-data [{:seon.agent/id aid :seon.agent/paused? true}] :reason [:review-pause aid]}
-               {:op :spawn-agent :id rid :parent aid :forked-from aid :prefix-mode :continue
-                :merge-target [:seon.agent/id aid] :tasks [:template/review-and-improve] :auto-merge? true
-                :goal (str "Review " aid " (triggered by " (pr-str reasons) ")")}] )
+               {:op :spawn-agent :id rid :parent aid :forked-from aid
+               :merge-target [:seon.agent/id aid] :tasks [:template/review-and-improve] :auto-merge? true
+               :goal (str "Review " aid " (triggered by " (pr-str reasons) ")")}] )
               []))))
 
       :else [])))

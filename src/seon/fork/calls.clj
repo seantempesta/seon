@@ -129,7 +129,7 @@
     {:sent-to to :type msg-type}))
 
 (defn ^:seon.flow/edge spawn-agent!
-  "Spawns a normal or COW-forked agent on a branch via unified `:op :spawn-agent`. Supports `:id`, `:branch`, `:scope`, `:goal`, `:task`, `:tasks`, `:fork-from`, `:prefix-mode` (`:continue`/`:example`/`:fresh`), `:merge-target` (`:main`, `:none`, branch kw, or `[:seon.agent/id parent]`), `:auto-merge?`, `:pause-parent?`, `:examples`, `:target`."
+  "Spawns an agent on a branch via unified `:op :spawn-agent`. Supports `:id`, `:branch`, `:scope`, `:goal`, `:tasks`, `:fork-from` (inherit branch + open session prefix), `:branch-from` (inherit code branch only), `:merge-target` (`:main`, `:none`, branch kw, or `[:seon.agent/id parent]`), `:auto-merge?`, `:pause-parent?`, `:target`."
   {:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
   [{:keys [id branch] :as spec}]
   (when-let [{:keys [agent-id]} *agent-ctx*]

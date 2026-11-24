@@ -29,7 +29,7 @@
     :seon.rule/id        (when (qualified-keyword? id-val)
                          "resources/seon/rules.edn")
     :seon.fix/id         "resources/seon/fixes.edn"
-    :seon.summary/id     "resources/seon/summaries.edn"
+    
     :seon.agent/id       (or (:seon.agent/seed-path ent)
                              (when (contains? (:schema theirs-db) :seon.agent/seed-path)
                                (:seon.agent/seed-path (d/pull theirs-db '[:seon.agent/seed-path] [:seon.agent/id id-val])))

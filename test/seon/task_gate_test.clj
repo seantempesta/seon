@@ -323,9 +323,9 @@
                   (finally (d/release pconn))))
             ;; Spawn reviewer WITHOUT passing :examples — rule must match :example/clean-fork-review via shared :seon.agent/tasks!
             [st2 _] (tspawn/handle-spawn-agent! st1 {:op :spawn-agent :id :rev/auto :branch :branch/rev-auto
-                                                     :fork-from :w/parent :prefix-mode :continue
-                                                     :merge-target [:seon.agent/id :w/parent]
-                                                     :tasks [:template/review-and-improve] :goal "Review parent"} (d/commit-id @conn))
+                                                    :fork-from :w/parent
+                                                    :merge-target [:seon.agent/id :w/parent]
+                                                    :tasks [:template/review-and-improve] :goal "Review parent"} (d/commit-id @conn))
             rconn (store/connect cfg :branch/rev-auto)]
         (try
           (let [w (wire/build-live-wire-request @conn @rconn :rev/auto {:conn conn :vision? false})
@@ -336,8 +336,8 @@
           (finally (d/release rconn)))
         (testing "2. :prefix-mode :fresh omits parent transcript while keeping COW branch inheritance"
           (let [[st3 _] (tspawn/handle-spawn-agent! st2 {:op :spawn-agent :id :w/fresh-fork :branch :branch/fresh-fork
-                                                         :fork-from :w/parent :prefix-mode :fresh :merge-target :none
-                                                         :goal "Fresh look"} (d/commit-id @conn))
+                                                        :branch-from :w/parent :merge-target :none
+                                                        :goal "Fresh look"} (d/commit-id @conn))
                 fconn (store/connect cfg :branch/fresh-fork)]
             (try
               (let [w (wire/build-live-wire-request @conn @fconn :w/fresh-fork {:conn conn :vision? false})

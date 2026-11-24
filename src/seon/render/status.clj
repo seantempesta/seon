@@ -48,19 +48,24 @@
     (if (> (count s) n) (str (subs s 0 (max 1 (dec n))) "…") s)))
 
 (defn ^:seon.flow/edge resolve-prefix-agents
-  "ONE unified resolver for `:zone :agent-prefix` projections (`:mode :continue` forks + `:mode :example` refs).
-   Recursively invokes `build-fn` on `:mode :continue` parents at immutable `fork-commit` for ~95%+ KV-cache hit."
+  "ONE self-assembling resolver for `:zone :agent-prefix` projections: derives continuation purely from `ag`'s `:seon.agent/forked-from` graph edge (recursing at `:seon.agent/fork-commit` for KV-cache reuse) and renders other linked agents as closed `<agent>` references."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :any :map [:sequential :map] :int :seon.host/fn] :map]
    :cost/ticks 25000000}
   [main-db branch-db conn ag prefix-items depth build-fn]
   (let [sc (or conn (:store main-db) (:store branch-db))
         pat '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/goal]
+        forked-aid (when-let [ff (:seon.agent/forked-from ag)]
+                     (let [feid (if (map? ff) (:db/id ff) ff)]
+                       (cond
+                         (qualified-keyword? feid) feid
+                         (integer? feid) (or (:seon.agent/id (d/pull branch-db '[:seon.agent/id] feid))
+                                             (:seon.agent/id (d/pull main-db '[:seon.agent/id] feid)))
+                         :else nil)))
         items (->> prefix-items
                    (map (fn [it]
                           (let [ent (:data it)
                                 eid (:entity it)
                                 aid (or (:seon.agent/id ent)
-                                        (get-in it [:params :seon.agent.prefix/agent-id])
                                         (when (and (vector? eid) (= :seon.agent/id (first eid))) (second eid)))
                                 a (cond
                                     (:seon.agent/id ent) ent
@@ -68,10 +73,10 @@
                                     (let [b (d/pull branch-db pat [:seon.agent/id aid])]
                                       (if (:seon.agent/id b) b (d/pull main-db pat [:seon.agent/id aid])))
                                     :else nil)
-                                mode (or (get-in it [:params :seon.agent.prefix/mode]) :example)]
-                            (when (:seon.agent/id a) {:agent a :mode mode}))))
+                                cont? (and (some? forked-aid) (= (:seon.agent/id a) forked-aid))]
+                            (when (:seon.agent/id a) {:agent a :cont? cont?}))))
                    (remove nil?)
-                   (sort-by (fn [{:keys [agent mode]}] [(if (= :continue mode) 0 1) (str (:seon.agent/id agent))]))
+                   (sort-by (fn [{:keys [agent cont?]}] [(if cont? 0 1) (str (:seon.agent/id agent))]))
                    (reduce (fn [{:keys [seen out]} item]
                              (let [aid (:seon.agent/id (:agent item))]
                                (if (contains? seen aid)
@@ -79,8 +84,8 @@
                                  {:seen (conj seen aid) :out (conj out item)})))
                            {:seen #{} :out []})
                    :out)
-        cont (when (< depth 4) (first (filter #(= :continue (:mode %)) items)))
-        ex-items (filterv #(= :example (:mode %)) items)
+        cont (when (< depth 4) (first (filter :cont? items)))
+        ex-items (filterv (comp not :cont?) items)
         cont-res (when cont
                    (let [pa (:agent cont)
                          pid (:seon.agent/id pa)

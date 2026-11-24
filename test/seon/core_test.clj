@@ -1304,10 +1304,10 @@
               ftxt (code/render-path db "resources/seon/fixes.edn")
               stxt (code/render-path db "resources/seon/summaries.edn")]
           (is (= "resources/seon/fixes.edn" (merge/entity->disk-path db db :seon.fix/id fid nil)))
-          (is (= "resources/seon/summaries.edn" (merge/entity->disk-path db db :seon.summary/id sid nil)))
+          (is (nil? (merge/entity->disk-path db db :seon.summary/id sid nil)))
           (is (string? ftxt)) (is (str/includes? ftxt ":test/demo-class"))
-          (is (string? stxt)) (is (str/includes? stxt "Demo"))
+          (is (nil? stxt))
           (let [ftx (code/file-import-tx nil "resources/seon/fixes.edn" ftxt false)
-                stx (code/file-import-tx nil "resources/seon/summaries.edn" stxt false)]
+                stx nil]
             (is (= [fid] (mapv :seon.fix/id ftx)))
-            (is (= [sid] (mapv :seon.summary/id stx)))))))))
+            (is (nil? stx))))))))

@@ -31,7 +31,6 @@ External sessions and Seon agents use the exact same entity-driven runtime primi
 4. **Thin wrappers only.** `bin/mcp` (stdio relay to `POST /mcp`) and `bin/seon` (CLI relay to `POST /op`) hold zero logic. Any missing capability belongs in `src/seon/`, not in shell scripts beside it.
 
 ## 3. Engineering Discipline
-
 - **Search prior work first.** Before adding any function, schema, or mechanism, search existing namespaces (`user/search`, `user/grep-src`, `user/ns-outline`, `docs/`) and extend or replace the existing mechanism. Delete superseded code in the same merge so the codebase shrinks as it improves.
 - **Design to the lower bound.** Work out `n`, big-O, ticks, and bytes before coding. Prefer indexed Datahike reads (`(d/datoms db :avet/:aevt ...)`) over full scans or `d/q` inside loops. Respect the **256 MB** eval allocation cap (`:seon.config/eval-bytes`) and **`< 8,000` token** namespace budget (`:oversized-namespace`).
 - **One schema authority.** Every stored attribute is derived from a co-located multi-segment Malli schema (`resources/seon/schemas.edn`) and checked at the write seam (`seon.store/validate-tx-data!`). Pure functions carry `:malli/schema` (predicate symbols like `number?`, `pos-int?`, never `:number`) and `:cost/ticks` metadata so `seed = 42` generative checks prove them automatically and `:seon.code.var/input` / `:seon.code.var/output` edges link the program graph mechanically.
@@ -39,6 +38,7 @@ External sessions and Seon agents use the exact same entity-driven runtime primi
 - **No external project code in Datahike.** Datahike holds Seon's own code, docs, tasks, schemas, and telemetry. External polyglot repositories (e.g., Harbor / Terminal-Bench containers) are edited through `seon.fork.container` (`user/sh!`, `user/fs-read`, `user/fs-write`, `user/fs-patch`).
 - **Never rig benchmarks.** Internal benchmark rounds MUST dispatch real `:seon.task/*` entities via `:op :create-task` + `:op :spawn-agent` with rough 1–2 sentence descriptions (zero spoon-fed recipes, schemas, or test paths) ([bench](docs/bench.md)).
 
+- **Zero role enums, zero hand-crafted mode enums, zero artificial caps, zero stored derived data (owner, 2026-11-24).** Agents self-assemble context purely from their Datahike graph edges (`:seon.agent/tasks`, `:seon.agent/forked-from`, `:seon.agent/target`, `:seon.error/_agent-ref`, `:seon.agent.eval/_agent-ref`), never from hardcoded role/mode enums (`:role`, `:prefix-mode`). Never add arbitrary entity/datom truncation caps or persist derived read-sets to LMDB when they can be derived cleanly from Datahike history, indexes, and live in-memory `datahike.reads` sets.
 ## 4. Architecture & Docs Map
 
 - [docs/principles.md](docs/principles.md) — The 7 founding principles and what enforces them.
