@@ -175,7 +175,7 @@
                        (-> prev
                            (assoc :priority (max (long (:priority prev 50)) (long (:priority it 50)))
                                   :tx (max (long (:tx prev 0)) (long (:tx it 0)))
-                                  :zone (if (= :ephemeral-tail (:zone it)) :ephemeral-tail (or (:zone prev) (:zone it)))
+                                  :zone (cond (or (= :agent-prefix (:zone prev)) (= :agent-prefix (:zone it))) :agent-prefix (= :ephemeral-tail (:zone it)) :ephemeral-tail :else (or (:zone prev) (:zone it)))
                                   :pinned? (boolean (or (:pinned? prev) (:pinned? it)))
                                   :rules (vec (distinct (concat (:rules prev) (:rules it))))
                                   :tags (into (set (:tags prev)) (:tags it))
@@ -200,7 +200,17 @@
                   merged)]
     (vec
      (keep (fn [[eid item]]
-             (when (integer? eid)
+             (cond
+               (and (vector? eid) (= 2 (count eid)) (= :seon.agent/id (first eid)))
+               (let [b (d/pull branch-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/goal] eid)
+                     ent (if (:seon.agent/id b)
+                           b
+                           (when-not same-mb?
+                             (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/role :seon.agent/goal] eid)))]
+                 (when (:seon.agent/id ent)
+                   (assoc item :entity eid :data ent)))
+
+               (integer? eid)
                (let [t-b (when-not same-tb? (d/pull task-db '[*] eid))
                      b (d/pull branch-db '[*] eid)
                      use-t? (boolean (and (map? t-b) (:seon.task/id t-b)))
@@ -247,14 +257,15 @@
       (or green? (not any-tests?)) (conj :rule.ctx/failing-reach-tests)
       (not errs?) (conj :rule.ctx/fault-with-recommended-fix)
       (and (not errs?) (not evs?)) (conj :rule.ctx/error-neighborhood)
-      same? (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
+      (or same? (and (some? (:seon.agent/forked-from ag)) (not evs?))) (conj :rule.ctx/edited-var-on-branch :rule.ctx/edited-var-callers)
       (not has-task?) (conj :rule.ctx/active-task-and-lineage)
       (and (not has-scope?) (not has-extra?)) (conj :rule.ctx/scope-and-extra-namespaces)
       (and (not has-scope?) (or has-task? (not (or (:seon.agent/router? ag) (= :coordinator (:seon.agent/role ag))))))
       (conj :rule.ctx/scope-task-history-and-fixes)
       (not any-docs?) (conj :rule.ctx/citing-docs)
       (not evs?) (conj :rule.ctx/recent-eval-results)
-      (not (:seon.agent/target ag)) (conj :rule.ctx/review-target)
+      (and (not (:seon.agent/target ag)) (not (:seon.agent/forked-from ag))) (conj :rule.ctx/review-target)
+      (and (not (:seon.agent/forked-from ag)) (empty? (:seon.agent/example-refs ag)) (empty? (:seon.agent/examples ag))) (conj :rule.ctx/agent-prefix-sessions)
       (and (not evs?) (not errs?) (empty? (:seon.agent/pinned ag)) (not has-task?) (not has-scope?))
       (conj :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns))))
 
@@ -281,7 +292,7 @@
       {})))
 
 (def ^:private volatile-rev-ref-attrs
-  #{:seon.agent/parent-ref :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.agent.eval/agent-ref :seon.error/agent-ref})
+  #{:seon.agent/parent-ref :seon.agent/forked-from :seon.agent/target :seon.agent/example-refs :seon.agent.call/caller-ref :seon.agent.call/callee-ref :seon.agent.eval/agent-ref :seon.error/agent-ref})
 
 (defn agent-world-datoms
   "Generic 2-read agent discovery: forward `:eavt` merged by latest `:tx` (resolving `:pinned`, `:curated`,
@@ -299,7 +310,7 @@
       {:agent-eid nil :forward [] :reverse [] :reverse-attrs [] :reverse-ephemeral {}
        :connected {} :pinned #{} :curated #{} :extra-nss #{} :virtual-pins []}
       (let [fwd (merge-forward-datoms main-db bdb agent-eid)
-            rev-attrs (reverse-agent-ref-attrs bdb)
+            rev-attrs (vec (remove #{:seon.agent/example-refs} (reverse-agent-ref-attrs bdb)))
             same? (same-db? bdb main-db)
             rev-ds (vec (distinct
                          (mapcat (fn [a]
@@ -357,8 +368,9 @@
                       :priority (reduce max 50 (map #(long (or (:priority %) 50)) ordered))
                       :parent (last (keep :parent ordered))
                       :zone (let [zs (keep :zone ordered)]
-                      (cond (some #{:ephemeral-tail} zs) :ephemeral-tail
-                            (seq zs) (last zs) :else :workspace))
+                      (cond (some #{:agent-prefix} zs) :agent-prefix
+                      (some #{:ephemeral-tail} zs) :ephemeral-tail
+                      (seq zs) (last zs) :else :workspace))
                       :rules (vec (sort-by str (distinct (keep :rule ordered))))
                       :why (vec (distinct (keep :why ordered)))
                       :tags (into #{} (mapcat #(let [t (:tags %)] (if (coll? t) t (when t [t])))) ordered)

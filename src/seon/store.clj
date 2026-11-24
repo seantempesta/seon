@@ -799,3 +799,23 @@
                 #(datahike.writing/stored->db
                   (datahike.writing/resolve-head s branch raw-head {:sync? true}) s))
       (d/branch-as-db s branch))))
+
+(defn fork-parent-target
+  "If `branch` belongs to a forked agent (`:seon.agent/forked-from`) whose parent lives on a non-`:main` branch, returns `{:agent-id :target-id :target-branch}`."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword [:maybe :keyword]] [:maybe :map]] :cost/ticks 1000000}
+  [main-db branch agent-id]
+  (let [dh (or (:schema main-db) {})]
+    (when (and (contains? dh :seon.agent/forked-from) (contains? dh :seon.agent/id))
+      (let [ag-by-id (when agent-id
+                       (let [a (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/forked-from] [:seon.agent/id agent-id])]
+                         (when (= branch (:seon.agent/branch a)) a)))
+            ag (or ag-by-id
+                   (when (and branch (not= branch :main) (contains? dh :seon.agent/branch))
+                     (some #(let [a (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/forked-from] (:e %))]
+                              (when (= branch (:seon.agent/branch a)) a))
+                           (d/datoms main-db :aevt :seon.agent/forked-from))))
+            feid (let [f (:seon.agent/forked-from ag)] (if (map? f) (:db/id f) f))
+            pa (when (integer? feid) (d/pull main-db '[:seon.agent/id :seon.agent/branch] feid))
+            tb (:seon.agent/branch pa)]
+        (when (and (:seon.agent/id ag) (:seon.agent/id pa) tb (not= tb :main) (not= tb branch))
+          {:agent-id (:seon.agent/id ag) :target-id (:seon.agent/id pa) :target-branch tb})))))

@@ -366,87 +366,157 @@
              (catch Throwable _ n)))
          0 coord-brs)))))
 
-(defn handle-merge-op!
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
-  [st msg prev-cid]
-  (let [{:keys [conn cfg repo-dir fork-out]} st
-        {:keys [branch agent-id branch-tx message]} msg
-        plan (merge/three-way conn cfg branch)]
+(defn- handle-fork-merge-back!
+  [st msg prev-cid branch fpt]
+  (let [{:keys [conn cfg]} st
+        {:keys [agent-id target-id target-branch]} fpt
+        tconn (store/connect cfg target-branch)
+        plan (try (merge/three-way tconn cfg branch {:exclude-agent agent-id :include-session-for target-id})
+                  (catch Throwable ex (d/release tconn) (throw ex)))]
     (if-not (:ok? plan)
-      (handle-merge-conflict! st msg prev-cid branch agent-id plan)
-      (let [old-git (:seon.git/commit (d/pull @conn '[:seon.git/commit] [:seon.git/repo :main]))
-          eff-aid (merge-eff-agent-id @conn branch agent-id)
-          eff-btx (or branch-tx
-                      (try (:max-tx (store/head conn branch)) (catch Throwable _ nil)))
-          r1 (when (seq (:schema-tx plan))
-               (d/transact conn {:tx-data (:schema-tx plan)}))
-          schema-ops (filterv #(and (map? %) (contains? % :seon.schema/key)) (:tx-data plan))
-          rest-ops   (rebind-committed-schema-tempids
-          schema-ops
-          (filterv #(not (and (map? %) (contains? % :seon.schema/key))) (:tx-data plan)))
-          r2 (when (seq schema-ops)
-               (d/transact conn {:tx-data schema-ops}))
-          cur-db @conn
-          branch-db (or (try (store/head conn branch) (catch Throwable _ nil)) cur-db)
-          upserted-vars (into #{} (keep :seon.code.var/name) rest-ops)
-          retracted-vars (into #{}
-                               (keep (fn [op]
-                                       (when (and (vector? op) (= :db/retractEntity (first op))
-                                                  (vector? (second op)) (= :seon.code.var/name (first (second op))))
-                                         (second (second op)))))
-                               rest-ops)
-          gate-res (when eff-aid
-                     (gate/evaluate-agent-gate cur-db branch-db eff-aid
-                                               {:upserted-vars upserted-vars
-                                                :retracted-vars retracted-vars}))
-          repl-aids (repl-aids-to-archive cur-db branch rest-ops)
-          tx-data (-> (cond-> rest-ops
-                        (and eff-aid eff-btx)
-                        (conj {:seon.agent/id eff-aid
-                               :seon.agent/ready? true
-                               :seon.agent/tested-tx (long eff-btx)
-                               :seon.agent/merged-tx (long eff-btx)})
-                        (seq repl-aids)
-                        (into (map (fn [raid] {:seon.agent/id raid :seon.agent/archived? true}) repl-aids)))
-                      (mark-passed-tasks-done (:passed-tasks gate-res))
-                      (into (keep (fn [dt]
-                                    (let [p (d/pull cur-db [:seon.error/id :seon.error/status :seon.error/branch] (:e dt))]
+      (do (d/release tconn)
+          (handle-merge-conflict! st msg prev-cid branch agent-id plan))
+      (let [b-db (or (try (store/head conn branch) (catch Throwable _ nil)) @conn)
+            eff-btx (or (:branch-tx msg) (:max-tx b-db))
+            s-tx (vec (:schema-tx plan))
+            tx-ops (vec (:tx-data plan))
+            has-edits? (boolean (or (seq s-tx) (seq tx-ops)))
+            _ (try
+                (when has-edits?
+                  (let [schema-ops (filterv #(and (map? %) (contains? % :seon.schema/key)) tx-ops)
+                        rest-ops (rebind-committed-schema-tempids schema-ops (filterv #(not (and (map? %) (contains? % :seon.schema/key))) tx-ops))
+                        tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
+                               :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
+                    (when (seq s-tx) (d/transact tconn {:tx-data s-tx}))
+                    (when (seq schema-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data schema-ops})))
+                    (when (seq rest-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data rest-ops})))))
+                (finally (d/release tconn)))
+            db0 @conn
+            summary (when (contains? (:schema b-db) :seon.agent/summary)
+                      (not-empty (str/trim (str (:seon.agent/summary (d/pull b-db '[:seon.agent/summary] [:seon.agent/id agent-id]))))))
+            note-body (if summary
+                        (str "Review by " agent-id " merged into " target-branch
+                             (when (seq (:entity-diffs plan)) (str " (" (count (:entity-diffs plan)) " entity diff(s))"))
+                             ":\n" summary)
+                        (extract-review-note-body conn agent-id branch {:ops (count tx-ops) :conflicts []}))
+            ;; Sync any edited :seon.task/* entities back to :main so task clarity/curated refs stay visible everywhere
+            resolved-errs (when (contains? (:schema db0) :seon.error/kind)
+                            (keep (fn [dt]
+                                    (let [p (d/pull db0 '[:seon.error/id :seon.error/status :seon.error/branch] (:e dt))]
                                       (when (and (= :open (:seon.error/status p)) (= branch (:seon.error/branch p)))
                                         {:seon.error/id (:seon.error/id p) :seon.error/status :resolved})))
-                                  (d/datoms cur-db :avet :seon.error/kind :merge-error))))
-          r3 (when (seq tx-data)
-               (binding [store/*tx-meta* (merge-tx-meta branch eff-aid message)]
-                 (d/transact conn {:tx-data tx-data})))
-          all-ds (concat (:tx-data r1) (:tx-data r2) (:tx-data r3))
-          db @conn
-          cid (d/commit-id db)
-          {:keys [boot-affected?]} (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
-          boot-touched? (or boot-affected? (boolean (some code/boot-file-path? (:touched-paths plan))))
-          _ (sync-coordinator-branches! conn cfg plan branch)
-          _ (store/prune-merged-branches! conn)
-          _ (store/sync! cfg)
-          ans (cond-> {:ok? true
-                       :branch branch
-                       :commit cid
-                       :tx (:max-tx db)
-                       :boot-affected? boot-touched?
-                       :touched-paths (:touched-paths plan)
-                       :auto-fixed (:auto-fixed plan [])
-                       :entity-diffs (:entity-diffs plan)}
-                gate-res (assoc :gate gate-res))]
-      (reply! msg ans)
-      [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-       (cond-> {:db [(db-notice prev-cid db all-ds [:merged branch])]
-                ::flow/report [(str "[:transactor] MERGED " branch " -> :main @ tx " (:max-tx db)
-                                    " (" (count (:entity-diffs plan)) " entities, "
-                                    (count (:touched-paths plan)) " files"
-                                    (when boot-touched? ", BOOT-AFFECTED") ")")]}
-         (and (:commit-git? st) repo-dir (seq (:touched-paths plan)))
-         (assoc :git [{:op :write-back
-                       :branch branch
-                       :commit cid
-                       :expected-sha old-git
-                       :touched-paths (:touched-paths plan)
-                       :deleted-paths (:deleted-paths plan #{})
-                       :boot-affected? boot-touched?
-                       :message (merge-git-commit-message db branch plan boot-touched? message)}]))]))))
+                                  (d/datoms db0 :avet :seon.error/kind :merge-error)))
+            mseq (inc (long (or (:msg-seq st) (count (d/datoms db0 :aevt :seon.agent.message/id)))))
+            mid (random-uuid)
+            ta-paused? (true? (:seon.agent/paused? (d/pull db0 '[:seon.agent/paused?] [:seon.agent/id target-id])))
+            main-tx (cond-> (vec (concat resolved-errs
+                                         [(cond-> {:seon.agent/id agent-id :seon.agent/ready? true}
+                                            eff-btx (assoc :seon.agent/tested-tx (long eff-btx) :seon.agent/merged-tx (long eff-btx))
+                                            (and summary (contains? (:schema db0) :seon.agent/summary)) (assoc :seon.agent/summary summary))
+                                          {:seon.agent.message/id mid :seon.agent.message/seq mseq
+                                           :seon.agent.message/from agent-id :seon.agent.message/to target-id
+                                           :seon.agent.message/type :review-note :seon.agent.message/body note-body}]))
+                      ta-paused? (conj {:seon.agent/id target-id :seon.agent/paused? false}))
+            r (d/transact conn {:tx-data main-tx})
+            db (:db-after r)
+            cid (d/commit-id db)
+            _ (store/prune-merged-branches! conn)
+            _ (store/sync! cfg)
+            ans {:ok? true :fork-merged? true :branch branch :target-branch target-branch :target target-id
+                 :commit cid :tx (:max-tx db) :boot-affected? false :touched-paths (:touched-paths plan)
+                 :entity-diffs (:entity-diffs plan) :message-id mid :summary summary}]
+        (reply! msg ans)
+        [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
+         {:db [(db-notice prev-cid db (:tx-data r) [:fork-merged branch target-branch])]
+          ::flow/report [(str "[:transactor] FORK-MERGED " branch " -> " target-branch " (" (count (:entity-diffs plan)) " entities, resumed " target-id ")")]}]))))
+
+(defn handle-merge-op!
+{:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
+[st msg prev-cid]
+(if-let [fpt (store/fork-parent-target @(:conn st) (:branch msg) (:agent-id msg))]
+  (if (store/branch? (:conn st) (:target-branch fpt))
+  (handle-fork-merge-back! st msg prev-cid (:branch msg) fpt)
+  (handle-merge-conflict! st msg prev-cid (:branch msg) (:agent-id msg)
+    {:ok? false :conflicts [{:entity [:seon.agent/id (:target-id fpt)] :reason :missing-target-branch
+                             :message (str "Fork parent branch " (:target-branch fpt) " no longer exists")}]}))
+  (let [{:keys [conn cfg repo-dir fork-out]} st
+      {:keys [branch agent-id branch-tx message]} msg
+      plan (merge/three-way conn cfg branch)]
+  (if-not (:ok? plan)
+    (handle-merge-conflict! st msg prev-cid branch agent-id plan)
+    (let [old-git (:seon.git/commit (d/pull @conn '[:seon.git/commit] [:seon.git/repo :main]))
+        eff-aid (merge-eff-agent-id @conn branch agent-id)
+        eff-btx (or branch-tx
+                    (try (:max-tx (store/head conn branch)) (catch Throwable _ nil)))
+        r1 (when (seq (:schema-tx plan))
+             (d/transact conn {:tx-data (:schema-tx plan)}))
+        schema-ops (filterv #(and (map? %) (contains? % :seon.schema/key)) (:tx-data plan))
+        rest-ops   (rebind-committed-schema-tempids
+        schema-ops
+        (filterv #(not (and (map? %) (contains? % :seon.schema/key))) (:tx-data plan)))
+        r2 (when (seq schema-ops)
+             (d/transact conn {:tx-data schema-ops}))
+        cur-db @conn
+        branch-db (or (try (store/head conn branch) (catch Throwable _ nil)) cur-db)
+        upserted-vars (into #{} (keep :seon.code.var/name) rest-ops)
+        retracted-vars (into #{}
+                             (keep (fn [op]
+                                     (when (and (vector? op) (= :db/retractEntity (first op))
+                                                (vector? (second op)) (= :seon.code.var/name (first (second op))))
+                                       (second (second op)))))
+                             rest-ops)
+        gate-res (when eff-aid
+                   (gate/evaluate-agent-gate cur-db branch-db eff-aid
+                                             {:upserted-vars upserted-vars
+                                              :retracted-vars retracted-vars}))
+        repl-aids (repl-aids-to-archive cur-db branch rest-ops)
+        tx-data (-> (cond-> rest-ops
+                      (and eff-aid eff-btx)
+                      (conj {:seon.agent/id eff-aid
+                             :seon.agent/ready? true
+                             :seon.agent/tested-tx (long eff-btx)
+                             :seon.agent/merged-tx (long eff-btx)})
+                      (seq repl-aids)
+                      (into (map (fn [raid] {:seon.agent/id raid :seon.agent/archived? true}) repl-aids)))
+                    (mark-passed-tasks-done (:passed-tasks gate-res))
+                    (into (keep (fn [dt]
+                                  (let [p (d/pull cur-db [:seon.error/id :seon.error/status :seon.error/branch] (:e dt))]
+                                    (when (and (= :open (:seon.error/status p)) (= branch (:seon.error/branch p)))
+                                      {:seon.error/id (:seon.error/id p) :seon.error/status :resolved})))
+                                (d/datoms cur-db :avet :seon.error/kind :merge-error))))
+        r3 (when (seq tx-data)
+             (binding [store/*tx-meta* (merge-tx-meta branch eff-aid message)]
+               (d/transact conn {:tx-data tx-data})))
+        all-ds (concat (:tx-data r1) (:tx-data r2) (:tx-data r3))
+        db @conn
+        cid (d/commit-id db)
+        {:keys [boot-affected?]} (sync-runtime-and-fork-parent! conn fork-out prev-cid cid)
+        boot-touched? (or boot-affected? (boolean (some code/boot-file-path? (:touched-paths plan))))
+        _ (sync-coordinator-branches! conn cfg plan branch)
+        _ (store/prune-merged-branches! conn)
+        _ (store/sync! cfg)
+        ans (cond-> {:ok? true
+                     :branch branch
+                     :commit cid
+                     :tx (:max-tx db)
+                     :boot-affected? boot-touched?
+                     :touched-paths (:touched-paths plan)
+                     :auto-fixed (:auto-fixed plan [])
+                     :entity-diffs (:entity-diffs plan)}
+              gate-res (assoc :gate gate-res))]
+    (reply! msg ans)
+    [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+     (cond-> {:db [(db-notice prev-cid db all-ds [:merged branch])]
+              ::flow/report [(str "[:transactor] MERGED " branch " -> :main @ tx " (:max-tx db)
+                                  " (" (count (:entity-diffs plan)) " entities, "
+                                  (count (:touched-paths plan)) " files"
+                                  (when boot-touched? ", BOOT-AFFECTED") ")")]}
+       (and (:commit-git? st) repo-dir (seq (:touched-paths plan)))
+       (assoc :git [{:op :write-back
+                     :branch branch
+                     :commit cid
+                     :expected-sha old-git
+                     :touched-paths (:touched-paths plan)
+                     :deleted-paths (:deleted-paths plan #{})
+                     :boot-affected? boot-touched?
+                     :message (merge-git-commit-message db branch plan boot-touched? message)}]))])))))

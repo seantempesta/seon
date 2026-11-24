@@ -208,6 +208,63 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/active-task-and-lineage}
  {:seon.rule/query [:find
+                    ?other-id
+                    ?mode
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    (or-join
+                     [?agent ?other-id ?mode ?pri ?tx]
+                     (and
+                      (or-join
+                       [?agent ?other-id ?tx]
+                       (and
+                        [$branch ?ag :seon.agent/id ?agent]
+                        [$branch ?ag :seon.agent/forked-from ?other ?tx]
+                        [$branch ?other :seon.agent/id ?other-id])
+                       (and
+                        [$main ?ag :seon.agent/id ?agent]
+                        [$main ?ag :seon.agent/forked-from ?other ?tx]
+                        [$main ?other :seon.agent/id ?other-id]))
+                      [(ground :continue) ?mode]
+                      [(ground 100) ?pri])
+                     (and
+                      (or-join
+                       [?agent ?other-id ?tx]
+                       (and
+                        [$branch ?ag :seon.agent/id ?agent]
+                        [$branch ?ag :seon.agent/example-refs ?other ?tx]
+                        [$branch ?other :seon.agent/id ?other-id])
+                       (and
+                        [$main ?ag :seon.agent/id ?agent]
+                        [$main ?ag :seon.agent/example-refs ?other ?tx]
+                        [$main ?other :seon.agent/id ?other-id])
+                       (and
+                        [$branch ?ag :seon.agent/id ?agent]
+                        [$branch ?ag :seon.agent/examples ?other-id ?tx]
+                        [$main ?other :seon.agent/id ?other-id])
+                       (and
+                        [$main ?ag :seon.agent/id ?agent]
+                        [$main ?ag :seon.agent/examples ?other-id ?tx]
+                        [$main ?other :seon.agent/id ?other-id]))
+                      [(ground :example) ?mode]
+                      [(ground 90) ?pri]))],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity [:seon.agent/id ?other-id],
+                      :zone :agent-prefix,
+                      :priority ?pri,
+                      :tx ?tx,
+                      :params {:seon.agent.prefix/mode ?mode, :seon.agent.prefix/agent-id ?other-id}}],
+  :seon.rule/doc "Unified agent-prefix projection: surfaces :seon.agent/forked-from (:mode :continue) and :seon.agent/example-refs / :seon.agent/examples (:mode :example) into :zone :agent-prefix for mechanical recursive <agent> rendering.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/agent-prefix-sessions}
+ {:seon.rule/query [:find
                     ?ns
                     ?pri
                     ?tx
@@ -471,11 +528,16 @@
                     :where
                     (or-join
                      [?agent ?t]
+                     (and
+                      [$branch ?ag :seon.agent/id ?agent]
+                      [$branch ?ag :seon.agent/forked-from ?t])
+                     (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/forked-from ?t])
                      (and [$branch ?ag :seon.agent/id ?agent] [$branch ?ag :seon.agent/target ?t])
                      (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/target ?t]))
-                    [$main ?t :seon.agent/id _]
+                    (or-join [?t] [$main ?t :seon.agent/id _] [$branch ?t :seon.agent/id _])
                     (or-join
                      [?t ?e ?tx]
+                     [$branch ?t :seon.agent/tasks ?e ?tx]
                      [$main ?t :seon.agent/tasks ?e ?tx]
                      (and [$main ?t :seon.agent/task ?tid] [$main ?e :seon.task/id ?tid ?tx])
                      (and
@@ -505,7 +567,7 @@
                       :zone :static-prefix,
                       :priority 94,
                       :tx ?tx}],
-  :seon.rule/doc "When an agent's :seon.agent/target ref points at another agent, assert [?t :wm/review-target true] and surface target's task(s), open errors, and docs/rules-of-thumb.md overview (order 0).",
+  :seon.rule/doc "When an agent links another agent via :seon.agent/forked-from or :seon.agent/target, assert [?t :wm/review-target true] and surface target's task(s), open errors, and docs/rules-of-thumb.md overview (order 0).",
   :seon.rule/stratum 18,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/review-target}

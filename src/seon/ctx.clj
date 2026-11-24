@@ -467,19 +467,8 @@
       (when-not (validator new-val)
         (throw (ex-info "ctx validator rejected value" {:error :seon.ctx/invalid}))))
     (let [old-val (.deref this)
-          {:keys [res target-moved?]} (tree/apply-ctx-reset! conn (:eid snap) old-val new-val)]
-      (cond
-        (and res target-moved?)
-        (let [snap' (build (:db-after res) (:eid snap) nil conn)]
-          (set! snap snap') (:val snap'))
-
-        res (-advance! this (:db-after res) (:tx-data res))
-
-        target-moved?
-        (let [snap' (build @conn (:eid snap) nil conn)]
-          (set! snap snap') (:val snap'))
-
-        :else old-val)))
+          res (tree/apply-ctx-reset! conn (:eid snap) old-val new-val)]
+      (if res (-advance! this (:db-after res) (:tx-data res)) old-val)))
   (swap [this f] (.reset this (f (.deref this))))
   (swap [this f a] (.reset this (f (.deref this) a)))
   (swap [this f a b] (.reset this (f (.deref this) a b)))

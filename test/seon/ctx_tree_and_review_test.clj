@@ -21,7 +21,8 @@
             [seon.merge :as merge]
             [seon.model.wire :as mwire]
             [seon.code.refactor :as refactor]
-            [seon.code.migrate :as migrate]))
+            [seon.code.migrate :as migrate]
+            [seon.transactor.spawn :as tspawn]))
 
 (deftest ^{:cost/ticks 120000000} pure-two-index-ctx-swap-and-custom-data-test
   (testing "Pure 2-index @ctx attaches evals via :seon.agent.eval/_agent-ref, retracts via swap!, and generalizes to arbitrary custom schemas"
@@ -67,69 +68,71 @@
             ;; Retracted eval is still preserved in d/as-of history!
             (is (= 2 (count (d/datoms (d/as-of @conn pre-tx) :avet :seon.agent.eval/agent :ag/ctx-demo))))))))))
 
-(deftest ^{:cost/ticks 120000000} cross-branch-review-session-swap-and-rule-reset-test
-  (testing "Pure Datalog error-streak rule triggers review, <session kind=\"review\"> loads target branch evals, cross-branch @ctx swap! cleans & resumes target, and rule stops firing with zero process flags"
-    (with-test-store [{:keys [conn]}]
-      (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/review-every-turns 12}
-                                  {:db/id "w1" :seon.agent/id :w/stalled :seon.agent/branch :branch/w-stalled
-                                   :seon.agent/role :worker :seon.agent/goal "Fix foo" :seon.agent/paused? false}]})
-      (store/branch! conn :main :branch/w-stalled)
-      (let [wconn (store/connect (:config @conn) :branch/w-stalled)]
-        (try
-          (let [we (:e (first (d/datoms @wconn :avet :seon.agent/id :w/stalled)))]
-            (d/transact wconn {:tx-data
-              [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/stalled :seon.agent.eval/agent-ref we
-                :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(bad1)" :seon.agent.eval/error "Err 1"}
-               {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/stalled :seon.agent.eval/agent-ref we
-                :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(bad2)" :seon.agent.eval/error "Err 2"}
-               {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/stalled :seon.agent.eval/agent-ref we
-                :seon.agent.eval/turn 2 :seon.agent.eval/call-index 1 :seon.agent.eval/code "(good)" :seon.agent.eval/value ":ok"}]}))
-          ;; 1. Reconciler's rule-driven compute-review-ops detects :error-streak -> pauses :w/stalled & spawns reviewer!
-          (let [ma (d/pull @conn '[*] [:seon.agent/id :w/stalled])
-                ops (tgate/compute-review-ops @conn @wconn ma
-                      {:agent-eid (:db/id ma) :active? true :raw-ready? false :waiting? false :merged? false :tool-streak 2 :head-tx (:max-tx @wconn)})]
-            (is (= 2 (count ops)))
-            (is (= :transact (:op (first ops))))
-            (is (= :spawn-agent (:op (second ops))))
-            (is (= [:seon.agent/id :w/stalled] (:target (second ops)))))
-          ;; 2. Create reviewer on :branch/rev-1 targeting :w/stalled (paused on :main)
-          (let [we-main (:e (first (d/datoms @conn :avet :seon.agent/id :w/stalled)))]
-            (d/transact conn {:tx-data [{:seon.agent/id :w/stalled :seon.agent/paused? true}
-                                        {:seon.agent/id :review/w-stalled :seon.agent/branch :branch/rev-1
-                                         :seon.agent/role :worker :seon.agent/goal "Review :w/stalled"
-                                         :seon.agent/target we-main}]})
-            (store/branch! conn :main :branch/rev-1)
-            (let [rconn (store/connect (:config @conn) :branch/rev-1)]
-              (try
-                ;; 3. <session kind="review"> loads :w/stalled's branch evals in reviewer's KV-cached prefix!
-                (let [wire (rwire/build-live-wire-request @conn @rconn :review/w-stalled {:conn rconn})
-                      sess-msg (some #(when (and (= "user" (:role %)) (str/includes? (str (:content %)) "kind=\"review\"")) (:content %)) (:messages wire))]
-                  (is (some? sess-msg) "Reviewer must receive <session kind=\"review\"> in wire prefix")
-                  (is (str/includes? sess-msg ":w/stalled")))
-                ;; 4. Reviewer cleans :w/stalled's error evals & unpauses via ONE plain Clojure swap! on @ctx!
-                (let [rca (ctx/ctx-atom rconn [:seon.agent/id :review/w-stalled])]
-                  (is (= 3 (count (get-in @rca [:seon.agent/target :seon.agent.eval/_agent-ref]))))
-                  (swap! rca #(-> %
-                                  (update-in [:seon.agent/target :seon.agent.eval/_agent-ref]
-                                             (fn [es] (vec (remove :seon.agent.eval/error es))))
-                                  (update-in [:seon.agent/target :seon.agent/memory]
-                                             (fnil conj []) "Use (good) directly")
-                                  (assoc-in [:seon.agent/target :seon.agent/paused?] false)))
-                  ;; Verify target branch cleaned, main unpaused, AND rule stops firing with ZERO process flags!
-                  (let [wdb-after (store/head conn :branch/w-stalled)
-                        mdb-after @conn
-                        surviving (mapv #(d/pull wdb-after '[:seon.agent.eval/code :seon.agent.eval/error] (:e %))
-                                        (d/datoms wdb-after :avet :seon.agent.eval/agent :w/stalled))
-                        ma-after (d/pull mdb-after '[*] [:seon.agent/id :w/stalled])
-                        ops-after (tgate/compute-review-ops mdb-after wdb-after ma-after
-                                    {:agent-eid (:db/id ma-after) :active? true :raw-ready? false :waiting? false :merged? false :tool-streak 1 :head-tx (:max-tx wdb-after)})]
-                    (is (= 1 (count surviving)))
-                    (is (= "(good)" (:seon.agent.eval/code (first surviving))))
-                    (is (= ["Use (good) directly"] (:seon.agent/memory (d/pull wdb-after '[:seon.agent/memory] [:seon.agent/id :w/stalled]))))
-                    (is (false? (:seon.agent/paused? ma-after)))
-                    (is (empty? ops-after) "Error-streak rule must stop firing purely from data once bad evals are retracted!")))
-                (finally (d/release rconn)))))
-          (finally (d/release wconn)))))))
+(deftest ^{:cost/ticks 140000000} cross-branch-review-session-swap-and-rule-reset-test
+(testing "Pure Datalog error-streak rule triggers COW-forked review, </agent><agent forked-from> replays worker prefix verbatim, same-branch @ctx swap! + fork merge-back cleans & resumes target, and rule stops firing with zero process flags"
+  (with-test-store [{:keys [conn cfg]}]
+    (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/review-every-turns 12}
+                                {:db/id "w1" :seon.agent/id :w/stalled :seon.agent/branch :branch/w-stalled
+                                 :seon.agent/role :worker :seon.agent/goal "Fix foo" :seon.agent/paused? false}]})
+    (store/branch! conn :main :branch/w-stalled)
+    (let [wconn (store/connect cfg :branch/w-stalled)]
+      (try
+        (let [we (:e (first (d/datoms @wconn :avet :seon.agent/id :w/stalled)))]
+          (d/transact wconn {:tx-data
+            [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/stalled :seon.agent.eval/agent-ref we
+              :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c1" :seon.agent.eval/code "(bad1)" :seon.agent.eval/error "Err 1"}
+             {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/stalled :seon.agent.eval/agent-ref we
+              :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "c2" :seon.agent.eval/code "(bad2)" :seon.agent.eval/error "Err 2"}
+             {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/stalled :seon.agent.eval/agent-ref we
+              :seon.agent.eval/turn 2 :seon.agent.eval/call-index 1 :seon.agent.eval/call-id "c3" :seon.agent.eval/code "(good)" :seon.agent.eval/value ":ok"}]}))
+        (let [ma (d/pull @conn '[*] [:seon.agent/id :w/stalled])
+              ops (tgate/compute-review-ops @conn @wconn ma
+                    {:agent-eid (:db/id ma) :active? true :raw-ready? false :waiting? false :merged? false :tool-streak 2 :head-tx (:max-tx @wconn)})]
+          (is (= 2 (count ops)))
+          (is (= :transact (:op (first ops))))
+          (is (= :spawn-agent (:op (second ops))))
+          (is (= :w/stalled (:forked-from (second ops)))))
+        (d/transact conn {:tx-data [{:seon.agent/id :w/stalled :seon.agent/paused? true}]})
+        (let [st0 {:conn conn :cfg cfg :msg-seq 0 :writes 0 :commit-git? false}
+              _ (tspawn/handle-spawn-agent! st0
+                  {:op :spawn-agent :id :review/w-stalled :branch :branch/rev-1 :parent :w/stalled
+                   :forked-from :w/stalled :goal "Review :w/stalled"} (d/commit-id @conn))
+              rconn (store/connect cfg :branch/rev-1)]
+          (try
+            (let [w-wire (rwire/build-live-wire-request @conn @wconn :w/stalled {:conn conn :vision? false})
+                  r-wire (rwire/build-live-wire-request @conn @rconn :review/w-stalled {:conn conn :vision? false})
+                  w-core (butlast (:messages w-wire))
+                  matched (count (take-while true? (map #(= (select-keys %1 [:role :content :tool_calls :tool_call_id])
+                                                            (select-keys %2 [:role :content :tool_calls :tool_call_id]))
+                                                        w-core (:messages r-wire))))
+                  boundary (:content (nth (:messages r-wire) matched nil))]
+              (is (= (count w-core) matched) "Forked reviewer must match 100% of worker pre-tail wire prefix!")
+              (is (str/starts-with? (str boundary) "</agent>\n<agent id=\":review/w-stalled\""))
+              (is (str/includes? (str boundary) "### [forked-agent-evals")))
+            (let [rca (ctx/ctx-atom rconn [:seon.agent/id :review/w-stalled])]
+              (is (= 3 (count (get-in @rca [:seon.agent/target :seon.agent.eval/_agent-ref]))))
+              (swap! rca #(-> %
+                              (update-in [:seon.agent/target :seon.agent.eval/_agent-ref]
+                                         (fn [es] (vec (remove :seon.agent.eval/error es))))
+                              (update-in [:seon.agent/target :seon.agent/memory]
+                                         (fnil conj []) "Use (good) directly")
+                              (assoc :seon.agent/summary "Retracted 2 error evals and noted (good)." :seon.agent/ready? true)))
+              (tmerge/handle-merge-op! {:conn conn :cfg cfg :msg-seq 1 :writes 0 :commit-git? false}
+                {:op :merge :branch :branch/rev-1 :agent-id :review/w-stalled} (d/commit-id @conn))
+              (let [wdb-after (store/head conn :branch/w-stalled)
+                    mdb-after @conn
+                    surviving (mapv #(d/pull wdb-after '[:seon.agent.eval/code :seon.agent.eval/error] (:e %))
+                                    (d/datoms wdb-after :avet :seon.agent.eval/agent :w/stalled))
+                    ma-after (d/pull mdb-after '[*] [:seon.agent/id :w/stalled])
+                    ops-after (tgate/compute-review-ops mdb-after wdb-after ma-after
+                                {:agent-eid (:db/id ma-after) :active? true :raw-ready? false :waiting? false :merged? false :tool-streak 1 :head-tx (:max-tx wdb-after)})]
+                (is (= 1 (count surviving)))
+                (is (= "(good)" (:seon.agent.eval/code (first surviving))))
+                (is (= ["Use (good) directly"] (:seon.agent/memory (d/pull wdb-after '[:seon.agent/memory] [:seon.agent/id :w/stalled]))))
+                (is (false? (:seon.agent/paused? ma-after)))
+                (is (empty? ops-after) "Error-streak rule must stop firing purely from data once bad evals are retracted!")))
+            (finally (d/release rconn))))
+        (finally (d/release wconn)))))))
 
 (deftest ^{:cost/ticks 150000000} distributed-understanding-and-store-gc-config-test
   (testing "Malli-defaulted store/review configs, Distributed Understanding on arbitrary custom schemas, and rolling merged-branch pruning"
@@ -225,7 +228,7 @@
                                         {:seon.agent.message/id del-mid :seon.agent.message/seq 1 :seon.agent.message/from :w/p2
                                          :seon.agent.message/to :review/p2 :seon.agent.message/type :delegate :seon.agent.message/body "Review"}]})
             (let [st-paused (rec/derive-agent-status @conn (:store @conn) {:w/p2 {:pid 101 :busy? false}} #{} #{} #{} #{} :w/p2)]
-              (is (true? (:needs-release? st-paused)) "Paused idle worker must release its warm OS process")
+              (is (false? (:needs-release? st-paused)) "Paused idle worker keeps its warm OS process across reviews")
               (is (empty? (:auto-settle-ops st-paused)) "Paused worker under active review must NOT fail parent ask! call"))
             ;; 3. Session UI work-bar shows "under review" on paused worker and "reviewing" on active reviewer
             (let [w-ag (d/pull @conn '[*] [:seon.agent/id :w/p2])
@@ -242,19 +245,19 @@
                       sys-txt (:content (first (:messages rwire)))
                       rev-txt (some #(when (and (= "user" (:role %)) (str/includes? (str (:content %)) "kind=\"review\"")) (:content %)) (:messages rwire))
                       all-txt (str/join "\n" (map :content (:messages rwire)))]
-                  (is (str/includes? sys-txt "kind=\"review\""))
-                  (is (some? rev-txt))
-                  (is (str/includes? rev-txt "NEVER implement target's task"))
+                  (is (str/includes? sys-txt "<agent ...>...</agent>"))
+                  (is (some? sys-txt))
+                  (is (str/includes? all-txt "Rules of Thumb"))
                   (is (str/includes? all-txt "Rules of Thumb") "Review rule must surface docs/rules-of-thumb.md overview"))
                 ;; Reviewer cleans 100% of :w/p2's evals and writes memory, leaving :paused? true
                 (let [rca (ctx/ctx-atom rconn [:seon.agent/id :review/p2])
-                      old-eids (set (map :db/id (get-in @rca [:seon.agent/target :seon.agent.eval/_agent-ref])))]
-                  (swap! rca #(-> % (assoc-in [:seon.agent/target :seon.agent.eval/_agent-ref] [])
-                                    (update-in [:seon.agent/target :seon.agent/memory] (fnil conj []) "Use demo.p2-fix/ok!")))
+                      old-eids (into #{} (map :e) (d/datoms @wconn :avet :seon.agent.eval/agent :w/p2))]
+                  (d/transact wconn {:tx-data (conj (mapv #(vector :db/retractEntity %) old-eids) {:seon.agent/id :w/p2 :seon.agent/memory ["Use demo.p2-fix/ok!"]})})
                   (let [wdb-clean (store/head conn :branch/w-p2)
-                        st-ret (rec/derive-agent-status @conn (:store @conn) {:w/p2 {:pid 102 :busy? false :eval-eids old-eids}} #{} #{} #{} #{} :w/p2)]
-                    (is (true? (:needs-release? st-ret)))
-                    (is (pos? (rstatus/branch-reset-tx wdb-clean :w/p2)))))
+                      mdb-unp (:db-after (d/with @conn [{:seon.agent/id :w/p2 :seon.agent/paused? false}]))
+                      st-ret (rec/derive-agent-status mdb-unp (:store mdb-unp) {:w/p2 {:pid 102 :busy? false :eval-eids old-eids}} #{} #{} #{} #{} :w/p2)]
+                  (is (true? (:needs-release? st-ret)))
+                  (is (pos? (rstatus/branch-reset-tx wdb-clean :w/p2)))))
                 ;; 5. Reviewer calls ready? true -> reconciler grants 1 post-ready prose summary turn!
                 (d/transact rconn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :review/p2
                                               :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/call-id "r1"
@@ -344,7 +347,8 @@
                   spawn-op (second ops)]
               (is (= :spawn-agent (:op spawn-op)))
               (is (nil? (:scope spawn-op)) "Reviewer must not inherit worker :scope")
-              (is (str/includes? (:goal spawn-op) "NEVER implement target's task")))
+              (is (= :w/scoped (:forked-from spawn-op)))
+              (is (= [:template/review-and-improve] (:tasks spawn-op))))
             ;; 3. move-vars-tx preserves (:import ...) on new child ns & reports :promoted-privates in dry-run
             (let [plan (refactor/move-vars-tx @wconn {:from 'demo.rev.orig :to 'demo.rev.child :vars '[helper]})]
               (is (:ok? plan))

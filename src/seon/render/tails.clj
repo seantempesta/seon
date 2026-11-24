@@ -335,3 +335,27 @@
                          (sort-by (comp - :tx)) (take rec-lim)
                          (mapv #(assoc % :preview (rdata/compact-entity-preview (d/pull main-db '[*] (:eid %)) 150))))))]
     {:scope scope :incoming incoming :outgoing outgoing :open-errors open-errs :samples samples}))
+
+(def fallback-entity-renderers
+  "Pure `ns-map -> ns-map` fallback renderers used only when a minimal DB lacks indexed code vars."
+  {:seon.code.var/entity   ['seon.render.entities/render-var-chip 'seon.render.entities/render-var-sig 'seon.render.entities/render-var-full]
+   :seon.error/entity      ['seon.render.entities/render-error-badge 'seon.render.entities/render-error-card]
+   :seon.task/entity       ['seon.render.entities/render-task-chip 'seon.render.entities/render-task-card 'seon.render.entities/render-task-full]
+   :seon.schema/entity     ['seon.render.entities/render-schema-chip 'seon.render.entities/render-schema-detail]
+   :seon.code.doc/entity   ['seon.render.entities/render-doc-snippet 'seon.render.entities/render-doc-full]
+   :seon.test/verdict      ['seon.render.entities/render-test-badge 'seon.render.entities/render-test-card]
+   :seon.agent.eval/entity ['seon.render.entities/render-eval-row 'seon.render.entities/render-eval-card]
+   :seon.code.ns/entity    ['seon.render.entities/render-ns-chip 'seon.render.entities/render-ns-card 'seon.render.entities.work/render-ns-full]
+   :seon.agent/entity      ['seon.render.entities/render-agent-row 'seon.render.entities/render-agent-card]
+   :seon.rule/entity       ['seon.render.entities/render-rule-chip 'seon.render.entities/render-rule-detail]
+   :seon.fix/entity        ['seon.render.entities/render-fix-chip 'seon.render.entities/render-fix-card]
+   :seon.agent.call/entity ['seon.render.entities/render-call-row 'seon.render.entities/render-call-card]
+   :seon.system/entity     ['seon.render.entities/render-system-chip 'seon.render.entities/render-system-card]
+   :seon.signal/snapshot   ['seon.signals/render-signals-bar 'seon.signals/render-signals-panel]
+   :seon.ctx/snapshot      ['seon.render.entities.work/render-ctx-chip 'seon.render.entities.work/render-ctx-snapshot]
+   :seon.summary/entity    ['seon.render.entities.work/render-summary-chip 'seon.render.entities.work/render-summary-card]
+   :seon.bench.run/entity  ['seon.render.entities.work/render-bench-run-card]
+   :seon.health/report     ['seon.render.entities.work/render-health-report]
+   :seon.task/lineage      ['seon.render.entities.work/render-task-lineage]
+   :seon.media/image       ['seon.render.media/render-image-chip 'seon.render.media/render-image-card]
+   :seon.ui.status/entity  ['seon.render.status/render-status-chip 'seon.render.status/render-status-card]})

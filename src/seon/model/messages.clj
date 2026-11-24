@@ -23,7 +23,7 @@
   (str "You are a Seon Clojure agent in your branch's live Jolt runtime.\n"
        "Relevant code, schemas, docs, tasks, and primers are surfaced dynamically in context.\n"
        "When replying directly to the user (greetings, simple answers, or final summaries), respond in clear plain prose with NO tool calls.\n"
-       "Never treat `<session kind=\"example\">` or `<session kind=\"review\">` as your live session."))
+       "Never treat a closed `<agent ...>...</agent>` example block as your own live session."))
 
 (defn format-tool-content
   {:malli/schema [:function [:=> [:cat :any] :string] [:=> [:cat :map :any] :string]], :cost/ticks 200000}
@@ -84,6 +84,31 @@
                              real-calls)]
          (concat in-msgs (when asst [asst]) tool-msgs)))
      turns)))
+(defn- render-prefix-agents [opts prefix-agents main-db eval-db seen-tc-ids]
+  (let [open? (volatile! false)
+        msgs (vec
+              (mapcat
+               (fn [{:keys [id mode goal turns db messages]}]
+                 (if (= :continue mode)
+                   (when (seq messages)
+                     (doseq [m messages tc (:tool_calls m) :when (:id tc)]
+                       (vswap! seen-tc-ids conj (str (:id tc))))
+                     (vreset! open? true)
+                     messages)
+                   (let [sid (if (qualified-keyword? id) (str id) (str "example/" (name (or id :unknown))))
+                         close-pfx (when @open? (vreset! open? false) "</agent>\n")
+                         hdr (str close-pfx "<agent id=\"" sid "\" kind=\"example\" from=\"seon\">\n"
+                                  "A finished example agent session shown for reference; not yours.\n"
+                                  "Goal: " (or goal "(none)"))
+                         ex-db (or db main-db eval-db)
+                         ex-opts (cond-> (assoc opts :seen-tc-ids seen-tc-ids)
+                                   ex-db (assoc :eval-db ex-db :fallback-db ex-db)
+                                   main-db (assoc :main-db main-db))]
+                     (concat [{:role "user" :content hdr}]
+                             (turns->wire-messages ex-opts turns)
+                             [{:role "user" :content "</agent>"}]))))
+               prefix-agents))]
+    {:msgs msgs :parent-open? @open?}))
 
 (defn build-wire-messages
   "Transforms provider-neutral conversation turns + system prompt into prefix-cache-friendly
@@ -170,69 +195,53 @@
       (and reasoning-effort (not= :disabled thinking))
       (assoc :reasoning_effort (name reasoning-effort)))))
 
-(defn- render-example-sessions [opts examples main-db eval-db]
-  (vec
-   (mapcat
-    (fn [{:keys [id branch kind goal turns db omitted-turns]}]
-      (let [rev? (= :review kind)
-            sid (if rev? (str id) (str "example/" (name id)))
-            hdr (if rev?
-                  (str "<session id=\"" sid "\" branch=\"" (or branch :main) "\" kind=\"review\" from=\"seon\">\n"
-                       "Live session under review (start to end). NEVER implement target's task on your review branch. Inspect for hunting loops, errors, or Seon root causes. If target is healthy with no Seon bug, leave an optional 1-line note on `:seon.agent/target`'s `:seon.agent/memory` and call `(user/ready!)` immediately (1-2 turns). Otherwise fix the Seon root cause on your branch, clean noisy/failed evals via `(swap! ctx ...)` on `:seon.agent/target`, then call `(user/ready!)` on YOUR session (never set `:ready?` or `:paused?` on target).\n"
-                       "Goal: " (or goal "(none)"))
-                  (str "<session id=\"" sid "\" kind=\"example\" from=\"seon\">\n"
-                       "A finished session of another task, shown for how its work was done; not yours.\n"
-                       "Goal: " (or goal "(none)")))
-            ex-db (or db main-db eval-db)
-            ex-opts (cond-> (assoc opts :seen-tc-ids (volatile! #{}))
-                      ex-db (assoc :eval-db ex-db :fallback-db ex-db)
-                      main-db (assoc :main-db main-db))
-            turn-msgs (if (and (pos? (long (or omitted-turns 0))) (>= (count turns) 3))
-                        (concat (turns->wire-messages ex-opts (take 2 turns))
-                                [{:role "user" :content (str "(... " omitted-turns " middle turns omitted ...)")}]
-                                (turns->wire-messages ex-opts (drop 2 turns)))
-                        (turns->wire-messages ex-opts turns))]
-        (concat [{:role "user" :content hdr}] turn-msgs [{:role "user" :content "</session>"}])))
-    examples)))
-
 (defn build-agent-wire-messages
   "Single source of truth for BOTH live LLM requests AND Level 3 Debug View.
    Produces proper OpenAI-compat / DeepSeek wire messages with:
    1. Byte-identical `system` message (KV prefix cache anchor)
-   2. Optional `<session id=\"example/...\" kind=\"example|review\" from=\"seon\">...</session>` in exact wire roles
-   3. `<agent id=\"...\" branch=\"...\" from=\"seon\">` opening + initial rendered walk tiles
+   2. Unified `<agent ...>` prefix blocks (`:mode :example` closed reference sessions, or `:mode :continue` verbatim forked parent prefix)
+   3. `<agent id=\"...\" branch=\"...\" from=\"seon\">` (prefixed with `</agent>` when `:forked-from`) + initial rendered walk tiles
    4. Append-only live conversation turns (`user`, `assistant` + `tool_calls`, `tool` with `result/e<n>`)
-   5. Current turn unread messages + volatility-ordered ephemeral tail blocks + optional viewport screenshot.
+   5. Optional current turn unread messages + volatility-ordered ephemeral tail blocks + optional viewport screenshot (omitted when `:include-tail? false`).
    Returns `:prefix-hash` (16-char SHA-256 over messages 1..3) for live KV-cache prefix-bust tracking."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
-   {:keys [agent-id branch role goal system-prompt examples walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image eval-db main-db fallback-db]}]
+   {:keys [agent-id branch role goal system-prompt examples prefix-agents forked-from include-tail? walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image eval-db main-db fallback-db]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
-        example-msgs (render-example-sessions opts examples main-db eval-db)
+        seen-tc-ids (volatile! #{})
+        eff-prefixes (or (seq prefix-agents) examples)
+        {:keys [msgs parent-open?]} (render-prefix-agents opts eff-prefixes main-db eval-db seen-tc-ids)
+        prefix-msgs msgs
         open-msg
         {:role "user"
-         :content (str "<agent id=\"" (or agent-id :agent/unknown)
+         :content (str (when parent-open? "</agent>\n")
+                       "<agent id=\"" (or agent-id :agent/unknown)
                        "\" branch=\"" (or branch :main)
                        "\" role=\"" (name (or role :worker))
+                       (when forked-from (str "\" forked-from=\"" forked-from))
                        "\" from=\"seon\">\n"
-                       "Your own live session.\n"
+                       (if forked-from
+                         (str "Your own live session (forked from " forked-from " above).\n")
+                         "Your own live session.\n")
                        "Goal: " (or (not-empty goal) "Assist the user and keep the system healthy.")
                        (when (not (str/blank? (str walk-text)))
                          (str "\n\n<walk-context>\n" walk-text "\n</walk-context>")))}
         prefix-hash (wire/prefix-sha256
                      (str/join "\u0000"
-                               (map (fn [m] (str (:role m) ":" (:content m)))
-                                    (concat [sys-msg] example-msgs [open-msg]))))
-        hist-msgs (vec (turns->wire-messages (cond-> opts
-                    eval-db (assoc :eval-db eval-db)
-                    main-db (assoc :main-db main-db)
-                    fallback-db (assoc :fallback-db fallback-db))
-                  history))
+                               (map (fn [m]
+                                      (str (:role m) ":" (:tool_call_id m) ":" (:reasoning_content m)
+                                           ":" (when (:tool_calls m) (pr-str (:tool_calls m))) ":" (:content m)))
+                                    (concat [sys-msg] prefix-msgs [open-msg]))))
+        hist-msgs (vec (turns->wire-messages (cond-> (assoc opts :seen-tc-ids seen-tc-ids)
+                                               eval-db (assoc :eval-db eval-db)
+                                               main-db (assoc :main-db main-db)
+                                               fallback-db (assoc :fallback-db fallback-db))
+                                             history))
         unread-blocks (when (and (seq unread) (not (some #(= "unread-inbox" (:tag %)) tail-blocks)))
-        (when-let [res (rtails/render-inbox-tail {:seon.tail/inbox {:unread unread}})]
-          [(str "<unread-inbox ephemeral=\"true\">\n"
-                (render/hiccup->text (:seon.ui/hiccup res))
-                "\n</unread-inbox>")]))
+                        (when-let [res (rtails/render-inbox-tail {:seon.tail/inbox {:unread unread}})]
+                          [(str "<unread-inbox ephemeral=\"true\">\n"
+                                (render/hiccup->text (:seon.ui/hiccup res))
+                                "\n</unread-inbox>")]))
         dom-summary (format-viewport-dom (:dom viewport-screenshot))
         fmt-attrs (fn [m]
                     (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))
@@ -268,8 +277,9 @@
                       (wire/extract-recent-eval-images
                        (or fallback-db eval-db main-db) history 4 (remove nil? [eval-db main-db]))
                       [])
-        tail-msg (wire/build-ephemeral-tail-msg tail-text eff-img eval-images (boolean vision?))
-        messages (vec (concat [sys-msg] example-msgs [open-msg] hist-msgs (when tail-msg [tail-msg])))
+        tail-msg (when (not= false include-tail?)
+                   (wire/build-ephemeral-tail-msg tail-text eff-img eval-images (boolean vision?)))
+        messages (vec (concat [sys-msg] prefix-msgs [open-msg] hist-msgs (when tail-msg [tail-msg])))
         msg-tokens (mapv estimate-message-tokens messages)]
     {:messages messages
      :message-tokens msg-tokens

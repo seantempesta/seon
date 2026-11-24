@@ -186,10 +186,10 @@
 
 (defn- test-batch-plan
   {:cost/ticks 5000000}
-  [st conn db b merge-plan vars force?]
+  [st ours-conn db b merge-plan vars force? fork-relative?]
   (let [theirs-db (if (= b :main) db (d/branch-as-db (:store db) b))
         branch-cid (d/commit-id theirs-db)
-        overlay (when merge-plan (build-branch-overlay conn merge-plan b))
+        overlay (when merge-plan (build-branch-overlay ours-conn merge-plan b))
         cand-reach (if overlay
                      (reach/apply-overlay-to-reach-graph theirs-db (:reach st) overlay)
                      (:reach st))
@@ -219,8 +219,8 @@
                                         (map :var uncached-tests))))
         boot-affected? (boolean (:boot-affected? overlay))]
     {:b b :branch-cid branch-cid :overlay overlay :deleted-main-tests deleted-main-tests
-     :uncached-tests uncached-tests :uncached-gens uncached-gens :cached-n cached-n
-     :plat-reached plat-reached :boot-affected? boot-affected?}))
+    :uncached-tests uncached-tests :uncached-gens uncached-gens :cached-n cached-n
+    :plat-reached plat-reached :boot-affected? boot-affected? :fork-relative? (boolean fork-relative?)}))
 
 (defn- test-batch-blocked
   [st b branch-cid deleted-main-tests cached-n agent-id reply-ch]
@@ -377,7 +377,7 @@
              (assoc-in
                [:parents parent-id]
                {:reply-ch reply-ch,
-                :boot-affected? boot-affected?,
+                :boot-affected? boot-affected?, :fork-relative? (:fork-relative? plan false),
                 :deferred-slow deferred-slow,
                 :agent-id agent-id,
                 :cached-count cached-n,
@@ -444,25 +444,28 @@
   (let [{:keys [branch agent-id branch-tx vars force? reply-ch]} msg]
     (try
       (let [conn (:conn st)
-            st (assoc
-                 st
-                 :reach
-                 (code/update-reach-graph (:reach st) conn))
+            st (assoc st :reach (code/update-reach-graph (:reach st) conn))
             db @conn
             b (or branch :main)
-            merge-plan (when (not= b :main)
-                         (merge/three-way conn (:cfg st) b))]
-        (if (and merge-plan (not (:ok? merge-plan)))
-          (test-batch-conflict st b agent-id merge-plan reply-ch)
-          (test-batch-run
-            st
-            (test-batch-plan st conn db b merge-plan vars force?)
-            agent-id
-            branch-tx
-            reply-ch)))
-      (catch
-        Throwable
-        ex
+            fpt (when (not= b :main) (store/fork-parent-target db b agent-id))]
+        (if (and fpt (not (store/branch? conn (:target-branch fpt))))
+          (test-batch-conflict st b agent-id
+            {:ok? false :conflicts [{:entity [:seon.agent/id (:target-id fpt)] :reason :missing-target-branch
+                                     :message (str "Fork parent branch " (:target-branch fpt) " no longer exists")}]}
+            reply-ch)
+          (let [tconn (when fpt (store/connect (:cfg st) (:target-branch fpt)))]
+            (try
+              (let [ours-conn (or tconn conn)
+                    merge-plan (when (not= b :main)
+                                 (if fpt
+                                   (merge/three-way tconn (:cfg st) b {:exclude-agent (:agent-id fpt) :include-session-for (:target-id fpt)})
+                                   (merge/three-way conn (:cfg st) b)))]
+                (if (and merge-plan (not (:ok? merge-plan)))
+                  (test-batch-conflict st b agent-id merge-plan reply-ch)
+                  (let [plan (test-batch-plan st ours-conn db b merge-plan vars force? (boolean fpt))]
+                    (test-batch-run st plan agent-id branch-tx reply-ch))))
+              (finally (when tconn (d/release tconn)))))))
+      (catch Throwable ex
         (test-batch-crash st branch agent-id reply-ch ex)))))
 
 (defn- test-fork-child-exception
@@ -589,15 +592,15 @@
                            failures)))
         tx-ops (cond->
                  [{:reply-ch (:reply-ch pinfo),
-                   :cached (:cached-count pinfo 0),
-                   :agent-id (when all-pass? (:agent-id pinfo)),
-                   :reply-val ans,
-                   :op :record-test-results,
-                   :commit (:commit pinfo),
-                   :tested-tx (when all-pass? (:tested-tx pinfo)),
-                   :branch (:branch pinfo),
-                   :ran (count results),
-                   :results results}]
+                  :cached (:cached-count pinfo 0),
+                  :agent-id (when all-pass? (:agent-id pinfo)),
+                  :reply-val ans,
+                  :op :record-test-results,
+                  :commit (:commit pinfo),
+                  :tested-tx (when all-pass? (:tested-tx pinfo)),
+                  :branch (:branch pinfo),
+                  :ran (count results),
+                  :results (if (:fork-relative? pinfo) [] results)}]
                  (and (not all-pass?) (:agent-id pinfo))
                  (conj
                    {:op :send-message,

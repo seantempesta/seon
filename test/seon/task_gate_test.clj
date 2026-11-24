@@ -11,7 +11,9 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.transactor.merge :as tmerge]
             [seon.render.wire :as wire]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.transactor.spawn :as tspawn]
+            [seon.fork.calls :as fcalls]))
 
 (defn- setup-demo-vars! [conn]
   (let [src (str "(ns demo.gate-test (:require [clojure.test :refer [deftest is]]))\n"
@@ -211,3 +213,67 @@
           (is (str/includes? wt "walk-context"))
           (is (str/includes? wt "demo.gate-test"))
           (is (str/includes? wt "demo.other-test")))))))
+
+(deftest ^{:cost/ticks 140000000} forked-review-compacts-and-merges-back-to-worker-branch
+  (testing "COW-forked review compacts selected turns via compact!, edits task + fixes code on review branch, finishes via finish-review!, and merges back into worker branch excluding reviewer evals"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data
+        (concat
+         (code/file-import-tx @conn "src/demo/fr_wip.clj" "(ns demo.fr-wip)\n(defn wip [] :base)\n" false)
+         (code/file-import-tx @conn "src/demo/fr_bug.clj" "(ns demo.fr-bug)\n(defn bug [] :broken)\n" false)
+         [{:seon.task/id :task/fr-work :seon.task/title "Build fr-wip" :seon.task/plan "Initial plan" :seon.task/done? false}
+          {:seon.task/id :template/review-and-improve :seon.task/title "Review" :seon.task/plan "Audit" :seon.task/template? true :seon.task/done? false}
+          {:db/id "w1" :seon.agent/id :w/fr :seon.agent/branch :branch/w-fr :seon.agent/role :worker
+           :seon.agent/goal "Build fr-wip" :seon.agent/task :task/fr-work :seon.agent/tasks #{[:seon.task/id :task/fr-work]} :seon.agent/paused? true}])})
+      (store/branch! conn :main :branch/w-fr)
+      (let [wconn (store/connect cfg :branch/w-fr)]
+        (try
+          (let [we (:e (first (d/datoms @wconn :avet :seon.agent/id :w/fr)))]
+            (d/transact wconn {:tx-data
+              (concat
+               (code/file-import-tx @wconn "src/demo/fr_wip.clj" "(ns demo.fr-wip)\n(defn wip [] :worker-wip)\n" false)
+               [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/fr :seon.agent.eval/agent-ref we :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(t1)" :seon.agent.eval/value "1"}
+                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/fr :seon.agent.eval/agent-ref we :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(noise)" :seon.agent.eval/error "boom"}
+                {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/fr :seon.agent.eval/agent-ref we :seon.agent.eval/turn 3 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(t3)" :seon.agent.eval/value "3"}])}))
+          ;; Spawn COW-forked reviewer directly from :branch/w-fr!
+          (let [st0 {:conn conn :cfg cfg :msg-seq 0 :writes 0 :commit-git? false}
+                _ (tspawn/handle-spawn-agent! st0
+                    {:op :spawn-agent :id :review/fr :branch :branch/rev-fr :parent :w/fr
+                     :forked-from :w/fr :tasks [:template/review-and-improve] :goal "Review :w/fr"}
+                    (d/commit-id @conn))
+                rconn (store/connect cfg :branch/rev-fr)]
+            (try
+              ;; Reviewer has worker's WIP, worker's evals, AND runs its own evals + compact! + task clarity + bug fix + finish-review!
+              (is (str/includes? (code/render-path @rconn "src/demo/fr_wip.clj") ":worker-wip"))
+              (d/transact rconn {:tx-data
+                (concat
+                 (code/file-import-tx @rconn "src/demo/fr_bug.clj" "(ns demo.fr-bug)\n(defn bug {:malli/schema [:=> [:cat] :keyword] :cost/ticks 5000} [] :fixed)\n" false)
+                 [{:seon.task/id :task/fr-work :seon.task/plan "Clarified plan with docs link"}
+                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :review/fr :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "(compact)" :seon.agent.eval/value "ok"}])})
+              (binding [fcalls/*agent-ctx* {:conn rconn :agent-id :review/fr :branch :branch/rev-fr}]
+                (let [cres (fcalls/compact! {:agent-id :w/fr :turns #{2} :summary "Removed noisy turn 2"})
+                      fres (fcalls/finish-review! "Compacted turn 2, clarified task plan, and fixed demo.fr-bug/bug.")]
+                  (is (= 1 (:retracted-evals cres)))
+                  (is (= 2 (:remaining-evals cres)))
+                  (is (true? (:ok? fres)))))
+              ;; Merge :branch/rev-fr -> :branch/w-fr via handle-merge-op!
+              (let [[_ _] (tmerge/handle-merge-op! {:conn conn :cfg cfg :msg-seq 1 :writes 0 :commit-git? false}
+                            {:op :merge :branch :branch/rev-fr :agent-id :review/fr} (d/commit-id @conn))
+                    wdb-after (store/head conn :branch/w-fr)
+                    mdb-after @conn
+                    w-evals (mapv #(d/pull wdb-after '[:seon.agent.eval/turn :seon.agent.eval/code] (:e %))
+                                  (d/datoms wdb-after :avet :seon.agent.eval/agent :w/fr))
+                    rev-evals-on-w (vec (d/datoms wdb-after :avet :seon.agent.eval/agent :review/fr))
+                    note (first (filter #(= :review-note (:seon.agent.message/type %))
+                                        (map #(d/pull mdb-after '[*] (:e %)) (d/datoms mdb-after :avet :seon.agent.message/to :w/fr))))]
+                (is (= #{1 3} (set (map :seon.agent.eval/turn w-evals))) "Noisy turn 2 retracted; turns 1 & 3 preserved!")
+                (is (empty? rev-evals-on-w) "Reviewer's own evals must NOT pollute worker branch!")
+                (is (= ["Removed noisy turn 2"] (:seon.agent/memory (d/pull wdb-after '[:seon.agent/memory] [:seon.agent/id :w/fr]))))
+                (is (str/includes? (code/render-path wdb-after "src/demo/fr_bug.clj") ":fixed") "Reviewer's bug fix merged onto worker branch!")
+                (is (str/includes? (code/render-path wdb-after "src/demo/fr_wip.clj") ":worker-wip") "Worker's WIP preserved!")
+                (is (= "Clarified plan with docs link" (:seon.task/plan (d/pull wdb-after '[:seon.task/plan] [:seon.task/id :task/fr-work]))) "Edited task lives on worker branch for clean merge to :main")
+                (is (false? (:seon.agent/paused? (d/pull mdb-after '[:seon.agent/paused?] [:seon.agent/id :w/fr]))))
+                (is (str/includes? (str (:seon.agent.message/body note)) "Compacted turn 2, clarified task plan, and fixed demo.fr-bug/bug."))
+                (is (str/includes? (code/render-path mdb-after "src/demo/fr_wip.clj") ":base") "Worker WIP must NOT leak onto :main!"))
+              (finally (d/release rconn))))
+          (finally (d/release wconn)))))))

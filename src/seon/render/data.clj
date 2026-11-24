@@ -351,7 +351,7 @@
                                   :seon.agent.eval/prefix-hash :seon.agent.eval/prompt-tokens :seon.agent.eval/completion-tokens
                                   :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
                                   :seon.agent.eval/seen-messages] (:e dt))
-                     :seon.agent.eval/tx (:tx dt) :seon.agent.eval/agent agent-id)))
+                     :db/id (:e dt) :seon.agent.eval/tx (:tx dt) :seon.agent.eval/agent agent-id)))
        (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
        vec))
 
