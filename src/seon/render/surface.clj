@@ -76,32 +76,40 @@
           :else (vec (distinct (concat [0] (range (max 1 (- ci 5)) (inc (min (- n 2) (+ ci 5)))) [(dec n)]))))))
 
 (defn render-surface-timeline
-  "Generic Datahike `d/as-of` time-travel bar shared across views."
-  {:malli/schema [:=> [:cat [:maybe [:sequential :int]] [:maybe :int] [:maybe :int]] :any] :cost/ticks 500000}
-  [hist-txs cur-idx as-of-tx]
-  (let [txs (vec (filter integer? (or hist-txs []))) n (count txs)
-        in-h? (boolean (and as-of-tx (some #(= (long %) (long as-of-tx)) txs)))
-        past? (boolean (and as-of-tx (or (<= n 1) (not in-h?) (< (long (or cur-idx (dec n))) (dec n)))))]
-    (when (or (> n 1) past?)
-      (let [idx (if (pos? n) (max 0 (min (dec n) (long (or cur-idx (dec n))))) 0)]
-        [:div {:class (str "canvas-timeline-bar" (when past? " historical"))}
-         (when (> n 1)
-           [:div {:class "tl-nav"}
-            [:button {:type "button" :class "tl-btn" :aria-label "Previous step" :disabled (zero? idx)
-                      :on-click '(seon.web/step-canvas-history! -1)} rmd/svg-chevron-left]
-            [:button {:type "button" :class "tl-btn" :aria-label "Next step" :disabled (>= idx (dec n))
-                      :on-click '(seon.web/step-canvas-history! 1)} rmd/svg-chevron-right]])
-         (if (> n 1)
-           [:div {:class "tl-track" :role "tablist"}
-            (for [i (windowed-history-indices n idx)
-                  :let [tx (nth txs i) c (cond (and in-h? (= i idx)) " active" (< i idx) " past" :else "")]]
-              [:button {:type "button" :class (str "tl-pip" c) :title (str "Step " (inc i) "/" n " · tx " tx)
-                        :on-click (list 'seon.web/jump-canvas-tx! tx)}])]
-           (kicker (str "Snapshot · tx " as-of-tx)))
-         [:div {:class "tl-meta"}
-          [:span (cond (and past? (not in-h?)) (str "Time-travel · tx " as-of-tx)
-                       past? (str "Time-travel · " (inc idx) " / " n) :else (str "History · " (inc idx) " / " n))]
-          (when past? [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)} "Live"])]]))))
+  "Generic Datahike `d/as-of` time-travel bar shared across views (clean human step labels in User Mode; full tx scrubber in Dev Mode)."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :int]] [:maybe :int] [:maybe :int] [:? :boolean]] :any], :cost/ticks 500000}
+  ([hist-txs cur-idx as-of-tx] (render-surface-timeline hist-txs cur-idx as-of-tx false))
+  ([hist-txs cur-idx as-of-tx expert-mode?]
+   (let [txs (vec (filter integer? (or hist-txs []))) n (count txs)
+         in-h? (boolean (and as-of-tx (some #(= (long %) (long as-of-tx)) txs)))
+         past? (boolean (and as-of-tx (or (<= n 1) (not in-h?) (< (long (or cur-idx (dec n))) (dec n)))))
+         show? (if expert-mode? (or (> n 1) past?) (> n 1))]
+     (when show?
+       (let [idx (if (pos? n) (max 0 (min (dec n) (long (or cur-idx (dec n))))) 0)]
+         [:div {:class (str "canvas-timeline-bar" (when past? " historical"))}
+          (when (> n 1)
+            [:div {:class "tl-nav"}
+             [:button {:type "button" :class "tl-btn" :aria-label "Previous step" :disabled (zero? idx)
+                       :on-click '(seon.web/step-canvas-history! -1)} rmd/svg-chevron-left]
+             [:button {:type "button" :class "tl-btn" :aria-label "Next step" :disabled (>= idx (dec n))
+                       :on-click '(seon.web/step-canvas-history! 1)} rmd/svg-chevron-right]])
+          (if (> n 1)
+            [:div {:class "tl-track" :role "tablist"}
+             (for [i (windowed-history-indices n idx)
+                   :let [tx (nth txs i) c (cond (and in-h? (= i idx)) " active" (< i idx) " past" :else "")]]
+               [:button {:type "button" :class (str "tl-pip" c)
+                         :title (if expert-mode? (str "Step " (inc i) "/" n " · tx " tx) (str "Step " (inc i) " of " n))
+                         :on-click (list 'seon.web/jump-canvas-tx! tx)}])]
+            (kicker (str "Snapshot · tx " as-of-tx)))
+          [:div {:class "tl-meta"}
+           [:span (if expert-mode?
+                    (cond (and past? (not in-h?)) (str "Time-travel · tx " as-of-tx)
+                          past? (str "Time-travel · " (inc idx) " / " n)
+                          :else (str "History · " (inc idx) " / " n))
+                    (if past?
+                      (str "Time-travel · Step " (inc idx) " of " n)
+                      (str "Step " (inc idx) " of " n)))]
+           (when past? [:button {:type "button" :class "step-live" :on-click '(seon.web/jump-canvas-live!)} "Live"])]])))))
 
 (defonce ^:private ^:seon.flow/edge signals-fit-cache (store/lru-cache 32))
 
@@ -202,10 +210,11 @@
                  history-txs step-idx as-of-tx]} m
          comp? (if (contains? o :include-composer?) (boolean (:include-composer? o)) true)
          tl (when (and (not inspecting?) (not= canon-mode :system) (not (and explaining? inspect-ref)))
-              (render-surface-timeline history-txs step-idx as-of-tx))
+              (render-surface-timeline history-txs step-idx as-of-tx (boolean (:expert-mode? m))))
          cls (cond (or explaining? inspecting? (= canon-mode :system)) "debug-wrap"
-         (= canon-mode :canvas) "root-canvas-wrap"
-         :else (if (>= (long (:avail-w slot-budget 1000)) 860) "workspace-grid" "workspace-grid surface-stack"))
+                   (= canon-mode :canvas) "root-canvas-wrap"
+                   (not (:expert-mode? m)) "user-chat-wrap"
+                   :else (if (>= (long (:avail-w slot-budget 1000)) 860) "workspace-grid" "workspace-grid surface-stack"))
          body (cond explaining? (clab/render-context-lab-body m)
                     (and inspecting? (= :seon.system/id (first inspect-ref))) (sentity/render-system-entity-body m)
                     inspecting? (sinsp/render-inspector-body m)

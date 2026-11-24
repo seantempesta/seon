@@ -91,7 +91,7 @@
   (let [sk (or (first (:schemas it)) (:schema it))]
     (cond (group-tasks-edits sk) :tasks-edits (group-alerts-proofs sk) :alerts-proofs :else :pinned-rules)))
 
-(defn- render-grouped-entities [entities avail-w expert-mode?]
+(defn- render-grouped-entities [entities avail-w]
   (when (seq entities)
     (let [by-g (group-by entity-group-key entities) counts (volatile! {})
           mk-item (fn [item]
@@ -112,17 +112,10 @@
                           card-node (or (:hiccup item)
                                         [:div {:class "ent-row mono tiny"}
                                          (if ref (ent-link ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong") (str (:entity item)))])]
-                      (if expert-mode?
-                        [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
-                               :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
-                         prov-bar
-                         card-node]
-                        [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
-                               :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
-                         card-node
-                         [:details {:class "expert-drawer ent-prov-drawer"}
-                          [:summary {:class "mono tiny muted" :style {:cursor "pointer" :opacity "0.55" :font-size "10px" :margin-top "2px"}} "···"]
-                          prov-bar]])))]
+                      [:div {:class "surface-entity-item" :style (str "view-transition-name:" vt)
+                             :data-entity (str (:entity item)) :data-chosen-fn (str cfn) :data-min-width (str (:min-width item 0))}
+                       prov-bar
+                       card-node]))]
       [:div {:class (if (< (long avail-w) 600) "surface-entities stack-sm" "surface-entities stack")
              :data-entity-count (str (count entities))}
        (for [[gk title] [[:tasks-edits "Tasks & Edits"] [:alerts-proofs "Alerts & Proofs"] [:pinned-rules "Pinned & Rules"]]
@@ -131,20 +124,21 @@
           [:div {:class "ctx-group-head"} (kicker title) [:span {:class "mono tiny muted"} (str (count xs))]]
           (mapv mk-item xs)])])))
 
-(defn- render-exchanges-list [prefix exchanges]
+(defn- render-exchanges-list [prefix exchanges expert-mode?]
   (for [[idx ex] (map-indexed vector exchanges)
         :let [emsgs (filter #(= :msg (:kind %)) ex)
               eevals (map :data (filter #(= :eval (:kind %)) ex))
               prose (->> eevals (filter #(str/blank? (str (:seon.agent.eval/code %))))
                          (keep :seon.agent.eval/thought) (remove #(str/blank? (str %))) vec)
-              acts (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
-                                 (not (str/blank? (str (:seon.agent.eval/reasoning %))))) eevals)]]
+              acts (when expert-mode?
+                     (filterv #(or (not (str/blank? (str (:seon.agent.eval/code %))))
+                                   (not (str/blank? (str (:seon.agent.eval/reasoning %))))) eevals))]]
     [:div {:id (str prefix "-" idx) :class "ws-exchange"}
      (for [[mi m] (map-indexed vector emsgs)]
        [:div {:id (str prefix "-" idx "-m-" mi) :class "ws-user-bubble"} (rmd/render-markdown-blocks (str (:seon.agent.message/body (:data m) "")))])
      (when (or (seq acts) (seq prose))
        [:div {:class (str "ws-agent-turn" (when (seq prose) " has-prose"))}
-        (rmd/render-activity-fold acts (str prefix "-" idx))
+        (when (seq acts) (rmd/render-activity-fold acts (str prefix "-" idx)))
         (for [[pi p] (map-indexed vector prose)]
           [:div {:id (str prefix "-" idx "-p-" pi) :class "chat-body"} (rmd/render-markdown-blocks p)])])]))
 
@@ -168,7 +162,7 @@
       {:target-id (:seon.agent/id t-ag)
        :reviewer-id active-rev})))
 
-(defn- render-work-bar [main-db agent viewing-id label branch tx-num active? expert-mode?]
+(defn- render-work-bar [main-db agent viewing-id label branch tx-num active?]
   (let [scope (:seon.agent/scope agent) tasks (rdata/agent-task-ids main-db agent) parent (:seon.agent/parent agent)
         {:keys [target-id reviewer-id]} (review-bar-links main-db agent viewing-id)
         role-b (cond (:seon.agent/router? agent) (badge "blue" "router") (:seon.agent/interactive? agent) (badge "muted" "repl") (:seon.agent/target agent) (badge "purple" "fork") :else nil)
@@ -186,103 +180,128 @@
                   [:div {:class "pill-row"}
                    (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
                    (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")])]
-    (if expert-mode?
-      [:div {:class "ws-head work-bar"}
-       [:div {:class "stack-xs"}
-        [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") role-b status-b]
-        meta-row]
-       br-acts]
-      [:div {:class "ws-head work-bar"}
-       [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") status-b
-        (when target-id (ent-link [:seon.agent/id target-id] (str "→ " (name target-id)) "mono tiny muted"))
-        (when reviewer-id (ent-link [:seon.agent/id reviewer-id] (str "→ " (name reviewer-id)) "mono tiny"))]
-       [:details {:class "expert-drawer"}
-        [:summary {:class "mono tiny muted" :style {:cursor "pointer"}} "Details"]
-        [:div {:class "stack-xs" :style {:margin-top "6px"}}
-         [:div {:class "pill-row"} role-b meta-row]
-         br-acts]]])))
+    [:div {:class "ws-head work-bar"}
+     [:div {:class "stack-xs"}
+      [:div {:class "pill-row"} (ent-link [:seon.agent/id viewing-id] label "mono strong") role-b status-b]
+      meta-row]
+     br-acts]))
+
+(defn- render-user-session [{:keys [agent viewing-id exchanges pending-prompt latest-prose reply-prompt work-summary live-stream branch-feedback active? agent-status]} label composer]
+  (let [prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
+        earlier (when (> (count exchanges) 1) (pop exchanges))]
+    [:section {:id "ws-left-unit" :class "user-chat-col"}
+     [:div {:class "user-chat-head"}
+      [:h2 {:class "strong"} label]
+      (when active? (badge "amber" "Working…"))]
+     (feedback-banner branch-feedback)
+     [:div {:class "ws-timeline" :data-agent (str viewing-id)}
+      (when (and (map? agent-status) (:seon.ui.status/label agent-status))
+        [:div {:id "cv-live-status" :class "session-live-status"}
+         (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
+      (when (and (seq earlier) (not pending-prompt))
+        [:div {:class "stack-sm"} (render-exchanges-list "hx" earlier false)])
+      (cond
+        pending-prompt
+        (let [{:keys [css-class text]} (canvas-live-progress live-stream)]
+          [:section {:id "cv-pending" :class (str "ch-pending-card canvas-pending " css-class)}
+           [:h1 {:class "canvas-prompt-headline"} pending-prompt]
+           [:div {:class "canvas-pending-status"}
+            [:span {:class "dot pulsing"}]
+            [:span {:class "muted sm-copy"} "Working…"]]
+           (when text [:div {:id "cv-live-prose" :class "live-prose"} text [:span {:class "cursor"} "▍"]])])
+        prose
+        [:section {:class "canvas-reply"}
+         (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} reply-prompt])
+         (rmd/render-markdown-blocks prose)]
+        work-summary
+        [:section {:id "cv-work-summary" :class "card stack-sm"}
+         [:div {:class "pill-row"} (badge "green" (:status-label work-summary)) [:strong {:class "sm-copy"} (:latest-intent work-summary)]]
+         (when-let [pr (:prompt work-summary)] [:div {:class "canvas-re-prompt"} pr])]
+        :else
+        [:div {:class "user-welcome"}
+         [:header {:class "root-hero"}
+          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) "Start a conversation")]
+          [:p {:class "root-sub"} "Send a message below to get started."]]])]
+     composer]))
 
 (defn render-session-body
-  "Renders the focused Agent Session view: calm Everyday mode by default (clean conversation,
-   live visual status card, collapsed expert drawers) or full Expert mode with provenance bars
-   and direct branch/test/merge actions."
+  "Renders Chat (`:session`): centered single-column User Mode or full 2-column Dev Mode with Active Context."
   {:malli/schema [:=> [:cat :map :boolean] :any] :cost/ticks 20000000}
   [{:keys [agent viewing-id branch main-db branch-db as-of-tx entities pool-count exchanges pending-prompt
            latest-prose reply-prompt latest-actions work-summary live-stream branch-feedback slot-budget
-           active? expert-mode? agent-status]}
+           active? expert-mode? agent-status] :as model}
    include-composer?]
   (let [label (rdata/agent-label agent viewing-id)
-        prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
-        earlier (when (> (count exchanges) 1) (pop exchanges))
-        tx-num (or as-of-tx (:max-tx branch-db) (:max-tx main-db))
         exp? (boolean expert-mode?)
-        pin-form [:form {:class "row-form" :on-submit (list 'seon.web/pin-ref-form! viewing-id)}
-                  [:input {:class "inp sm mono flex-1" :name "ref" :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
-                  [:button {:type "submit" :class "btn sm"} "+ Pin"]]]
-    (list
-     [:section {:id "ws-left-unit" :class "ws-left"}
-      (render-work-bar main-db agent viewing-id label branch tx-num active? exp?)
-      (feedback-banner branch-feedback)
-      [:div {:class "ws-timeline" :data-agent (str viewing-id)}
-       (when (and (map? agent-status) (:seon.ui.status/label agent-status))
-         [:div {:id "cv-live-status" :class "session-live-status"}
-          (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
-       (when (and (seq earlier) (not pending-prompt))
-         [:details {:id "session-earlier" :class "activity-fold" :open true}
-          [:summary {:class "mono tiny"} (str "Earlier exchanges (" (count earlier) ")")]
-          [:div {:class "stack-sm" :style {:margin-top "8px"}} (render-exchanges-list "hx" earlier)]])
-       (cond
-         pending-prompt
-         (let [{:keys [css-class rate reasoning text] pl :label} (canvas-live-progress live-stream)]
-           [:section {:id "cv-pending" :class (str "ch-pending-card canvas-pending " css-class)}
-            [:div {:class "root-kicker"} (str "In flight · " pl)]
-            [:h1 {:class "canvas-prompt-headline"} pending-prompt]
-            [:div {:class "canvas-pending-status"}
-             [:span {:class "dot pulsing"}] [:span {:class (str "stream-phase-badge " css-class)} pl]
-             (when rate [:span {:class "stream-rate"} rate])]
-            (when text [:div {:id "cv-live-prose" :class "live-prose"} text [:span {:class "cursor"} "▍"]])
-            (when reasoning
-              [:details {:id "cv-live-reasoning" :class "activity-fold"}
-               [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
-               [:div {:class "live-reasoning"} reasoning]])
-            (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-live"))])
-         prose
-         [:section {:class "canvas-reply"}
-          (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (str "Re: " reply-prompt)])
-          (rmd/render-markdown-blocks prose)
-          (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv"))]
-         work-summary
-         [:section {:id "cv-work-summary" :class "card stack-sm"}
-          [:div {:class "row-between"}
-           [:div {:class "pill-row"} (badge "green" (:status-label work-summary)) [:strong {:class "sm-copy"} (:latest-intent work-summary)]]
-           [:span {:class "mono tiny muted"} (str (:eval-count work-summary) " eval(s)")]]
-          (when-let [pr (:prompt work-summary)] [:div {:class "canvas-re-prompt"} (str "Re: " pr)])
-          (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-work"))]
-         :else
-         [:header {:class "root-hero"}
-          [:div {:class "root-kicker pill-row"}
-           (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·" (ent-link [:seon.branch/name branch] (str branch) "mono tiny")]
-          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
-          (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])])]
-      (when include-composer?
-        [:form {:class "ws-composer" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
-         [:div {:class "composer-shell"}
-          [:textarea {:class "composer-inp" :name "text" :rows 1 :data-on:keydown enter-submit-js
-                      :placeholder (str "Message " label " or (eval Clojure)…")}]
-          [:button {:type "submit" :class "send-icon-btn" :aria-label "Send"} rmd/svg-arrow-up]]])]
-     [:section {:class "ws-right"}
-      [:div {:id "ws-right-head-unit"}
-       [:div {:class "ws-head"}
-        [:h2 (str "Active Context (" (count entities) ")")]
-        (btn "nav-pill tiny" '(seon.web/set-explain-lens! true nil)
-             (if (pos? (long (or pool-count 0)))
-               (str "Explain selection (" pool-count " in pool) →")
-               "Explain selection →"))]
-       (if exp?
-         pin-form
-         [:details {:class "expert-drawer" :style {:margin-top "4px"}}
-          [:summary {:class "mono tiny muted" :style {:cursor "pointer"}} "+ Pin"]
-          pin-form])]
-      [:div {:class "tiles-scroll"}
-       (or (render-grouped-entities entities (:avail-w slot-budget) exp?)
-           [:div {:id "ws-tiles-empty" :class "card muted sm-copy"} "No active context entities yet."])]])))
+        composer (when include-composer?
+                   [:form {:class "ws-composer" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
+                    [:div {:class "composer-shell"}
+                     [:textarea {:class "composer-inp" :name "text" :rows 1 :data-on:keydown enter-submit-js
+                                 :placeholder (if exp? (str "Message " label " or (eval Clojure)…") "Ask anything…")}]
+                     [:button {:type "submit" :class "send-icon-btn" :aria-label "Send"} rmd/svg-arrow-up]]])]
+    (if-not exp?
+      (render-user-session model label composer)
+      (let [prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
+            earlier (when (> (count exchanges) 1) (pop exchanges))
+            tx-num (or as-of-tx (:max-tx branch-db) (:max-tx main-db))
+            pin-form [:form {:class "row-form" :on-submit (list 'seon.web/pin-ref-form! viewing-id)}
+                      [:input {:class "inp sm mono flex-1" :name "ref" :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
+                      [:button {:type "submit" :class "btn sm"} "+ Pin"]]]
+        (list
+         [:section {:id "ws-left-unit" :class "ws-left"}
+          (render-work-bar main-db agent viewing-id label branch tx-num active?)
+          (feedback-banner branch-feedback)
+          [:div {:class "ws-timeline" :data-agent (str viewing-id)}
+           (when (and (map? agent-status) (:seon.ui.status/label agent-status))
+             [:div {:id "cv-live-status" :class "session-live-status"}
+              (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
+           (when (and (seq earlier) (not pending-prompt))
+             [:details {:id "session-earlier" :class "activity-fold" :open true}
+              [:summary {:class "mono tiny"} (str "Earlier exchanges (" (count earlier) ")")]
+              [:div {:class "stack-sm" :style {:margin-top "8px"}} (render-exchanges-list "hx" earlier true)]])
+           (cond
+             pending-prompt
+             (let [{:keys [css-class rate reasoning text] pl :label} (canvas-live-progress live-stream)]
+               [:section {:id "cv-pending" :class (str "ch-pending-card canvas-pending " css-class)}
+                [:div {:class "root-kicker"} (str "In flight · " pl)]
+                [:h1 {:class "canvas-prompt-headline"} pending-prompt]
+                [:div {:class "canvas-pending-status"}
+                 [:span {:class "dot pulsing"}] [:span {:class (str "stream-phase-badge " css-class)} pl]
+                 (when rate [:span {:class "stream-rate"} rate])]
+                (when text [:div {:id "cv-live-prose" :class "live-prose"} text [:span {:class "cursor"} "▍"]])
+                (when reasoning
+                  [:details {:id "cv-live-reasoning" :class "activity-fold"}
+                   [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
+                   [:div {:class "live-reasoning"} reasoning]])
+                (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-live"))])
+             prose
+             [:section {:class "canvas-reply"}
+              (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (str "Re: " reply-prompt)])
+              (rmd/render-markdown-blocks prose)
+              (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv"))]
+             work-summary
+             [:section {:id "cv-work-summary" :class "card stack-sm"}
+              [:div {:class "row-between"}
+               [:div {:class "pill-row"} (badge "green" (:status-label work-summary)) [:strong {:class "sm-copy"} (:latest-intent work-summary)]]
+               [:span {:class "mono tiny muted"} (str (:eval-count work-summary) " eval(s)")]]
+              (when-let [pr (:prompt work-summary)] [:div {:class "canvas-re-prompt"} (str "Re: " pr)])
+              (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-work"))]
+             :else
+             [:header {:class "root-hero"}
+              [:div {:class "root-kicker pill-row"}
+               (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·" (ent-link [:seon.branch/name branch] (str branch) "mono tiny")]
+              [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
+              (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])])]
+          composer]
+         [:section {:class "ws-right"}
+          [:div {:id "ws-right-head-unit"}
+           [:div {:class "ws-head"}
+            [:h2 (str "Active Context (" (count entities) ")")]
+            (btn "nav-pill tiny" '(seon.web/set-explain-lens! true nil)
+                 (if (pos? (long (or pool-count 0)))
+                   (str "Explain selection (" pool-count " in pool) →")
+                   "Explain selection →"))]
+           pin-form]
+          [:div {:class "tiles-scroll"}
+           (or (render-grouped-entities entities (:avail-w slot-budget))
+               [:div {:id "ws-tiles-empty" :class "card muted sm-copy"} "No active context entities yet."])]])))))

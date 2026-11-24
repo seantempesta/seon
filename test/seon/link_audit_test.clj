@@ -201,10 +201,7 @@
                  {:seon.agent.message/id m2-id :seon.agent.message/seq 2 :seon.agent.message/from :agent/worker
                   :seon.agent.message/to :user :seon.agent.message/type :chat
                   :seon.agent.message/body "Audit pass 1 done."}
-                 {:seon.user/id :user/default
-                  :seon.user/viewing [:seon.agent/id :agent/worker]
-                  :seon.user/view-mode :session
-                  :seon.user/sidebar-open? true}]})
+                 {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/worker] :seon.user/view-mode :session :seon.user/expert-mode? true :seon.user/sidebar-open? true}]})
         tx1 (reduce max 0 (map :tx (:tx-data tx1-r)))]
     ;; Second tx so d/as-of history has >1 distinct tx and vectors exist
     (d/transact conn {:tx-data [{:seon.agent.eval/id ev3-id :seon.agent.eval/agent :agent/worker :seon.agent.eval/turn 3

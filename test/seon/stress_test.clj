@@ -309,8 +309,8 @@
             (is (>= (count hist-txs) 2)
                 "Every pinned entity mutation must record a Datahike history step for Back/Forward time-travel!")
             ;; Verify Datahike d/as-of time-travel renders Step One vs Live Step Two!
-            (let [h-html (render/hiccup->html (surface/render-surface @(:conn sys) bdb {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas :as-of-tx tx-step1}))
-                  l-html (render/hiccup->html (surface/render-surface @(:conn sys) bdb {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas}))]
+            (let [h-html (render/hiccup->html (surface/render-surface @(:conn sys) bdb {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas :expert-mode? true :as-of-tx tx-step1}))
+                  l-html (render/hiccup->html (surface/render-surface @(:conn sys) bdb {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas :expert-mode? true}))]
               (is (str/includes? h-html "Step One"))
               (is (str/includes? h-html "Time-travel"))
               (is (str/includes? l-html "Step Two"))
@@ -319,7 +319,7 @@
             (let [m-ans (main/call! sys {:op :send-message :from :user :to :agent/mcp-check :type :chat :body "test"})
                   mid (:message-id m-ans)]
               ;; The instant a user sends a message (unread/pending), surface shows the user's prompt!
-              (let [mid-html (render/hiccup->html (surface/render-surface @(:conn sys) (store/head (:conn sys) :branch/mcp-check) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas}))]
+              (let [mid-html (render/hiccup->html (surface/render-surface @(:conn sys) (store/head (:conn sys) :branch/mcp-check) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas :expert-mode? true}))]
                 (is (str/includes? mid-html "canvas-pending")
                     "Sending a message must immediately give visual feedback replacing Canvas with the user's prompt!")
                 (is (str/includes? mid-html "canvas-prompt-headline\">test</h1>")
@@ -336,7 +336,7 @@
                                           :seon.agent.eval/thought "Test received — **alive** on `:branch/mcp-check`!\n- *all green*"
                                           :seon.agent.eval/seen-messages [mid]}]})
                   (finally (d/release bconn))))
-              (let [r-html (render/hiccup->html (surface/render-surface @(:conn sys) (store/head (:conn sys) :branch/mcp-check) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas}))]
+              (let [r-html (render/hiccup->html (surface/render-surface @(:conn sys) (store/head (:conn sys) :branch/mcp-check) {:conn (:conn sys) :branch :branch/mcp-check :viewing-id :agent/mcp-check :view-mode :canvas :expert-mode? true}))]
                 (is (str/includes? r-html "Test received")
                     "Plain-text reply MUST render cleanly on the unified surface!")
                 (is (str/includes? r-html "<strong>alive</strong>")

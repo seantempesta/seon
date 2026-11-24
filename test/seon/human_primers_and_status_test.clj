@@ -317,7 +317,7 @@
             db @conn
             html-everyday (render/hiccup->html (surface/render-surface db db {:conn conn :viewing-id :agent/ux :view-mode :session :viewport-w 1440 :viewport-h 900}))
             html-expert   (render/hiccup->html (surface/render-surface db db {:conn conn :viewing-id :agent/ux :view-mode :session :viewport-w 1440 :viewport-h 900 :expert-mode? true}))
-            html-asof     (render/hiccup->html (surface/render-surface db db {:conn conn :viewing-id :agent/ux :view-mode :session :viewport-w 1440 :viewport-h 900 :as-of-tx tx1}))]
+            html-asof     (render/hiccup->html (surface/render-surface db db {:conn conn :viewing-id :agent/ux :view-mode :session :expert-mode? true :viewport-w 1440 :viewport-h 900 :as-of-tx tx1}))]
         ;; 1. Live status card banner prominently in Session column
         (is (str/includes? html-everyday "id=\"cv-live-status\""))
         (is (str/includes? html-everyday "Preparing chart"))
@@ -325,16 +325,18 @@
         (is (str/includes? html-everyday "<svg viewBox=\"0 0 80 16\">"))
 
         ;; 2. Everyday mode (default = false) tucks noisy provenance & branch/test/merge inside collapsed expert-drawer
+        ;; 2. Normal User Mode (default = false) renders clean single-column Chat with zero engineering rail or branch/merge drawers
         (is (str/includes? html-everyday "data-expert-mode=\"false\""))
-        (is (str/includes? html-everyday "class=\"expert-drawer\""))
-        (is (str/includes? html-everyday "class=\"expert-drawer ent-prov-drawer\""))
-        (is (str/includes? html-everyday "data-chosen-fn="))
-        (is (str/includes? html-everyday "class=\"surface-entity-item\""))
+        (is (str/includes? html-everyday "user-chat-wrap"))
+        (is (not (str/includes? html-everyday "Active Context")))
+        (is (not (str/includes? html-everyday "Merge → :main")))
+        (is (not (str/includes? html-everyday "ent-prov-bar")))
 
         ;; 3. Expert mode (true) shows provenance bars & Test/Merge actions directly open without expert-drawer
+        ;; 3. Developer Mode (true) shows 2-column workspace-grid, Active Context provenance bars & Test/Merge actions
         (is (str/includes? html-expert "data-expert-mode=\"true\""))
-        (is (not (str/includes? html-expert "class=\"expert-drawer\"")))
-        (is (not (str/includes? html-expert "ent-prov-drawer")))
+        (is (str/includes? html-expert "workspace-grid"))
+        (is (str/includes? html-expert "Active Context"))
         (is (str/includes? html-expert "class=\"ent-prov-bar\""))
         (is (str/includes? html-expert "Merge → :main"))
 

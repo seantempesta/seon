@@ -242,8 +242,7 @@
          :candidates (hydrate bdb mdb neighbors)}))))
 
 (defn entity-world-candidates
-  "Commit-cached generic 2-read entity-rooted world discovery (`:eavt` outbound + reverse `:avet` inbound +
-   `:seon.system/id` live overview + live `seon.vector/near`) for ANY lookup ref or EID."
+  "Commit-cached 2-read entity-rooted world discovery + `seon.vector/near`."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map] :cost/ticks 30000000}
   [main-db branch-db ref-or-eid]
   (let [bdb (or branch-db main-db)
@@ -254,8 +253,7 @@
         (compute-entity-world main-db bdb ref))))
 
 (defn render-variations-panel
-  "Renders ALL renderer variations side-by-side (`Browser HTML` vs `Model Text`, `WINNER`, `:reason`,
-   live target/budget/width toggles). Collapsed `<details>` by default; expanded when `expanded?` is true."
+  "Renders all renderer variations side-by-side (`Browser HTML` vs `Model Text`)."
   {:malli/schema [:function [:=> [:cat :map :map :boolean] [:vector :any]]
                   [:=> [:cat :map :map :boolean :boolean] [:vector :any]]]
    :cost/ticks 10000000}
@@ -297,34 +295,6 @@
          [:span (str "Renderer Variations (" (count vars) ")" (when win-fn (str " · Winner: " (name win-fn))))]
          (mut (str (if (= it :wire) "Model Wire" "Browser UI") " · " ib " tok · " iw "px"))]
         [:div {:class "stack-sm" :style {:margin-top "10px"}} ctrls body]]))))
-
-(defn- render-nav-bar [viewing-id agent-lbl ref trail fwd lp focal]
-  (let [[ra rv] ref
-        rule-dis? (and (= ra :seon.rule/id) (contains? (:disabled-rules lp) rv))]
-    [:div {:id "insp-nav-bar" :class "insp-bar"}
-     [:div {:class "insp-nav-left"}
-      (btn "btn sm" '(seon.web/inspect-back!) "← Back" (empty? trail))
-      (btn "btn sm" '(seon.web/inspect-forward!) "→ Forward" (empty? fwd))
-      [:div {:class "insp-trail"}
-       (for [[idx tr] (map-indexed vector trail)]
-         (list [:a {:href (seon.web.router/entity-ref->path nil tr) :class "crumb-btn ent-link mono tiny"
-                    :data-ref (pr-str tr) :data-preview-ref (pr-str tr) :interestfor "seon-hovercard"
-                    :on-click (list 'seon.web/jump-inspect-trail! idx)}
-               (rdata/entity-short-label tr)]
-               [:span {:class "crumb-sep"} "›"]))
-       [:span {:class "badge amber mono"} (rdata/entity-short-label (or (:entity focal) ref))]]]
-     [:div {:class "pill-row"}
-      (when (= ra :seon.agent/id) (btn "btn sm primary" (list 'seon.web/view-agent! rv :session) "Open Session"))
-      (when (= ra :seon.rule/id)
-        (btn (if rule-dis? "btn sm success" "btn sm danger") (list 'seon.web/toggle-lab-rule! rv)
-             (if rule-dis? "Enable in Lab" "Disable in Lab")))
-      (when (= ra :seon.branch/name)
-        (list (btn "btn sm" (list 'seon.web/run-tests! rv) "Test Branch")
-              (when (not= rv :main) (btn "btn sm success" (list 'seon.web/merge-branch! rv) "Merge → :main"))))
-      (when (and ref (not (#{:seon.signal/kind :seon.branch/name :seon.system/id} ra)))
-        (btn "btn sm" (list 'seon.web/pin-to-agent! viewing-id ref) (str "+ Pin to " agent-lbl)))
-      (btn "nav-pill tiny" (list 'seon.web/set-explain-lens! true ref) "Explain / Variations →")
-      (btn "btn sm" '(seon.web/inspect-close!) "Close ×")]]))
 
 (defn- render-focal-extras
   ([world main-db] (render-focal-extras world main-db nil))
@@ -422,11 +392,27 @@
                  :placeholder (str "Start an agent focused on " lbl "…")}]
         [:button {:type "submit" :class "btn sm primary"} "Start agent"]]])))
 
+(defn- render-entity-actions [viewing-id agent-lbl ref lp]
+  (let [[ra rv] ref
+        rule-dis? (and (= ra :seon.rule/id) (contains? (:disabled-rules lp) rv))]
+    [:div {:class "entity-actions"}
+     (when (= ra :seon.agent/id)
+       (list (btn "btn sm primary" (list 'seon.web/view-agent! rv :canvas) "Open Canvas")
+             (btn "btn sm" (list 'seon.web/view-agent! rv :session) "Open Chat")))
+     (when (= ra :seon.rule/id)
+       (btn (if rule-dis? "btn sm success" "btn sm danger") (list 'seon.web/toggle-lab-rule! rv)
+            (if rule-dis? "Enable in Lab" "Disable in Lab")))
+     (when (= ra :seon.branch/name)
+       (list (btn "btn sm" (list 'seon.web/run-tests! rv) "Test Branch")
+             (when (not= rv :main) (btn "btn sm success" (list 'seon.web/merge-branch! rv) "Merge → :main"))))
+     (when (and ref (not (#{:seon.signal/kind :seon.branch/name :seon.system/id} ra)))
+       (btn "btn sm" (list 'seon.web/pin-to-agent! viewing-id ref) (str "+ Pin to " agent-lbl)))
+     (btn "btn sm" '(seon.web/inspect-close!) "Close ×")]))
+
 (defn render-inspector-body
-  "Renders the focused Entity Full View for `:inspect-ref`: clean nav bar, Upgrade-Ladder focal
-   card, top 10 highest-ranked related entities (hover=preview, click=full view), and collapsed Variations."
+  "Renders focused Entity Full View for `:inspect-ref` (breadcrumbs live in `#seon-header`)."
   {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
-  [{:keys [main-db branch-db viewing-id agent inspect-ref inspect-trail inspect-forward lab-prefs slot-budget branch-feedback]}]
+  [{:keys [main-db branch-db viewing-id agent inspect-ref lab-prefs slot-budget branch-feedback]}]
   (if-not (or main-db branch-db)
     [:div {:id "seon-inspector-unit" :class "card muted"} "No database connected."]
     (let [main-db (or main-db branch-db) lp (rdata/normalize-lab-prefs lab-prefs)
@@ -446,18 +432,19 @@
           out-nb (filterv #(= :outbound (:polarity %)) sel-nb)
           in-nb  (filterv #(= :inbound (:polarity %)) sel-nb)
           sem-nb (filterv #(= :semantic (:polarity %)) sel-nb)
-          winner-h (some #(when (:chosen? %) (:hiccup %)) (:variations explained))]
+          winner-h (some #(when (:chosen? %) (:hiccup %)) (:variations explained))
+          acts (render-entity-actions viewing-id (rdata/agent-label agent viewing-id) (:ref world) lp)]
       [:div {:id "seon-inspector-unit" :class "stack"}
        (when branch-feedback
          [:div {:class (str "notice row-between " (if (:ok? branch-feedback) "green" "red"))}
           [:span (:text branch-feedback)] (btn "link-muted tiny" '(seon.web/dismiss-feedback!) "×")])
-       (render-nav-bar viewing-id (rdata/agent-label agent viewing-id) (:ref world) inspect-trail inspect-forward lp world)
        (if (and (not (:virtual? world)) (nil? (:entity world)))
-         [:section {:class "card"} [:h2 "Entity not found"]
+         [:section {:class "card stack-sm"}
+          [:div {:class "row-between"} [:h2 "Entity not found"] acts]
           [:p {:class "muted sm-copy mono"} (str "No entity matched " (pr-str ref) " on current DB.")]]
          (list
           (when-let [fc (or winner-h (render-generic-focal (:entity world) (:ref world) dh))]
-            [:section {:id "insp-focal-unit" :class "stack-xs"} fc])
+            [:section {:id "insp-focal-unit" :class "stack-xs"} acts fc])
           (render-focal-extras world main-db branch-db)
           [:section {:id "insp-neighborhood-unit" :class "stack"}
            [:div {:class "row-between"}

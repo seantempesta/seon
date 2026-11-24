@@ -83,10 +83,7 @@
                 :seon.agent/pinned [[:seon.task/id :task/surface-demo]
                                     [:seon.code.var/name 'demo.mod/compute]
                                     [:seon.code.doc/id "docs/surface.md#intro"]]}
-               {:seon.user/id :user/default
-                :seon.user/viewing [:seon.agent/id :agent/root]
-                :seon.user/view-mode :session
-                :seon.user/sidebar-open? true}]}))]
+               {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root] :seon.user/view-mode :session :seon.user/expert-mode? true :seon.user/sidebar-open? true}]}))]
     {:tx1 (reduce max 0 (map :tx t1))}))
 
 (deftest ^{:cost/ticks 90000000} unified-surface-modes-and-viewport-upgrade-ladder-test

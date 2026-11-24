@@ -32,8 +32,7 @@
          {:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main :seon.agent/router? true
           :seon.agent/tasks #{[:seon.task/id :task/t1]}
           :seon.agent/pinned [[:seon.task/id :task/t1] [:seon.code.doc/id "docs/d1.md#one"]]}
-         {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
-          :seon.user/view-mode :session :seon.user/sidebar-open? true}]})
+         {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root] :seon.user/view-mode :session :seon.user/expert-mode? true :seon.user/sidebar-open? true}]})
 
       (let [st {:boot-seq 1 :conn conn :agent-states {:agent/root :idle}
                 :live-streams {} :errors [] :walk-summary []}

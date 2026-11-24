@@ -319,7 +319,7 @@
               callees (set (map :seon.agent.call/callee tree))
               self-prog (rdata/agent-branch-progress db2 conn :agent/mid)
               mon (fcalls/agent-monitor-snapshot conn :agent/mid)
-              surf-txt (render/hiccup->text (surface/render-surface db2 db2 {:conn conn :viewing-id :agent/mid :view-mode :canvas}))
+              surf-txt (render/hiccup->text (surface/render-surface db2 db2 {:conn conn :viewing-id :agent/mid :view-mode :canvas :expert-mode? true}))
               nb-txt (rwire/neighborhood-recent-activity db2 db2 {:seon.agent/id :agent/mid })]
           ;; Unified candidate discovery catches reverse needed-by parent task + render-task-lineage renders chain, history & templates
           (is (some #(= :task/root-parent (get-in % [:data :seon.task/id])) mid-cands))

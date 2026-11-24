@@ -405,12 +405,6 @@
           pair-c (if stack? "debug-tile-pair is-stack" "debug-tile-pair")]
       [:div {:class "stack"}
        [:div {:id "dbg-feedback-unit"} (feedback-banner branch-feedback)]
-       [:div {:class "insp-bar"}
-        [:div {:class "pill-row"}
-         (badge "purple" "EXPLAIN")
-         (el [:seon.agent/id viewing-id] (rdata/agent-label agent viewing-id) "mono strong")
-         (el [:seon.branch/name branch] (str branch) "pill mono tiny")]
-        (btn "btn sm primary" '(seon.web/set-explain-lens! false) "← Back to Explore")]
        (render-kv-cache-section kv walk-c (or (:eval-by-turn wire) {}))
        (when explained
          (render-candidates-section explained (:ent-by-id wire) lp (:semantic-active? wire) stack? (:lab-suppressed-count wire)))

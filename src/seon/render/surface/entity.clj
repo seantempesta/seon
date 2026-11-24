@@ -263,7 +263,7 @@
   "Renders `[:seon.system/id :root]` through the EXACT SAME `project-entity-view` Upgrade Ladder
    (focal `:seon.system/entity` card + live 5 signals + compact semantic search + ranked high-signal live entities)."
   {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
-  [{:keys [main-db branch-db signals branch-feedback vector-status semantic-search slot-budget inspect-trail inspect-forward]}]
+  [{:keys [main-db branch-db signals branch-feedback vector-status semantic-search slot-budget]}]
   (if-not (or (instance? datahike.db.interface.ISearch main-db) (instance? datahike.db.interface.ISearch branch-db))
     [:div {:id "seon-system-unit" :class "card muted"} "No database connected."]
     (let [main-db (if (instance? datahike.db.interface.ISearch main-db) main-db branch-db)
@@ -278,12 +278,6 @@
           sigs (or signals (:signals proj) (sig/all-signals main-db))]
       [:div {:id "seon-system-unit" :class "stack" :data-focus-ref "[:seon.system/id :root]"}
        (feedback-banner branch-feedback)
-       (when (or (seq inspect-trail) (seq inspect-forward))
-         [:div {:id "insp-nav-bar" :class "insp-bar"}
-          [:div {:class "insp-nav-left"}
-           (btn "btn sm" '(seon.web/inspect-back!) "← Back" (empty? inspect-trail))
-           (btn "btn sm" '(seon.web/inspect-forward!) "→ Forward" (empty? inspect-forward))]
-          (btn "nav-pill tiny" '(seon.web/set-explain-lens! true [:seon.system/id :root]) "Explain →")])
        [:section {:id "sys-focal-unit" :class "stack-xs"}
         (or (get-in proj [:focal-fit :hiccup])
             [:div {:class "card ent-card"} (ent-link [:seon.system/id :root] "Seon Runtime" "strong")])]
@@ -345,12 +339,6 @@
                                           :on-click (list 'seon.web/update-lab-prefs! p)} lbl])]
       [:div {:id "seon-entity-explain-unit" :class "stack" :data-focus-ref (pr-str ref)}
        (feedback-banner branch-feedback)
-       [:div {:class "insp-bar"}
-        [:div {:class "pill-row"}
-         (badge "purple" "EXPLAIN")
-         (ent-link ref (rdata/entity-short-label (or (:entity world) ref)) "mono strong")
-         (mut (pr-str ref))]
-        (btn "btn sm primary" '(seon.web/set-explain-lens! false) "← Back to Explore")]
        (when focal-ex (sinsp/render-variations-panel focal-ex lp stack? true))
        [:section {:id "ctx-candidates-unit" :class "card stack-sm"}
         [:div {:class "card-head"}

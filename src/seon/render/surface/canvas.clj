@@ -7,7 +7,8 @@
             [seon.render.links :as rlinks :refer [badge btn ent-link feedback-banner kicker]]
             [seon.render.markdown :as rmd]
             [seon.render.status :as rstatus]
-            [seon.render.surface.session :as ssess]))
+            [seon.render.surface.session :as ssess]
+            [seon.render.markdown.parse :as mdp]))
 
 (def ^:private enter-submit-js
   "if(evt.key==='Enter'&&!evt.shiftKey){evt.preventDefault();if(evt.isComposing||evt.keyCode===229)return;if(evt.target.value.trim()){evt.target.form.requestSubmit();}}")
@@ -22,11 +23,13 @@
     (pf model)
     (when-let [ch (get-in model [:agent :seon.agent/canvas-hiccup])]
       (when (vector? ch)
-        [:section {:id "cv-custom-canvas" :class "canvas-surface stack-sm"}
-         [:div {:class "row-between"}
-          (kicker "Live Agent Canvas")
-          (badge "purple" "hiccup")]
-         ch]))))
+        (when-let [safe (mdp/sanitize-hiccup ch)]
+          [:section {:id "cv-custom-canvas" :class "canvas-surface stack-sm"}
+           (when (:expert-mode? model)
+             [:div {:class "row-between"}
+              (kicker "Live Agent Canvas")
+              (badge "purple" "hiccup")])
+           safe])))))
 
 (defn render-canvas-demo-deck
   "Renders a compact, viewport-fitting interactive capabilities strip on the Canvas
@@ -107,13 +110,17 @@
                 prov-bar])])])
        [:p {:class "muted tiny mono"} "No active context cards yet."])]))
 
+(def ^:private starter-prompts
+  ["Summarize what's happening"
+   "Help me plan a project"
+   "Show me an interactive demo"])
+
 (defn render-canvas-body
-  "Renders the default spatial presentation Canvas (`:canvas`):
-   - Normal User Mode (`expert-mode? false`): pure, large, viewport-fitting Canvas where the agent paints
-     live presence, status cards, rich Markdown briefings, and explicitly pinned entity cards via the
-     Upgrade Ladder (zero Active Context developer clutter).
-   - Developer Mode (`expert-mode? true`): adds unmistakable DEV header/bar, branch/tx Test & Merge
-     actions, and the full spatial Active Context tile grid with provenance and `+ Pin` controls."
+  "Renders the presentation-first Canvas (`:canvas`):
+   - Normal User Mode (`expert-mode? false`): calm, viewport-fitting living stage with warm greeting,
+     starter chips, live presence/status, and clean Markdown replies (zero dev jargon or eval folds).
+   - Developer Mode (`expert-mode? true`): DEV work bar, live telemetry/reasoning/eval folds, demo deck,
+     and full Active Context spatial tile grid."
   {:malli/schema [:=> [:cat :map :boolean] :any] :cost/ticks 20000000}
   [{:keys [agent viewing-id branch main-db branch-db as-of-tx entities pool-count exchanges evals
            pending-prompt latest-prose reply-prompt latest-actions work-summary live-stream
@@ -124,19 +131,14 @@
         tx-num (or as-of-tx (:max-tx branch-db) (:max-tx main-db))
         exp? (boolean expert-mode?)
         ex-n (count exchanges)
-        pinned-set (into #{} (keep rdata/normalize-inspect-ref) (:seon.agent/pinned agent))
-        pinned-items (when (and (not exp?) (seq pinned-set) (seq entities))
-                       (filterv (fn [it]
-                                  (let [r (or (rdata/entity-lookup-ref (:data it))
-                                              (when (integer? (:entity it)) [:db/id (:entity it)]))]
-                                    (contains? pinned-set r)))
-                                entities))
-        live-acts (if (seq latest-actions)
-                    latest-actions
-                    (when (seq evals)
-                      (vec (take-last 3 (filter #(or (not (str/blank? (str (:seon.agent.eval/code %))))
-                                                     (not (str/blank? (str (:seon.agent.eval/intent %)))))
-                                                evals)))))
+        
+        live-acts (when exp?
+                    (if (seq latest-actions)
+                      latest-actions
+                      (when (seq evals)
+                        (vec (take-last 3 (filter #(or (not (str/blank? (str (:seon.agent.eval/code %))))
+                                                       (not (str/blank? (str (:seon.agent.eval/intent %)))))
+                                                  evals))))))
         status-b (cond active? (badge "amber" "live")
                        (pos? (long (or (:seon.agent/merged-tx agent) 0))) (badge "green" "merged")
                        (:seon.agent/ready? agent) (badge "green" "ready")
@@ -166,23 +168,26 @@
        pending-prompt
        (let [{:keys [css-class rate reasoning text] pl :label} (ssess/canvas-live-progress live-stream)]
          [:section {:id "cv-pending" :class (str "canvas-surface ch-pending-card canvas-pending " css-class)}
-          [:div {:class "root-kicker"} (str "In flight · " pl)]
+          (when exp? [:div {:class "root-kicker"} (str "In flight · " pl)])
           [:h1 {:class "canvas-prompt-headline"} pending-prompt]
           [:div {:class "canvas-pending-status"}
-           [:span {:class "dot pulsing"}] [:span {:class (str "stream-phase-badge " css-class)} pl]
-           (when rate [:span {:class "stream-rate"} rate])]
+           [:span {:class "dot pulsing"}]
+           (if exp?
+             (list [:span {:class (str "stream-phase-badge " css-class)} pl]
+                   (when rate [:span {:class "stream-rate"} rate]))
+             [:span {:class "muted sm-copy"} "Working…"])]
           (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text) [:span {:class "cursor"} "▍"]])
-          (when reasoning
+          (when (and exp? reasoning)
             [:details {:id "cv-live-reasoning" :class "activity-fold"}
              [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
              [:div {:class "live-reasoning"} reasoning]])
-          (when (seq live-acts) (rmd/render-activity-fold live-acts "cv-live"))])
+          (when (and exp? (seq live-acts)) (rmd/render-activity-fold live-acts "cv-live"))])
 
        prose
        [:section {:id "cv-featured-reply" :class "canvas-surface canvas-reply stack-sm"}
-        (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (str "Re: " reply-prompt)])
+        (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (if exp? (str "Re: " reply-prompt) reply-prompt)])
         (rmd/render-markdown-blocks prose)
-        (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv"))]
+        (when (and exp? (seq latest-actions)) (rmd/render-activity-fold latest-actions "cv"))]
 
        work-summary
        [:section {:id "cv-work-summary" :class "canvas-surface card stack-sm"}
@@ -190,24 +195,30 @@
          [:div {:class "pill-row"}
           (badge "green" (:status-label work-summary))
           [:strong {:class "sm-copy"} (:latest-intent work-summary)]]
-         [:span {:class "mono tiny muted"} (str (:eval-count work-summary) " eval(s)")]]
-        (when-let [pr (:prompt work-summary)] [:div {:class "canvas-re-prompt"} (str "Re: " pr)])
-        (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv-work"))]
+         (when exp? [:span {:class "mono tiny muted"} (str (:eval-count work-summary) " eval(s)")])]
+        (when-let [pr (:prompt work-summary)] [:div {:class "canvas-re-prompt"} (if exp? (str "Re: " pr) pr)])
+        (when (and exp? (seq latest-actions)) (rmd/render-activity-fold latest-actions "cv-work"))]
 
-       :else
+       exp?
        [:div {:class "stack"}
         [:header {:class "root-hero"}
-         (when exp?
-           [:div {:class "root-kicker pill-row"}
-            (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·"
-            (ent-link [:seon.branch/name branch] (str branch) "mono tiny")])
+         [:div {:class "root-kicker pill-row"}
+          (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·"
+          (ent-link [:seon.branch/name branch] (str branch) "mono tiny")]
          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
          (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])]
-        (render-canvas-demo-deck main-db viewing-id signals)])
-     (when (seq pinned-items)
-       [:section {:id "cv-pinned-cards" :class "root-visuals"}
-        (for [item pinned-items :when (:hiccup item)]
-          [:div {:class "surface-entity-item"} (:hiccup item)])])
+        (render-canvas-demo-deck main-db viewing-id signals)]
+
+       :else
+       [:div {:id "cv-user-welcome" :class "user-welcome"}
+        [:header {:class "root-hero"}
+         [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) "What would you like to work on?")]
+         [:p {:class "root-sub"} "Ask a question, brainstorm an idea, or pick a prompt below to get started."]]
+        [:div {:class "starter-chips"}
+         (for [prompt starter-prompts]
+           [:button {:type "button" :class "starter-chip"
+                     :on-click (list 'seon.web/chat-agent-form! viewing-id {:text prompt})}
+            prompt])]])
      (when exp?
        (list
         (render-canvas-context-grid entities pool-count viewing-id true)
@@ -220,5 +231,5 @@
        [:form {:class "ws-composer" :on-submit (list 'seon.web/chat-agent-form! viewing-id)}
         [:div {:class "composer-shell"}
          [:textarea {:class "composer-inp" :name "text" :rows 1 :data-on:keydown enter-submit-js
-                     :placeholder (str "Message " label " or (eval Clojure)…")}]
+                     :placeholder (if exp? (str "Message " label " or (eval Clojure)…") "Ask anything…")}]
          [:button {:type "submit" :class "send-icon-btn" :aria-label "Send"} rmd/svg-arrow-up]]])]))

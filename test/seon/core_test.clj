@@ -1051,11 +1051,7 @@
         (d/transact conn {:tx-data [{:seon.agent/id :work/alpha :seon.agent/parent :agent/root :seon.agent/branch :branch/alpha }]})
         (d/transact conn {:tx-data [{:seon.agent/id :work/beta :seon.agent/parent :agent/root :seon.agent/branch :branch/beta }]})
         (d/transact conn {:tx-data [{:seon.agent/id :work/gamma :seon.agent/parent :agent/root :seon.agent/branch :branch/gamma }]})
-        (d/transact conn {:tx-data [{:seon.user/id :user/default
-                                     :seon.user/viewing [:seon.agent/id :agent/root]
-                                     :seon.user/view-mode :canvas
-                                     :seon.user/sidebar-open? true
-                                     :seon.user/expanded-agents #{:agent/root}}]})
+        (d/transact conn {:tx-data [{:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root] :seon.user/view-mode :canvas :seon.user/sidebar-open? true :seon.user/expert-mode? true :seon.user/expanded-agents #{:agent/root}}]})
 
         ;; 1. Deterministic creation-order left sidebar (entry first, then newest entity-tx descending)
         (let [order-of (fn [html]

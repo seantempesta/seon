@@ -159,8 +159,8 @@
                           html (render/hiccup->html (surface/render-surface db2 db2 (assoc opts :conn conn)))
                           ms (/ (double (- (System/nanoTime) t0)) 1e6)]
                       {:html html :ms ms}))
-            sess-d (timed {:viewing-id :agent/root :view-mode :session :viewport-w 1440 :viewport-h 900})
-            sess-m (timed {:viewing-id :agent/root :view-mode :session :viewport-w 430  :viewport-h 900})
+            sess-d (timed {:viewing-id :agent/root :view-mode :session :expert-mode? true :viewport-w 1440 :viewport-h 900})
+            sess-m (timed {:viewing-id :agent/root :view-mode :session :expert-mode? true :viewport-w 430  :viewport-h 900})
             ctx-d  (timed {:viewing-id :agent/root :view-mode :context :viewport-w 1440 :viewport-h 900
                            :walk-summary [{:id "seon-header" :reads-count 4 :hit? true :ms 0.0}
                                           {:id "seon-view-unit" :reads-count 18 :hit? false :ms 6.2}]})
@@ -178,23 +178,23 @@
                             :agent-states {:ns/demo.alpha :active}
                             :live-stream {:status :token :phase :writing :started-ms 1000 :last-ms 2000 :step-chars 160 :chars 160 :text "Streaming"}})]
         ;; 1. Header navigation + clickable signal pills + clickable agent breadcrumb
-        (do
-        (doseq [needle ["Canvas" "Chat" "Explain" "Dev Mode" "←" "→" "sig-pill-btn" "data-preview-ref"
-                       "data-canonical-url=" "data-expert-mode=\"false\"" "is-everyday"
-                       "interestfor=\"seon-hovercard\"" "seon.web%2Finspect-entity%21"
-                       "seon.web%2Fset-explain-lens%21" "seon.web%2Ftoggle-expert-mode%21"]]
-          (is (str/includes? hdr-desk needle) (str "Everyday desktop header missing " needle)))
-        (is (not (str/includes? hdr-desk "Pressure")) "Everyday mode should tuck 5-signal strip behind Expert toggle")
+        ;; 1. Header Two-Audience split: clean Normal User Mode vs full Developer Mode with signals/breadcrumbs/Explain/System
+        (doseq [needle ["Canvas" "Chat" "Dev" "data-canonical-url=" "data-expert-mode=\"false\"" "seon.web%2Ftoggle-expert-mode%21"]]
+          (is (str/includes? hdr-desk needle) (str "Normal User desktop header missing " needle)))
+        (doseq [hidden ["Explain" "Pressure" "Healthy" "sig-pill-btn" "data-preview-ref" "interestfor=\"seon-hovercard\""]]
+          (is (not (str/includes? hdr-desk hidden)) (str "Normal User header must hide dev element " hidden)))
         (let [db-exp (:db-after (d/with db2 {:tx-data [{:seon.user/id :user/default :seon.user/expert-mode? true}]}))
               hdr-exp (render/hiccup->html (ui/header-unit db-exp {:boot-seq 1 :agent-states {}}))]
-          (is (str/includes? hdr-exp "data-expert-mode=\"true\""))
-          (doseq [needle ["Flow" "Pressure" "Context" "Proof" "Health"]]
-            (is (str/includes? hdr-exp needle) (str "Expert desktop header missing " needle)))))
+          (doseq [needle ["data-expert-mode=\"true\"" "is-dev-mode" "Dev Mode · ON" "←" "→"
+                          "Flow" "Pressure" "Context" "Proof" "Health" "Canvas" "Chat" "Explain" "System"
+                          "sig-pill-btn" "data-preview-ref" "interestfor=\"seon-hovercard\""
+                          "seon.web%2Finspect-entity%21" "seon.web%2Fset-explain-lens%21"]]
+            (is (str/includes? hdr-exp needle) (str "Developer desktop header missing " needle))))
         (is (str/includes? hdr-mob "is-narrow"))
         (is (not (str/includes? hdr-mob "sig-strip")))
         (is (str/includes? hdr-mob "Canvas"))
         (is (str/includes? hdr-mob "Chat"))
-        (is (str/includes? hdr-mob "Explain"))
+        (is (not (str/includes? hdr-mob "Explain")))
 
         ;; 2. Strict < 40 ms warm frame budget across ALL 4 holistic views
         (let [canv-u (timed {:viewing-id :agent/root :view-mode :canvas :expert-mode? false :viewport-w 1440 :viewport-h 900})
@@ -243,9 +243,12 @@
           (is (not (str/includes? (:html sys-d) deleted)) (str "Hand-coded dashboard should be deleted: " deleted)))
 
         ;; 7. Fractal Inspector: Back/Forward + Breadcrumbs + Variations WINNER + Neighborhood
-        (doseq [needle ["insp-nav-bar" "← Back" "→ Forward" "insp-variations-unit" "WINNER"
+        ;; 7. Fractal Inspector: zero duplicate nav/breadcrumb bar, local entity actions + Variations WINNER + Neighborhood
+        (is (not (str/includes? (:html insp-d) "insp-nav-bar")) "Inspector must not duplicate #seon-header nav bar")
+        (is (not (str/includes? (:html insp-d) "← Back")) "Inspector must not duplicate Back button")
+        (doseq [needle ["entity-actions" "Close ×" "insp-variations-unit" "WINNER"
                         "Browser HTML" "Model Text" "insp-neighborhood-unit"
-                        "Outbound &amp; Direct Refs" "Inbound &amp; Referencers" "Open →" "Explain / Variations"]]
+                        "Outbound &amp; Direct Refs" "Inbound &amp; Referencers" "Open →"]]
           (is (str/includes? (:html insp-d) needle) (str ":inspect missing " needle)))))))
 
 (deftest ^{:cost/ticks 90000000} entities-hyperlinks-plain-text-params-and-all-types-inspector-test
@@ -412,7 +415,7 @@
         ;; CSS contains holistic rules & zero layout @media(max-width:1080px) hack
         (let [css (styles/full-css)]
           (is (not (str/includes? css "@media(max-width:1080px)")))
-          (doseq [sel [".ent-link{" ".kv-bar{" ".lab-chip.active{" ".var-card.is-winner{" ".insp-bar{" ".cos-bar{"]]
+          (doseq [sel [".ent-link{" ".kv-bar{" ".lab-chip.active{" ".var-card.is-winner{" ".entity-actions{" ".cos-bar{"]]
             (is (str/includes? css sel) (str "Missing CSS rule " sel))))
 
         ;; Seed=42 generative checks on new pure helpers
@@ -474,7 +477,7 @@
               _ (d/transact conn {:tx-data (conj extras {:seon.agent/id :agent/root
                                                          :seon.agent/pinned (mapv #(vector :seon.task/id (:seon.task/id %)) extras)})})
               sm (surface/build-surface-model @conn @conn {:conn conn :viewing-id :agent/root :view-mode :session :viewport-w 1440 :viewport-h 900})
-              sh (render/hiccup->html (surface/render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :session :viewport-w 1440 :viewport-h 900}))]
+              sh (render/hiccup->html (surface/render-surface @conn @conn {:conn conn :viewing-id :agent/root :view-mode :session :expert-mode? true :viewport-w 1440 :viewport-h 900}))]
           (is (<= (count (:entities sm)) 8) (str "Session rail exceeded 8 items: " (count (:entities sm))))
           (is (str/includes? sh "Explain selection ("))
           (is (not (str/includes? sh "sig-panel"))))
