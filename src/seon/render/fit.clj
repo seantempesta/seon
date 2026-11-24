@@ -68,13 +68,15 @@
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :seon.config/rank-weights]
    :cost/ticks 500000}
   [db]
-  (let [dh (db-schema db)]
-    (if-not (and db (contains? dh :seon.config/rank-weights))
-      default-rank-weights
-      (let [root-w (when (contains? dh :seon.config/key)
-                     (:seon.config/rank-weights
-                      (d/pull db '[:seon.config/rank-weights] [:seon.config/key :seon.config/root])))]
-        (normalize-weights (or root-w (:v (first (d/datoms db :aevt :seon.config/rank-weights)))) false)))))
+  (store/without-agent-eval-reads
+  (fn []
+    (let [dh (db-schema db)]
+      (if-not (and db (contains? dh :seon.config/rank-weights))
+        default-rank-weights
+        (let [root-w (when (contains? dh :seon.config/key)
+                       (:seon.config/rank-weights
+                        (d/pull db '[:seon.config/rank-weights] [:seon.config/key :seon.config/root])))]
+          (normalize-weights (or root-w (:v (first (d/datoms db :aevt :seon.config/rank-weights)))) false)))))))
 
 (defn- to-set [x]
   (cond (set? x) x (coll? x) (set x) (some? x) #{x} :else #{}))
@@ -109,9 +111,13 @@
   (max 0 (fmeas/safe-long (or (:turn c) (when (map? (:data c)) (:seon.agent.eval/turn (:data c)))) 0)))
 
 (defn- candidate-raw-convergence [c]
-  (+ (max 0 (fmeas/safe-long (or (:touches c) (:eval-touches c)) 0))
-     (max 0 (fmeas/safe-long (or (:converging-paths c) (:convergence c)
-                                 (when (coll? (:rules c)) (count (:rules c)))) 0))))
+  (let [te (when (number? (:touch-energy c)) (max 0.0 (fmeas/finite-double (:touch-energy c) 0.0)))
+        raw-t (if (some? te)
+                (* 2.5 te)
+                (double (max 0 (fmeas/safe-long (or (:touches c) (:eval-touches c)) 0))))
+        paths (double (max 0 (fmeas/safe-long (or (:converging-paths c) (:convergence c)
+                                                  (when (coll? (:rules c)) (count (:rules c)))) 0)))]
+    (+ raw-t paths)))
 
 (defn- candidate-semantic [c]
   (let [v (or (:semantic c) (:semantic/score c) (:ctx.match/score c))]
@@ -233,9 +239,11 @@
                  :else [])]
     (if (empty? ks)
       []
-      (if-let [sig (db-cache-sig db)]
-        (store/lru-get! discover-renderers-cache 256 [sig ks] #(compute-discovered-renderers db ks))
-        (compute-discovered-renderers db ks)))))
+      (store/without-agent-eval-reads
+      (fn []
+        (if-let [sig (db-cache-sig db)]
+          (store/lru-get! discover-renderers-cache 256 [sig ks] #(compute-discovered-renderers db ks))
+          (compute-discovered-renderers db ks)))))))
 
 (defn- item-candidates [item]
   (let [raw (:candidates item)]

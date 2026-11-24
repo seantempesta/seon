@@ -1,20 +1,30 @@
 (ns seon.ctx.touches
-  "Derived raw-Datahike datoms-touched engine: combines uncapped live in-memory `datahike.reads`,
-   raw branch mutations from `d/changes` (`d/merge-base` -> head), and eval mentions via pure
-   set-difference progression with ZERO persisted `:touched` / `:touched-refs` storage bloat."
+  "Layered derived context-touch & working-set engine: combines source-isolated in-memory
+   `datahike.reads`, raw `d/changes` branch writes, attention-conserved working-set energy,
+   and `seon.ctx.frontier` (Turn `t-1` continuation, ACL Local-Push PPR + RRF novel frontier,
+   and generic failing-turn schema discovery) with ZERO persisted derived touch datoms."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.render.links :as rlinks :refer [db-schema live-cid]]
-            [seon.store :as store]))
+            [seon.ctx.frontier :as frontier]
+            [seon.store :as store :refer [db-schema live-cid]]))
 
-(def ^:private max-live-agents 64)
+(def ^:private energy-decay 0.55)
 
 (defonce ^:private ^:seon.flow/edge live-reads-state
-  (atom {:order [] :by-key {}}))
+  (atom {:by-key {} :key-gen {}}))
 
 (defonce ^:private ^:seon.flow/edge branch-writes-cache
   (store/lru-cache 32))
+
+(defonce ^:private ^:seon.flow/edge derived-touches-cache
+  (store/lru-cache 32))
+
+(defn- safe-long [x dflt]
+  (cond
+    (integer? x) (long x)
+    (number? x) (let [v (double x)] (if (and (== v v) (not (Double/isInfinite v))) (long v) (long dflt)))
+    :else (long dflt)))
 
 (defn- excluded-attr? [a]
   (when (qualified-keyword? a)
@@ -29,114 +39,147 @@
   [store-id (or branch :main) agent-id])
 
 (defn ^:seon.flow/edge record-live-reads-by-key!
-  "Merges an uncapped set of domain EIDs into the in-memory per-turn read log for `[store-id branch agent-id]`."
-  {:malli/schema [:=> [:cat :any [:maybe :keyword] :keyword :int :any] :map]
+  "Appends a per-call uncapped live read event into process RAM for `[store-id branch agent-id]`."
+  {:malli/schema [:function
+                  [:=> [:cat :any [:maybe :keyword] :keyword :int :any] :map]
+                  [:=> [:cat :any [:maybe :keyword] :keyword :int :any [:maybe :map]] :map]]
    :cost/ticks 2000000}
-  [store-id branch agent-id turn eids]
-  (let [es (into #{} (filter #(and (integer? %) (pos? (long %)))) (if (coll? eids) eids []))]
-    (if (or (nil? agent-id) (empty? es))
-      {:ok? true :recorded 0}
-      (let [k (live-key store-id branch agent-id)
-            t (max 1 (long turn))]
-        (swap! live-reads-state
-               (fn [{:keys [order by-key]}]
-                 (let [prev (get by-key k {})
-                       merged (update prev t (fn [old] (if (set? old) (set/union old es) es)))
-                       ord' (conj (filterv #(not= % k) order) k)
-                       drop-n (max 0 (- (count ord') max-live-agents))
-                       evicted (when (pos? drop-n) (subvec ord' 0 drop-n))
-                       ord'' (if (pos? drop-n) (subvec ord' drop-n) ord')
-                       by' (cond-> (assoc by-key k merged)
-                             (seq evicted) (#(apply dissoc % evicted)))]
-                   {:order ord'' :by-key by'})))
-        {:ok? true :recorded (count es)}))))
+  ([store-id branch agent-id turn eids]
+   (record-live-reads-by-key! store-id branch agent-id turn eids nil))
+  ([store-id branch agent-id turn eids meta-map]
+   (let [es (into #{} (filter #(and (integer? %) (pos? (long %)))) (if (coll? eids) eids []))]
+     (if (or (nil? agent-id) (empty? es))
+       {:ok? true :recorded 0}
+       (let [k (live-key store-id branch agent-id)
+             t (max 1 (long turn))
+             code-s (when (and (map? meta-map) (string? (:code meta-map))) (:code meta-map))
+             ev (cond-> {:eids es} code-s (assoc :code code-s))]
+         (swap! live-reads-state
+                (fn [{:keys [by-key key-gen]}]
+                  {:by-key (update-in by-key [k t] (fn [old] (cond (vector? old) (conj old ev) (set? old) [{:eids old} ev] :else [ev])))
+                   :key-gen (update key-gen k (fnil inc 0))}))
+         {:ok? true :recorded (count es)})))))
 
 (defn ^:seon.flow/edge record-live-reads!
-  "Records uncapped live `datahike.reads` domain EIDs for `agent-id` at `turn` in process RAM (zero LMDB writes)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :keyword :int :any] :map]
+  "Records an uncapped live `datahike.reads` call for `agent-id` at `turn` in process RAM (zero LMDB writes)."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :keyword :int :any] :map]
+                  [:=> [:cat [:maybe :seon.host/db] :keyword :int :any [:maybe :map]] :map]]
    :cost/ticks 2000000}
-  [db agent-id turn eids]
-  (record-live-reads-by-key!
-   (get-in db [:config :store :id])
-   (get-in db [:config :branch] :main)
-   agent-id turn eids))
+  ([db agent-id turn eids]
+   (record-live-reads! db agent-id turn eids nil))
+  ([db agent-id turn eids meta-map]
+   (record-live-reads-by-key!
+    (get-in db [:config :store :id])
+    (get-in db [:config :branch] :main)
+    agent-id turn eids meta-map)))
 
-(defn ^:seon.flow/edge live-reads-for
-  "Returns `{turn #{eid ...}}` of uncapped in-memory live `datahike.reads` captured for `agent-id`."
+(defn ^:seon.flow/edge live-read-calls-for
+  "Returns `{turn [{:eids #{...} :code ...} ...]}` of per-call uncapped live reads for `agent-id`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :map]
    :cost/ticks 500000}
   [db agent-id]
   (if-not (and db agent-id)
     {}
-    (let [sid (get-in db [:config :store :id])
-          br (get-in db [:config :branch] :main)]
-      (or (get-in @live-reads-state [:by-key (live-key sid br agent-id)]) {}))))
+    (let [k (live-key (get-in db [:config :store :id]) (get-in db [:config :branch] :main) agent-id)]
+      (or (get-in @live-reads-state [:by-key k]) {}))))
 
-(defn ^:seon.flow/edge clear-live-reads!
-  "Clears in-memory live `datahike.reads` for `agent-id` on `db` (test/cleanup helper)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :keyword] :boolean]
+(defn ^:seon.flow/edge live-reads-for
+  "Returns `{turn #{eid ...}}` union of uncapped in-memory live `datahike.reads` for `agent-id`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :map]
    :cost/ticks 500000}
   [db agent-id]
-  (let [k (live-key (get-in db [:config :store :id]) (get-in db [:config :branch] :main) agent-id)]
-    (swap! live-reads-state
-           (fn [{:keys [order by-key]}]
-             {:order (filterv #(not= % k) order)
-              :by-key (dissoc by-key k)}))
-    true))
+  (let [by-t (live-read-calls-for db agent-id)]
+    (if (empty? by-t)
+      {}
+      (reduce-kv (fn [acc t calls]
+                   (assoc acc t (if (set? calls) calls (reduce (fn [s c] (set/union s (if (map? c) (:eids c) #{}))) #{} calls))))
+                 {} by-t))))
+
+(defn ^:seon.flow/edge clear-live-reads!
+  "Evicts in-memory live `datahike.reads` for `agent-id` on merge/archive or test cleanup."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :keyword] :boolean]
+                  [:=> [:cat :any [:maybe :keyword] :keyword] :boolean]]
+   :cost/ticks 500000}
+  ([db agent-id]
+   (clear-live-reads! (get-in db [:config :store :id]) (get-in db [:config :branch] :main) agent-id))
+  ([store-id branch agent-id]
+   (when agent-id
+     (let [k (live-key store-id branch agent-id)]
+       (swap! live-reads-state
+              (fn [{:keys [by-key key-gen]}]
+                {:by-key (dissoc by-key k)
+                 :key-gen (update key-gen k (fnil inc 0))}))))
+   true))
 
 (defn- resolve-change-attr [branch-db raw-a]
   (if (keyword? raw-a)
     raw-a
     (or (get-in branch-db [:ref-ident-map raw-a]) raw-a)))
 
+(defn- canonicalize-eid [db dh e]
+  (if (and (integer? e) (dh :seon.code.form/key))
+    (if-let [fk (:v (first (d/datoms db :eavt e :seon.code.form/key)))]
+      (cond
+        (and (string? fk) (str/ends-with? fk "#ns") (dh :seon.code.ns/name))
+        (or (:e (first (d/datoms db :avet :seon.code.ns/name (symbol (subs fk 0 (- (count fk) 3)))))) e)
+
+        (and (string? fk) (str/includes? fk "/") (dh :seon.code.var/name))
+        (let [[n s] (str/split fk #"/" 2)]
+          (or (when (and (seq n) (seq s))
+                (:e (first (d/datoms db :avet :seon.code.var/name (symbol n s)))))
+              e))
+
+        :else e)
+      e)
+    e))
+
+(defn- owner-ns-eid [db dh e]
+  (when (and (integer? e) (dh :seon.code.var/ns) (dh :seon.code.ns/name))
+    (when-let [nsym (:v (first (d/datoms db :eavt e :seon.code.var/ns)))]
+      (:e (first (d/datoms db :avet :seon.code.ns/name nsym))))))
+
 (defn- compute-branch-writes [main-db branch-db]
-  (let [mc (live-cid main-db)
-        bc (live-cid branch-db)
-        sid (get-in branch-db [:config :store :id])
-        same? (or (nil? main-db) (identical? main-db branch-db)
-                  (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))]
-    (if (or same? (not (and mc bc (= sid (get-in main-db [:config :store :id])))))
-      {}
-      (let [base (try (d/merge-base branch-db mc bc) (catch Throwable _ nil))]
-        (if (or (nil? base) (= base bc))
-          {}
-          (let [dh (db-schema branch-db)
-                has-fkey? (contains? dh :seon.code.form/key)
-                has-vname? (contains? dh :seon.code.var/name)
-                per-tx (reduce (fn [acc dt]
-                                 (let [a (resolve-change-attr branch-db (:a dt))
-                                       e (:e dt)
-                                       tx (long (or (:tx dt) 0))]
-                                   (if (and (integer? e) (pos? (long e))
-                                            (qualified-keyword? a)
-                                            (not (excluded-attr? a))
-                                            (not (contains? dh e)))
-                                     (-> acc
-                                         (update-in [e :txs] (fnil conj #{}) tx)
-                                         (update-in [e :max-tx] #(max (long (or % 0)) tx)))
-                                     acc)))
-                               {}
-                               (try (d/changes branch-db base bc) (catch Throwable _ [])))]
-            (reduce-kv
-             (fn [acc e {:keys [txs max-tx]}]
-               (let [w (max 1 (count txs))
-                     acc' (assoc acc e {:writes w :max-tx max-tx})
-                     fk (when has-fkey? (:v (first (d/datoms branch-db :eavt e :seon.code.form/key))))
-                     vsym (when (and (string? fk) (str/includes? fk "/") (not (str/ends-with? fk "#ns")))
-                            (let [[n s] (str/split fk #"/" 2)]
-                              (when (and (seq n) (seq s)) (symbol n s))))
-                     ve (when (and vsym has-vname?)
-                          (:e (first (d/datoms branch-db :avet :seon.code.var/name vsym))))]
-                 (if (and (integer? ve) (not= ve e))
-                   (update acc' ve (fn [prev]
-                                     {:writes (max w (long (:writes prev 0)))
-                                      :max-tx (max max-tx (long (:max-tx prev 0)))}))
-                   acc')))
+  (store/without-agent-eval-reads
+   (fn []
+     (let [mc (live-cid main-db)
+           bc (live-cid branch-db)
+           sid (get-in branch-db [:config :store :id])
+           same? (or (nil? main-db) (identical? main-db branch-db)
+                     (and mc bc (= mc bc) (= (:max-tx main-db) (:max-tx branch-db))))]
+       (if (or same? (not (and mc bc (= sid (get-in main-db [:config :store :id])))))
+         {}
+         (let [base (try (d/merge-base branch-db mc bc) (catch Throwable _ nil))]
+           (if (or (nil? base) (= base bc))
              {}
-             per-tx)))))))
+             (let [dh (db-schema branch-db)
+                   per-tx (reduce (fn [acc dt]
+                                    (let [a (resolve-change-attr branch-db (:a dt))
+                                          e (:e dt)
+                                          tx (long (or (:tx dt) 0))]
+                                      (if (and (integer? e) (pos? (long e))
+                                               (qualified-keyword? a)
+                                               (not (excluded-attr? a))
+                                               (not (contains? dh e)))
+                                        (-> acc
+                                            (update-in [e :txs] (fnil conj #{}) tx)
+                                            (update-in [e :max-tx] #(max (long (or % 0)) tx)))
+                                        acc)))
+                                  {}
+                                  (try (d/changes branch-db base bc) (catch Throwable _ [])))]
+               (reduce-kv
+                (fn [acc e {:keys [txs max-tx]}]
+                  (let [w (max 1 (count txs))
+                        ce (canonicalize-eid branch-db dh e)]
+                    (update acc ce (fn [prev]
+                                     {:writes (max w (long (:writes prev 0)))
+                                      :max-tx (max max-tx (long (:max-tx prev 0)))}))))
+                {}
+                per-tx)))))))))
 
 (defn ^:seon.flow/edge branch-write-eids
-  "Derives domain entity EIDs written on `branch-db` since `d/merge-base` with `main-db`
+  "Derives canonicalized domain entity EIDs written on `branch-db` since `d/merge-base` with `main-db`
    directly from raw Datahike `d/changes` (commit-cached, zero persisted derived datoms)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :int]] :map]
    :cost/ticks 10000000}
@@ -155,30 +198,59 @@
         raw))))
 
 (defn analyze-touch-sets
-  "Pure set-algebra progression over chronological per-turn touched EID sets and branch writes:
-   computes per-turn novelty (`set/difference`), recurrence (`set/intersection`), weighted `:counts`
-   (`read-turns + 2 * writes`), `:written`, `:max-tx`, and `:total-unique`."
+  "Pure set-algebra & attention-conserved working-set progression over chronological per-turn
+   entries and branch writes: computes per-turn novelty, recurrence, `:counts`, `:written`,
+   `:max-tx`, `:total-unique`, and exponential-decayed (`gamma = 0.55`) `:energy`."
   {:malli/schema [:=> [:cat [:vector :map] [:maybe :map]]
                   [:map [:counts :map] [:read-counts :map] [:written [:set :int]]
-                   [:max-tx :map] [:by-turn [:vector :map]] [:total-unique :int]]]
-   :cost/ticks 15000000}
+                   [:max-tx :map] [:by-turn [:vector :map]] [:total-unique :int] [:energy :map]]]
+   :cost/ticks 20000000}
   [per-turn-sets written-map]
   (let [wm (if (map? written-map) written-map {})
-        sorted-turns (sort-by #(long (or (:turn %) 0)) per-turn-sets)
-        init {:seen #{} :read-counts {} :max-tx {} :by-turn []}
-        {:keys [seen read-counts max-tx by-turn]}
-        (reduce (fn [{:keys [seen read-counts max-tx by-turn]} entry]
-                  (let [t (long (or (:turn entry) 0))
-                        tx (long (or (:tx entry) 0))
+        sorted-turns (vec (sort-by #(safe-long (:turn %) 0) per-turn-sets))
+        max-turn (reduce (fn [m e] (max m (safe-long (:turn e) 0))) 0 sorted-turns)
+        init {:seen #{} :read-counts {} :max-tx {} :by-turn [] :energy {}}
+        {:keys [seen read-counts max-tx by-turn energy]}
+        (reduce (fn [{:keys [seen read-counts max-tx by-turn energy]} entry]
+                  (let [t (safe-long (:turn entry) 0)
+                        tx (safe-long (:tx entry) 0)
+                        age (max 0 (- max-turn t))
+                        decay (Math/pow energy-decay (double age))
                         reids (into #{} (filter integer?) (or (:read-eids entry) (:eids entry) #{}))
+                        explicit (into #{} (filter integer?) (or (:explicit-eids entry) #{}))
+                        owners (if (map? (:owners entry)) (:owners entry) {})
+                        calls (let [cs (:calls entry)]
+                                (if (and (sequential? cs) (seq cs))
+                                  cs
+                                  (when (seq reids) [{:eids reids}])))
                         novel (set/difference reids seen)
                         recurr (set/intersection reids seen)
                         seen' (set/union seen reids)
                         rc' (reduce #(update %1 %2 (fnil inc 0)) read-counts reids)
                         mtx' (if (pos? tx)
-                               (reduce #(update %1 %2 (fn [old] (max (long (or old 0)) tx))) max-tx reids)
-                               max-tx)]
-                    {:seen seen' :read-counts rc' :max-tx mtx'
+                               (reduce #(update %1 %2 (fn [old] (max (safe-long old 0) tx))) max-tx reids)
+                               max-tx)
+                        eng1 (reduce (fn [em call]
+                                       (let [ceids (into #{} (filter integer?) (:eids call))
+                                             n (count ceids)]
+                                         (if (zero? n)
+                                           em
+                                           (let [share (/ decay (double n))
+                                                 em' (reduce #(update %1 %2 (fnil + 0.0) share) em ceids)
+                                                 ns-shares (reduce (fn [nm e]
+                                                                     (if-let [ne (get owners e)]
+                                                                       (if (and (integer? ne) (not (contains? ceids ne)))
+                                                                         (update nm ne (fnil + 0.0) (* 0.5 share))
+                                                                         nm)
+                                                                       nm))
+                                                                   {} ceids)]
+                                             (reduce-kv #(update %1 %2 (fnil + 0.0) %3) em' ns-shares)))))
+                                     energy calls)
+                        eng2 (if (seq explicit)
+                               (let [eb (/ (* 1.5 decay) (Math/sqrt (double (count explicit))))]
+                                 (reduce #(update %1 %2 (fnil + 0.0) eb) eng1 explicit))
+                               eng1)]
+                    {:seen seen' :read-counts rc' :max-tx mtx' :energy eng2
                      :by-turn (conj by-turn {:turn t :tx tx :novel novel :recurrent recurr :total (count reids)})}))
                 init
                 sorted-turns)
@@ -186,16 +258,25 @@
         counts (reduce-kv
                 (fn [acc e info]
                   (if (integer? e)
-                    (let [w (max 1 (long (if (map? info) (or (:writes info) 1) 1)))]
-                      (update acc e (fn [old] (+ (long (or old 0)) (* 2 w)))))
+                    (let [w (max 1 (safe-long (when (map? info) (:writes info)) 1))]
+                      (update acc e (fn [old] (+ (safe-long old 0) (* 2 w)))))
                     acc))
                 read-counts
                 wm)
+        final-energy (reduce-kv
+                      (fn [acc e info]
+                        (if (integer? e)
+                          (let [w (max 1 (safe-long (when (map? info) (:writes info)) 1))
+                                boost (* 2.5 (+ 1.0 (Math/log1p (double w))))]
+                            (update acc e (fnil + 0.0) boost))
+                          acc))
+                      energy
+                      wm)
         final-max-tx (reduce-kv
                       (fn [acc e info]
-                        (let [tx (long (if (map? info) (or (:max-tx info) 0) 0))]
+                        (let [tx (safe-long (when (map? info) (:max-tx info)) 0)]
                           (if (and (integer? e) (pos? tx))
-                            (update acc e (fn [old] (max (long (or old 0)) tx)))
+                            (update acc e (fn [old] (max (safe-long old 0) tx)))
                             acc)))
                       max-tx
                       wm)
@@ -205,28 +286,17 @@
      :written written-set
      :max-tx final-max-tx
      :by-turn by-turn
-     :total-unique (count all-eids)}))
+     :total-unique (count all-eids)
+     :energy final-energy}))
 
-(defn- eval-mentioned-eids [db dh ev]
+(defn- eval-explicit-eids [db dh ev]
   (let [rs (:seon.agent.eval/result-schemas ev)
         rsk (:seon.agent.eval/result-schema ev)
-        code-s (:seon.agent.eval/code ev)
         from-rs (when (coll? rs)
                   (keep #(cond (integer? %) % (and (map? %) (integer? (:db/id %))) (:db/id %) :else nil) rs))
         from-rsk (when (and (qualified-keyword? rsk) (dh :seon.schema/key))
                    (when-let [e (:e (first (d/datoms db :avet :seon.schema/key rsk)))] [e]))
-        from-code (when (and (string? code-s) (not (str/blank? code-s)))
-                    (let [qsyms (keep #(let [s (or (nth % 1) (nth % 2))]
-                                         (when (and (string? s) (< (count s) 128))
-                                           (if (str/includes? s "/")
-                                             (let [[a b] (str/split s #"/" 2)]
-                                               (when (and (seq a) (seq b) (not= a "result")) (symbol a b)))
-                                             (when (str/includes? s ".") (symbol s)))))
-                                      (re-seq #"(?:'([a-zA-Z][\w.-]*(?:/[\w.*?!+-]+)?)|\(quote\s+([a-zA-Z][\w.-]*(?:/[\w.*?!+-]+)?)\))" code-s))]
-                      (keep (fn [sym]
-                              (let [a (if (namespace sym) :seon.code.var/name :seon.code.ns/name)]
-                                (when (dh a) (:e (first (d/datoms db :avet a sym))))))
-                            qsyms)))]
+        from-code (:all (frontier/extract-text-domain-eids db dh (:seon.agent.eval/code ev)))]
     (into #{} (concat from-rs from-rsk from-code))))
 
 (defn- legacy-stored-eval-eids [db dh ee]
@@ -236,14 +306,110 @@
     (cond
       r-ds (vec (keep #(let [e (:v %)] (when (integer? e) e)) r-ds))
       has-vec? (when-let [tdt (first (d/datoms db :eavt ee :seon.agent.eval/touched))]
-                 (let [ts (:v tdt)]
-                   (when (coll? ts) (filterv integer? ts))))
+                 (let [ts (:v tdt)] (when (coll? ts) (filterv integer? ts))))
       :else nil)))
 
-(defn derived-agent-touches
-  "Derives uncapped per-entity touch counts, branch writes, per-turn novelty, and latest tx for `agent-id`
-   from (1) live in-memory `datahike.reads`, (2) raw `d/changes` branch writes, (3) eval code/result-schema
-   mentions, and (4) read-only legacy `:touched`/`:touched-refs` fallback on archived/fixture DBs."
+(defn- compute-derived-touches [mdb bdb agent-id o]
+  (store/without-agent-eval-reads
+   (fn []
+     (let [dh (db-schema bdb)
+           mdh (db-schema mdb)
+           same? (or (identical? mdb bdb) (= (live-cid mdb) (live-cid bdb)))
+           self-eid (or (when (dh :seon.agent/id) (:e (first (d/datoms bdb :avet :seon.agent/id agent-id))))
+                        (when (and (not same?) (mdh :seon.agent/id))
+                          (:e (first (d/datoms mdb :avet :seon.agent/id agent-id)))))
+           archived? (fn [e]
+                       (boolean
+                        (or (= e self-eid)
+                            (and (dh :seon.agent/archived?)
+                                 (true? (:v (first (d/datoms bdb :eavt e :seon.agent/archived?)))))
+                            (and (not same?) (mdh :seon.agent/archived?)
+                                 (true? (:v (first (d/datoms mdb :eavt e :seon.agent/archived?))))))))
+           canon #(canonicalize-eid bdb dh %)
+           live-calls-by-t (if (false? (:use-live-reads? o)) {} (live-read-calls-for bdb agent-id))
+           eval-dts (when (dh :seon.agent.eval/agent)
+                      (vec (d/datoms bdb :avet :seon.agent.eval/agent agent-id)))
+           raw-writes (if (or same? (false? (:include-writes? o)))
+                        {}
+                        (into {} (remove #(archived? (key %))) (branch-write-eids mdb bdb self-eid)))
+           written-nss (into #{}
+                             (keep (fn [e]
+                                     (or (when (dh :seon.code.ns/name) (:v (first (d/datoms bdb :eavt e :seon.code.ns/name))))
+                                         (when (dh :seon.code.var/ns) (:v (first (d/datoms bdb :eavt e :seon.code.var/ns)))))))
+                             (keys raw-writes))
+           ev-pull-pat '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/value
+                         :seon.agent.eval/out :seon.agent.eval/error :seon.agent.eval/reasoning
+                         :seon.agent.eval/thought :seon.agent.eval/result-schema :seon.agent.eval/result-schemas]
+           ev-data (reduce (fn [acc dt]
+                             (let [ee (:e dt)
+                                   tx (long (or (:tx dt) 0))
+                                   ev (d/pull bdb ev-pull-pat ee)
+                                   t (max 1 (safe-long (:seon.agent.eval/turn ev) 1))
+                                   m-eids (into #{} (comp (map canon) (remove archived?))
+                                                (eval-explicit-eids bdb dh ev))
+                                   leg (legacy-stored-eval-eids bdb dh ee)
+                                   leg-cnts (when (seq leg)
+                                              (frequencies (into [] (comp (map canon) (remove archived?)) leg)))]
+                               (-> acc
+                                   (update-in [:turns t :tx] #(max (safe-long % 0) tx))
+                                   (update-in [:turns t :evs] (fnil conj []) ev)
+                                   (update-in [:turns t :explicit] (fn [old] (set/union (or old #{}) m-eids)))
+                                   (update-in [:turns t :eids] (fn [old] (set/union (or old #{}) m-eids (set (keys leg-cnts)))))
+                                   (update :legacy-extra (fn [m]
+                                                           (reduce-kv (fn [a e c] (if (> c 1) (update a e (fnil + 0) (dec c)) a))
+                                                                      (or m {}) (or leg-cnts {})))))))
+                           {:turns {} :legacy-extra {}}
+                           eval-dts)
+           all-turns (vec (sort (set/union (set (keys (:turns ev-data))) (set (keys live-calls-by-t)))))
+           owners-cache (java.util.HashMap.)
+           get-owner (fn [e]
+                       (if (.containsKey owners-cache e)
+                         (.get owners-cache e)
+                         (let [ne (owner-ns-eid bdb dh e)]
+                           (.put owners-cache e ne) ne)))
+           explicit-all (volatile! #{})
+           per-turn (mapv (fn [t]
+                            (let [ev-t (get-in ev-data [:turns t])
+                                  raw-calls (let [rc (get live-calls-by-t t [])] (if (set? rc) [{:eids rc}] rc))
+                                  canon-calls (mapv (fn [c]
+                                                      {:eids (into #{} (comp (map canon) (remove archived?)) (:eids c))})
+                                                    raw-calls)
+                                  l-union (reduce (fn [s c] (set/union s (:eids c))) #{} canon-calls)
+                                  ex-eids (or (:explicit ev-t) #{})
+                                  _ (vswap! explicit-all set/union ex-eids)
+                                  reids (set/union (or (:eids ev-t) #{}) l-union)
+                                  owners (reduce (fn [om e]
+                                                   (if-let [ne (get-owner e)]
+                                                     (assoc om e ne) om))
+                                                 {} reids)]
+                              {:turn t
+                               :tx (long (or (:tx ev-t) (:max-tx bdb) 0))
+                               :read-eids reids
+                               :explicit-eids ex-eids
+                               :calls (if (seq canon-calls) canon-calls (when (seq reids) [{:eids reids}]))
+                               :owners owners}))
+                          all-turns)
+           base (analyze-touch-sets per-turn raw-writes)
+           counts (reduce-kv (fn [m e extra] (update m e (fnil + 0) extra)) (:counts base) (:legacy-extra ev-data))
+           latest-t (last all-turns)
+           latest-evs (if latest-t (get-in ev-data [:turns latest-t :evs] []) [])
+           latest-live (if latest-t (get live-calls-by-t latest-t []) [])
+           turn-events (frontier/derive-turn-events bdb dh latest-evs latest-live)
+           cont-scores (frontier/compute-continuation-scores bdb dh latest-evs canon archived?)
+           frontier-scores (frontier/compute-novel-frontier bdb (:energy base) (:written base) @explicit-all cont-scores archived?)
+           sig [(count counts) (count (:written base)) (count frontier-scores) (count (:error-schemas turn-events)) (reduce + 0 (vals counts))]]
+       (assoc base
+              :counts counts
+              :written-nss written-nss
+              :continuation cont-scores
+              :novel-frontier frontier-scores
+              :turn-events turn-events
+              :sig sig)))))
+
+(defn ^:seon.flow/edge derived-agent-touches
+  "Commit-cached layered working-set & frontier derivation for `agent-id`: combines source-isolated
+   live `datahike.reads`, `d/changes` branch writes, attention-conserved `:energy`, Turn `t-1`
+   `:continuation`, ACL-PPR + RRF `:novel-frontier`, and `:turn-events` with ZERO persisted bloat."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:? [:maybe :map]]] :map]
    :cost/ticks 25000000}
   ([main-db branch-db agent-id] (derived-agent-touches main-db branch-db agent-id nil))
@@ -251,60 +417,19 @@
    (let [bdb (or branch-db main-db)
          mdb (or main-db bdb)]
      (if-not (and bdb agent-id)
-       {:counts {} :read-counts {} :written #{} :max-tx {} :by-turn [] :total-unique 0 :sig [0 0 0]}
+       {:counts {} :read-counts {} :written #{} :written-nss #{} :max-tx {} :by-turn []
+        :total-unique 0 :energy {} :continuation {} :novel-frontier {}
+        :turn-events {:has-error? false :error-schemas #{} :large-result? false} :sig [0 0 0 0 0]}
        (let [o (if (map? opts) opts {})
-             dh (db-schema bdb)
-             mdh (db-schema mdb)
-             same? (or (identical? mdb bdb) (= (live-cid mdb) (live-cid bdb)))
-             self-eid (or (when (dh :seon.agent/id) (:e (first (d/datoms bdb :avet :seon.agent/id agent-id))))
-                          (when (and (not same?) (mdh :seon.agent/id))
-                            (:e (first (d/datoms mdb :avet :seon.agent/id agent-id)))))
-             archived? (fn [e]
-                         (boolean
-                          (or (= e self-eid)
-                              (and (dh :seon.agent/archived?)
-                                   (true? (:v (first (d/datoms bdb :eavt e :seon.agent/archived?)))))
-                              (and (not same?) (mdh :seon.agent/archived?)
-                                   (true? (:v (first (d/datoms mdb :eavt e :seon.agent/archived?))))))))
-             live-by-turn (if (false? (:use-live-reads? o)) {} (live-reads-for bdb agent-id))
-             eval-dts (when (dh :seon.agent.eval/agent)
-                        (vec (d/datoms bdb :avet :seon.agent.eval/agent agent-id)))
-             raw-writes (if (or same? (false? (:include-writes? o)))
-                          {}
-                          (into {} (remove #(archived? (key %))) (branch-write-eids mdb bdb self-eid)))
-             ev-by-turn (reduce (fn [acc dt]
-                                  (let [ee (:e dt)
-                                        tx (long (or (:tx dt) 0))
-                                        ev (d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/code
-                                                         :seon.agent.eval/result-schema :seon.agent.eval/result-schemas]
-                                                   ee)
-                                        t (max 1 (long (or (:seon.agent.eval/turn ev) 1)))
-                                        m-eids (eval-mentioned-eids bdb dh ev)
-                                        leg (legacy-stored-eval-eids bdb dh ee)
-                                        ;; Preserve multi-occurrence legacy counts if explicitly present in a fixture
-                                        leg-cnts (when (seq leg) (frequencies (remove archived? leg)))]
-                                    (-> acc
-                                        (update-in [:turns t :tx] #(max (long (or % 0)) tx))
-                                        (update-in [:turns t :eids] (fn [old] (set/union (or old #{}) (into #{} (remove archived?) m-eids) (set (keys leg-cnts)))))
-                                        (update :legacy-extra (fn [m]
-                                                                (reduce-kv (fn [a e c] (if (> c 1) (update a e (fnil + 0) (dec c)) a))
-                                                                           (or m {}) (or leg-cnts {})))))))
-                                {:turns {} :legacy-extra {}}
-                                eval-dts)
-             all-turns (sort (set/union (set (keys (:turns ev-by-turn))) (set (keys live-by-turn))))
-             per-turn (mapv (fn [t]
-                              (let [ev-t (get-in ev-by-turn [:turns t])
-                                    l-eids (into #{} (remove archived?) (get live-by-turn t #{}))]
-                                {:turn t
-                                 :tx (long (or (:tx ev-t) (:max-tx bdb) 0))
-                                 :read-eids (set/union (or (:eids ev-t) #{}) l-eids)}))
-                            all-turns)
-             analyzed (if (and (empty? per-turn) (empty? raw-writes))
-             {:counts {} :read-counts {} :written #{} :max-tx {} :by-turn [] :total-unique 0}
-             (analyze-touch-sets per-turn raw-writes))
-             counts' (reduce-kv (fn [acc e extra] (update acc e (fnil + 0) extra))
-                                (:counts analyzed)
-                                (:legacy-extra ev-by-turn))]
-         (assoc analyzed
-                :counts counts'
-                :sig [(count counts') (reduce + 0 (vals counts')) (count (:written analyzed))]))))))
+             sid (get-in bdb [:config :store :id])
+             br (get-in bdb [:config :branch] :main)
+             mc (live-cid mdb)
+             bc (live-cid bdb)
+             use-live? (not (false? (:use-live-reads? o)))
+             inc-writes? (not (false? (:include-writes? o)))
+             lgen (if use-live? (get-in @live-reads-state [:key-gen (live-key sid br agent-id)] 0) -1)]
+         (if (and sid mc bc)
+           (store/lru-get! derived-touches-cache 32
+                           [sid mc (:max-tx mdb) bc (:max-tx bdb) agent-id lgen use-live? inc-writes?]
+                           #(compute-derived-touches mdb bdb agent-id o))
+           (compute-derived-touches mdb bdb agent-id o)))))))

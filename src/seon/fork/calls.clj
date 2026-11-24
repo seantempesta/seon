@@ -69,25 +69,25 @@
   (let [main-db (or (store/head conn :main) @conn)
         aid (or target-id (entry-agent-id main-db))
         ag (d/pull main-db '[:seon.agent/id :seon.agent/branch :seon.agent/router? :seon.agent/label
-                             :seon.agent/parent :seon.agent/task]
+                           :seon.agent/parent {:seon.agent/tasks [:seon.task/id]}]
                    [:seon.agent/id aid])
         br (or (:seon.agent/branch ag) :main)
         bdb (or (store/head conn br) main-db)
         ev-eids (mapv :e (d/datoms bdb :avet :seon.agent.eval/agent aid))
         evals (->> ev-eids
-                   (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/index :seon.agent.eval/intent
-                                       :seon.agent.eval/ms :seon.agent.eval/error :seon.agent.eval/reply] %))
+                   (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/call-index :seon.agent.eval/intent
+                                     :seon.agent.eval/code :seon.agent.eval/ms :seon.agent.eval/error :seon.agent.eval/thought] %))
                    (sort-by (juxt #(long (or (:seon.agent.eval/turn %) 0))
-                                  #(long (or (:seon.agent.eval/index %) 0))))
+                                  #(long (or (:seon.agent.eval/call-index %) 0))))
                    vec)
         recent (->> (take-last 6 evals)
                     (mapv (fn [e]
-                            (cond-> {:index (:seon.agent.eval/index e)
+                            (cond-> {:index (:seon.agent.eval/call-index e)
                                      :turn (:seon.agent.eval/turn e)
                                      :intent (:seon.agent.eval/intent e)
                                      :ms (:seon.agent.eval/ms e)}
                               (:seon.agent.eval/error e) (assoc :error (:seon.agent.eval/error e))))))
-        latest-reply (some :seon.agent.eval/reply (rseq evals))
+        latest-reply (some #(when (and (str/blank? (str (:seon.agent.eval/code %))) (not (str/blank? (str (:seon.agent.eval/thought %))))) (:seon.agent.eval/thought %)) (rseq evals))
         seen (store/agent-seen-message-ids bdb aid)
         unread-count (->> (d/datoms main-db :avet :seon.agent.message/to aid)
                           (map #(:seon.agent.message/id (d/pull main-db '[:seon.agent.message/id] (:e %))))
@@ -488,3 +488,43 @@
              {:ok? true :agent-id target-aid :retracted-evals (count to-retract)
               :remaining-evals rem :through-turn (when-not turn-set cut-turn)
               :turns (when turn-set (vec (sort turn-set))) :memories-saved (count notes)})))))))
+
+(defn ^:seon.flow/edge set-canvas!
+  "Paints this agent's live Canvas directly with either a static Hiccup vector `[:div ...]` (`:seon.agent/canvas-hiccup`)
+   or a qualified symbol `'ns/fn` of a pure 2-arg `(fn [db agent])` reactive renderer (`:seon.agent/canvas-fn`)."
+  {:seon.repl/export true
+   :malli/schema [:=> [:cat [:or [:vector :any] :qualified-symbol]] [:maybe :map]]}
+  [hiccup-or-fn]
+  (when-let [{:keys [conn agent-id]} *agent-ctx*]
+    (let [db @conn
+          aeid (:e (first (d/datoms db :avet :seon.agent/id agent-id)))
+          cur (when aeid (d/pull db '[:seon.agent/canvas-hiccup :seon.agent/canvas-fn] aeid))
+          tx (cond
+               (vector? hiccup-or-fn)
+               (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-hiccup hiccup-or-fn}]
+                 (and aeid (some? (:seon.agent/canvas-fn cur)))
+                 (conj [:db/retract aeid :seon.agent/canvas-fn (:seon.agent/canvas-fn cur)]))
+
+               (qualified-symbol? hiccup-or-fn)
+               (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-fn hiccup-or-fn}]
+                 (and aeid (some? (:seon.agent/canvas-hiccup cur)))
+                 (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])))]
+      (d/transact conn {:tx-data tx})
+      {:ok? true :agent-id agent-id :mode (if (vector? hiccup-or-fn) :hiccup :fn)})))
+
+(defn ^:seon.flow/edge clear-canvas!
+  "Clears any custom `:seon.agent/canvas-hiccup` or `:seon.agent/canvas-fn` override so Canvas returns to auto-derived presence."
+  {:seon.repl/export true
+   :malli/schema [:=> [:cat] [:maybe :map]]}
+  []
+  (when-let [{:keys [conn agent-id]} *agent-ctx*]
+    (let [db @conn
+          aeid (:e (first (d/datoms db :avet :seon.agent/id agent-id)))
+          cur (when aeid (d/pull db '[:seon.agent/canvas-hiccup :seon.agent/canvas-fn] aeid))
+          tx (cond-> []
+               (and aeid (some? (:seon.agent/canvas-hiccup cur)))
+               (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])
+               (and aeid (some? (:seon.agent/canvas-fn cur)))
+               (conj [:db/retract aeid :seon.agent/canvas-fn (:seon.agent/canvas-fn cur)]))]
+      (when (seq tx) (d/transact conn {:tx-data tx}))
+      {:ok? true :agent-id agent-id :cleared (count tx)})))

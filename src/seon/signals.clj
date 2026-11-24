@@ -344,9 +344,11 @@
                :proof proof
                :health health}
               {:seon/schema :seon.signal/snapshot})))]
-    (if c-key
-      (store/lru-get! signals-snap-cache 16 c-key compute)
-      (compute))))
+    (store/without-agent-eval-reads
+    (fn []
+      (if c-key
+        (store/lru-get! signals-snap-cache 16 c-key compute)
+        (compute))))))
 
 (defn- sig-action [sig-kind]
   (if (= :context sig-kind)

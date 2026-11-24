@@ -12,9 +12,7 @@
             [seon.code :as code]
             [seon.render.ui :as ui]
             [seon.store :as store]
-            [seon.ctx.touches :as ctouches]
-            [seon.browser.preview :as preview]
-            [seon.render.data :as rdata]))
+            [seon.ctx.touches :as ctouches]))
 
 (defn- build-wire-monitored [st main-db bdb aid opts]
   (let [t0 (System/nanoTime)
@@ -61,7 +59,7 @@
   ;; Only backpressure `:run` when ALL `max-os-procs` slots are actively `:busy?`!
   ;; If some slots are warm `:idle`, `:run` can LRU-evict an idle slot on demand!
   (if (>= (busy-count (:live st)) (:max-os-procs st))
-    (assoc st ::flow/input-filter #{:fork-ev :response :browser-res :preview-res :eval :tx-reply})
+    (assoc st ::flow/input-filter #{:fork-ev :response :browser-res :eval :tx-reply})
     (dissoc st ::flow/input-filter)))
 
 (defn- maybe-evict-lru-idle! [st]
@@ -198,6 +196,24 @@
              sync-agents-filter)
          nil]))))
 
+(defn- handle-browser-res
+  [st msg]
+  (let [req-id (:req-id msg)
+        snap (:snapshot msg)]
+    (if-let [{:keys [pid aid frame]} (get-in st [:pending-browser req-id])]
+      (let [main-db @(:conn st)
+            b (or (:branch frame) :main)
+            bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
+            {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid
+                                                       {:viewport-screenshot snap
+                                                        :vision? (boolean (:vision? st))})]
+        [(-> st
+             (update :pending-browser dissoc req-id)
+             (assoc-in [:model-reqs req-id] {:pid pid :prefix-hash (:prefix-hash wire)}))
+         (cond-> {:request [(assoc frame :wire-messages (:messages wire))]}
+           (seq tx) (assoc :tx tx))])
+      [st nil])))
+
 (defn- handle-forked
   [st msg]
   (let [aid (:agent-id msg)
@@ -221,13 +237,35 @@
     [st' {:exits [{:ev :exited :agent-id aid :pid (:pid msg) :raw-status (:raw-status msg)}]
           :clojure.core.async.flow/report [(str "[:agents] " aid " (PID " (:pid msg) ") exited -> 0 OS resources held")]}]))
 
+(defn- handle-model-request
+  {:seon.flow/edge true}
+  [st msg]
+  (let [f (:frame msg)
+        aid (:agent-id msg)
+        pid (:pid msg)
+        main-db @(:conn st)
+        want-shot? (and (:browser-enabled? st)
+                        (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?)))]
+    (if want-shot?
+      [(assoc-in st [:pending-browser (:req-id f)] {:pid pid :aid aid :frame f})
+       {:exits [{:ev :branch-moved :agent-id aid :branch (:branch f)}]
+        :browser-req [{:op :snapshot :req-id (:req-id f) :agent-id aid :wait-ms 180}]}]
+      (let [b (or (:branch f) :main)
+            bdb (or (try (store/head (:conn st) b) (catch Throwable _ nil)) main-db)
+            {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid {})]
+        [(assoc-in st [:model-reqs (:req-id f)] {:pid pid :prefix-hash (:prefix-hash wire)})
+         (cond-> {:request [(assoc f :router? (boolean (or (:router? f) (:seon.agent/router? (datahike.api/pull main-db '[:seon.agent/router?] [:seon.agent/id aid])))) :wire-messages (:messages wire))]}
+           (seq tx) (assoc :tx tx))]))))
+
 (defn- handle-turn-committed
   [st tick msg]
   (let [f (:frame msg)
         aid (:agent-id msg)
         pid (:pid msg)
-        _ (when-let [eids (seq (mapcat :touched-eids (:tool-results f)))]
-            (ctouches/record-live-reads-by-key! (get-in st [:cfg :store :id]) (:branch f) aid (long (or (:turn f) 1)) eids))
+        _ (doseq [tr (:tool-results f)
+                :let [eids (:touched-eids tr)]
+                :when (seq eids)]
+          (ctouches/record-live-reads-by-key! (get-in st [:cfg :store :id]) (:branch f) aid (long (or (:turn f) 1)) eids))
         st' (-> st
                 (update :turns-done inc)
                 (cond-> (contains? (:live st) aid)
@@ -289,98 +327,6 @@
           :exits [{:ev :turn-idle :agent-id aid :pid pid}]
           :clojure.core.async.flow/report [(str "[:agents] child exception on " aid ": " err-str)]}]))
 
-(defn- user-viewport-dims [main-db]
-  (let [dh (store/db-schema main-db)
-        u (when (and main-db (contains? dh :seon.user/id)
-                     (first (datahike.api/datoms main-db :avet :seon.user/id :user/default)))
-            (datahike.api/pull main-db (quote [:seon.user/viewport-w :seon.user/viewport-h :seon.user/theme])
-                               [:seon.user/id :user/default]))
-        vw (let [v (:seon.user/viewport-w u)] (if (and (number? v) (pos? (long v))) (long v) 1280))
-        vh (let [v (:seon.user/viewport-h u)] (if (and (number? v) (pos? (long v))) (long v) 820))
-        th (if (= :light (:seon.user/theme u)) :light :dark)]
-    {:width vw :height vh :theme th}))
-
-(defn- finish-model-request [st main-db bdb aid pid frame snap preview-frames]
-  (let [vis? (boolean (:vision? st))
-        {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid
-                                                   (cond-> {:vision? vis?}
-                                                     snap (assoc :viewport-screenshot snap)))
-        final-msgs (preview/attach-preview-frames-to-messages (:messages wire) preview-frames vis?)
-        router? (boolean (or (:router? frame)
-                             (:seon.agent/router? (datahike.api/pull main-db (quote [:seon.agent/router?]) [:seon.agent/id aid]))))]
-    [(assoc-in st [:model-reqs (:req-id frame)] {:pid pid :prefix-hash (:prefix-hash wire)})
-     (cond-> {:request [(assoc frame :router? router? :wire-messages final-msgs)]}
-       (seq tx) (assoc :tx tx))]))
-
-(defn- plan-derived-previews [main-db bdb aid theme]
-  (let [evals (rdata/agent-evals-in bdb aid)
-        edited-vars (take 2 (preview/recent-edited-renderer-vars main-db bdb evals))
-        widths [360 640]]
-    (reduce (fn [acc vsym]
-              (let [ev (preview/eval-renderer-preview bdb vsym)]
-                (if-not (:ok? ev)
-                  acc
-                  (if-let [hit (preview/cached-preview-frames vsym (:form-hash ev) (:input-hash ev) widths theme)]
-                    (update acc :cached-frames into hit)
-                    (update acc :to-render conj {:var vsym :ev ev :widths widths :theme theme})))))
-            {:cached-frames [] :to-render []}
-            edited-vars)))
-
-(defn- handle-model-request
-  {:seon.flow/edge true}
-  [st msg]
-  (let [f (:frame msg)
-        aid (:agent-id msg)
-        pid (:pid msg)
-        main-db @(:conn st)
-        b (or (:branch f) :main)
-        bdb (rdata/branch-db-for main-db (:conn st) b)
-        {:keys [width height theme]} (user-viewport-dims main-db)
-        want-shot? (and (:browser-enabled? st)
-                        (boolean (store/config-val main-db aid :seon.config/viewport-screenshot?)))
-        {:keys [cached-frames to-render]} (if (:browser-enabled? st)
-                                            (plan-derived-previews main-db bdb aid theme)
-                                            {:cached-frames [] :to-render []})
-        preview-ch (:preview-res-ch st)
-        preview-reqs (when (and (seq to-render) preview-ch)
-                       (mapv (fn [{:keys [var ev widths theme]}]
-                               (let [rch (a/chan 1)]
-                                 (a/go
-                                   (let [[res _] (a/alts! [rch (a/timeout 8000)])]
-                                     (a/>! preview-ch {:req-id (:req-id f)
-                                                       :var var
-                                                       :form-hash (:form-hash ev)
-                                                       :input-hash (:input-hash ev)
-                                                       :source (:source ev)
-                                                       :widths widths
-                                                       :theme theme
-                                                       :res res})))
-                                 {:op :render-hiccup-frames
-                                  :html (:html ev)
-                                  :widths widths
-                                  :theme theme
-                                  :label-prefix (name var)
-                                  :reply-ch rch}))
-                             to-render))
-        browser-reqs (cond-> (vec preview-reqs)
-                       want-shot?
-                       (conj {:op :snapshot
-                              :req-id (:req-id f)
-                              :agent-id aid
-                              :width width
-                              :height height
-                              :wait-ms 180}))]
-    (if (seq browser-reqs)
-      [(assoc-in st [:pending-browser (:req-id f)]
-                 {:pid pid :aid aid :frame f
-                  :shot-done? (not want-shot?)
-                  :snap nil
-                  :pending-previews (count preview-reqs)
-                  :preview-frames (vec cached-frames)})
-       {:exits [{:ev :branch-moved :agent-id aid :branch (:branch f)}]
-        :browser-req browser-reqs}]
-      (finish-model-request st main-db bdb aid pid f nil cached-frames))))
-
 (defn- handle-child-frame
   [st tick msg]
   (let [f (:frame msg)
@@ -413,7 +359,7 @@
       :eval-done
       (handle-eval-done st tick msg)
 
-      :child-exception
+      (:child-exception :agent-error)
       (handle-child-exception st msg)
 
       [st nil])))
@@ -424,45 +370,6 @@
     :forked (handle-forked st msg)
     :child-frame (handle-child-frame st tick msg)
     :child-exited (handle-child-exited st msg)
-    [st nil]))
-
-(defn- maybe-complete-pending-browser [st req-id entry]
-  (if (and (:shot-done? entry) (zero? (long (or (:pending-previews entry) 0))))
-    (let [{:keys [pid aid frame snap preview-frames]} entry
-          main-db @(:conn st)
-          b (or (:branch frame) :main)
-          bdb (rdata/branch-db-for main-db (:conn st) b)]
-      (finish-model-request (update st :pending-browser dissoc req-id)
-                            main-db bdb aid pid frame snap preview-frames))
-    [(assoc-in st [:pending-browser req-id] entry) nil]))
-
-(defn- handle-browser-res
-  [st msg]
-  (let [req-id (:req-id msg)]
-    (if-let [entry (get-in st [:pending-browser req-id])]
-      (maybe-complete-pending-browser st req-id (assoc entry :shot-done? true :snap (:snapshot msg)))
-      [st nil])))
-
-(defn- handle-preview-res
-  [st {:keys [req-id var form-hash input-hash source widths theme res]}]
-  (if-let [entry (get-in st [:pending-browser req-id])]
-    (let [norm-f (fn [f]
-                   {:mime (or (:seon.media/mime f) (:mime f) "image/jpeg")
-                    :base64 (str (or (:seon.media/base64 f) (:base64 f) ""))
-                    :label (or (:seon.media/label f) (:label f) (str (name var)))
-                    :width (long (or (:seon.media/width f) (:width f) 0))
-                    :height (long (or (:seon.media/height f) (:height f) 0))
-                    :dom (let [d (or (:seon.media/dom f) (:dom f))] (if (map? d) d {}))
-                    :var var
-                    :source source})
-          frames (when (and (map? res) (:ok? res) (seq (:frames res)))
-                   (let [fs (mapv norm-f (:frames res))]
-                     (preview/cache-preview-frames! var form-hash input-hash widths theme fs)
-                     fs))
-          entry1 (-> entry
-                     (update :pending-previews #(max 0 (dec (long (or % 1)))))
-                     (cond-> (seq frames) (update :preview-frames (fnil into []) frames)))]
-      (maybe-complete-pending-browser st req-id entry1))
     [st nil]))
 
 (defn agents-proc
@@ -483,12 +390,12 @@
              :response "Model completions from `:model`"
              :browser-res "Fresh live WKWebView snapshots `{:req-id :agent-id :snapshot}` from `:browser`"}
        :outs {:request "Model completion requests to `:model`"
-              :browser-req "On-demand snapshot & preview frame requests to `:browser`"
+              :browser-req "On-demand snapshot requests to `:browser`"
               :tx "Agent spawns & inter-agent messages to `:transactor`"
               :git "Auto-sync branch refs to `:git`"
               :exits "Process fork/idle/exit lifecycle events to `:reconciler`"}
        :workload :io
-       :doc "Manages persistent COW forked agent runtimes with LRU eviction, live WKWebView viewport vision & derived preview frames."
+       :doc "Manages persistent COW forked agent runtimes with LRU eviction, live WKWebView viewport vision & multi-tool turn execution."
        :ping-map-fn (fn [st]
                       {:max-os-procs (:max-os-procs st)
                        :live-os-procs (count (:live st))
@@ -502,13 +409,11 @@
                                    (:live st))
                        :turns-completed (:turns-done st)})})
   ([{:keys [conn cfg fork-out fork-agent-in max-os-procs browser-enabled? vision?]}]
-   (let [tx-reply-ch (a/chan 256)
-         preview-res-ch (a/chan 64)]
+   (let [tx-reply-ch (a/chan 256)]
      {:conn conn
       :cfg cfg
       :fork-out fork-out
       :tx-reply-ch tx-reply-ch
-      :preview-res-ch preview-res-ch
       :max-os-procs (or max-os-procs 6)
       :browser-enabled? (boolean browser-enabled?)
       :vision? (boolean vision?)
@@ -520,7 +425,7 @@
       :clock 0
       :req-seq 0
       :turns-done 0
-      :clojure.core.async.flow/in-ports {:fork-ev fork-agent-in :tx-reply tx-reply-ch :preview-res preview-res-ch}}))
+      :clojure.core.async.flow/in-ports {:fork-ev fork-agent-in :tx-reply tx-reply-ch}}))
   ([st transition]
    (when (= transition :clojure.core.async.flow/stop)
      (doseq [[_ {:keys [pid]}] (:live st) :when (number? pid)]
@@ -549,7 +454,5 @@
            [st nil])
 
          :browser-res (handle-browser-res st msg)
-
-         :preview-res (handle-preview-res st msg)
 
          :fork-ev (handle-fork-ev st tick msg))))))

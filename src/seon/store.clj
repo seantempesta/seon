@@ -101,24 +101,6 @@
        (select-keys ent (keys (:schema db)))
        ent))))
 
-(defn config-val
-  "Reads config key `k` from `db`, checking `agent-id`'s entity first (if given) and falling back
-   to `:seon.config/key :seon.config/root`, then `default-config-values`. 1 indexed pull (~20 µs)!"
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/db :qualified-keyword] :any]
-                  [:=> [:cat :seon.host/db [:or :keyword :nil] :qualified-keyword] :any]]}
-  ([db k] (config-val db nil k))
-  ([db agent-id k]
-   (let [agent-v (when (and db agent-id (first (d/datoms db :avet :seon.agent/id agent-id)))
-                   (get (d/pull db [k] [:seon.agent/id agent-id]) k))]
-     (if (some? agent-v)
-       agent-v
-       (let [root-v (when (and db (first (d/datoms db :avet :seon.config/key :seon.config/root)))
-                      (get (d/pull db [k] [:seon.config/key :seon.config/root]) k))]
-         (if (some? root-v)
-           root-v
-           (get default-config-values k)))))))
-
 (defn config-map
   "Returns `{:effective map :overrides #{...}}` for `agent-id` (or `:seon.config/root` when nil)."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db [:maybe :keyword]] :map]]}
@@ -756,73 +738,6 @@
  ([db] (db-cache-sig db))
  ([db extra] (when-let [s (db-cache-sig db)] (into s extra))))
 
-(defn ^:seon.flow/edge prune-merged-branches!
-  "Deletes already-merged, non-protected, non-active branches beyond `:seon.config/gc-keep-merged-branches` so old branches never pin LMDB storage indefinitely."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/conn] :map]
-                  [:=> [:cat :seon.host/conn nat-int?] :map]]
-   :cost/ticks 15000000}
-  ([conn]
-   (prune-merged-branches! conn
-     (long (or (config-val @conn nil :seon.config/gc-keep-merged-branches)
-               (:seon.config/gc-keep-merged-branches default-config-values)))))
-  ([conn keep-n]
-   (let [mdb @conn
-       protected #{:db :main :branch/repl}
-       all-brs (set (d/branches mdb))
-       ags (mapv #(d/pull mdb '[:db/id :seon.agent/branch :seon.agent/merged-tx :seon.agent/archived?] (:e %))
-                 (d/datoms mdb :aevt :seon.agent/id))
-       active-brs (into #{} (keep (fn [ag]
-                                    (when (and (:seon.agent/branch ag)
-                                               (nil? (:seon.agent/merged-tx ag))
-                                               (not (:seon.agent/archived? ag)))
-                                      (:seon.agent/branch ag))))
-                        ags)
-       merged (->> ags
-                   (keep (fn [ag]
-                           (let [b (:seon.agent/branch ag)
-                                 mtx (:seon.agent/merged-tx ag)]
-                             (when (and b (all-brs b) (not (protected b)) (not (active-brs b)) (or mtx (:seon.agent/archived? ag)))
-                             {:branch b :merged-tx (long (or mtx 0))}))))
-                   (group-by :branch)
-                   (map (fn [[b xs]] {:branch b :merged-tx (apply max (map :merged-tx xs))}))
-                   (sort-by :merged-tx >)
-                   vec)
-       to-del (mapv :branch (drop (long keep-n) merged))
-       to-del-set (set to-del)
-       archive-tx (vec (keep (fn [ag]
-                               (when (and (contains? to-del-set (:seon.agent/branch ag))
-                                          (not (:seon.agent/archived? ag)))
-                                 {:db/id (:db/id ag) :seon.agent/archived? true}))
-                             ags))
-       _ (when (seq archive-tx)
-           (d/transact conn archive-tx))
-       deleted (volatile! 0)]
-   (doseq [b to-del]
-     (try (d/delete-branch! conn b) (vswap! deleted inc) (catch Throwable _ nil)))
-   {:ok? true :deleted @deleted :archived (count archive-tx) :kept (min (count merged) (long keep-n))})))
-
-(defn ^:seon.flow/edge gc-store!
-  "Prunes merged branches beyond `:seon.config/gc-keep-merged-branches` and runs `d/gc-storage` with cutoff `:seon.config/gc-history-hours` ago (preserving active branch merge-bases)."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.host/conn] :map]
-                  [:=> [:cat :seon.host/conn [:maybe :map]] :map]]
-   :cost/ticks 25000000}
-  ([conn] (gc-store! conn nil))
-  ([conn opts]
-   (let [mdb @conn
-         keep-n (long (or (:keep opts)
-                          (config-val mdb nil :seon.config/gc-keep-merged-branches)
-                          (:seon.config/gc-keep-merged-branches default-config-values)))
-         hrs (long (or (:history-hours opts)
-                       (config-val mdb nil :seon.config/gc-history-hours)
-                       (:seon.config/gc-history-hours default-config-values)))
-         pruned (prune-merged-branches! conn keep-n)
-         cutoff (java.util.Date. (- (System/currentTimeMillis) (* hrs 3600 1000)))
-         swept @(d/gc-storage conn cutoff)
-         n-swept (if (coll? swept) (count swept) swept)]
-     {:ok? true :pruned pruned :swept n-swept :history-hours hrs})))
-
 (defonce ^:private ^:seon.flow/edge head-db-cache (lru-cache 16))
 
 (defn head
@@ -908,3 +823,105 @@
     (instance? datahike.db.interface.ISearch db) (or (:schema db) (d/schema db) {})
     (and (map? db) (map? (:schema db))) (:schema db)
     :else {}))
+
+(def ^:dynamic *capturing-agent-eval-reads?*
+  "Bound true ONLY inside `seon.code/eval-single-form` while evaluating an agent expression;
+   allows internal runtime plumbing to opt out of agent touch capture without affecting UI/rule `reads/with-reads` reactivity."
+  false)
+
+(defn without-agent-eval-reads
+  "Invokes 0-arg `f`, temporarily binding `di/*reads*` nil ONLY when `*capturing-agent-eval-reads?*` is true.
+   Preserves 100% of UI walk and Datalog rule `datahike.reads` invalidation while eliminating self-inflicted plumbing noise."
+  {:malli/schema [:=> [:cat [:=> [:cat] :any]] :any]
+   :cost/ticks 100000}
+  [f]
+  (if *capturing-agent-eval-reads?*
+    (binding [di/*reads* nil] (f))
+    (f)))
+
+(defn config-val
+  "Reads config key `k` from `db`, checking `agent-id`'s entity first (if given) and falling back
+   to `:seon.config/key :seon.config/root`, then `default-config-values`. 1 indexed pull (~20 µs)!"
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db :qualified-keyword] :any]
+                  [:=> [:cat :seon.host/db [:or :keyword :nil] :qualified-keyword] :any]]}
+  ([db k] (config-val db nil k))
+  ([db agent-id k]
+   (without-agent-eval-reads
+   (fn []
+     (let [agent-v (when (and db agent-id (first (d/datoms db :avet :seon.agent/id agent-id)))
+                     (get (d/pull db [k] [:seon.agent/id agent-id]) k))]
+       (if (some? agent-v)
+         agent-v
+         (let [root-v (when (and db (first (d/datoms db :avet :seon.config/key :seon.config/root)))
+                        (get (d/pull db [k] [:seon.config/key :seon.config/root]) k))]
+           (if (some? root-v)
+             root-v
+             (get default-config-values k)))))))))
+
+(defn ^:seon.flow/edge prune-merged-branches!
+  "Deletes already-merged, non-protected, non-active branches beyond `:seon.config/gc-keep-merged-branches` so old branches never pin LMDB storage indefinitely."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/conn] :map]
+                  [:=> [:cat :seon.host/conn nat-int?] :map]]
+   :cost/ticks 15000000}
+  ([conn]
+   (prune-merged-branches! conn
+     (long (or (config-val @conn nil :seon.config/gc-keep-merged-branches)
+               (:seon.config/gc-keep-merged-branches default-config-values)))))
+  ([conn keep-n]
+   (let [mdb @conn
+       protected #{:db :main :branch/repl}
+       all-brs (set (d/branches mdb))
+       ags (mapv #(d/pull mdb '[:db/id :seon.agent/branch :seon.agent/merged-tx :seon.agent/archived?] (:e %))
+                 (d/datoms mdb :aevt :seon.agent/id))
+       active-brs (into #{} (keep (fn [ag]
+                                    (when (and (:seon.agent/branch ag)
+                                               (nil? (:seon.agent/merged-tx ag))
+                                               (not (:seon.agent/archived? ag)))
+                                      (:seon.agent/branch ag))))
+                        ags)
+       merged (->> ags
+                   (keep (fn [ag]
+                           (let [b (:seon.agent/branch ag)
+                                 mtx (:seon.agent/merged-tx ag)]
+                             (when (and b (all-brs b) (not (protected b)) (not (active-brs b)) (or mtx (:seon.agent/archived? ag)))
+                             {:branch b :merged-tx (long (or mtx 0))}))))
+                   (group-by :branch)
+                   (map (fn [[b xs]] {:branch b :merged-tx (apply max (map :merged-tx xs))}))
+                   (sort-by :merged-tx >)
+                   vec)
+       to-del (mapv :branch (drop (long keep-n) merged))
+       to-del-set (set to-del)
+       archive-tx (vec (keep (fn [ag]
+                               (when (and (contains? to-del-set (:seon.agent/branch ag))
+                                          (not (:seon.agent/archived? ag)))
+                                 {:db/id (:db/id ag) :seon.agent/archived? true}))
+                             ags))
+       _ (when (seq archive-tx)
+           (d/transact conn archive-tx))
+       deleted (volatile! 0)]
+   (doseq [b to-del]
+     (try (d/delete-branch! conn b) (vswap! deleted inc) (catch Throwable _ nil)))
+   {:ok? true :deleted @deleted :archived (count archive-tx) :kept (min (count merged) (long keep-n))})))
+
+(defn ^:seon.flow/edge gc-store!
+  "Prunes merged branches beyond `:seon.config/gc-keep-merged-branches` and runs `d/gc-storage` with cutoff `:seon.config/gc-history-hours` ago (preserving active branch merge-bases)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/conn] :map]
+                  [:=> [:cat :seon.host/conn [:maybe :map]] :map]]
+   :cost/ticks 25000000}
+  ([conn] (gc-store! conn nil))
+  ([conn opts]
+   (let [mdb @conn
+         keep-n (long (or (:keep opts)
+                          (config-val mdb nil :seon.config/gc-keep-merged-branches)
+                          (:seon.config/gc-keep-merged-branches default-config-values)))
+         hrs (long (or (:history-hours opts)
+                       (config-val mdb nil :seon.config/gc-history-hours)
+                       (:seon.config/gc-history-hours default-config-values)))
+         pruned (prune-merged-branches! conn keep-n)
+         cutoff (java.util.Date. (- (System/currentTimeMillis) (* hrs 3600 1000)))
+         swept @(d/gc-storage conn cutoff)
+         n-swept (if (coll? swept) (count swept) swept)]
+     {:ok? true :pruned pruned :swept n-swept :history-hours hrs})))

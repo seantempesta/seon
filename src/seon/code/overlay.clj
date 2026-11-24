@@ -143,9 +143,13 @@
        (doseq [[_ v] (ns-interns ns-obj)]
          (let [m (meta v)]
            (when (and (not (:private m))
-                      (or (not (:seon/instrumented? m)) (seq changed-schemas))
-                      (:malli/schema m))
-             (schema/arm-var! arm-db v))))))
+                    (or (not (:seon/instrumented? m)) (seq changed-schemas))
+                    (:malli/schema m))
+           (if tolerant?
+             (try (schema/arm-var! arm-db v)
+                  (catch Throwable ex
+                    (vswap! errors conj {:key (symbol (name nsym) (str (:name m))) :error (or (.getMessage ex) (str ex))})))
+             (schema/arm-var! arm-db v)))))))
    (when (seq changed-schemas)
      (doseq [ns-obj (all-ns)
              :let [nsym (ns-name ns-obj)]
