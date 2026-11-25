@@ -1,21 +1,12 @@
 (ns seon.render.entities.system
   "Uniform pure `ns-map -> ns-map` chip (~180px) & card (~420px) Hiccup renderers for operational
    runtime entities (`:seon.config/entity`, `:seon.test.run/entity`, `:seon.user/entity`, `:seon.vector/entity`)."
-  (:require [clojure.string :as str]
-            [seon.render.links :as rlinks]
-            [seon.render.text :refer [one-line]]))
-
-(defn- chip [min-w cls & xs]
-  {:seon.ui/hiccup (into [:span {:class (str "ent-chip " cls) :data-min-width min-w}] (remove nil? xs))})
+  (:require [seon.render.links :as rlinks]
+            [seon.render.text :refer [one-line]]
+            [seon.render.entities.prim :as prim :refer [chip]]))
 
 (defn- box [min-w cls left right & body]
-  {:seon.ui/hiccup
-   (into [:div {:class (str "card ent-card " cls) :data-min-width min-w}
-          [:div {:class "card-head ent-head"}
-           (into [:div {:class "pill-row"}] (remove nil? left))
-           (when (and (some? right) (not (str/blank? (str right))))
-             [:span {:class "muted tiny mono ent-meta"} (str right)])]]
-         (remove nil? body))})
+  (apply prim/box "ent-card" min-w cls left right body))
 
 (defn render-config-chip
   "Compact chip (~180px) for `:seon.config/entity`."

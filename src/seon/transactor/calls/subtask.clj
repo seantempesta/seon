@@ -18,13 +18,14 @@
   {:malli/schema [:=> [:cat :any :any :any :any] :string], :cost/ticks 200000, :cost/bytes 65536}
   [call-id caller prompt result-schema]
   (str "Structured call from " caller " (call-id: " (pr-str call-id) ")\n"
-       (when result-schema
-         (str "Required result schema: " (pr-str result-schema) "\n"))
-       "\n" prompt "\n\n"
-       "When finished, settle this call via:\n"
-       "  (user/answer! " (pr-str call-id) " <value>)\n"
-       "or if out of scope / blocked:\n"
-       "  (user/fail! " (pr-str call-id) " {:class :out-of-scope :message \"...\"})"))
+  (when result-schema
+    (str "Required result schema: " (pr-str result-schema) "\n"))
+  "\n" prompt "\n\n"
+  "When finished, settle this call via:\n"
+  "  (user/answer! " (pr-str call-id) " <value>)\n"
+  "(If you edited code, verify with `user/run-tests!`, call `user/answer!`, then reply concisely with no tool calls — merging to `:main` is automatic; never call merge helpers manually.)\n"
+  "or if out of scope / blocked:\n"
+  "  (user/fail! " (pr-str call-id) " {:class :out-of-scope :message \"...\"})"))
 
 (defn call-summary-map
   {:malli/schema [:=> [:cat [:maybe :map]] :map], :cost/ticks 50000, :cost/bytes 16384}

@@ -525,4 +525,12 @@
   :seon.fix/id #uuid "2136b13e-07bd-44d6-acdb-eac9be058075",
   :seon.fix/regression-test seon.alloc-guard-test/wave12b-reconciler-merge-before-deliver-and-test-user-db-guard-test,
   :seon.fix/root-cause "reconcile-candidates delivered :settle-calls before edited auto-merging callees finished :testing/:merging; add-fn! did not reject (user/db)/(user/main-db)/(user/conn) in *-test namespaces.",
-  :seon.fix/symptom "In B+-tree write+merge delegation, reconciler woke :agent/root immediately on user/answer! before edited callees finished :testing/:merging, causing root to spend 9 turns searching :main for unmerged edits; agents writing (user/db) in *-test namespaces passed local runs then failed in COW merge-gate workers."}]
+  :seon.fix/symptom "In B+-tree write+merge delegation, reconciler woke :agent/root immediately on user/answer! before edited callees finished :testing/:merging, causing root to spend 9 turns searching :main for unmerged edits; agents writing (user/db) in *-test namespaces passed local runs then failed in COW merge-gate workers."}
+ {:seon.fix/created-ms 1795632797301,
+  :seon.fix/symptom "B+-tree caller timed out at 300s after both children merged; specialists wasted 3 turns searching for merge-branch!; 2/4 seed=111 agents hit Unable to resolve symbol: pprint; bare add-fn! lacked user/ hint; stale pre-trial root errors polluted :error-samples.",
+  :seon.fix/change-summary "Hold :awaiting-blocked? while awaited calls are undelivered; clear stale awaiting IDs in handle-settle-calls! and prune-reconciler-sets; suspend handle-await-calls! on unmerged callee edits; drop vanished candidates from reconciler :views; document automatic merge on specialist calls; refer clojure.pprint/pprint in user & repl; add get-else nil & bare user/* helper hints; filter pull-failure-diagnostics by after-tx; consolidate clip-str & render.entities prims.",
+  :seon.fix/before-after "Wave 13A: 5/5 single-agent (100%, 0 OOMs), B+-tree timed out after both children merged -> Wave 13B airtight await/merge sync + specialist auto-merge guidance + pprint + error hints.",
+  :seon.fix/error-class :seon.reconciler/bplus-await-merge-race-and-repl-ergonomics,
+  :seon.fix/root-cause "call-delivery-state dropped :awaiting-blocked? as soon as :pending=0 even while callee merge-in-flight held delivery; handle-await-calls! short-circuited on :resolved calls with unmerged branch edits; handle-settle-calls! did not retract stale already-delivered awaiting IDs; reconciler kept vanished candidates in :views; pprint was not referred in user/repl.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave13b-bplus-await-merge-sync-pprint-and-error-hints-test,
+  :seon.fix/id #uuid "52f183da-756f-480f-8949-7cdd49b3c400"}]

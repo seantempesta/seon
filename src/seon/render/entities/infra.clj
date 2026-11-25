@@ -4,24 +4,8 @@
    chip (~180px) and a richer card (~420px) footprint."
   (:require [clojure.string :as str]
             [seon.render.links :as rlinks]
-            [seon.render.text :refer [nonblank one-line]]))
-
-(defn- chip [min-w cls & xs]
-  {:seon.ui/hiccup (into [:span {:class (str "ent-chip " cls) :data-min-width min-w}] (remove nil? xs))})
-
-(defn- box [tag-cls min-w cls left right & body]
-  {:seon.ui/hiccup
-   (into [:div {:class (str "card " tag-cls " " cls) :data-min-width min-w}
-          [:div {:class "card-head ent-head"}
-           (into [:div {:class "pill-row"}] (remove nil? left))
-           (cond (vector? right) right
-                 (and (some? right) (not (str/blank? (str right)))) [:span {:class "muted tiny mono ent-meta"} (str right)]
-                 :else nil)]]
-         (remove nil? body))})
-
-(defn- el
-  ([a v] (rlinks/ent-link a v (str v) "mono"))
-  ([a v lbl] (rlinks/ent-link a v lbl "mono strong")))
+            [seon.render.text :refer [nonblank one-line]]
+            [seon.render.entities.prim :refer [chip box el]]))
 
 (defn render-file-chip
   "Compact chip (~180px) for `:seon.code.file/entity`."

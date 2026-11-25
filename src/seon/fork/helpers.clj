@@ -26,7 +26,7 @@
         opt (fn [s] (try (requiring-resolve s) (catch Throwable _ nil)))]
     (binding [*ns* u]
       (refer-clojure)
-      (require '[datahike.api :as d] '[clojure.string :as str] '[jolt.fs :as fs] '[jolt.process :as proc])
+      (require '[datahike.api :as d] '[clojure.string :as str] '[clojure.pprint :refer [pprint]] '[jolt.fs :as fs] '[jolt.process :as proc])
       (fcalls/export-ns-helpers! u 'seon.fork.helpers)
       (fcalls/export-ns-helpers! u 'seon.fork.ui)
       (fcalls/install-call-and-ui-helpers! u)
@@ -39,7 +39,7 @@
         (when-let [f (opt s)] (f u ctx-fn)))
       (when-let [f (opt 'seon.render.status/install-user-helpers!)] (f u)))
     (binding [*ns* (create-ns 'repl)]
-      (require '[jolt.fs :as fs] '[jolt.process :as proc]))))
+      (require '[clojure.pprint :refer [pprint]] '[jolt.fs :as fs] '[jolt.process :as proc]))))
 
 (defn ^:seon.flow/edge conn
   "Returns the current agent branch Datahike connection."

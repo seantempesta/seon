@@ -3,7 +3,7 @@
   (:require [jolt.fs :as fs]
             [datahike.api :as d]
             [seon.store :as store :refer [db-schema]]
-            [seon.render.text :refer [round1]]
+            [seon.render.text :refer [clip round1]]
             [seon.fork.calls :as fcalls]
             [clojure.string :as str]
             [seon.render.fit :as fit]
@@ -159,36 +159,34 @@
                    (assoc :err (subs (str (:seon.agent.eval/error e))
                                      0 (min 120 (count (str (:seon.agent.eval/error e))))))))))))
 
-(defn- clip-str [s max-n]
-  (let [t (str/trim (str (or s "")))]
-    (if (> (count t) max-n) (str (subs t 0 max-n) "…") t)))
-
-(defn- pull-failure-diagnostics [conn main-db brs aid br after-mtx]
-  (let [dbx (if (and br (contains? brs br)) (store/head conn br) main-db)
-        sch (db-schema dbx)
-        err-samples (if (sch :seon.agent.eval/agent)
-                      (->> (d/datoms dbx :avet :seon.agent.eval/agent aid)
-                           (map #(d/pull dbx '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/error] (:e %)))
-                           (filter #(not (str/blank? (str (:seon.agent.eval/error %)))))
-                           (sort-by #(long (or (:seon.agent.eval/turn %) 0)))
-                           (take 6)
-                           (mapv (fn [e]
-                                   {:turn (long (or (:seon.agent.eval/turn e) 0))
-                                    :code (clip-str (:seon.agent.eval/code e) 110)
-                                    :error (clip-str (:seon.agent.eval/error e) 200)})))
-                      [])
-        amtx (long (or after-mtx 0))
-        fail-tests (if (sch :seon.test/pass?)
-                     (->> (d/datoms dbx :avet :seon.test/pass? false)
-                          (filter #(or (not (pos? amtx)) (> (long (:tx % 0)) amtx)))
-                          (map #(d/pull dbx '[:seon.test/var :seon.test/report :seon.test/digest] (:e %)))
-                          (filter :seon.test/var)
-                          (take 5)
-                          (mapv (fn [v]
-                                  {:var (:seon.test/var v)
-                                   :report (clip-str (:seon.test/report v) 220)})))
-                     [])]
-    {:error-samples err-samples :failing-tests fail-tests}))
+(defn- pull-failure-diagnostics [conn main-db brs aid br after-mtx after-tx]
+(let [dbx (if (and br (contains? brs br)) (store/head conn br) main-db)
+      sch (db-schema dbx)
+      atx (long (or (when (pos? (long (or after-tx 0))) after-tx) (when (or (nil? br) (= br :main)) after-mtx) 0))
+      err-samples (if (sch :seon.agent.eval/agent)
+                    (->> (d/datoms dbx :avet :seon.agent.eval/agent aid)
+                         (filter #(or (not (pos? atx)) (> (long (:tx % 0)) atx)))
+                         (map #(d/pull dbx '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/error] (:e %)))
+                         (filter #(not (str/blank? (str (:seon.agent.eval/error %)))))
+                         (sort-by #(long (or (:seon.agent.eval/turn %) 0)))
+                         (take 6)
+                         (mapv (fn [e]
+                                 {:turn (long (or (:seon.agent.eval/turn e) 0))
+                                  :code (clip (:seon.agent.eval/code e) 110)
+                                  :error (clip (:seon.agent.eval/error e) 200)})))
+                    [])
+      amtx (long (or after-mtx 0))
+      fail-tests (if (sch :seon.test/pass?)
+                   (->> (d/datoms dbx :avet :seon.test/pass? false)
+                        (filter #(or (not (pos? amtx)) (> (long (:tx % 0)) amtx)))
+                        (map #(d/pull dbx '[:seon.test/var :seon.test/report :seon.test/digest] (:e %)))
+                        (filter :seon.test/var)
+                        (take 5)
+                        (mapv (fn [v]
+                                {:var (:seon.test/var v)
+                                 :report (clip (:seon.test/report v) 220)})))
+                   [])]
+  {:error-samples err-samples :failing-tests fail-tests}))
 
 (defn ^:seon.flow/edge trial-audit-summary
   "Runs inside an isolated trial instance before teardown: combines `seon.health.metrics/agent-friction-summary`
@@ -240,7 +238,7 @@
                          (long (count (filter #(> (long (:tx %)) after-mtx)
                                               (d/datoms main-db :avet :seon.code.var/test? true))))
                          0)
-         diag (pull-failure-diagnostics conn main-db brs agent-id br after-mtx)
+         diag (pull-failure-diagnostics conn main-db brs agent-id br after-mtx (as-l (:after-tx o)))
          compact-evs (when (:include-trace? o)
                        {:worker (pull-compact-evals conn main-db brs agent-id br)
                         :children (mapv (fn [cid cr] {:id cid :merged? (boolean (:merged? cr))

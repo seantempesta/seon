@@ -239,13 +239,13 @@
                                                 :force-tune-after-turns force-tune-after-turns})]
         (if (= :cold-merged (:outcome watch))
           (let [fh (cluster/instance-op! inst {:op :health})
-                vr (when (:verify-spec task) (cluster/instance-op! inst {:op :verify-task :spec (assoc (:verify-spec task) :after-main-tx base-mtx)}))]
+                vr (when-let [vs (or (:verify-spec task) (:verify-spec opts))] (cluster/instance-op! inst {:op :verify-task :spec (assoc vs :after-main-tx base-mtx)}))]
             {:ok? (boolean (and (:ok? fh) (if vr (:ok? vr) true))) :phase :cold-merged :task tid :worker worker-id :merged? true
              :health-ok? (boolean (:ok? fh)) :verify-ok? (if vr (boolean (:ok? vr)) true) :verify-reason (:reason vr)
              :turns (long (:turns (:detail watch) 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))
              :worker-pre (:detail watch) :elapsed-s (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e8)) 10.0)})
           (run-tuner-intervention! inst tid worker-id worker-br tuner-id watch
-                                   {:tuner-timeout-ms tuner-timeout-ms :resume-timeout-ms resume-timeout-ms :tuner-max-turns tuner-max-turns :verify-spec (:verify-spec task) :after-main-tx base-mtx :proxy-inst proxy-inst} t0)))
+                                   {:tuner-timeout-ms tuner-timeout-ms :resume-timeout-ms resume-timeout-ms :tuner-max-turns tuner-max-turns :verify-spec (or (:verify-spec task) (:verify-spec opts)) :after-main-tx base-mtx :proxy-inst proxy-inst} t0)))
       (finally
         (try (cluster/stop-instance! inst {:keep-dir? keep-dir?}) (finally (when proxy-inst (proxy/stop! proxy-inst))))))))
 

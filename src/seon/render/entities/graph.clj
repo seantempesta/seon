@@ -1,13 +1,8 @@
 (ns seon.render.entities.graph
   "Pure Hiccup renderers for collapsed chain-boundary witnesses, contract blame cuts,
    and exact doc-atom cards with zero-cost Known-Set back-references."
-  (:require [clojure.string :as str]))
-
-(defn- clip-str [s max-len]
-  (let [t (str (or s ""))]
-    (if (> (count t) (long max-len))
-      (str (subs t 0 (max 0 (- (long max-len) 3))) "...")
-      t)))
+  (:require [clojure.string :as str]
+            [seon.render.text :refer [clip]]))
 
 (defn format-known-backref
   "Formats a zero-repetition inline back-reference `(see Turn k / result/e<n>)` for an entity already in Known Set `K_t`."
@@ -40,14 +35,14 @@
       [:p {:class "tiny mono muted"} chain-str]
       (when (or (not (str/blank? (str sample-in))) (not (str/blank? (str sample-out))))
         [:pre {:class "code-box tiny"}
-         [:code (str "witness: " (clip-str (or sample-in "?") 160) " => " (clip-str (or sample-out "?") 160))]])
+         [:code (str "witness: " (clip (or sample-in "?") 160) " => " (clip (or sample-out "?") 160))]])
       (when (seq known-refs)
         [:p {:class "tiny muted"}
          (str "Already known: " (str/join ", " (map format-known-backref known-refs)))])
       (when (seq doc-atoms)
         (into [:ul {:class "tiny"}]
               (for [{:keys [id heading]} (take 6 doc-atoms)]
-                [:li [:code (str id)] (when (not (str/blank? (str heading))) (str " — " (clip-str heading 80)))])))]}))
+                [:li [:code (str id)] (when (not (str/blank? (str heading))) (str " — " (clip heading 80)))])))]}))
 
 (defn render-blame-cut
   "Pure renderer for localized contract/exception blame: shows `[f1 -> ... -> FAILED AT fi]`, blame badge,
@@ -74,16 +69,16 @@
        [:strong {:class "mono"} (str (or var kind :error/unknown))]]
       (when chain-txt [:p {:class "tiny mono muted"} chain-txt])
       (when-not (str/blank? (str message))
-        [:div {:class "notice red sm-copy"} (clip-str message 320)])
+        [:div {:class "notice red sm-copy"} (clip message 320)])
       (when-not (str/blank? (str input-sample))
         [:pre {:class "code-box tiny"}
-         [:code (str (if input-blame? "valid example args: " "failing witness: ") (clip-str input-sample 240))]])
+         [:code (str (if input-blame? "valid example args: " "failing witness: ") (clip input-sample 240))]])
       (when (and sch-ent (:seon.schema/key sch-ent))
         [:pre {:class "code-box tiny"}
-         [:code (str (:seon.schema/key sch-ent) " = " (clip-str (pr-str (:seon.schema/form sch-ent)) 280))]])
+         [:code (str (:seon.schema/key sch-ent) " = " (clip (pr-str (:seon.schema/form sch-ent)) 280))]])
       (when (and (not input-blame?) var-ent (:seon.code.var/name var-ent))
         [:p {:class "tiny mono"}
          (str "cut-point: " (:seon.code.var/name var-ent)
-              (when (:seon.code.var/schema var-ent) (str " " (clip-str (pr-str (:seon.code.var/schema var-ent)) 160))))])
+              (when (:seon.code.var/schema var-ent) (str " " (clip (pr-str (:seon.code.var/schema var-ent)) 160))))])
       (when (and fix-ent (:seon.fix/change-summary fix-ent))
-        [:p {:class "tiny muted"} (str "Known fix: " (clip-str (:seon.fix/change-summary fix-ent) 200))])]}))
+        [:p {:class "tiny muted"} (str "Known fix: " (clip (:seon.fix/change-summary fix-ent) 200))])]}))

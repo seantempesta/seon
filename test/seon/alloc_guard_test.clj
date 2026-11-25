@@ -587,3 +587,75 @@
             (is (false? (seon.reconciler.calls/callee-merge-in-flight? mdb st {:ns/demo.x {:branch :branch/ns.demo.x :status :gate-blocked}} cid)))
             (is (= #{:agent/root} (seon.reconciler.calls/callers-awaiting-callees mdb #{:ns/demo.x}))))
           (finally (d/release bconn)))))))
+
+(deftest wave13b-bplus-await-merge-sync-pprint-and-error-hints-test
+  (testing "call-delivery-state holds awaiting-blocked? until delivered and flags stale already-delivered awaits"
+    (with-test-store [{:keys [conn]}]
+      (let [cid1 (random-uuid)
+            cid2 (random-uuid)]
+        (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/awaiting #{cid1}}
+                                    {:seon.agent/id :ns/demo.w :seon.agent/branch :branch/ns.demo.w :seon.agent/auto-merge? true}
+                                    {:seon.agent.call/id cid1 :seon.agent.call/caller :agent/root :seon.agent.call/callee :ns/demo.w
+                                     :seon.agent.call/status :resolved :seon.agent.call/delivered? false}]})
+        (let [mdb @conn
+              ma (d/pull mdb '[:seon.agent/awaiting] [:seon.agent/id :agent/root])
+              ds (seon.reconciler.calls/call-delivery-state mdb :agent/root ma #{})]
+          (is (true? (:awaiting-blocked? ds)))
+          (is (= 1 (:awaiting-count ds)))
+          (is (= [cid1] (:awaiting-ready-to-deliver ds))))
+        (d/transact conn {:tx-data [{:seon.agent.call/id cid1 :seon.agent.call/delivered? true}
+                                    {:seon.agent/id :agent/root :seon.agent/awaiting #{cid2}}
+                                    {:seon.agent.call/id cid2 :seon.agent.call/caller :agent/root :seon.agent.call/callee :ns/demo.w
+                                     :seon.agent.call/status :resolved :seon.agent.call/delivered? true}]})
+        (let [mdb @conn
+              ma (d/pull mdb '[:seon.agent/awaiting] [:seon.agent/id :agent/root])
+              ds (seon.reconciler.calls/call-delivery-state mdb :agent/root ma #{})]
+          (is (false? (:awaiting-blocked? ds)))
+          (is (= #{cid1 cid2} (set (:awaiting-stale-to-clear ds))))))))
+  (testing "handle-settle-calls! clears stale awaiting IDs even when 0 undelivered calls remain"
+    (with-test-store [{:keys [conn]}]
+      (let [cid (random-uuid)
+            replies (atom [])]
+        (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/awaiting #{cid}}
+                                    {:seon.agent/id :ns/demo.s :seon.agent/branch :main}
+                                    {:seon.agent.call/id cid :seon.agent.call/caller :agent/root :seon.agent.call/callee :ns/demo.s
+                                     :seon.agent.call/status :resolved :seon.agent.call/delivered? true}]})
+        (let [[_ outs] (seon.transactor.calls/handle-call-op!
+                         {:conn conn :msg-seq 0 :writes 0}
+                         {:op :settle-calls :caller :agent/root :call-ids [cid] :clear-awaiting? true}
+                         (d/commit-id @conn)
+                         {:reply! (fn [_ r] (swap! replies conj r))
+                          :db-notice (fn [p db ds why] {:prev p :tx (:max-tx db) :ds ds :why why})})]
+          (is (= 1 (:cleared (first @replies))))
+          (is (seq (:db outs)))
+          (is (empty? (:seon.agent/awaiting (d/pull @conn '[:seon.agent/awaiting] [:seon.agent/id :agent/root]))))))))
+  (testing "handle-await-calls! suspends on resolved calls whose callee branch still has unmerged code edits"
+    (with-test-store [{:keys [conn cfg]}]
+      (let [cid (random-uuid)
+            replies (atom [])]
+        (seon.store/branch! conn :main :branch/ns.demo.m)
+        (let [bconn (seon.store/connect cfg :branch/ns.demo.m)]
+          (try
+            (d/transact bconn {:tx-data [{:seon.code.form/key "demo.m/f" :seon.code.form/ns 'demo.m
+                                          :seon.code.form/order 1 :seon.code.form/src "(defn f [] 1)"}]})
+            (finally (d/release bconn))))
+        (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main}
+                                    {:seon.agent/id :ns/demo.m :seon.agent/branch :branch/ns.demo.m :seon.agent/auto-merge? true}
+                                    {:seon.agent.call/id cid :seon.agent.call/caller :agent/root :seon.agent.call/callee :ns/demo.m
+                                     :seon.agent.call/status :resolved :seon.agent.call/delivered? false}]})
+        (seon.transactor.calls/handle-call-op!
+          {:conn conn :msg-seq 0 :writes 0}
+          {:op :await-calls :caller :agent/root :call-ids [cid]}
+          (d/commit-id @conn)
+          {:reply! (fn [_ r] (swap! replies conj r))
+           :db-notice (fn [p db ds why] {:prev p :tx (:max-tx db) :ds ds :why why})})
+        (is (false? (:settled? (first @replies))))
+        (is (= [cid] (:awaiting (first @replies))))
+        (is (contains? (set (:seon.agent/awaiting (d/pull @conn '[:seon.agent/awaiting] [:seon.agent/id :agent/root]))) cid)))))
+  (testing "enrich-eval-error hints get-else nil default and bare user/* helper names; pprint is exported"
+    (let [h1 (seon.code.errors/enrich-eval-error "(d/q ...)" "get-else: nil default value is not supported" {})
+          h2 (seon.code.errors/enrich-eval-error "(add-fn! 'a '(defn x [] 1))"
+               "Unable to resolve symbol: add-fn! in this context (did you mean add-tap?)"
+               {"add-fn!" {:arglists "([ns-sym form])" :doc "Adds a form."}})]
+      (is (clojure.string/includes? h1 "non-nil sentinel"))
+      (is (clojure.string/includes? h2 "user/add-fn!")))))

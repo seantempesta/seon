@@ -6,7 +6,8 @@
             [datahike.api :as d]
             [seon.schema :as schema]
             [seon.store :as store]
-            [seon.transactor.calls.subtask :as subtask]))
+            [seon.transactor.calls.subtask :as subtask]
+            [seon.task.gate :as gate]))
 
 (defn pull-call
   {:doc "Pulls `:seon.agent.call/*` fields by `call-id`.", :malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :uuid]] [:maybe :map]], :cost/ticks 500000}
@@ -160,35 +161,50 @@
      :auto-merge? eff-auto :resolve-eid res-eid}))
 
 (defn- handle-settle-calls! [st msg prev-cid {:keys [reply! db-notice]}]
-  (let [{:keys [conn]} st
-        {:keys [caller call-ids clear-awaiting?]} msg
-        db0 @conn
-        calls (vec (keep (fn [id]
-                           (let [c (pull-call db0 id)]
-                             (when (and c (not= :pending (:seon.agent.call/status c)) (not (:seon.agent.call/delivered? c)))
-                               c)))
-                         (distinct call-ids)))]
-    (if (empty? calls)
-      (do (reply! msg {:ok? true :delivered 0}) [st nil])
-      (let [mseq (inc (:msg-seq st))
-            mid (random-uuid)
-            mark-ops (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c) :seon.agent.call/delivered? true}) calls)
-            cur-awaiting (when clear-awaiting?
-                           (set (:seon.agent/awaiting (d/pull db0 '[:seon.agent/awaiting] [:seon.agent/id caller]))))
-            retract-ops (when clear-awaiting?
-                          (vec (for [c calls :let [cid (:seon.agent.call/id c)] :when (contains? cur-awaiting cid)]
-                                 [:db/retract [:seon.agent/id caller] :seon.agent/awaiting cid])))
-            msg-ent {:seon.agent.message/id mid :seon.agent.message/seq mseq
-                     :seon.agent.message/from :seon/calls :seon.agent.message/to caller
-                     :seon.agent.message/type :call-result
-                     :seon.agent.message/body (format-call-results-body calls)}
-            r (d/transact conn {:tx-data (vec (concat retract-ops mark-ops [msg-ent]))})
-            db (:db-after r)
-            cid (d/commit-id db)]
-        (reply! msg {:ok? true :delivered (count calls) :message-id mid :tx (:max-tx db)})
-        [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
-         {:db [(db-notice prev-cid db (:tx-data r) [:settle-calls caller])]
-          ::flow/report [(str "[:transactor] delivered " (count calls) " call result(s) -> " caller)]}]))))
+(let [{:keys [conn]} st
+      {:keys [caller call-ids clear-awaiting?]} msg
+      db0 @conn
+      uniq-ids (vec (distinct call-ids))
+      calls (vec (keep (fn [id]
+                         (let [c (pull-call db0 id)]
+                           (when (and c (not= :pending (:seon.agent.call/status c)) (not (:seon.agent.call/delivered? c)))
+                             c)))
+                       uniq-ids))
+      cur-awaiting (when clear-awaiting?
+                     (set (:seon.agent/awaiting (d/pull db0 '[:seon.agent/awaiting] [:seon.agent/id caller]))))
+      retract-ops (when clear-awaiting?
+                    (vec (for [cid uniq-ids
+                               :when (and (contains? cur-awaiting cid)
+                                          (let [c (pull-call db0 cid)]
+                                            (or (nil? c) (not= :pending (:seon.agent.call/status c)))))]
+                           [:db/retract [:seon.agent/id caller] :seon.agent/awaiting cid])))]
+  (cond
+    (and (empty? calls) (empty? retract-ops))
+    (do (reply! msg {:ok? true :delivered 0}) [st nil])
+
+    (empty? calls)
+    (let [r (d/transact conn {:tx-data retract-ops})
+          db (:db-after r)
+          cid (d/commit-id db)]
+      (reply! msg {:ok? true :delivered 0 :cleared (count retract-ops) :tx (:max-tx db)})
+      [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+       {:db [(db-notice prev-cid db (:tx-data r) [:clear-awaiting caller])]}])
+
+    :else
+    (let [mseq (inc (:msg-seq st))
+          mid (random-uuid)
+          mark-ops (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c) :seon.agent.call/delivered? true}) calls)
+          msg-ent {:seon.agent.message/id mid :seon.agent.message/seq mseq
+                   :seon.agent.message/from :seon/calls :seon.agent.message/to caller
+                   :seon.agent.message/type :call-result
+                   :seon.agent.message/body (format-call-results-body calls)}
+          r (d/transact conn {:tx-data (vec (concat retract-ops mark-ops [msg-ent]))})
+          db (:db-after r)
+          cid (d/commit-id db)]
+      (reply! msg {:ok? true :delivered (count calls) :message-id mid :tx (:max-tx db)})
+      [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
+       {:db [(db-notice prev-cid db (:tx-data r) [:settle-calls caller])]
+        ::flow/report [(str "[:transactor] delivered " (count calls) " call result(s) -> " caller)]}]))))
 
 (defn- handle-cancel-call! [st msg prev-cid {:keys [reply! db-notice]}]
   (let [{:keys [conn]} st
@@ -282,30 +298,41 @@
 
       :else
       (let [calls (mapv second pulled)
-            pending (filterv #(= :pending (:seon.agent.call/status %)) calls)]
-        (if (empty? pending)
-          (let [deliver-tx (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c) :seon.agent.call/delivered? true}) calls)
-                r (d/transact conn {:tx-data deliver-tx})
-                db (:db-after r)
-                cid (d/commit-id db)
-                res-map (into {} (map (fn [c] [(:seon.agent.call/id c) (call-summary-map c)])) calls)]
-            (reply! msg {:ok? true :settled? true :results res-map :tx (:max-tx db)})
-            [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-             {:db [(db-notice prev-cid db (:tx-data r) [:await-settled caller])]}])
-          (let [tx-data (mapv (fn [id] [:db/add [:seon.agent/id caller] :seon.agent/awaiting id]) ids)
-                r (d/transact conn {:tx-data tx-data})
-                db (:db-after r)
-                cid (d/commit-id db)]
-            (reply! msg {:ok? true :settled? false :awaiting (mapv :seon.agent.call/id pending) :tx (:max-tx db)
-                         :note "Suspended cleanly in Datahike (0 blocked threads); will auto-resume when all awaited calls settle."})
-            [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-             {:db [(db-notice prev-cid db (:tx-data r) [:await-calls caller])]}]))))))
+          merging? (fn [c]
+                     (and (= :resolved (:seon.agent.call/status c))
+                          (not (:seon.agent.call/delivered? c))
+                          (when-let [callee (:seon.agent.call/callee c)]
+                            (let [ca (d/pull db0 '[:seon.agent/branch :seon.agent/paused? :seon.agent/auto-merge? :seon.agent/merged-tx] [:seon.agent/id callee])
+                                  br (:seon.agent/branch ca)
+                                  am? (if (some? (:seon.agent/auto-merge? ca)) (boolean (:seon.agent/auto-merge? ca)) (boolean (store/config-val db0 callee :seon.config/auto-merge?)))]
+                              (and br (not= br :main) am? (not (:seon.agent/paused? ca)) (store/branch? conn br)
+                                   (let [bdb (try (store/head conn br) (catch Throwable _ nil))]
+                                     (and bdb (not= (:seon.agent/merged-tx ca) (:max-tx bdb))
+                                          (gate/branch-has-code-edits? db0 bdb))))))))
+          pending (filterv #(or (= :pending (:seon.agent.call/status %)) (merging? %)) calls)]
+      (if (empty? pending)
+        (let [deliver-tx (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c) :seon.agent.call/delivered? true}) calls)
+              r (d/transact conn {:tx-data deliver-tx})
+              db (:db-after r)
+              cid (d/commit-id db)
+              res-map (into {} (map (fn [c] [(:seon.agent.call/id c) (call-summary-map c)])) calls)]
+          (reply! msg {:ok? true :settled? true :results res-map :tx (:max-tx db)})
+          [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+           {:db [(db-notice prev-cid db (:tx-data r) [:await-settled caller])]}])
+        (let [tx-data (mapv (fn [id] [:db/add [:seon.agent/id caller] :seon.agent/awaiting id]) ids)
+              r (d/transact conn {:tx-data tx-data})
+              db (:db-after r)
+              cid (d/commit-id db)]
+          (reply! msg {:ok? true :settled? false :awaiting (mapv :seon.agent.call/id pending) :tx (:max-tx db)
+                       :note "Suspended cleanly in Datahike (0 blocked threads); will auto-resume when all awaited calls settle and merge."})
+          [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+           {:db [(db-notice prev-cid db (:tx-data r) [:await-calls caller])]}]))))))
 
 (defn- build-spawn-callee-ent [db0 caller callee spawn-branch inferred-scope goal eff-auto fspec]
   (let [fork-eid (:fork-eid fspec)]
     (cond-> {:seon.agent/id callee :seon.agent/parent caller :seon.agent/branch spawn-branch
              :seon.agent/scope inferred-scope :seon.agent/focus (str "ns/" inferred-scope)
-             :seon.agent/goal (or goal (str "Subsystem owner for " inferred-scope ". Answer incoming calls concisely using canonical Seon helpers (`user/health`, `user/ns-list`, `seon.health.coverage/coverage-report`), edit/test on your branch when asked to modify code, and promptly settle via `(user/answer! call-id val)` once verified."))
+             :seon.agent/goal (or goal (str "Subsystem owner for " inferred-scope ". Answer incoming calls concisely using canonical Seon helpers (`user/health`, `user/ns-list`, `seon.health.coverage/coverage-report`), edit/test on your branch when asked to modify code, and promptly settle via `(user/answer! call-id val)` once verified. Merging is automatic: never search for or call merge helpers manually — after `(user/answer! call-id val)`, reply concisely with no tool calls to trigger automatic test and merge."))
              :seon.agent/auto-merge? eff-auto}
       fork-eid (assoc :seon.agent/forked-from fork-eid)
       (:fork-commit fspec) (assoc :seon.agent/fork-commit (:fork-commit fspec))

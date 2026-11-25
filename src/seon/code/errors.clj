@@ -56,7 +56,9 @@
   [["Lookup ref attribute should be marked as :db/unique"]
    "Hint: Pass the bare integer entity ID `eid` directly to `(d/pull db '[*] eid)` — `:db/id` is not a `:db/unique` lookup-ref attribute."]
   [["the namespace name must be a symbol, got: (quote"]
-   "Hint: `(ns my.ns ...)` takes an unquoted symbol (unlike `(in-ns 'my.ns)`)."]])
+   "Hint: `(ns my.ns ...)` takes an unquoted symbol (unlike `(in-ns 'my.ns)`)."]
+  [["get-else: nil default value is not supported"]
+   "Hint: Datahike `get-else` rejects `nil` as the 3rd arg — use a non-nil sentinel like `:none` or `:missing`, or pull optional attrs via `(d/pull db '[...] eid)`."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
@@ -100,8 +102,13 @@
           (let [doc-line (some-> (:doc info) str str/split-lines first str/trim)]
             (vswap! hints conj (str "Usage: user/" h " " (or (:arglists info) "")
                                     (when (not (str/blank? doc-line)) (str " — " doc-line))))))))
-    (when (or (str/includes? e "No such var: user/") (str/includes? e "Unable to resolve var: user/"))
+    (do (when (or (str/includes? e "No such var: user/") (str/includes? e "Unable to resolve var: user/"))
       (when-let [fh (fuzzy-user-helper-hint e helper-index)] (vswap! hints conj fh)))
+    (when-let [bare (second (re-find #"Unable to resolve symbol: ([a-zA-Z0-9_!?*-]+) in this context" e))]
+      (when-let [info (get helper-index bare)]
+        (let [doc-line (some-> (:doc info) str str/split-lines first str/trim)]
+          (vswap! hints conj (str "Hint: Qualify REPL helpers with `user/` — `user/" bare "` " (or (:arglists info) "")
+                                  (when (not (str/blank? doc-line)) (str " — " doc-line))))))))
     (when (and (str/includes? e "PersistentArrayMap cannot be cast to")
                (or (str/includes? c "user/fs-read") (str/includes? c "user/sh!")))
       (vswap! hints conj "Hint: `(user/fs-read path)` returns `{:ok? true :lines N :content \"...\"}` (extract `(:content ...)`), and `(user/sh! cmd)` returns `{:exit N :out \"...\" :err \"...\"}` (extract `(:out ...)`)."))
