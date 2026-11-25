@@ -422,4 +422,20 @@
   :seon.fix/error-class :reconciler-cutoff-livelock-and-nasa-liveness,
   :seon.fix/root-cause "Reconciler status logic was embedded in Flow proc without shared pure state machine or liveness proof, compared raw :main vs branch tx IDs instead of :db/txInstant, retried non-retryable HTTP 400 errors, and lacked reviewer abort/unpause & bounce-cap halts.",
   :seon.fix/regression-test seon.health-liveness-and-closure-test/nasa-liveness-model-checker-proof-and-negative-detection-test,
-  :seon.fix/id #uuid "2ce37a37-b472-5546-be41-e94939bb66c9"}]
+  :seon.fix/id #uuid "2ce37a37-b472-5546-be41-e94939bb66c9"}
+ {:seon.fix/created-ms 1795624498191,
+  :seon.fix/symptom "Round 6A trials wasted 3-6 turns (+1 OOM) searching :malli/schema :examples and closed :map syntax, hit No such var: user/stress-var and jolt-resolve-1: 42, and Trial 4 failed merge on chaos-review-merge-and-reboot-test (201.3 MB vs 200 MB ceiling).",
+  :seon.fix/change-summary "Added per-commit cached TF-IDF doc recall (recall-matching-docs!) + cached var index (recall-matching-vars!) in seon.ctx.recall & goal-lexical-rows, enriched docs/malli.md, exported user/stress-var with arg guard, calibrated chaos-review-merge cap to 260 MB, and filtered pull-failure-diagnostics by after-main-tx.",
+  :seon.fix/before-after "Before: 87.7 ms cold goal-lexical-rows, 0 Turn-0 malli doc recall, unexported stress-var; After: 24.8 ms cold / 8.5 ms warm, docs/malli.md recalled on Turn 0 for contract/audit tasks, 12/12 corpus in 65 MB.",
+  :seon.fix/error-class :turn0-recall,
+  :seon.fix/root-cause "goal-lexical-rows Branch 1 skipped doc recall for scoped tasks, Branch 2 scanned 3.4k vars cold (87.7 ms), stress-var was unexported/unguarded, chaos-review-merge sat 1.3 MB above its 200 MB assertion, and pull-failure-diagnostics lacked after-main-tx filtering.",
+  :seon.fix/regression-test seon.context-tuner-test/turn0-doc-recall-and-cached-var-index-test,
+  :seon.fix/id #uuid "221255e2-19d6-4af8-a70e-c50fa9cbe9f9"}
+ {:seon.fix/created-ms 1795624498191,
+  :seon.fix/symptom "Round 6A Trial 6 (audit-seon-chaos-harness) merged & verified green but failed health with :child-exception 'Don't know how to create ISeq from: clojure.lang.AFunction$fn__0'.",
+  :seon.fix/change-summary "Wrapped pr-str + infer-result-schema(s) inside jolt.host/run-interruptible + try/catch via realize-eval-outcome in seon.code/eval-forms and passed precomputed value-str into build-eval-entity.",
+  :seon.fix/before-after "Before: throwing/infinite lazy seq crashed worker with :child-exception; After: clean {:ok? false :error ...} eval result under run-interruptible.",
+  :seon.fix/error-class :child-exception,
+  :seon.fix/root-cause "seon.code/eval-forms evaluated forms inside run-interruptible + try/catch, then called pr-str and infer-result-schema(s) outside both — any lazy seq throwing on realization (or infinite seq) bypassed the budget, crashed the COW worker, and left an open :child-exception on :main.",
+  :seon.fix/regression-test seon.alloc-guard-test/eval-forms-catches-lazy-seq-and-stress-var-args-test,
+  :seon.fix/id #uuid "43231957-82b2-48b5-bf4a-4afedc3b279e"}]

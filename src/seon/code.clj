@@ -296,7 +296,7 @@
                  :seon.eval/code code-str)))
 
 (defn- build-eval-entity
-  [db ctx out-str eid res-handle res-schema res-schema-eids called-var-eids _touched-eids code-str dk dbytes dms ok? value error]
+  [db ctx out-str eid res-handle res-schema res-schema-eids called-var-eids _touched-eids code-str dk dbytes dms ok? value-str error]
   (let [{:keys [agent-id turn call-index call-id seen-messages thought reasoning intent usage prefix-hash]} ctx
         aid (or agent-id :repl)
         ag-eid (when (and (contains? (:schema db) :seon.agent.eval/agent-ref) (contains? (:schema db) :seon.agent/id))
@@ -319,8 +319,26 @@
       (:completion-tokens usage) (assoc :seon.agent.eval/completion-tokens (long (:completion-tokens usage)))
       (:cache-hit-tokens usage) (assoc :seon.agent.eval/cache-hit-tokens (long (:cache-hit-tokens usage)))
       (:cache-miss-tokens usage) (assoc :seon.agent.eval/cache-miss-tokens (long (:cache-miss-tokens usage)))
-      ok? (assoc :seon.agent.eval/value (pr-str value))
+      ok? (assoc :seon.agent.eval/value value-str)
       error (assoc :seon.agent.eval/error error))))
+
+(defn- realize-eval-outcome [db outcome ticks-cap bytes-cap]
+  (if-not (:ok? outcome)
+    outcome
+    (let [v (:value outcome)
+          r-ticks (max 5000000 ticks-cap)
+          r-bytes (max 33554432 bytes-cap)]
+      (try
+        (let [[vstr rsch rschs]
+              (jolt.host/run-interruptible
+                (jolt.host/make-interrupt)
+                (fn [] [(pr-str v) (infer-result-schema db v) (infer-result-schemas db v)])
+                r-ticks r-bytes)]
+          (assoc outcome :value-str vstr :result-schema rsch :result-schemas rschs))
+        (catch Throwable t
+          (assoc outcome :ok? false :value nil :value-str nil :by-ns (array-map) :retracts []
+                 :interrupted? (boolean (:jolt/interrupted (ex-data t)))
+                 :error (format-eval-throwable t r-ticks r-bytes)))))))
 
 (defn eval-forms
   {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
@@ -338,7 +356,7 @@
         called-all (volatile! #{})
         parsed (try {:ok? true :parsed (binding [schema/*bypass-contracts* true] (read-clj "<repl>" code-str))}
                     (catch Throwable t {:ok? false :error (str "Reader syntax error: " (.getMessage t))}))
-        outcome
+        raw-outcome
         (if-not (:ok? parsed)
           {:ok? false :error (:error parsed) :final-ns (ns-name start-ns) :by-ns (array-map)}
           (binding [*ns* start-ns
@@ -347,14 +365,15 @@
              (fn [acc f] (eval-single-form db code-str f ir-by-var touched-all called-all ticks-cap bytes-cap acc))
              {:ok? true :value nil :final-ns (ns-name start-ns) :by-ns (array-map)}
              (get-in parsed [:parsed :forms]))))
+        outcome (realize-eval-outcome db raw-outcome ticks-cap bytes-cap)
         dk (max 0 (- (ticks-fn) k0))
         dbytes (max 0 (- (alloc-fn) b0))
         dms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)
-        {:keys [ok? value error final-ns by-ns retracts blame-info]} outcome
+        {:keys [ok? value value-str result-schema result-schemas error final-ns by-ns retracts blame-info]} outcome
         eid (random-uuid)
         res-handle (or handle (next-result-handle db agent-id))
-        res-schema (when ok? (infer-result-schema db value))
-        res-schemas (when ok? (infer-result-schemas db value))
+        res-schema result-schema
+        res-schemas result-schemas
         res-schema-eids (when (and (seq res-schemas)
                                    (contains? (:schema db) :seon.agent.eval/result-schemas)
                                    (contains? (:schema db) :seon.schema/key))
@@ -384,7 +403,7 @@
                                         :thought thought :reasoning reasoning :intent intent
                                         :usage usage :prefix-hash prefix-hash}
                                     (str out-sw) eid res-handle res-schema res-schema-eids called-var-eids touched-eids
-                                    code-str dk dbytes dms ok? value error)]
+                                    code-str dk dbytes dms ok? value-str error)]
     (cond-> {:ok? ok?
              :eval-id eid
              :call-id call-id

@@ -509,3 +509,26 @@
               rows (cgraph @conn @conn :w/sem)
               eids (set (map first rows))]
           (is (contains? eids leaf-e) "Unscoped task with stored vector must recall matching var via seon.vector/near"))))))
+
+(deftest turn0-doc-recall-and-cached-var-index-test
+  (testing "Turn-0 cached TF-IDF doc recall matches concise reference docs for contract/example tasks"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data [{:seon.code.doc/id "docs/malli.md#pure-function-contracts-seed-42-generative-checks"
+                                   :seon.code.doc/path "docs/malli.md"
+                                   :seon.code.doc/order 1
+                                   :seon.code.doc/heading "## Pure Function Contracts, Examples & `seed = 42` Generative Checks\n"
+                                   :seon.code.doc/body "Attach :examples and run user/stress-var.\n"}
+                                  {:seon.code.doc/id "docs/other.md#unrelated-topic"
+                                   :seon.code.doc/path "docs/other.md"
+                                   :seon.code.doc/order 1
+                                   :seon.code.doc/heading "## Unrelated Storage Notes\n"
+                                   :seon.code.doc/body "Nothing about contracts.\n"}]})
+      (let [db @conn
+            hits (volatile! [])]
+        (seon.ctx.recall/recall-matching-docs!
+          db
+          (fn [e pri]
+            (vswap! hits conj [(:seon.code.doc/id (d/pull db '[:seon.code.doc/id] e)) pri]))
+          "Add behavioral unit tests and contract examples for pure functions"
+          2 80 2)
+        (is (= [["docs/malli.md#pure-function-contracts-seed-42-generative-checks" 80]] @hits))))))

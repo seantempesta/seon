@@ -41,7 +41,10 @@
 
 (def ^:private lexical-stopwords
   #{"the" "and" "for" "with" "that" "this" "from" "into" "when" "where" "what" "have" "has"
-    "fix" "add" "update" "make" "use" "using" "all" "any" "new" "one" "two" "not" "are" "can"})
+    "fix" "add" "update" "make" "use" "using" "all" "any" "new" "one" "two" "not" "are" "can"
+    "its" "how" "why" "who" "also" "than" "then" "them" "they" "their" "there" "these" "those"
+    "been" "being" "were" "will" "would" "could" "should" "just" "more" "most" "some" "such"
+    "only" "very" "must" "does" "did" "had" "but" "out" "our" "your" "seon" "everything" "inspect" "currently" "ensure"})
 
 (defn tokenize-goal
   {:malli/schema [:=> [:cat [:maybe :string]] [:maybe [:vector :string]]], :cost/ticks 500000}
@@ -92,11 +95,15 @@
   [mdb bdb agent-id task-ents add!]
   (when (and (dh-has? bdb :seon.vector/coarse) (dh-has? bdb :seon.vector/of))
     (let [min-sc (double (or (store/config-val bdb agent-id :seon.config/semantic-min-score) 0.45))
-          qvec (some (fn [{:keys [tdb eid]}]
-                       (or (svec/vector-of bdb eid)
-                           (when (and tdb (not (identical? tdb bdb))) (svec/vector-of tdb eid))
-                           (when (and mdb (not (identical? mdb bdb))) (svec/vector-of mdb eid))))
-                     task-ents)]
+          qvec (or (some (fn [{:keys [tdb eid]}]
+                           (or (svec/vector-of bdb eid)
+                               (when (and tdb (not (identical? tdb bdb))) (svec/vector-of tdb eid))
+                               (when (and mdb (not (identical? mdb bdb))) (svec/vector-of mdb eid))))
+                         task-ents)
+                   (when-let [ae (or (first (avet-eids bdb :seon.agent/id agent-id))
+                                     (when (and mdb (not (identical? mdb bdb))) (first (avet-eids mdb :seon.agent/id agent-id))))]
+                     (or (svec/vector-of bdb ae)
+                         (when (and mdb (not (identical? mdb bdb))) (svec/vector-of mdb ae)))))]
       (when (seq qvec)
         (let [hit? (volatile! false)]
           (doseq [[of-attr k pri] [[:seon.code.var/name 6 85]
@@ -107,3 +114,93 @@
             (vreset! hit? true)
             (add! e pri))
           @hit?)))))
+
+(defonce ^:private ^:seon.flow/edge lexical-index-cache (store/lru-cache 16))
+
+(defn- stem-token [w]
+  (cond
+    (and (> (count w) 4) (str/ends-with? w "ies")) (str (subs w 0 (- (count w) 3)) "y")
+    (and (> (count w) 4) (str/ends-with? w "s") (not (str/ends-with? w "ss"))) (subs w 0 (dec (count w)))
+    :else w))
+
+(defn- stemmed-tokens [s]
+  (into #{} (map stem-token) (tokenize-goal s)))
+
+(defn- db-index-key [db kind]
+  (when (instance? datahike.db.DB db)
+    [kind (get-in db [:config :store :id]) (get-in db [:config :branch]) (try (d/commit-id db) (catch Throwable _ nil)) (:max-tx db)]))
+
+(defn- build-doc-tfidf-index [db]
+  (store/without-agent-eval-reads
+    (fn []
+      (when (dh-has? db :seon.code.doc/id)
+        (let [hmap (if (dh-has? db :seon.code.doc/heading)
+                     (reduce (fn [m dt] (assoc m (:e dt) (str (:v dt)))) {} (d/datoms db :aevt :seon.code.doc/heading))
+                     {})
+              rows (mapv (fn [dt]
+                           (let [e (:e dt)
+                                 id (str (:v dt))
+                                 path (first (str/split id #"#" 2))
+                                 hd (get hmap e "")
+                                 tks (into (stemmed-tokens (str/replace path #"\.md$" "")) (stemmed-tokens hd))]
+                             [e id tks]))
+                         (d/datoms db :aevt :seon.code.doc/id))
+              n (double (max 1 (count rows)))
+              df (reduce (fn [m [_ _ tks]] (reduce (fn [a t] (update a t (fnil inc 0))) m tks)) {} rows)]
+          {:rows rows :n n :df df})))))
+
+(defn- build-var-lexical-index [db]
+  (store/without-agent-eval-reads
+    (fn []
+      (when (dh-has? db :seon.code.var/name)
+        (let [dmap (if (dh-has? db :seon.code.var/doc)
+                     (reduce (fn [m dt] (assoc m (:e dt) (str/lower-case (str (:v dt))))) {} (d/datoms db :aevt :seon.code.var/doc))
+                     {})]
+          (mapv (fn [dt] [(:e dt) (str/lower-case (str (:v dt))) (get dmap (:e dt) "")])
+                (d/datoms db :aevt :seon.code.var/name)))))))
+
+(defn recall-matching-docs!
+  "Fast per-commit cached TF-IDF doc-section recall over `:seon.code.doc/{id,heading}`, preferring concise reference sections with >= `min-hits` distinct stemmed token matches."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db :seon.host/fn [:maybe :string] :int :int] :any]
+                  [:=> [:cat :seon.host/db :seon.host/fn [:maybe :string] :int :int :int] :any]]
+   :cost/ticks 10000000}
+  ([bdb add! goal-txt k pri] (recall-matching-docs! bdb add! goal-txt k pri 2))
+  ([bdb add! goal-txt k pri min-hits]
+   (let [gtks (stemmed-tokens goal-txt)]
+     (when (seq gtks)
+       (let [ck (db-index-key bdb :doc-tfidf)
+             ix (if ck (store/lru-get! lexical-index-cache 16 ck #(build-doc-tfidf-index bdb)) (build-doc-tfidf-index bdb))]
+         (when-let [{:keys [rows n df]} ix]
+           (let [idf (fn [t] (Math/log (/ (+ 1.0 n) (+ 1.0 (double (get df t 0))))))
+                 hits (->> rows
+                           (keep (fn [[e id tks]]
+                                   (let [matched (filter tks gtks)
+                                         hc (count matched)]
+                                     (when (>= hc min-hits)
+                                       (let [raw (reduce + 0.0 (map idf matched))
+                                             sc (/ raw (Math/sqrt (double (max 3 (count tks)))))]
+                                         [e id sc])))))
+                           (sort-by (fn [[_ id sc]] [(- sc) id]))
+                           (take k))]
+             (doseq [[e _ _] hits]
+               (add! e pri)))))))))
+
+(defn recall-matching-vars!
+  "Fast per-commit cached lexical var recall over `:seon.code.var/{name,doc}` (eliminates repeated cold `:eavt` scans)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn [:sequential :string] :int :int] :any]
+   :cost/ticks 12000000}
+  [bdb add! toks k pri]
+  (when (seq toks)
+    (let [ck (db-index-key bdb :var-lex)
+          rows (if ck (store/lru-get! lexical-index-cache 16 ck #(build-var-lexical-index bdb)) (build-var-lexical-index bdb))
+          sc-fn (fn [s] (if (str/blank? s) 0 (reduce + 0 (map #(if (str/includes? s %) 1 0) toks))))]
+      (when (seq rows)
+        (doseq [[e _] (->> rows
+                           (keep (fn [[e lnm ldoc]]
+                                   (let [nm-sc (sc-fn lnm)
+                                         sc (if (pos? nm-sc) (+ (* 2 nm-sc) (sc-fn ldoc)) 0)]
+                                     (when (>= sc 2) [e sc]))))
+                           (sort-by (fn [[e sc]] [(- sc) e]))
+                           (take k))]
+          (add! e pri))))))

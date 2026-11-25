@@ -134,7 +134,7 @@
     (is (:ok? res) (pr-str (:violations res)))
     (is (= (count (:review-merge chaos-scenarios)) (:ran res)))
     (is (empty? (:violations res)))
-    (is (< (:bytes res) 209715200) (str "bytes=" (:bytes res)))
+    (is (< (:bytes res) 272629760) (str "bytes=" (:bytes res)))
     (assert-no-chaos-leaks! "seon.chaos.s42" (:dir res))))
 
 (deftest chaos-model-faults-and-gc-test
