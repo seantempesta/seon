@@ -447,7 +447,7 @@
 (defn apply-move-vars!
   "Executes `move-vars-tx` on `conn` in O(|moved|) time & memory, reloading ONLY newly added forms in `to`
    and updated header/re-exports of `from` into the live JVM. Pass `:dry-run? true` to preview."
-  {:seon.eval/budget-override {:ticks 500000000, :bytes 1073741824}, :malli/schema [:=> [:cat :seon.host/conn :map] :map]}
+  {:seon.eval/budget-override {:ticks 800000000, :bytes 2147483648}, :malli/schema [:=> [:cat :seon.host/conn :map] :map]}
   [conn {:keys [dry-run? reload?] :or {reload? true} :as spec}]
   (let [res (move-vars-tx @conn spec)]
     (cond
@@ -510,7 +510,7 @@
         mv (intern u (with-meta 'move-vars!
                        {:doc "Atomically move vars from :from ns to child :to ns. Spec: {:from 'ns :to 'ns.child :vars '[v1 v2] :alias 'child :doc \"...\" :include-deps? true :re-export-public? true :keep-private? :auto :dry-run? false}. Only moved private helpers still called by :from are promoted to defn."
                         :arglists '([spec])
-                        :seon.eval/budget-override {:ticks 500000000 :bytes 1073741824}})
+                        :seon.eval/budget-override {:ticks 800000000 :bytes 2147483648}})
                    (fn [spec]
                      (when-let [{:keys [conn]} (get-agent-ctx-fn)]
                        (let [res (apply-move-vars! conn spec)]

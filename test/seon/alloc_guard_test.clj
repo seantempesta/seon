@@ -555,3 +555,35 @@
   (testing "enrich-eval-error hints schema/validate and pprint"
     (is (str/includes? (seon.code.errors/enrich-eval-error "(schema/validate s x)" "No such var: schema/validate" {}) "malli.core/validate"))
     (is (str/includes? (seon.code.errors/enrich-eval-error "(pprint x)" "Unable to resolve symbol: pprint" {}) "clojure.pprint"))))
+
+(deftest wave12b-reconciler-merge-before-deliver-and-test-user-db-guard-test
+  (testing "add-fn! rejects (user/db) inside *-test namespaces upfront before COW worker failure"
+    (with-test-store [{:keys [conn]}]
+      (binding [fcalls/*agent-ctx* {:conn conn :agent-id :repl/t :branch :main}]
+        (let [bad (seon.code.edit/add-fn! 'demo.foo-test "(deftest bad-t (is (some? (user/db))))")
+              good (seon.code.edit/add-fn! 'demo.foo-test "(deftest good-t (is (= 2 (+ 1 1))))")]
+          (is (false? (:ok? bad)))
+          (is (= :repl-helper-in-test-ns (:error bad)))
+          (is (true? (:ok? good)))))))
+  (testing "reconciler holds resolved call delivery while edited callee is :testing/:merging and releases once :merged"
+    (with-test-store [{:keys [conn]}]
+      (let [cid (random-uuid)
+            _ (d/transact conn {:tx-data (concat
+                                          (code/file-import-tx @conn "src/demo/x.clj" "(ns demo.x)\n(defn f [x] x)\n" false)
+                                          [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/awaiting #{cid}}
+                                           {:seon.agent/id :ns/demo.x :seon.agent/branch :branch/ns.demo.x}
+                                           {:seon.agent.call/id cid :seon.agent.call/caller :agent/root :seon.agent.call/callee :ns/demo.x
+                                            :seon.agent.call/status :resolved :seon.agent.call/delivered? false
+                                            :seon.agent.call/prompt "edit" :seon.agent.call/result {:ok? true}}])})
+            _ (store/branch! conn :main :branch/ns.demo.x)
+            bconn (d/connect (assoc (:config @conn) :branch :branch/ns.demo.x))]
+        (try
+          (d/transact bconn {:tx-data (code/file-import-tx @bconn "src/demo/x.clj" "(ns demo.x)\n(defn f [x] (inc x))\n" false)})
+          (let [mdb @conn
+                st (:store mdb)]
+            (is (true? (seon.reconciler.calls/callee-merge-in-flight? mdb st {:ns/demo.x {:branch :branch/ns.demo.x :status :testing}} cid)))
+            (is (true? (seon.reconciler.calls/callee-merge-in-flight? mdb st {:ns/demo.x {:branch :branch/ns.demo.x :status :merging}} cid)))
+            (is (false? (seon.reconciler.calls/callee-merge-in-flight? mdb st {:ns/demo.x {:branch :branch/ns.demo.x :status :merged}} cid)))
+            (is (false? (seon.reconciler.calls/callee-merge-in-flight? mdb st {:ns/demo.x {:branch :branch/ns.demo.x :status :gate-blocked}} cid)))
+            (is (= #{:agent/root} (seon.reconciler.calls/callers-awaiting-callees mdb #{:ns/demo.x}))))
+          (finally (d/release bconn)))))))
