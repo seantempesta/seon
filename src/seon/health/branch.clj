@@ -74,10 +74,11 @@
                             (let [compute (fn []
                                             (let [osnap (static/var-snapshot ours-db {:schemas? true})]
                                               {:vmap (:vmap osnap)
-                                               :blocks (into #{} (map (juxt :class :subject :var)) (blocking-fn ours-db (:vmap osnap)))
-                                               :bref (into #{} (map :subject) (contracts/broken-symbol-refs ours-db osnap))
-                                               :dref (into #{} (map :subject) (contracts/broken-doc-refs ours-db nil osnap))
-                                               :imp (into #{} (map :subject) (contracts/impure-generatable-fns ours-db nil osnap))}))]
+                                              :blocks (into #{} (map (juxt :class :subject :var)) (blocking-fn ours-db (:vmap osnap)))
+                                              :bref (into #{} (map :subject) (contracts/broken-symbol-refs ours-db osnap))
+                                              :dref (into #{} (map :subject) (contracts/broken-doc-refs ours-db nil osnap))
+                                              :imp (into #{} (map :subject) (contracts/impure-generatable-fns ours-db nil osnap))
+                                              :invc (into #{} (map :subject) (contracts/invalid-contract-violations ours-db osnap))}))]
                               (if ocid (store/lru-get! cache 8 [:v2 sid ocid] compute) (compute))))]
         (if no-code?
           (vec (concat schema-errs
@@ -126,4 +127,8 @@
                                         (remove #(contains? bi2 (:subject %)) (contracts/impure-generatable-fns theirs-db nil nil {:edge-syms edge-syms}))))]
                             (dedup (concat ni1 ni2))))
                 new-contracts (contracts/missing-contract-violations ours-db theirs-db tseq)]
-            (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp new-contracts))))))))
+            (let [new-invalid (if need-full-tsnap?
+                              (remove #(contains? (:invc @get-base-full) (:subject %)) (contracts/invalid-contract-violations theirs-db tsnap))
+                              (let [bi (into #{} (map :subject) (contracts/invalid-contract-violations ours-db nil {:target-nss tseq}))]
+                                (remove #(contains? bi (:subject %)) (contracts/invalid-contract-violations theirs-db nil {:target-nss tseq}))))]
+            (vec (concat schema-errs new-blocks new-ubd new-mns new-bref new-dref new-imp new-contracts new-invalid)))))))))

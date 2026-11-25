@@ -162,7 +162,7 @@
           (do (a/<!! (a/timeout 300)) (recur)))))))
 
 (defn- ^:seon.flow/edge run-tuner-intervention! [inst tid worker-id worker-br tuner-id watch opts t0]
-  (let [{:keys [tuner-timeout-ms resume-timeout-ms tuner-max-turns verify-spec after-main-tx proxy-inst]} opts
+  (let [{:keys [tuner-timeout-ms resume-timeout-ms tuner-max-turns verify-spec after-main-tx proxy-inst on-phase!]} opts
         _ (cluster/instance-op! inst {:op :transact :tx-data [{:seon.agent/id worker-id :seon.agent/paused? true}] :reason :lab-pause-worker})
         _ (wait-until-not-busy! inst worker-id 15000)
         pre-det (probe-agent-detail inst worker-id worker-br)
@@ -177,6 +177,7 @@
                                               :auto-merge? true :pause-parent? true
                                               :config {:seon.config/max-tool-turns tuner-max-turns} :goal tuner-goal})
         tuner-br (:branch spawn-res)
+        _ (when on-phase! (on-phase! {:phase :tuning :trigger (:reason watch) :turns (long (:turns pre-det 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
         tuner-wait (cluster/wait-for-agent! inst tuner-id tuner-timeout-ms)
         tuner-row (some #(when (= tuner-id (:id %)) %) (get-in tuner-wait [:status :agents]))
         tuner-det (probe-agent-detail inst tuner-id tuner-br)
@@ -184,6 +185,7 @@
         post-tune-ctx (probe-context-and-corpus inst worker-id worker-br true)
         _ (when (:paused? post-tune-w)
             (cluster/instance-op! inst {:op :transact :tx-data [{:seon.agent/id worker-id :seon.agent/paused? false}] :reason :lab-resume-worker}))
+        _ (when on-phase! (on-phase! {:phase :resuming :trigger (:reason watch) :turns (+ (long (:turns pre-det 0)) (long (:turns tuner-det 0))) :tuner-merged? (boolean (or (= :merged (:status tuner-row)) (pos? (long (or (:merged-tx tuner-det) 0))))) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
         resume-wait (cluster/wait-for-agent! inst worker-id resume-timeout-ms)
         final-row (some #(when (= worker-id (:id %)) %) (get-in resume-wait [:status :agents]))
         final-det (probe-agent-detail inst worker-id worker-br)
@@ -236,9 +238,10 @@
                                    (:scope inner) (assoc :scope (:scope inner))))
       (cluster/instance-op! inst {:op :send-message :from :user :to worker-id :type :chat
                                   :body "Work your assigned task, verify your changes pass tests and health, then reply concisely with your summary."})
-      (let [watch (watch-worker-until-trigger! inst worker-id worker-br timeout-ms
+      (let [watch (do (when-let [cb (:on-phase! opts)] (cb {:phase :watching :turns 0 :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
+                  (watch-worker-until-trigger! inst worker-id worker-br timeout-ms
                                                {:trigger-on-errors trigger-on-errors :trigger-on-empty-turns trigger-on-empty-turns
-                                                :force-tune-after-turns force-tune-after-turns})]
+                                                :force-tune-after-turns force-tune-after-turns}))]
         (if (= :cold-merged (:outcome watch))
           (let [fh (cluster/instance-op! inst {:op :health})
                 vr (when-let [vs (or (:verify-spec task) (:verify-spec opts))] (cluster/instance-op! inst {:op :verify-task :spec (assoc vs :after-main-tx base-mtx)}))]
@@ -247,7 +250,7 @@
              :turns (long (:turns (:detail watch) 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))
              :worker-pre (:detail watch) :elapsed-s (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e8)) 10.0)})
           (run-tuner-intervention! inst tid worker-id worker-br tuner-id watch
-                                   {:tuner-timeout-ms tuner-timeout-ms :resume-timeout-ms resume-timeout-ms :tuner-max-turns tuner-max-turns :verify-spec (or (:verify-spec task) (:verify-spec opts)) :after-main-tx base-mtx :proxy-inst proxy-inst} t0)))
+                                   {:tuner-timeout-ms tuner-timeout-ms :resume-timeout-ms resume-timeout-ms :tuner-max-turns tuner-max-turns :verify-spec (or (:verify-spec task) (:verify-spec opts)) :after-main-tx base-mtx :proxy-inst proxy-inst :on-phase! (:on-phase! opts)} t0)))
       (finally
         (try (cluster/stop-instance! inst {:keep-dir? keep-dir?}) (finally (when proxy-inst (proxy/stop! proxy-inst))))))))
 
@@ -270,7 +273,7 @@
                         nil)
       (a/thread
         (try
-          (let [res (execute-supervisor-cycle! opts)
+          (let [res (execute-supervisor-cycle! (assoc opts :on-phase! (fn [m] (publish-lab-run! coord-url run-id title tid started-ms :running (merge {:id tid :status :running :evals 0 :elapsed-ms (- (System/currentTimeMillis) started-ms) :merged? false :health-ok? false :alive? true} m) nil))))
                 ok? (boolean (:ok? res))
                 ms (long (* 1000.0 (double (or (:elapsed-s res) 0.0))))]
             (publish-lab-run! coord-url run-id title tid started-ms (if ok? :passed :failed)

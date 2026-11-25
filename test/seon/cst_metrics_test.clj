@@ -16,7 +16,12 @@
             [seon.code.errors]
             [seon.repl]
             [seon.fork.calls]
-            [seon.model]))
+            [seon.model]
+            [seon.bench.ab]
+            [seon.bench.helpers]
+            [seon.health]
+            [seon.schema]
+            [seon.store]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -523,3 +528,46 @@
   (testing "Adopted autonomous Tuner bounds hint and m/valid? hint fire cleanly"
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "substring: 0 and 260 are not valid start/end indices for \"x\"" {}) "min n (count s)"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "No such var: m/valid?" {}) "malli.core/validate"))))
+
+(deftest ^{:cost/ticks 60000000} wave25b-invalid-contract-gate-arity-blame-var-run-tests-and-bounces-test
+  (testing "seon.health.branch/caused-by-branch catches :invalid-contract (e.g. local def symbol in :malli/schema) before merge"
+    (seon.test-fixture/with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data [{:seon.code.ns/name 'demo.c :seon.code.ns/path "src/demo/c.clj"}
+                                  {:seon.code.form/key "demo.c#ns" :seon.code.form/ns 'demo.c :seon.code.form/order 0 :seon.code.form/src "(ns demo.c)" :seon.code.form/hash (apply str (repeat 64 "a"))}]})
+      (let [mdb @conn]
+        (seon.store/branch! conn :main :branch/bad-contract)
+        (let [bconn (seon.store/connect cfg :branch/bad-contract)]
+          (try
+            (d/transact bconn {:tx-data [{:seon.code.var/name 'demo.c/f :seon.code.var/ns 'demo.c :seon.code.var/form "demo.c/f" :seon.code.var/schema '[:=> [:cat :int] local-def-sym]}]})
+            (let [probs (seon.health/caused-by-branch mdb @bconn {} ['demo.c])]
+              (is (some #(and (= :invalid-contract (:class %)) (= 'demo.c/f (:var %))
+                              (clojure.string/includes? (:message %) "static EDN Malli form"))
+                        probs)))
+            (finally (d/release bconn)))))))
+  (testing "seon.schema/arm-var! reports :malli.core/invalid-arity as invalid arity (not invalid return value nil)"
+    (let [v (intern (create-ns 'seon.wave25b.arity-tmp) 'f (with-meta (fn ([x] x)) {:malli/schema [:=> [:cat :int] :int]}))]
+      (alter-meta! v assoc :malli/schema [:=> [:cat :int] :int])
+      (seon.schema/arm-var! nil v)
+      (try
+        (@v 1 2)
+        (is false "expected arity contract violation")
+        (catch clojure.lang.ExceptionInfo ex
+          (is (= :arity-contract (:blame (ex-data ex))))
+          (is (clojure.string/includes? (.getMessage ex) "invalid arity"))
+          (is (not (clojure.string/includes? (.getMessage ex) "invalid return value")))))
+      (remove-ns 'seon.wave25b.arity-tmp)))
+  (testing "seon.repl/resolve-run-tests-targets accepts #'var and Namespace values without ClassCastException"
+    (let [resolve-fn @(ns-resolve 'seon.repl 'resolve-run-tests-targets)
+          coerce-fn @(ns-resolve 'seon.repl 'coerce-target-sym)]
+      (is (= 'seon.cst-metrics-test/patch-form-source-test (coerce-fn #'seon.cst-metrics-test/patch-form-source-test)))
+      (is (= 'seon.cst-metrics-test (coerce-fn (find-ns 'seon.cst-metrics-test))))
+      (is (fn? resolve-fn))))
+  (testing "seon.bench.ab/summarize-ab tolerates non-numeric telemetry values without ClassCastException"
+    (let [s (seon.bench.ab/summarize-ab [{:id :ab/a-c :pair-id :t/a :arm :control :merged? true :turns :bad :child-turns "x" :prompt-tokens :oops}])]
+      (is (= 1 (get-in s [:by-arm :control :merged])))
+      (is (= 0.0 (get-in s [:by-arm :control :median-worker-turns])))))
+  (testing "seon.bench.helpers/trial-telemetry preserves :bounce-messages and errors hints Var->Named"
+    (let [tm (seon.bench.helpers/trial-telemetry :schema-proof {:bounce-messages [{:type :health-block :body "bad"}]})
+          h (seon.code.errors/enrich-eval-error "(user/run-tests! #'a/b)" "class clojure.lang.Var cannot be cast to class clojure.lang.Named" {})]
+      (is (= [{:type :health-block :body "bad"}] (:bounce-messages tm)))
+      (is (clojure.string/includes? h "not a Var")))))

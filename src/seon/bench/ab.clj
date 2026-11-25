@@ -97,7 +97,7 @@
   [results]
   (let [rows (vec (filter map? results))
         arm-order (vec (distinct (keep :arm rows)))
-        as-l #(long (or % 0))
+        as-l #(if (number? %) (long %) 0)
         row-view (fn [r]
                    (let [wt (as-l (or (:turns r) (:evals r)))
                          ct (as-l (:child-turns r))

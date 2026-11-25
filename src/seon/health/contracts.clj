@@ -452,20 +452,34 @@
                      (catch Throwable ex (or (.getMessage ex) (str ex))))))))))))
 
 (defn invalid-contract-violations
-  "Validates every stored `:seon.code.var/schema` on `db` reusing the compiled Malli registry."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]]}
-  ([db] (invalid-contract-violations db nil))
-  ([db var-snap]
+  "Validates stored `:seon.code.var/schema` forms on `db` reusing the compiled Malli registry.
+   Optional `opts` `{:target-nss ns-syms}` scopes to O(|vars in nss|) indexed `:avet :seon.code.var/ns` checks."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] [:vector :seon.health/problem]]
+                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]
+                  [:=> [:cat :seon.host/db [:maybe :map] [:maybe :map]] [:vector :seon.health/problem]]]}
+  ([db] (invalid-contract-violations db nil nil))
+  ([db var-snap] (invalid-contract-violations db var-snap nil))
+  ([db var-snap opts]
    (if-not (and db (contains? (:schema db) :seon.code.var/schema))
      []
      (let [br (get-in db [:config :branch] :main)
            reg-cell (volatile! nil)
            checked (java.util.HashMap. 300)
-           rows (if var-snap (:var-schemas var-snap) (d/datoms db :aevt :seon.code.var/schema))]
+           rows (cond
+                  (contains? opts :target-nss)
+                  (for [nsym (distinct (remove nil? (:target-nss opts)))
+                        dt (d/datoms db :avet :seon.code.var/ns nsym)
+                        :let [e (:e dt)
+                              sch (:v (first (d/datoms db :eavt e :seon.code.var/schema)))]
+                        :when sch]
+                    [e nil nsym nil sch])
+                  var-snap (:var-schemas var-snap)
+                  :else (d/datoms db :aevt :seon.code.var/schema))]
        (->> rows
             (keep
              (fn [row]
-               (let [[e vsym nsym _ sch] (if var-snap row [(:e row) nil nil nil (:v row)])
+               (let [[e vsym nsym _ sch] (if (vector? row) row [(:e row) nil nil nil (:v row)])
                      err (if (.containsKey checked sch)
                            (.get checked sch)
                            (let [res (validate-contract-schema db reg-cell sch)]
@@ -477,6 +491,7 @@
                        {:class :invalid-contract :severity :error :kind :static
                         :ns nsym :var vsym :subject (str vsym) :branch br
                         :message (str "Invalid :malli/schema on " vsym ": " err
-                                      " — in Malli use predicate symbols like number?, pos-int?, nat-int? (not :number), "
+                                      " — :malli/schema must be a static EDN Malli form (not a local def symbol); "
+                                      "use predicate symbols like number?, pos-int?, nat-int? (not :number), "
                                       "or built-ins :int, :double, :string, :boolean, :keyword, :map, :vector, :any, :seon.host/db.")}))))))
             (sort-by :subject) vec)))))
