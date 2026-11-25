@@ -53,6 +53,13 @@
   :seon.fix/regression-test seon.cst-metrics-test/wave22b-transient-network-retry-and-test-var-oom-hint-test,
   :seon.fix/root-cause "seon.model/openai-stream-chat! had zero transient IOException retry on text requests (only retried multimodal payloads) and kept stale pooled connections; enrich-eval-error only matched literal clojure.test/run-tests.",
   :seon.fix/symptom "Wave 22A contract-schema-index-build-entity-index failed on 3 consecutive Broken pipe IOExceptions without retry; signals-scoreboard hit 256MB OOM twice calling ct/run-test-var without a user/run-tests! hint."}
+ {:seon.fix/before-after "Before: Supervisor Cycle #2 cut off Worker at 20t and showed :kv-hit-pct nil. After: 24t budget matches run-ab!, top-level :kv-hit-pct populated, and both new hints active on :main.",
+  :seon.fix/change-summary "Adopted autonomous Tuner's subs/subvec/nth bounds hint and added m/valid? -> malli.core/validate hint in seon.code.errors; raised execute-supervisor-cycle! default max-tool-turns to 24 and promoted :proxy-stats to :seon.bench.run/proxy-stats in publish-lab-run!.",
+  :seon.fix/error-class :tuner-bounds-malli-validate-hints-and-lab-turn-cap,
+  :seon.fix/id #uuid "b05337aa-1468-4c73-be23-336a38d6a9cb",
+  :seon.fix/regression-test seon.cst-metrics-test/wave23b-tuner-bounds-malli-validate-hints-and-lab-telemetry-test,
+  :seon.fix/root-cause "static-error-hints lacked out-of-bounds slicing and m/valid? hints; execute-supervisor-cycle! defaulted max-tool-turns to 20 (below run-ab!'s 24) and publish-lab-run! left :proxy-stats inside :trials instead of :seon.bench.run/proxy-stats.",
+  :seon.fix/symptom "Wave 23A Supervisor Cycle #2 autonomous Tuner invented a general subs/subvec bounds hint that fired on Worker T14; Worker also hit No such var: m/valid? and was cut off at max-tool-turns=20 right as it finished T21; publish-lab-run! omitted :seon.bench.run/proxy-stats."}
  {:seon.fix/before-after "Before: runs/store pinned at 4,294,967,296 B (MDB_MAP_FULL at 4 GiB). After: live runs/store upgraded seamlessly to 1,099,511,627,776 B (1 TB sparse, APFS disk-limited).",
   :seon.fix/change-summary "Monotonically grow existing writable LMDB stores in open-env when requested :map-size exceeds recorded size (never shrinking or remapping RDONLY), drain active txns under :rw-lock writeLock in close-env & adopt-mapsize!, and wrap LMDB txns with masked tryLock/dynamic-wind unwind in seon.store/install-interrupt-safe-lmdb!.",
   :seon.fix/error-class :lmdb-map-full,

@@ -76,7 +76,8 @@
 (defn- publish-lab-run!
   {:seon.flow/edge true}
   [coord-url run-id title tid started-ms status trial-map finished-ms]
-  (let [ent (cond-> {:seon.bench.run/id run-id
+  (let [px (:proxy-stats trial-map)
+        ent (cond-> {:seon.bench.run/id run-id
                      :seon.bench.run/title title
                      :seon.bench.run/suite-id :lab/supervisor-cycle
                      :seon.bench.run/status status
@@ -86,6 +87,7 @@
                      :seon.bench.run/passed (if (= :passed status) 1 0)
                      :seon.bench.run/failed (if (= :failed status) 1 0)
                      :seon.bench.run/trials [(assoc trial-map :pair-id tid :arm :supervised)]}
+              (map? px) (assoc :seon.bench.run/proxy-stats px)
               finished-ms (assoc :seon.bench.run/finished-ms (long finished-ms)))]
     (try (cluster/instance-op! {:base-url coord-url}
                                {:op :transact :tx-data [ent] :reason [:lab-run run-id]})
@@ -211,7 +213,7 @@
   (let [{:keys [task timeout-ms tuner-timeout-ms resume-timeout-ms seed-store keep-dir?
                 max-tool-turns tuner-max-turns trigger-on-errors trigger-on-empty-turns force-tune-after-turns]
          :or {timeout-ms 180000 tuner-timeout-ms 210000 resume-timeout-ms 180000 seed-store "runs/store"
-              keep-dir? false max-tool-turns 20 tuner-max-turns 14 trigger-on-errors 2 trigger-on-empty-turns 8}} opts
+              keep-dir? false max-tool-turns 24 tuner-max-turns 14 trigger-on-errors 2 trigger-on-empty-turns 8}} opts
         inner (if (map? (:task task)) (:task task) (or task opts))
         tid (or (:id inner) :lab/task)
         slug (str/replace (name tid) #"[^A-Za-z0-9._-]" "-")

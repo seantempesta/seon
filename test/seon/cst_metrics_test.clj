@@ -518,3 +518,8 @@
   (testing "Wave 22A error hints cover ct/run-test-var OOM and u/ namespace typo"
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "(ct/run-test-var #'foo/bar)" "Eval exceeded allocation budget (limit 268435456 bytes)." {}) "user/run-tests!"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "(u/source 'a/b)" "No such namespace: u" {}) "user/"))))
+
+(deftest wave23b-tuner-bounds-malli-validate-hints-and-lab-telemetry-test
+  (testing "Adopted autonomous Tuner bounds hint and m/valid? hint fire cleanly"
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "substring: 0 and 260 are not valid start/end indices for \"x\"" {}) "min n (count s)"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "No such var: m/valid?" {}) "malli.core/validate"))))
