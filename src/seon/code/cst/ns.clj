@@ -459,3 +459,58 @@
                             " but schema expects arity " arities
                             " (for 0-arg use [[] expected-out], NOT [[[]] expected-out]).")}))
             exs))))
+
+(defn synth-ns-form-src
+  "Builds a canonical `(ns nsym ...)` form string from `aliases` `{alias-sym lib-sym}` and `refers` `{var-sym lib-sym}`."
+  {:malli/schema [:=> {:examples [[[(quote demo.t) {(quote str) (quote clojure.string)} {(quote deftest) (quote clojure.test) (quote is) (quote clojure.test)}]
+                                   "(ns demo.t\n  (:require [clojure.string :as str]\n            [clojure.test :refer [deftest is]]))"]
+                                  [[(quote demo.bare) {} {}] "(ns demo.bare)"]]}
+                  [:cat :symbol :map :map] :string]
+   :cost/ticks 1000000}
+  [nsym aliases refers]
+  (let [by-lib (reduce-kv (fn [a k lib] (if (and (symbol? k) (symbol? lib) (not= lib nsym) (not= lib (quote clojure.core))) (assoc-in a [lib :as] k) a)) {} (or aliases {}))
+        by-lib (reduce-kv (fn [a r lib] (if (and (symbol? r) (symbol? lib) (not= lib nsym) (not= lib (quote clojure.core))) (update-in a [lib :refer] (fnil conj (sorted-set)) r) a)) by-lib (or refers {}))
+        specs (mapv (fn [lib] (let [{:keys [as refer]} (get by-lib lib)] (pr-str (cond-> [lib] as (conj :as as) (seq refer) (conj :refer (vec refer)))))) (sort-by str (keys by-lib)))]
+    (if (empty? specs) (str "(ns " nsym ")") (str "(ns " nsym "\n  (:require " (str/join "\n            " specs) "))"))))
+
+(defn sync-ns-requires-for-srcs
+  "Ensures a namespace has an `(ns ...)` header covering referenced live `aliases`/`refers`/`bare-libs` in `srcs`."
+  {:malli/schema [:function
+                  [:=> [:cat :symbol [:maybe :string] [:sequential :string] :map :map] [:maybe :string]]
+                  [:=> [:cat :symbol [:maybe :string] [:sequential :string] :map :map [:maybe [:set :symbol]]] [:maybe :string]]]
+   :cost/ticks 3000000}
+  ([nsym existing-ns-src srcs aliases refers] (sync-ns-requires-for-srcs nsym existing-ns-src srcs aliases refers #{}))
+  ([nsym existing-ns-src srcs aliases refers bare-libs]
+   (let [{:keys [qual-ns unqual]} (collect-body-refs srcs)
+         ok? (fn [lib] (and (symbol? lib) (not= lib nsym) (not= lib (quote clojure.core))))
+         ua (into {} (filter (fn [[a lib]] (and (symbol? a) (ok? lib) (contains? qual-ns (name a))))) (or aliases {}))
+         ur (into {} (filter (fn [[r lib]] (and (symbol? r) (ok? lib) (contains? unqual (name r))))) (or refers {}))
+         ub (into (sorted-set) (filter (fn [lib] (and (ok? lib) (contains? qual-ns (name lib))))) (or bare-libs #{}))]
+     (if (str/blank? (str existing-ns-src))
+       (let [base (synth-ns-form-src nsym ua ur)
+             extra (remove #(or (contains? (set (vals ua)) %) (contains? (set (vals ur)) %)) ub)]
+         (if (seq extra) (or (:src (add-require-src base (mapv vector extra))) base) base))
+       (let [cur (analyze-ns-requires existing-ns-src)
+             ex-l (into #{} (keep :lib) cur) ex-a (into #{} (keep :alias) cur) ex-r (into #{} (mapcat :refers) cur)
+             bl (reduce-kv (fn [m a lib] (if (or (contains? ex-a (name a)) (contains? ex-l (str lib))) m (assoc-in m [lib :as] a))) {} ua)
+             bl (reduce-kv (fn [m r lib] (if (or (contains? ex-r (name r)) (contains? ex-l (str lib))) m (update-in m [lib :refer] (fnil conj (sorted-set)) r))) bl ur)
+             bl (reduce (fn [m lib] (if (or (contains? ex-l (str lib)) (contains? m lib)) m (assoc m lib {}))) bl ub)
+             specs (mapv (fn [lib] (let [{:keys [as refer]} (get bl lib)] (cond-> [lib] as (conj :as as) (seq refer) (conj :refer (vec refer))))) (sort-by str (keys bl)))]
+         (when (seq specs) (let [r (add-require-src existing-ns-src specs)] (when (:changed? r) (:src r)))))))))
+
+(defn ^:seon.flow/edge sync-ns-requires-for-live-ns
+  "Inspects live Clojure namespace `nsym` (if loaded) and calls `sync-ns-requires-for-srcs` (O(1) fast-path when existing header needs no live sync)."
+  {:malli/schema [:=> [:cat :symbol [:maybe :string] [:sequential :string]] [:maybe :string]] :cost/ticks 4000000}
+  [nsym existing-ns-src srcs]
+  (let [nso (find-ns nsym)
+        blank-ex? (str/blank? (str existing-ns-src))]
+    (if (and (not blank-ex?) (nil? nso))
+      nil
+      (let [aliases (if nso (into {} (map (fn [[a n2]] [a (ns-name n2)])) (ns-aliases nso)) {})
+            refers (if nso (into {} (keep (fn [[s v]] (when-let [vn (some-> (and (var? v) (:ns (meta v))) ns-name)] (when (and (not= vn 'clojure.core) (not= vn nsym)) [s vn])))) (ns-refers nso)) {})]
+        (if (and (not blank-ex?) (empty? aliases) (empty? refers))
+          nil
+          (let [bare (if blank-ex?
+                       (into #{} (keep (fn [q] (when (and (string? q) (str/includes? q ".")) (some-> (find-ns (symbol q)) ns-name)))) (:qual-ns (collect-body-refs srcs)))
+                       #{})]
+            (sync-ns-requires-for-srcs nsym existing-ns-src srcs aliases refers bare)))))))

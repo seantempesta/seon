@@ -11,7 +11,8 @@
             [seon.cite :as cite]
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.ctx.touches :as ctouches]))
 
 (defn- dh-has? [db a] (boolean (and db (contains? (:schema db) a))))
 
@@ -233,7 +234,7 @@
                                         :reason [:trigger/pause-for-prereq parent-agent rtid] :defer-agent parent-agent}
                                         {:op :spawn-agent :id rid :parent parent-agent :forked-from parent-agent
                                          :merge-target [:seon.agent/id parent-agent] :tasks [rtid] :auto-merge? true
-                                         :config {:seon.config/max-tool-turns 14}
+                                         :config {:seon.config/max-tool-turns 18}
                                          :goal (str "Refine & write failing proofs for " parent-task " (" rtid ")")}]))
                                    (sort-by (comp str first) spawn-facts)))]
         (into refine-ops spawn-ops)))))
@@ -412,9 +413,9 @@
               {:ok? true :task tid :branch branch :tx (when br (:max-tx (:db-after br)))}))))))
 
 (defn auto-anchor-parent-proofs-tx
-  "Mechanically links newly authored branch `deftest` var(s) (and their called target vars) onto a Refiner's parent task on merge-back so agents never lose work to manual bookkeeping."
+  "Mechanically links newly authored branch `deftest` var(s), their called target vars, and high-signal discovered domain entities onto the parent task on merge-back."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:vector :map]]
-   :cost/ticks 5000000}
+   :cost/ticks 10000000}
   [main-db branch-db agent-id]
   (if-not (and main-db branch-db agent-id)
     []
@@ -434,14 +435,21 @@
                                tids)
               dh (:schema branch-db)
               lref-proofs (mapv #(vector :seon.code.var/name %) new-tests)
-              called-syms (into #{} (for [sym new-tests
-                                          :let [ve (eid-of branch-db :seon.code.var/name sym)]
-                                          :when ve
+              called-syms (into #{} (for [sym new-tests :let [ve (eid-of branch-db :seon.code.var/name sym)] :when ve
                                           dt (when (dh-has? branch-db :seon.code.var/calls) (d/datoms branch-db :eavt ve :seon.code.var/calls))
-                                          :let [cn (eav1 branch-db (:v dt) :seon.code.var/name)]
-                                          :when (qualified-symbol? cn)]
+                                          :let [cn (eav1 branch-db (:v dt) :seon.code.var/name)] :when (qualified-symbol? cn)]
                                       cn))
-              lref-refs (vec (distinct (concat lref-proofs (mapv #(vector :seon.code.var/name %) (sort called-syms)))))]
+              touches (try (ctouches/derived-agent-touches main-db branch-db agent-id) (catch Throwable _ nil))
+              eid->dom-lref (fn [e] (some (fn [a] (when-let [v (eav1 branch-db e a)] [a v])) [:seon.code.var/name :seon.schema/key :seon.code.doc/id :seon.code.ns/name]))
+              disc-lrefs (when (map? touches)
+                           (->> (:energy touches)
+                                (filter (fn [[e en]] (and (integer? e) (or (>= (double en) 0.25) (contains? (:written touches) e)))))
+                                (sort-by (fn [[e en]] [(- (double en)) (long e)]))
+                                (keep (fn [[e _]] (eid->dom-lref e)))
+                                (remove #(and (= :seon.code.var/name (first %)) (= "seon.test-fixture" (namespace (second %)))))
+                                (take 16)
+                                vec))
+              lref-refs (vec (distinct (concat lref-proofs (mapv #(vector :seon.code.var/name %) (sort called-syms)) disc-lrefs)))]
           (vec (keep (fn [rtid]
                        (when-let [ptid (refiner-parent-task-id main-db branch-db rtid)]
                          (cond-> {:seon.task/id ptid :seon.task/tests (set new-tests)}

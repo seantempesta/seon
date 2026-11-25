@@ -59,7 +59,7 @@
      (let [cmd (build-instance-cmd (assoc opts :bin-path bin :port 0 :store-path spath :repo-dir repo
                                           :headless? headless? :commit-git? commit-git? :auto-switch-over? auto-switch-over?))
            started-ns (System/nanoTime)
-           jproc (proc/process cmd {:dir repo :err :out :extra-env (bh/jolt-env-map repo extra-env) :shutdown proc/destroy-tree})
+           jproc (proc/process cmd {:dir wdir :err :out :extra-env (bh/jolt-env-map repo extra-env) :shutdown proc/destroy-tree})
            ^Process proc (:proc jproc)
            reader (java.io.BufferedReader. (java.io.InputStreamReader. (:out jproc) "UTF-8"))
            log-atom (atom []) ready-ch (a/chan 1) delivered? (volatile! false)

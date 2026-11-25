@@ -250,7 +250,8 @@
       :main-synced? (boolean (:ok? main-r))})))
 
 (defn branch-reset-tx
-  "Purely derives the latest session-reset transaction on `branch-db` for `agent-id`."
+  "Purely derives the latest session-reset transaction on `branch-db` for `agent-id`.
+   Preserves mid-session KV cache on append-only `:fork-review` merges (counting `:fork-review` only before first surviving eval or on eval retraction)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] :int]
    :cost/ticks 5000000}
   [branch-db agent-id]
@@ -260,10 +261,16 @@
                      (reduce (fn [m dt] (if-not (:added dt) (max m (long (:tx dt))) m))
                              0 (d/datoms (d/history branch-db) :avet :seon.agent.eval/agent agent-id))
                      0)
+        min-ev-tx (when (and branch-db agent-id (contains? dh :seon.agent.eval/agent))
+                    (reduce (fn [m dt] (let [t (long (:tx dt))] (if (or (nil? m) (< t m)) t m)))
+                            nil (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)))
         sync-tx (if (and branch-db (contains? dh :seon.tx/merged))
-                  (reduce (fn [m dt] (max m (long (:tx dt))))
-                  0 (concat (d/datoms branch-db :avet :seon.tx/merged :main)
-                            (d/datoms branch-db :avet :seon.tx/merged :fork-review)))
+                  (let [m-tx (reduce (fn [m dt] (max m (long (:tx dt)))) 0 (d/datoms branch-db :avet :seon.tx/merged :main))
+                        f-tx (reduce (fn [m dt]
+                                       (let [t (long (:tx dt))]
+                                         (if (or (nil? min-ev-tx) (<= t min-ev-tx)) (max m t) m)))
+                                     0 (d/datoms branch-db :avet :seon.tx/merged :fork-review))]
+                    (max m-tx f-tx))
                   0)]
     (max retract-tx sync-tx)))
 

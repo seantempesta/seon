@@ -24,7 +24,8 @@
             [seon.code.analyze :as analyze]
             [seon.code.overlay :as overlay]
             [seon.ctx.touches :as ctouches]
-            [seon.error :as serr]))
+            [seon.error :as serr]
+            [seon.code.cst.ns :as cst-ns]))
 
 (def ^:private ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 
@@ -340,8 +341,7 @@
           placed))))))
 
 (defn persist-forms-by-ns
-  "Persists newly defined or updated top-level Clojure form source strings grouped by namespace
-   `{nsym [src ...]}` into Datahike tx-data with automatic topological form reordering."
+  "Persists newly defined or updated top-level Clojure forms `{nsym [src ...]}` into Datahike tx-data with topo reordering and ns-header sync."
   {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :any]]}
   [db ns-entries ir-refs-by-var]
   (vec
@@ -350,29 +350,23 @@
       (let [existing (ns-forms db target-ns)
             existing-ns-src (some #(when (= (:seon.code.form/key %) (str target-ns "#ns")) (:seon.code.form/src %)) existing)
             srcs (if existing-ns-src (vec (remove bare-ns-form? srcs)) srcs)
-            has-ns-form? (some #(str/starts-with? (str/triml %) "(ns ") srcs)
+            raw-ns? (boolean (some #(str/starts-with? (str/triml %) "(ns ") srcs))
+            auto-ns (when-not raw-ns? (cst-ns/sync-ns-requires-for-live-ns target-ns existing-ns-src srcs))
+            srcs (if auto-ns (into [auto-ns] srcs) srcs)
+            has-ns-form? (or raw-ns? (some? auto-ns))
             existing-local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (ns-vars db target-ns))
-            header (cond
-                     has-ns-form? ""
-                     existing-ns-src (str existing-ns-src "\n")
-                     :else (str "(ns " target-ns ")\n"))
-            combined (str header (str/join "\n" srcs))
-            reparsed (read-clj (ns->default-path target-ns) combined existing-local-defs)
-            kept-forms (if has-ns-form?
-                         (:forms reparsed)
-                         (vec (rest (:forms reparsed))))
+            header (cond has-ns-form? "" existing-ns-src (str existing-ns-src "\n") :else (str "(ns " target-ns ")\n"))
+            reparsed (read-clj (ns->default-path target-ns) (str header (str/join "\n" srcs)) existing-local-defs)
+            kept-forms (if has-ns-form? (:forms reparsed) (vec (rest (:forms reparsed))))
             kept-vars (enrich-reparsed-vars db target-ns reparsed ir-refs-by-var)
             by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
             ns-ent (build-ns-entry db target-ns ns-chain reparsed has-ns-form?)
-            stale-ns-reqs (when has-ns-form?
-                            (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires :seon.code.ns/requires-ns] [ns-ent]))
-            raw-form-txs (assign-form-orders existing by-key max-ord kept-forms)
-            form-txs (reorder-form-txs by-key raw-form-txs)
-            stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps]
-                                                    (filter :seon.code.form/src form-txs))
-            stale-var-refs  (analyze/stale-var-edge-retracts db kept-vars)]
+            stale-ns-reqs (when has-ns-form? (retract-stale-many-ops db :seon.code.ns/name [:seon.code.ns/requires :seon.code.ns/requires-ns] [ns-ent]))
+            form-txs (reorder-form-txs by-key (assign-form-orders existing by-key max-ord kept-forms))
+            stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] (filter :seon.code.form/src form-txs))
+            stale-var-refs (analyze/stale-var-edge-retracts db kept-vars)]
         (vec (concat stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 
