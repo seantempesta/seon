@@ -282,7 +282,9 @@
              {:db [(db-notice prev-cid db (:tx-data r) [:answer-call call-id])]
               ::flow/report [(str "[:transactor] call " call-id " RESOLVED by " (:seon.agent.call/callee c))]}]))))))
 
-(defn- handle-await-calls! [st msg prev-cid {:keys [reply! db-notice]}]
+(defn- handle-await-calls!
+  {:seon.flow/edge true}
+  [st msg prev-cid {:keys [reply! db-notice]}]
   (let [{:keys [conn]} st
         {:keys [caller call-ids]} msg
         ids (vec (distinct call-ids))
