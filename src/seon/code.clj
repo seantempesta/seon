@@ -149,16 +149,20 @@
     (symbol "result" (str "e" n))))
 
 (defn- effective-eval-budgets [form-val base-ticks base-bytes]
-  (reduce
-   (fn [[t b] x]
-     (if-let [ov (when (symbol? x)
-                   (when-let [v (try (resolve x) (catch Throwable _ nil))]
-                     (:seon.eval/budget-override (meta v))))]
-       [(max t (long (or (:ticks ov) t)))
-        (max b (long (or (:bytes ov) b)))]
-       [t b]))
-   [(long base-ticks) (long base-bytes)]
-   (tree-seq coll? seq form-val)))
+  (let [test-ov {:ticks 2000000000 :bytes 4294967296}]
+    (reduce
+     (fn [[t b] x]
+       (if-let [ov (when (symbol? x)
+                     (let [nm (name x)]
+                       (if (or (= nm "run-tests") (= nm "run-all-tests") (= nm "test-vars") (= nm "test-var"))
+                         test-ov
+                         (when-let [v (try (resolve x) (catch Throwable _ nil))]
+                           (:seon.eval/budget-override (meta v))))))]
+         [(max t (long (or (:ticks ov) t)))
+          (max b (long (or (:bytes ov) b)))]
+         [t b]))
+     [(long base-ticks) (long base-bytes)]
+     (tree-seq coll? seq form-val))))
 
 (defn task-file-path?
   {:malli/schema [:=> [:cat :string] :boolean]}

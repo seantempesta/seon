@@ -213,7 +213,7 @@
 
 (defn run-tests!
   "Runs reach-selected or explicit `deftest`s AND `seed=42` Malli generative checks on edited/target contracted vars."
-  {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]], :seon.eval/budget-override {:ticks 2000000000, :bytes 4294967296}, :seon.flow/edge true}
+  {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]], :seon.eval/budget-override {:ticks 6000000000, :bytes 12884901888}, :seon.flow/edge true}
   ([] (run-tests! nil))
   ([target & more]
    (when-let [{:keys [conn branch]} *agent-ctx*]
@@ -245,8 +245,13 @@
                                                               (schema/generatable-function-schema? (:seon.code.var/schema v)))
                                                      s)))))
                                            tlist)))
-                      (->> (:upserts ops)
-                           (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form (:seon.code.form/key %))))
+                      (let [ed-eids (vec (distinct (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form (:seon.code.form/key %))) (:upserts ops))))
+                          ed-nss (into #{} (keep :seon.code.form/ns) (:upserts ops))
+                          same-ns-callers (when (contains? (:schema bdb) :seon.code.var/calls)
+                                            (into [] (comp (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/calls %)))
+                                                           (filter #(contains? ed-nss (:seon.code.var/ns (d/pull bdb '[:seon.code.var/ns] %)))))
+                                                  ed-eids))]
+                      (->> (concat ed-eids same-ns-callers)
                            (keep (fn [e]
                                    (let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test? :seon.code.var/flow-edge? :seon.code.var/schema] e)
                                          vn (:seon.code.var/name v)]
@@ -254,7 +259,7 @@
                                                 (not (str/ends-with? (namespace vn) "-test"))
                                                 (schema/generatable-function-schema? (:seon.code.var/schema v)))
                                        vn))))
-                           distinct sort vec))
+                           distinct sort vec)))
            {:keys [results gen-results]}
            (wsup/call-with-candidate-overrides bdb
              (fn [_]

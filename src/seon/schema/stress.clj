@@ -98,10 +98,10 @@
                      (catch Throwable ex
                        (fail {:exception (.getMessage ex) :blame :exception} #(str "Threw exception on " (if (= tag :example) "example" (str "seed=" seed)) " args " (pr-str %) ": " (.getMessage ex)))))))
         ex-out (reduce check1 {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} (map (fn [[a e]] [:example a e]) top-examples))]
-    (if-not (:ok? ex-out)
-      ex-out
-      (let [batches (try (mg/generate [:vector {:min samples :max samples} cat-s] {:registry registry :seed seed :size 8})
-                         (catch Throwable t {:gen-error (.getMessage t)}))]
-        (if (map? batches)
-          {:ok? false :var fn-sym :reason (str "Generator failed for " fn-sym ": " (:gen-error batches))}
-          (reduce check1 ex-out (map (fn [a] [:sample a nil]) batches)))))))
+    (if (or (not (:ok? ex-out)) (not (pos? (long samples))))
+    ex-out
+    (let [batches (try (mg/generate [:vector {:min samples :max samples} cat-s] {:registry registry :seed seed :size 8})
+                       (catch Throwable t {:gen-error (.getMessage t)}))]
+      (if (map? batches)
+        {:ok? false :var fn-sym :reason (str "Generator failed for " fn-sym ": " (:gen-error batches))}
+        (reduce check1 ex-out (map (fn [a] [:sample a nil]) batches)))))))

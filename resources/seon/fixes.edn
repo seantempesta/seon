@@ -438,4 +438,12 @@
   :seon.fix/error-class :child-exception,
   :seon.fix/root-cause "seon.code/eval-forms evaluated forms inside run-interruptible + try/catch, then called pr-str and infer-result-schema(s) outside both — any lazy seq throwing on realization (or infinite seq) bypassed the budget, crashed the COW worker, and left an open :child-exception on :main.",
   :seon.fix/regression-test seon.alloc-guard-test/eval-forms-catches-lazy-seq-and-stress-var-args-test,
-  :seon.fix/id #uuid "43231957-82b2-48b5-bf4a-4afedc3b279e"}]
+  :seon.fix/id #uuid "43231957-82b2-48b5-bf4a-4afedc3b279e"}
+ {:seon.fix/created-ms 1795625227345,
+  :seon.fix/symptom "Wave 6C trials wasted 5 turns diagnosing silent nil from stress-var on :function/:any vars (nonblank, add-require-src), 4 turns re-fetching truncated 5KB (user/source) maps, 10 turns fighting 1-arg vector :examples nesting, 4x 4GB OOMs on run-tests!, and missed same-ns caller generative break (sync-ns-requires-for-srcs).",
+  :seon.fix/change-summary "Made stress-var always run :examples and return informative :skipped-gen? map for :=>/:function vars, added same-ns caller generative checks + 12GB cap to repl/run-tests!, added 4GB override for clojure.test/run-tests, raised plain-edn? cap to 12000, and documented 1-arg vector [[[a b]] out] example nesting.",
+  :seon.fix/before-after "Before: silent nil on nonblank/add-require-src, 4KB map truncation, 4GB run-tests! OOM; After: nonblank checks 3 examples cleanly, 5.2KB source maps pass intact, clojure.test/run-tests gets 4GB override.",
+  :seon.fix/error-class :stress-var-and-repl-parity,
+  :seon.fix/root-cause "stress-var had no fallback branch for non-generatable :=>/:function schemas, repl/run-tests! only stressed edited vars (not same-ns callers) under 4GB cap, clojure.test/run-tests lacked budget override, format-eval-output capped plain-edn maps at 4000 chars, and docs/malli.md omitted 1-arg collection example syntax.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave6e-stress-var-examples-on-any-function-and-wire-12k-test,
+  :seon.fix/id #uuid "2abf5adf-7505-4a75-9143-77640d822aeb"}]

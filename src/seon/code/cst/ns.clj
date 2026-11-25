@@ -457,7 +457,7 @@
                  :example-arity (count (first ex)) :expected-arities arities
                  :hint (str "Example args " (pr-str (first ex)) " has arity " (count (first ex))
                             " but schema expects arity " arities
-                            " (for 0-arg use [[] expected-out], NOT [[[]] expected-out]).")}))
+                            " (0-arg: [[] out]; 1-arg taking a vector/seq [a b]: [[[a b]] out] — outer vector is the arg list!).")}))
             exs))))
 
 (defn synth-ns-form-src
