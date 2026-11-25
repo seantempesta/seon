@@ -192,3 +192,128 @@
                   seon.ctx.project/budget-and-order-projections]]
       (let [res (schema/stress-var nil sym {:samples 100 :seed 42})]
         (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))
+
+(deftest ^{:cost/ticks 80000000} browser-box-cache-real-fit-per-item-budget-and-normalize-test
+  (testing "record-browser-box!, cached-browser-box, and clear-browser-box-cache! perform O(1) lookup across widths"
+    (try
+      (fit/clear-browser-box-cache!)
+      (is (nil? (fit/cached-browser-box 'demo/card "fh-1" 360)))
+      (let [b360  (fit/record-browser-box! 'demo/card "fh-1" 360  {:w 340 :h 80  :overflow-x? false})
+            b640  (fit/record-browser-box! 'demo/card "fh-1" 640  {:w 610 :h 140 :overflow-x? false})
+            b1100 (fit/record-browser-box! 'demo/card "fh-1" 1100 {:w 960 :h 220 :overflow-x? true})]
+        (is (= {:w 340 :h 80  :area 27200  :overflow-x? false :slot-w 360}  b360))
+        (is (= {:w 610 :h 140 :area 85400  :overflow-x? false :slot-w 640}  b640))
+        (is (= {:w 960 :h 220 :area 211200 :overflow-x? true  :slot-w 1100} b1100))
+        (is (= b360  (fit/cached-browser-box 'demo/card "fh-1" 360))  "Exact 360px match")
+        (is (= b360  (fit/cached-browser-box 'demo/card "fh-1" 500))  "Largest slot-w <= 500px is 360px")
+        (is (= b640  (fit/cached-browser-box 'demo/card "fh-1" 640))  "Exact 640px match")
+        (is (= b640  (fit/cached-browser-box 'demo/card "fh-1" 900))  "Largest slot-w <= 900px is 640px")
+        (is (= b1100 (fit/cached-browser-box 'demo/card "fh-1" 1100)) "Exact 1100px match")
+        (is (= b1100 (fit/cached-browser-box 'demo/card "fh-1" 1440)) "Largest slot-w <= 1440px is 1100px")
+        (is (= b360  (fit/cached-browser-box 'demo/card "fh-1" 240))  "Smallest slot-w when all exceed 240px")
+        (is (nil?    (fit/cached-browser-box 'demo/card "fh-2" 360))  "Different form-hash misses cleanly")
+        (is (true?   (fit/clear-browser-box-cache!)))
+        (is (nil?    (fit/cached-browser-box 'demo/card "fh-1" 360))))
+      (finally
+        (fit/clear-browser-box-cache!))))
+
+  (testing "fit-projections and explain-candidates use real browser (w, h, overflow-x?) over static guesses"
+    (with-test-store [{:keys [conn]}]
+      (try
+        (fit/clear-browser-box-cache!)
+        (let [sig-stub (str "(ns seon.signals)\n"
+                            "(defn render-signals-bar {:malli/schema [:=> [:cat [:map [:seon.signal/snapshot :seon.signal/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div {:data-min-width 220} \"bar\"]})\n"
+                            "(defn render-signals-panel {:malli/schema [:=> [:cat [:map [:seon.signal/snapshot :seon.signal/snapshot]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:section {:data-min-width 560} \"panel\"]})\n")
+              _ (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/signals.clj" sig-stub false)})
+              _ (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn {:analyze-compiler? true})})
+              db @conn
+              snap (sig/all-signals db)
+              projs [{:entity :live-sig :schema :seon.signal/snapshot :data snap}]
+              bar-fh (:seon.code.form/hash (d/pull db '[:seon.code.form/hash] [:seon.code.form/key "seon.signals/render-signals-bar"]))
+              pan-fh (:seon.code.form/hash (d/pull db '[:seon.code.form/hash] [:seon.code.form/key "seon.signals/render-signals-panel"]))
+              static-bar-tok (:tokens (fit/measure-hiccup (:seon.ui/hiccup (sig/render-signals-bar {:seon.signal/snapshot snap}))))
+              f-cold (fit/fit-projections db projs {:target :html :avail-w 900 :area-budget 500000})]
+          (is (= 'seon.signals/render-signals-panel (get-in f-cold [:selected 0 :chosen-fn])))
+          (is (= :static (get-in f-cold [:selected 0 :measured-by])))
+
+          (fit/record-browser-box! 'seon.signals/render-signals-bar bar-fh 900 {:w 320 :h 48  :overflow-x? false})
+          (fit/record-browser-box! 'seon.signals/render-signals-panel pan-fh 900 {:w 960 :h 220 :overflow-x? true})
+          (let [f-br (fit/fit-projections db projs {:target :html :avail-w 900 :area-budget 500000})
+                sel (first (:selected f-br))
+                by-cand (into {} (map (juxt :fn identity)) (:candidates sel))
+                ex (fit/explain-candidates db projs {:target :html :avail-w 900 :area-budget 500000})
+                vars-by (into {} (map (juxt :fn identity)) (get-in ex [:selected 0 :variations]))]
+            (is (= 'seon.signals/render-signals-bar (:chosen-fn sel))
+                "Real browser overflow-x? on panel forces selection of smaller non-overflowing bar")
+            (is (= :browser (:measured-by sel)))
+            (is (false? (:overflow-x? sel)))
+            (is (= 15360 (:area sel)) "Uses real browser area 320*48")
+            (is (= static-bar-tok (:measured-tokens sel)) "Preserves exact static token count from measure-hiccup")
+            (is (= :browser (:measured-by (get by-cand 'seon.signals/render-signals-panel))))
+            (is (true? (:overflow-x? (get by-cand 'seon.signals/render-signals-panel))))
+            (is (false? (:fits-width? (get by-cand 'seon.signals/render-signals-panel))))
+            (is (= "Skipped: browser overflow at 900px"
+                   (:reason (get vars-by 'seon.signals/render-signals-panel)))))
+
+          (fit/clear-browser-box-cache!)
+          (let [f-opt (fit/fit-projections db projs
+                                           {:target :html :avail-w 900 :area-budget 500000
+                                            :browser-boxes {'seon.signals/render-signals-bar {:w 280 :h 40 :overflow-x? false}
+                                                            'seon.signals/render-signals-panel {:w 950 :h 200 :overflow-x? true}}})]
+            (is (= 'seon.signals/render-signals-bar (get-in f-opt [:selected 0 :chosen-fn])))
+            (is (= :browser (get-in f-opt [:selected 0 :measured-by])))
+            (is (= 11200 (get-in f-opt [:selected 0 :area])))))
+        (finally
+          (fit/clear-browser-box-cache!)))))
+
+  (testing "upgrade-ladder honors :per-item-budget in Pass 2 for multiple items while allowing a sole item full budget"
+    (let [mk (fn [tag]
+               [{:fn (symbol "demo" (str tag "-sm")) :hiccup [:span tag] :tokens 10  :min-width 120 :area 2000}
+                {:fn (symbol "demo" (str tag "-md")) :hiccup [:div tag]  :tokens 40  :min-width 280 :area 12000}
+                {:fn (symbol "demo" (str tag "-lg")) :hiccup [:section tag] :tokens 120 :min-width 480 :area 60000}])
+          items [{:entity 1 :rank/score 0.95 :candidates (mk "a")}
+                 {:entity 2 :rank/score 0.80 :candidates (mk "b")}]
+          multi-cap (fit/upgrade-ladder items {:target :wire :strategy :depth-first :token-budget 200 :per-item-budget 50})
+          by-e (into {} (map (juxt :entity identity)) (:selected multi-cap))
+          sole (fit/upgrade-ladder [(first items)] {:target :wire :strategy :depth-first :token-budget 200 :per-item-budget 50})
+          html-cap (fit/upgrade-ladder items {:target :html :avail-w 900 :area-budget 200000 :per-item-budget 20000})
+          big-base [{:entity 10 :rank/score 0.9 :candidates [{:fn 'demo/big-min :tokens 60 :min-width 120 :area 4000}]}
+                    {:entity 11 :rank/score 0.8 :candidates (mk "c")}]
+          admitted (fit/upgrade-ladder big-base {:target :wire :token-budget 200 :per-item-budget 50})]
+      (is (= 'demo/a-md (:chosen-fn (get by-e 1))))
+      (is (= 'demo/b-md (:chosen-fn (get by-e 2))))
+      (is (= 80 (:tokens multi-cap)))
+      (is (= 'demo/a-lg (get-in sole [:selected 0 :chosen-fn])))
+      (is (= 120 (:tokens sole)))
+      (is (= #{'demo/a-md 'demo/b-md} (set (map :chosen-fn (:selected html-cap)))))
+      (is (= 2 (count (:selected admitted))) "Pass 1 admits smallest valid footprint even if > per-item-budget")
+      (is (= 'demo/big-min (:chosen-fn (first (filter #(= 10 (:entity %)) (:selected admitted))))))))
+
+  (testing "normalize-entity-for-malli is public (2/3/4-arity) and new pure fit.measure helpers pass seed=42"
+    (is (not (:private (meta #'fit/normalize-entity-for-malli))) "normalize-entity-for-malli must be public")
+    (let [raw {:seon.code.var/calls [{:db/id 101} {:db/id 102}]
+               :seon.code.var/ns-ref {:db/id 200}
+               :demo/tags ["a" "b"]}
+          main-dh {:seon.code.var/calls {:db/cardinality :db.cardinality/many :db/valueType :db.type/ref}
+                   :seon.code.var/ns-ref {:db/cardinality :db.cardinality/one :db/valueType :db.type/ref}}
+          forms {:demo/tags [:set :string]}
+          n2 (fit/normalize-entity-for-malli nil raw)
+          n3 (fit/normalize-entity-for-malli nil raw forms)
+          n4 (fit/normalize-entity-for-malli nil raw forms main-dh)]
+      (is (= raw n2))
+      (is (= #{"a" "b"} (:demo/tags n3)))
+      (is (= #{101 102} (:seon.code.var/calls n4)))
+      (is (= 200 (:seon.code.var/ns-ref n4)))
+      (is (= #{"a" "b"} (:demo/tags n4)))
+      (is (= :non-map (fit/normalize-entity-for-malli nil :non-map))))
+    (doseq [sym '[seon.render.fit.measure/normalize-entity-map
+                  seon.render.fit.measure/normalize-browser-box
+                  seon.render.fit.measure/select-browser-box
+                  seon.render.fit.measure/apply-browser-box
+                  seon.render.fit.measure/item-candidates
+                  seon.render.fit.measure/candidate-urgency
+                  seon.render.fit.measure/candidate-raw-convergence
+                  seon.render.fit.measure/pool-norm
+                  seon.render.fit.measure/variation-reason]]
+      (let [res (schema/stress-var nil sym {:samples 100 :seed 42})]
+        (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))

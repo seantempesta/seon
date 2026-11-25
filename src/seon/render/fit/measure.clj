@@ -182,47 +182,59 @@
 
 (defn variation-reason
   "Returns an explicit human-readable selection/skip/drop reason for variation `c` of item `it`."
-  {:malli/schema [:=> [:cat :map :map :boolean :keyword :int :int] :string]
+  {:malli/schema [:=> [:cat :map :map :boolean :keyword :int :int [:? [:maybe :int]]] :string]
    :cost/ticks 200000}
-  [c it dropped? target avail-w remaining]
-  (let [mw (safe-long (:min-width c) 0)
-        tok (safe-long (:tokens c) 0)
-        area (safe-long (:area c) 0)
-        cfn (:chosen-fn it)
-        bfn (:base-fn it)
-        status (:status it)
-        chosen? (and (not dropped?) (= (:fn c) cfn))]
-    (cond
-      dropped?
-      (cond (and (= target :html) (> mw avail-w)) (str "Skipped: min-width " mw "px > slot " avail-w "px")
-            (= target :wire) (str "Dropped: exceeds budget (" tok " tok > " remaining " tok left)")
-            :else (str "Dropped: exceeds budget (" area " px² > " remaining " px² left)"))
+  ([c it dropped? target avail-w remaining]
+   (variation-reason c it dropped? target avail-w remaining
+                     (when (integer? (:per-item-budget it)) (long (:per-item-budget it)))))
+  ([c it dropped? target avail-w remaining per-item-budget]
+   (let [mw (safe-long (:min-width c) 0)
+         tok (safe-long (:tokens c) 0)
+         area (safe-long (:area c) 0)
+         ov? (boolean (:overflow-x? c))
+         pib (when (and (integer? per-item-budget) (pos? (long per-item-budget)))
+               (long per-item-budget))
+         cfn (:chosen-fn it)
+         bfn (:base-fn it)
+         status (:status it)
+         chosen? (and (not dropped?) (= (:fn c) cfn))]
+     (cond
+       dropped?
+       (cond (and (= target :html) ov?) (str "Skipped: browser overflow at " avail-w "px")
+             (and (= target :html) (> mw avail-w)) (str "Skipped: min-width " mw "px > slot " avail-w "px")
+             (= target :wire) (str "Dropped: exceeds budget (" tok " tok > " remaining " tok left)")
+             :else (str "Dropped: exceeds budget (" area " px² > " remaining " px² left)"))
 
-      chosen?
-      (cond (and (= target :wire) (= :unchanged status)) "0 tok (already-shown)"
-            (and (= target :wire) (or (= :upgraded status) (and bfn (not= bfn cfn))))
-            (str "Chosen (Pass 2 upgraded +" (max 0 (- tok (safe-long (:base-tokens it) 0))) " tok)")
-            (and (= target :html) bfn (not= bfn cfn))
-            (str "Chosen (Pass 2 upgraded +" (max 0 (- area (safe-long (:base-area it) 0))) " px²)")
-            (and (= target :html) (> mw avail-w))
-            (str "Chosen (Fallback smallest; min-width " mw "px > slot " avail-w "px)")
-            :else "Chosen (Pass 1 base fit)")
+       chosen?
+       (cond (and (= target :wire) (= :unchanged status)) "0 tok (already-shown)"
+             (and (= target :wire) (or (= :upgraded status) (and bfn (not= bfn cfn))))
+             (str "Chosen (Pass 2 upgraded +" (max 0 (- tok (safe-long (:base-tokens it) 0))) " tok)")
+             (and (= target :html) bfn (not= bfn cfn))
+             (str "Chosen (Pass 2 upgraded +" (max 0 (- area (safe-long (:base-area it) 0))) " px²)")
+             (and (= target :html) ov?)
+             (str "Chosen (Fallback smallest; browser overflow at " avail-w "px)")
+             (and (= target :html) (> mw avail-w))
+             (str "Chosen (Fallback smallest; min-width " mw "px > slot " avail-w "px)")
+             :else "Chosen (Pass 1 base fit)")
 
-      (and (= target :html) (> mw avail-w))
-      (str "Skipped: min-width " mw "px > slot " avail-w "px")
+       (and (= target :html) ov?)
+       (str "Skipped: browser overflow at " avail-w "px")
 
-      (= target :wire)
-      (let [ctok (safe-long (or (:measured-tokens it) (:tokens it)) 0)
-            eff-c (if (= :unchanged status) 0 ctok)]
-        (if (< tok ctok)
-          "Superseded by richer variation"
-          (str "Skipped: needs +" (max 0 (- tok eff-c)) " tok > " remaining " tok left")))
+       (and (= target :html) (> mw avail-w))
+       (str "Skipped: min-width " mw "px > slot " avail-w "px")
 
-      :else
-      (let [carea (safe-long (:area it) 0)]
-        (if (< area carea)
-          "Superseded by richer variation"
-          (str "Skipped: needs +" (max 0 (- area carea)) " px² > " remaining " px² left"))))))
+       (= target :wire)
+       (let [ctok (safe-long (or (:measured-tokens it) (:tokens it)) 0)
+             eff-c (if (= :unchanged status) 0 ctok)]
+         (cond (< tok ctok) "Superseded by richer variation"
+               (and pib (> tok pib)) (str "Skipped: exceeds per-item budget (" tok " tok > " pib " tok cap)")
+               :else (str "Skipped: needs +" (max 0 (- tok eff-c)) " tok > " remaining " tok left")))
+
+       :else
+       (let [carea (safe-long (:area it) 0)]
+         (cond (< area carea) "Superseded by richer variation"
+               (and pib (> area pib)) (str "Skipped: exceeds per-item budget (" area " px² > " pib " px² cap)")
+               :else (str "Skipped: needs +" (max 0 (- area carea)) " px² > " remaining " px² left")))))))
 
 (defn build-explained-item
   "Assembles the complete explanation record for one ranked candidate item and all its variations."
@@ -241,6 +253,8 @@
      :selected? (not dropped?)
      :zone (:zone it)
      :chosen-fn cfn
+     :measured-by (or (:measured-by it) :static)
+     :overflow-x? (boolean (:overflow-x? it))
      :tokens (long (if dropped? 0 (safe-long (:tokens it) 0)))
      :measured-tokens (long (safe-long (or (:measured-tokens it) (:tokens it)) 0))
      :min-width (long (safe-long (:min-width it) 0))
@@ -262,7 +276,167 @@
               :min-width (long (safe-long (:min-width c) 0))
               :area (long (safe-long (:area c) 0))
               :lines (long (safe-long (:lines c) 0))
-              :fits-width? (<= (safe-long (:min-width c) 0) avail-w)
+              :measured-by (or (:measured-by c) :static)
+              :overflow-x? (boolean (:overflow-x? c))
+              :fits-width? (and (<= (safe-long (:min-width c) 0) avail-w)
+                                (not (:overflow-x? c)))
               :chosen? (boolean (and (not dropped?) (= (:fn c) cfn)))
               :reason (variation-reason c it dropped? target avail-w remaining)})
            cands)}))
+
+(defn- set-schema-form? [f]
+  (and (vector? f) (or (= :set (first f)) (and (= :and (first f)) (some set-schema-form? (rest f))))))
+
+(defn- unwrap-ref [x]
+  (if (and (map? x) (= 1 (count x)) (integer? (:db/id x))) (:db/id x) x))
+
+(defn normalize-entity-map
+  "Normalizes entity map `ent` against schema maps `dh`/`main-dh` and Malli `forms`: converts
+   `:db.cardinality/many` or `:set` values to sets and unwraps single-key `{:db/id n}` refs."
+  {:malli/schema [:=> [:cat [:maybe :map] :any [:maybe :map] [:maybe :map]] :any]
+   :cost/ticks 2000000}
+  [dh ent forms main-dh]
+  (if-not (map? ent)
+    ent
+    (let [d1 (when (map? dh) dh)
+          d2 (when (map? main-dh) main-dh)
+          fs (when (map? forms) forms)]
+      (into {} (map (fn [[k v]]
+                      (let [raw-sp (or (get d1 k) (get d2 k))
+                            sp (when (map? raw-sp) raw-sp)
+                            many? (or (= :db.cardinality/many (:db/cardinality sp))
+                                      (set-schema-form? (get fs k)))
+                            ref? (= :db.type/ref (:db/valueType sp))
+                            v1 (cond
+                                 (and many? (sequential? v)) (into #{} (if ref? (map unwrap-ref) identity) v)
+                                 (and many? (set? v) ref?) (into #{} (map unwrap-ref) v)
+                                 (and many? (some? v) (not (set? v))) #{(if ref? (unwrap-ref v) v)}
+                                 ref? (unwrap-ref v)
+                                 :else v)]
+                        [k v1])))
+            ent))))
+
+(defn normalize-browser-box
+  "Normalizes a browser measurement box map into `{:w :h :area :overflow-x? :slot-w}`."
+  {:malli/schema [:=> [:cat :int :map]
+                  [:map [:w :int] [:h :int] [:area :int] [:overflow-x? :boolean] [:slot-w :int]]]
+   :cost/ticks 50000}
+  [slot-w box]
+  (let [sw (max 1 (safe-long slot-w 1))
+        bw (max 0 (safe-long (or (:w box) (:width box)) sw))
+        bh (max 0 (safe-long (or (:h box) (:height box)) 0))
+        ba (max 1 (safe-long (:area box) (* (max 1 bw) (max 1 bh))))
+        ov? (boolean (or (:overflow-x? box) (:overflowX box)))]
+    {:w bw :h bh :area ba :overflow-x? ov? :slot-w sw}))
+
+(defn select-browser-box
+  "Selects the best recorded browser box from `{slot-w box}` for `avail-w`:
+   exact `slot-w == avail-w` if present, else largest `slot-w <= avail-w`, else smallest `slot-w`."
+  {:malli/schema [:=> [:cat :map :int] [:maybe :map]]
+   :cost/ticks 50000}
+  [by-w avail-w]
+  (when (seq by-w)
+    (let [aw (long avail-w)
+          exact (get by-w aw)]
+      (if (map? exact)
+        exact
+        (let [ws (filterv #(and (integer? %) (map? (get by-w %))) (keys by-w))]
+          (when (seq ws)
+            (let [le (filterv #(<= (long %) aw) ws)
+                  best-w (if (seq le) (reduce max le) (reduce min ws))]
+              (get by-w best-w))))))))
+
+(defn apply-browser-box
+  "Applies a real browser box `{:w :h :area :overflow-x?}` onto static Hiccup metrics `m`,
+   preserving exact `:tokens`/`:chars`/`:lines` and tagging `:measured-by` (`:browser` vs `:static`)."
+  {:malli/schema [:=> [:cat :map [:maybe :map] :int] :map]
+   :cost/ticks 50000}
+  [m box avail-w]
+  (let [b (when (map? box)
+            (if (and (seq box) (every? integer? (keys box)))
+              (select-browser-box box avail-w)
+              box))]
+    (if-not (map? b)
+      (assoc m :measured-by :static :overflow-x? (boolean (:overflow-x? m)))
+      (let [aw (max 1 (long avail-w))
+            bw (max 0 (safe-long (or (:w b) (:width b)) (safe-long (:min-width m) 0)))
+            bh (max 0 (safe-long (or (:h b) (:height b)) 0))
+            ov? (boolean (or (:overflow-x? b) (:overflowX b)))
+            ba (max 1 (safe-long (:area b) (* (max 1 bw) (max 1 bh))))
+            mw (if ov? (max bw (inc aw)) bw)]
+        (assoc m :w bw :h bh :min-width mw :area ba
+               :overflow-x? ov? :measured-by :browser)))))
+
+(defn item-candidates
+  "Normalizes an item map's `:candidates` vector (or synthesizes a default candidate from `:tokens`/`:data`)."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]
+   :cost/ticks 5000000}
+  [item]
+  (let [raw (:candidates item)]
+    (if (and (sequential? raw) (seq raw) (every? map? raw))
+      (mapv normalize-candidate raw)
+      (let [tok (cond (= :unchanged (:status item)) 0
+                      (number? (:tokens item)) (max 0 (safe-long (:tokens item) 0))
+                      :else (let [p (or (:delta-data item) (:data item))]
+                              (if (and (map? p) (empty? p)) 0 (max 1 (quot (count (pr-str p)) 4)))))]
+        [(normalize-candidate
+          {:fn (or (:fn item) :default/projection) :hiccup (:hiccup item)
+           :tokens tok :chars (* 4 tok)
+           :min-width (safe-long (:min-width item) 240) :lines (max 1 (quot tok 16))})]))))
+
+(defn- clamp01 [x]
+  (max 0.0 (min 1.0 (finite-double x 0.0))))
+
+(defn- to-set [x]
+  (cond (set? x) x (coll? x) (set x) (some? x) #{x} :else #{}))
+
+(defn candidate-urgency
+  "Computes the normalized `[0.0, 1.0]` urgency signal for a candidate entity map."
+  {:malli/schema [:=> [:cat :map] number?]
+   :cost/ticks 100000}
+  [c]
+  (if (number? (:urgency c))
+    (clamp01 (:urgency c))
+    (let [data (if (map? (:data c)) (:data c) {})
+          tags (to-set (:tags c))
+          rules (to-set (:rules c))
+          anchor (cond
+                   (or (= :open (:seon.error/status data)) (:open-error? c)
+                       (tags :error) (tags :fault) (rules :rule.ctx/fault-with-recommended-fix)) 1.0
+                   (or (false? (:seon.test/pass? data)) (:failing-test? c)
+                       (tags :failing-test) (rules :rule.ctx/failing-reach-tests)) 0.95
+                   (or (some? (:seon.fix/id data)) (:matching-fix? c) (tags :fix)) 0.90
+                   (or (:edited? c) (:branch-edited? c) (:written? c)
+                       (tags :edited) (rules :rule.ctx/edited-var-on-branch)) 0.85
+                   (or (and (some? (:seon.task/id data)) (not (:seon.task/done? data)))
+                       (:active-task? c) (tags :active-task) (rules :rule.ctx/active-task-and-lineage)) 0.75
+                   (or (:pinned? c) (tags :pinned) (rules :rule.ctx/pinned-entities)) 0.70
+                   :else 0.0)
+          pri-u (if (number? (:priority c))
+                  (* 0.45 (clamp01 (/ (finite-double (:priority c) 0.0) 100.0)))
+                  0.0)]
+      (max anchor pri-u))))
+
+(defn candidate-raw-convergence
+  "Computes raw convergence energy from `:touch-energy`, `:touches`, and converging `:rules`."
+  {:malli/schema [:=> [:cat :map] number?]
+   :cost/ticks 50000}
+  [c]
+  (let [te (when (number? (:touch-energy c)) (max 0.0 (finite-double (:touch-energy c) 0.0)))
+        raw-t (if (some? te) (* 2.5 te) (double (max 0 (safe-long (or (:touches c) (:eval-touches c)) 0))))
+        paths (double (max 0 (safe-long (or (:converging-paths c) (:convergence c)
+                                            (when (coll? (:rules c)) (count (:rules c)))) 0)))]
+    (+ raw-t paths)))
+
+(defn pool-norm
+  "Min-max normalizes a vector of numbers into `[0.0, 1.0]` across the pool."
+  {:malli/schema [:=> [:cat [:vector number?]] [:vector number?]]
+   :cost/ticks 200000}
+  [vs]
+  (if (empty? vs)
+    []
+    (let [ds (mapv #(finite-double % 0.0) vs)
+          lo (reduce min ds) hi (reduce max ds) span (- hi lo)]
+      (if (zero? span)
+        (mapv #(if (pos? %) 1.0 0.0) ds)
+        (mapv #(/ (- % lo) span) ds)))))

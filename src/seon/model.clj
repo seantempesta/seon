@@ -189,100 +189,101 @@
 (defonce ^:private ^:seon.flow/edge multimodal-unsupported-endpoints (atom #{}))
 
 (defn ^:seon.flow/edge openai-stream-chat!
-"Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
- `(on-delta {:kind :token|:reasoning-token :text s})` per chunk and returning `finalize-stream-state`.
- Automatically strips `image_url` parts and retries once on HTTP 400/422 multimodal-unsupported
- errors or transport drops on multimodal requests, caching proven text-only endpoints in memory."
-{:malli/schema [:function [:=> [:cat :map [:maybe :string] :any :string :any] :any]
-                [:=> [:cat :map [:maybe :string] :any :string :any :any] :any]]
- :cost/ticks 100000000}
-([prov system-prompt history user-prompt on-delta]
- (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
-([prov system-prompt history user-prompt wire-messages on-delta]
- (let [api-key-env (or (:api-key-env prov) "DEEPSEEK_API_KEY")
-       api-key (or (:api-key prov) (System/getenv api-key-env))]
-   (when (str/blank? api-key)
-     (throw (ex-info (str "Missing model API key in env var " api-key-env)
-                     {:error :seon.model/missing-api-key :env api-key-env})))
-   (let [base-url (or (:base-url prov) "https://api.deepseek.com")
-         url (str (str/replace base-url #"/+$" "") "/chat/completions")
-         raw-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
-                                     system-prompt history user-prompt)
-         endpoint-k [base-url (or (:model prov) (:model raw-req))]
-         init-req (if (and (contains? @multimodal-unsupported-endpoints endpoint-k)
-                           (messages-have-image-parts? (:messages raw-req)))
-                    (update raw-req :messages strip-image-parts)
-                    raw-req)]
-     (loop [attempt 0
-            req-map init-req]
-       (let [req-body (json/write-str req-map)
-             post-res (try
-                        {:ok? true
-                         :resp (http/post url {:headers {"Authorization" (str "Bearer " api-key)
-                                                         "Content-Type" "application/json"
-                                                         "Accept" "text/event-stream"}
-                                               :body req-body
-                                               :as :stream
-                                               :throw false})}
-                        (catch Throwable ex
-                          {:ok? false :ex ex}))]
-         (if-not (:ok? post-res)
-           (if (and (zero? attempt)
-                    (messages-have-image-parts? (:messages req-map)))
-             (do
-               (when-not (contains? @multimodal-fallback-logged endpoint-k)
-                 (swap! multimodal-fallback-logged conj endpoint-k)
-                 (binding [*out* *err*]
-                   (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
-                                 ") dropped connection on image_url parts (" (.getMessage ^Throwable (:ex post-res))
-                                 "); stripping image parts and retrying text-only."))))
-               (recur 1 (update req-map :messages strip-image-parts)))
-             (throw ^Throwable (:ex post-res)))
-           (let [resp (:resp post-res)
-                 status (long (or (:status resp) 0))
-                 body (:body resp)]
-             (if (not= 200 status)
-               (let [body-str (cond
-                                (nil? body) ""
-                                (string? body) body
-                                :else (with-open [in ^java.io.InputStream body] (slurp in :encoding "UTF-8")))]
-                 (if (and (zero? attempt)
-                          (messages-have-image-parts? (:messages req-map))
-                          (multimodal-unsupported-error? status body-str))
-                   (do
-                     (swap! multimodal-unsupported-endpoints conj endpoint-k)
-                     (when-not (contains? @multimodal-fallback-logged endpoint-k)
-                       (swap! multimodal-fallback-logged conj endpoint-k)
-                       (binding [*out* *err*]
-                         (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
-                                       ") rejected image_url parts (HTTP " status
-                                       "); stripping image parts and retrying text-only."))))
-                     (recur 1 (update req-map :messages strip-image-parts)))
-                   (let [hdrs (:headers resp)
-                         retry-after (some (fn [[k v]]
-                                             (when (= "retry-after" (str/lower-case (str k)))
-                                               (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
-                                           hdrs)]
-                     (throw (ex-info (str "Model HTTP " status ": " (subs body-str 0 (min 300 (count body-str))))
-                                     {:error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error)
-                                      :status status
-                                      :retry-after-ms retry-after
-                                      :headers hdrs
-                                      :body body-str})))))
+  "Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
+   `(on-delta {:kind :token|:reasoning-token :text s})` per chunk and returning `finalize-stream-state`.
+   Automatically strips `image_url` parts and retries once on HTTP 400/422 multimodal-unsupported
+   errors (caching proven text-only endpoints in memory) or transient transport drops (without caching)."
+  {:malli/schema [:function [:=> [:cat :map [:maybe :string] :any :string :any] :any]
+                  [:=> [:cat :map [:maybe :string] :any :string :any :any] :any]]
+   :cost/ticks 100000000}
+  ([prov system-prompt history user-prompt on-delta]
+   (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
+  ([prov system-prompt history user-prompt wire-messages on-delta]
+   (let [api-key-env (or (:api-key-env prov) "DEEPSEEK_API_KEY")
+         api-key (or (:api-key prov) (System/getenv api-key-env))]
+     (when (str/blank? api-key)
+       (throw (ex-info (str "Missing model API key in env var " api-key-env)
+                       {:error :seon.model/missing-api-key :env api-key-env})))
+     (let [base-url (or (:base-url prov) "https://api.deepseek.com")
+           url (str (str/replace base-url #"/+$" "") "/chat/completions")
+           raw-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
+                                       system-prompt history user-prompt)
+           endpoint-k [base-url (or (:model prov) (:model raw-req))]
+           init-req (if (and (contains? @multimodal-unsupported-endpoints endpoint-k)
+                             (messages-have-image-parts? (:messages raw-req)))
+                      (update raw-req :messages strip-image-parts)
+                      raw-req)]
+       (loop [attempt 0
+              req-map init-req
+              unsupported-4xx? false]
+         (let [req-body (json/write-str req-map)
+               post-res (try
+                          {:ok? true
+                           :resp (http/post url {:headers {"Authorization" (str "Bearer " api-key)
+                                                           "Content-Type" "application/json"
+                                                           "Accept" "text/event-stream"}
+                                                 :body req-body
+                                                 :as :stream
+                                                 :throw false})}
+                          (catch Throwable ex
+                            {:ok? false :ex ex}))]
+           (if-not (:ok? post-res)
+             (if (and (zero? attempt)
+                      (messages-have-image-parts? (:messages req-map)))
                (do
-                 (when (pos? attempt)
-                   (swap! multimodal-unsupported-endpoints conj endpoint-k))
-                 (let [st-vol (volatile! (make-stream-state))]
-                   (when body
-                     (with-open [rdr (io/reader body :encoding "UTF-8")]
-                       (sse/read-events!
-                        rdr
-                        {:on-event (fn [ev]
-                                     (when-let [parsed (wire/decode-sse-data (:data ev))]
-                                       (let [[st1 delta] (process-sse-chunk parsed @st-vol)]
-                                         (vreset! st-vol st1)
-                                         (when (and delta on-delta) (on-delta delta)))))})))
-                   (finalize-stream-state @st-vol))))))))))))
+                 (when-not (contains? @multimodal-fallback-logged endpoint-k)
+                   (swap! multimodal-fallback-logged conj endpoint-k)
+                   (binding [*out* *err*]
+                     (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
+                                   ") dropped connection on image_url parts (" (.getMessage ^Throwable (:ex post-res))
+                                   "); stripping image parts and retrying text-only (transient, not cached)."))))
+                 (recur 1 (update req-map :messages strip-image-parts) false))
+               (throw ^Throwable (:ex post-res)))
+             (let [resp (:resp post-res)
+                   status (long (or (:status resp) 0))
+                   body (:body resp)]
+               (if (not= 200 status)
+                 (let [body-str (cond
+                                  (nil? body) ""
+                                  (string? body) body
+                                  :else (with-open [in ^java.io.InputStream body] (slurp in :encoding "UTF-8")))]
+                   (if (and (zero? attempt)
+                            (messages-have-image-parts? (:messages req-map))
+                            (multimodal-unsupported-error? status body-str))
+                     (do
+                       (swap! multimodal-unsupported-endpoints conj endpoint-k)
+                       (when-not (contains? @multimodal-fallback-logged endpoint-k)
+                         (swap! multimodal-fallback-logged conj endpoint-k)
+                         (binding [*out* *err*]
+                           (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
+                                         ") rejected image_url parts (HTTP " status
+                                         "); stripping image parts and retrying text-only."))))
+                       (recur 1 (update req-map :messages strip-image-parts) true))
+                     (let [hdrs (:headers resp)
+                           retry-after (some (fn [[k v]]
+                                               (when (= "retry-after" (str/lower-case (str k)))
+                                                 (try (* 1000 (parse-long (str/trim (str v)))) (catch Throwable _ nil))))
+                                             hdrs)]
+                       (throw (ex-info (str "Model HTTP " status ": " (subs body-str 0 (min 300 (count body-str))))
+                                       {:error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error)
+                                        :status status
+                                        :retry-after-ms retry-after
+                                        :headers hdrs
+                                        :body body-str})))))
+                 (do
+                   (when (and (pos? attempt) unsupported-4xx?)
+                     (swap! multimodal-unsupported-endpoints conj endpoint-k))
+                   (let [st-vol (volatile! (make-stream-state))]
+                     (when body
+                       (with-open [rdr (io/reader body :encoding "UTF-8")]
+                         (sse/read-events!
+                          rdr
+                          {:on-event (fn [ev]
+                                       (when-let [parsed (wire/decode-sse-data (:data ev))]
+                                         (let [[st1 delta] (process-sse-chunk parsed @st-vol)]
+                                           (vreset! st-vol st1)
+                                           (when (and delta on-delta) (on-delta delta)))))})))
+                     (finalize-stream-state @st-vol))))))))))))
 
 (defn model-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
