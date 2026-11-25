@@ -339,9 +339,9 @@
             test-res (when (and (not timed-out?) (:run-tests? task) (or (not already-merged?) (:retest-main? task)))
                        (instance-op! inst-handle {:op :test :branch (if already-merged? :main branch)}))
             merge-res (when (and (not timed-out?) (:merge? task))
-                        (if already-merged?
-                          {:ok? true :already-merged? true :branch branch}
-                          (instance-op! inst-handle {:op :merge :branch branch :message (str "Bench trial " (name id))})))
+                      (if already-merged?
+                        {:ok? true :already-merged? true :branch branch}
+                        (instance-op! inst-handle {:op :merge :branch branch :message (str "Bench trial " (name id))})))
             health-res (instance-op! inst-handle {:op :health})
             outcome (trial-outcome {:task task :ag-snap ag-snap :eval-res eval-res :agent-res agent-res
                                     :test-res test-res :merge-res merge-res :final-trace final-trace})
@@ -380,7 +380,7 @@
                          (or (:timed-out? result-row) (= :timeout (:status result-row))) :timeout
                          :else :failed)
         err-text (or (:last-error result-row) (:error result-row))
-        telemetry-keys (into [:category :arm :pair-id :turn-overrun? :child-merged? :total-kv-hit-pct] (map second bh/telemetry-numeric-pairs))]
+        telemetry-keys (into [:category :arm :pair-id :turn-overrun? :child-merged? :total-kv-hit-pct :eval-trace] (map second bh/telemetry-numeric-pairs))]
     (merge
       (cond-> {:id (:id result-row) :status row-status :port (:port result-row)
                :evals (long (or (:evals result-row) 0)) :elapsed-ms (long (or (:elapsed-ms result-row) 0))
@@ -400,8 +400,10 @@
         title (or (not-empty (str (:title opts ""))) (str "Parallel Trial (" (count tasks) " tasks)"))
         init-trials (mapv (fn [idx task]
                             (cond-> {:id (or (:id task) (keyword "trial" (str "t" (inc idx))))
-                                     :status :booting :evals 0 :elapsed-ms 0 :alive? false}
-                              (:category task) (assoc :category (:category task))))
+                                   :status :booting :evals 0 :elapsed-ms 0 :alive? false}
+                            (:category task) (assoc :category (:category task))
+                            (:arm task) (assoc :arm (:arm task))
+                            (:pair-id task) (assoc :pair-id (:pair-id task))))
                           (range) tasks)
         state-atom (atom {:trials (into {} (map (juxt :id identity) init-trials))
                           :order (mapv :id init-trials) :proxy-stats nil :last-pub-ms 0})
