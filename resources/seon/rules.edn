@@ -4,22 +4,11 @@
                     ?prereq
                     ?tx
                     :in
-                    $
                     $main
                     $branch
                     ?agent
-                    %
                     :where
-                    (or-join
-                     [?agent ?t ?tx]
-                     (and
-                      [$branch ?ag :seon.agent/id ?agent]
-                      [$branch ?ag :seon.agent/tasks ?t ?tx])
-                     (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/tasks ?t ?tx]))
-                    (or-join
-                     [?t ?prereq]
-                     (needs* ?t ?prereq)
-                     (and [(identity ?t) ?t] [(ground :seon.rule/nil) ?prereq]))],
+                    [(seon.ctx.ground/active-task-rows $main $branch ?agent) [[?t ?prereq ?tx]]]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?t,
@@ -131,34 +120,14 @@
                     $wm
                     ?agent
                     :where
-                    (or-join
-                     [?agent ?ns ?tx]
-                     (and
-                      (or-join
-                       [?agent ?sc]
-                       (and [$branch ?ag :seon.agent/id ?agent] [$branch ?ag :seon.agent/scope ?sc])
-                       (and [$main ?ag :seon.agent/id ?agent] [$main ?ag :seon.agent/scope ?sc])
-                       (and
-                        [$branch ?ag :seon.agent/id ?agent]
-                        [$branch ?ag :seon.agent/tasks ?te]
-                        [$branch ?te :seon.task/scope ?sc])
-                       (and
-                        [$main ?ag :seon.agent/id ?agent]
-                        [$main ?ag :seon.agent/tasks ?te]
-                        [$main ?te :seon.task/scope ?sc]))
-                      (or-join
-                       [?sc ?ns ?tx]
-                       [$branch ?ns :seon.code.ns/name ?sc ?tx]
-                       (and
-                        (not-join [?sc] [$branch ?nb :seon.code.ns/name ?sc])
-                        [$main ?ns :seon.code.ns/name ?sc ?tx])))
-                     (and
-                      [$wm ?ns :world/extra-ns true]
-                      [(identity ?agent) ?agent]
-                      (or-join
-                       [?ns ?tx]
-                       [$wm ?ns :world/tx ?tx]
-                       (and (not [$wm ?ns :world/tx _]) [(ground 0) ?tx]))))],
+                    [(seon.ctx.ground/scope-ns-rows
+                      $main
+                      $branch
+                      $wm
+                      ?agent
+                      :world/extra-ns
+                      :world/tx)
+                     [[?ns ?tx]]]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?ns,

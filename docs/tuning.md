@@ -63,7 +63,7 @@ The Upgrade Ladder (`seon.render.fit`) automatically chooses the richest pure re
 `@user/ctx` is a live bidirectional Datahike-backed Clojure atom. Edit data using standard Clojure (`get`, `filter`, `remove`, `assoc`, `conj`, `swap!`) — every write is checked against Malli schemas:
 
 - **Pin an entity onto the forked target**:
-  `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent/pinned] (fnil conj #{}) [:seon.code.var/name 'ns/v])`
+  `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent/pinned] (fnil conj []) [:seon.code.var/name 'ns/v])`
 - **Roll back bad turns (strictly before `err-turn`)**:
   `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] #(filterv (fn [e] (< (long (:seon.agent.eval/turn e 0)) err-turn)) %))`
 - **Prune specific noisy turns**:

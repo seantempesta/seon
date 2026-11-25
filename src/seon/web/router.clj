@@ -491,3 +491,13 @@
           (let [v (decode-entity-val db a (:val path-params))]
             (when (some? v) (inspect-op [a v] explain? tx))))
         nil))))
+
+(defn op-timeout-ms
+  "Returns bounded `/op` server timeout in ms: honors caller `:timeout-ms` (clamped `1000..600000`), else `:test` 120s, `:eval`/`:merge` 60s, default 30s."
+  {:malli/schema [:=> [:cat [:maybe :map]] pos-int?]
+   :cost/ticks 50000}
+  [op-req]
+  (let [t (:timeout-ms op-req)]
+    (long (if (and (number? t) (pos? t))
+            (min 600000 (max 1000 (long t)))
+            (case (:op op-req) :test 120000 (:eval :merge) 60000 30000)))))

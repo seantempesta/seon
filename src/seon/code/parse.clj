@@ -619,3 +619,14 @@
                     (conj raw-forms {:form form
                                      :lead (subs text prev-end start)
                                      :src (subs text start end)})))))))))
+
+(defn named-expr-sig
+  "Returns `[head name]` for top-level `(deftype Name ...)`, `(defrecord Name ...)`, or `(definterface Name ...)` forms, else nil."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe [:tuple :symbol :symbol]]]
+   :cost/ticks 500000}
+  [src]
+  (when (and (string? src) (not (str/blank? src)))
+    (let [s (str/triml src)]
+      (when (str/starts-with? s "(")
+        (when-let [[_ hd nm] (re-find #"^\(\s*(?:clojure\.core/)?(deftype|defrecord|definterface)\s+(?:\^\{[^}]*\}\s*|\^\S+\s*)*([A-Za-z_][A-Za-z0-9_.*+!\-?$]*)" s)]
+          [(symbol hd) (symbol nm)])))))

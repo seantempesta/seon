@@ -292,8 +292,7 @@
 
 (defn- handle-op-route [{:keys [server-in-ch]} req]
   (let [op-req (edn/read-string (req-body-str req))
-        timeout-ms (if (= :test (:op op-req)) 120000 30000)
-        ans (call-server-edge! server-in-ch op-req timeout-ms)]
+        ans (call-server-edge! server-in-ch op-req (router/op-timeout-ms op-req))]
     {:status 200 :headers {"Content-Type" "application/edn; charset=utf-8"} :body (pr-str ans)}))
 
 (defn- handle-mcp-route [{:keys [server-in-ch conn]} req]
