@@ -363,3 +363,58 @@
      (if (= a b)
        ""
        (text-diff/unified-diff a b {:context 2 :filename (str (or label "form"))})))))
+
+(defn flatten-top-level-do-srcs
+  "Recursively unwraps non-empty top-level `(do ...)` blocks in `src` into sequential top-level form source strings
+   (matching Clojure `Compiler.java` top-level `do` flattening while preserving CST formatting and metadata).
+   Returns `[src]` unchanged on non-`do` forms, empty `(do)`, or unparseable syntax."
+  {:malli/schema [:=> {:examples [[["(do (in-ns 'demo.a) (defn f [x] x))"]
+                                   ["(in-ns 'demo.a)" "(defn f [x] x)"]]
+                                  [["(do (do (defn a [] 1)) (defn b [] 2))"]
+                                   ["(defn a [] 1)" "(defn b [] 2)"]]
+                                  [["(defn f [x] (+ x 1))"]
+                                   ["(defn f [x] (+ x 1))"]]
+                                  [["(do)"]
+                                   ["(do)"]]]}
+                  [:cat :string] [:vector :string]]
+   :cost/ticks 2000000
+   :cost/bytes 4194304}
+  [src]
+  (let [s (str src)]
+    (if-not (re-find #"^\s*\(\s*(?:clojure\.core/)?do(?:\s|$)" s)
+      [s]
+      (let [p (parse-non-ws-nodes s)]
+        (if-not (and (:ok? p) (= 1 (count (:nodes p))))
+          [s]
+          (letfn [(dedent-by [txt col]
+                    (let [ls (str/split-lines txt)]
+                      (if (or (<= (count ls) 1) (not (pos? (long col))))
+                        txt
+                        (str/join "\n"
+                          (cons (first ls)
+                                (map (fn [l]
+                                       (let [sp (count (re-find #"^ *" l))
+                                             cut (min (long col) sp)]
+                                         (subs l cut)))
+                                     (rest ls)))))))
+                  (unwrap [nd col]
+                    (if (= :list (n/tag nd))
+                      (let [raw (vec (n/children nd))
+                            non-ws (vec (remove #(or (n/whitespace-or-comment? %) (= :uneval (n/tag %))) raw))
+                            h (first non-ws)
+                            hs (when (and h (= :token (n/tag h))) (n/string h))]
+                        (if (and (contains? #{"do" "clojure.core/do"} hs) (> (count non-ws) 1))
+                          (loop [xs raw, seen-head? false, cur-col 0, at-sol? false, out []]
+                            (if (empty? xs)
+                              out
+                              (let [c (first xs) tag (n/tag c)]
+                                (cond
+                                  (= tag :newline) (recur (rest xs) seen-head? 0 true out)
+                                  (n/whitespace-or-comment? c)
+                                  (recur (rest xs) seen-head? (if at-sol? (+ cur-col (count (n/string c))) cur-col) at-sol? out)
+                                  (= tag :uneval) (recur (rest xs) seen-head? 0 false out)
+                                  (not seen-head?) (recur (rest xs) true 0 false out)
+                                  :else (recur (rest xs) true 0 false (into out (unwrap c (if at-sol? cur-col 0))))))))
+                          [(dedent-by (n/string nd) col)]))
+                      [(dedent-by (n/string nd) col)]))]
+            (unwrap (first (:nodes p)) 0)))))))

@@ -571,3 +571,39 @@
           h (seon.code.errors/enrich-eval-error "(user/run-tests! #'a/b)" "class clojure.lang.Var cannot be cast to class clojure.lang.Named" {})]
       (is (= [{:type :health-block :body "bad"}] (:bounce-messages tm)))
       (is (clojure.string/includes? h "not a Var")))))
+
+(deftest ^{:cost/ticks 80000000} wave26b-top-level-do-eval-persistence-dq-oom-hints-and-run-ab-test
+  (testing "seon.code.cst/flatten-top-level-do-srcs recursively unwraps top-level do blocks preserving indent and skipping uneval"
+    (is (= ["(in-ns 'demo.x)" "(defn f [a]\n  (+ a 1))"]
+           (cst/flatten-top-level-do-srcs "(do\n  (in-ns 'demo.x)\n  (defn f [a]\n    (+ a 1)))")))
+    (is (= ["(defn a [] 1)" "(defn b [] 2)"]
+           (cst/flatten-top-level-do-srcs "(do (do #_(ignored) (defn a [] 1)) (defn b [] 2))")))
+    (is (= ["(do)"] (cst/flatten-top-level-do-srcs "(do)"))))
+  (testing "seon.code/eval-forms persists (defn ...) inside top-level (do (in-ns '...) (defn ...)) to Datahike"
+    (tf/with-test-store [{:keys [conn]}]
+      (let [res (code/eval-forms @conn {:agent-id :repl/do-test :turn 1 :default-ns 'user}
+                  "(do\n  (in-ns 'seon.demo.do-persist)\n  (defn- helper [x] (+ x 1))\n  (defn pub-fn {:malli/schema [:=> [:cat :int] :int]} [x] (helper x))\n  (pub-fn 41))")]
+        (is (:ok? res) (pr-str (:error res)))
+        (is (= 42 (:value res)))
+        (is (some :seon.code.var/name (:tx-data res)) "Top-level (do (in-ns ...) (defn ...)) must persist vars in :tx-data")
+        (d/transact conn {:tx-data (:tx-data res)})
+        (let [db @conn]
+          (is (some? (:e (first (d/datoms db :avet :seon.code.var/name 'seon.demo.do-persist/helper)))))
+          (is (some? (:e (first (d/datoms db :avet :seon.code.var/name 'seon.demo.do-persist/pub-fn))))))
+        (remove-ns 'seon.demo.do-persist))))
+  (testing "Wave 26A error hints cover d/q OOM, @user/conn, DB-as-IFn, Could not locate seon/db, and No such namespace: d"
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(d/q '[:find ?e :where [?e :a ?v]] db)" "Eval exceeded allocation budget (limit 268435456 bytes)." {})
+          "d/datoms"))
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "@user/conn" "class user$conn cannot be cast to class java.util.concurrent.Future" {})
+          "0-arg function"))
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(require '[seon.db :as db])" "Could not locate seon/db.jolt" {})
+          "There is no"))
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(d/datoms db :aevt :x)" "No such namespace: d" {})
+          "datahike.api"))
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(db :a)" "class datahike.db.DB cannot be cast to class clojure.lang.IFn" {})
+          "d/pull"))))

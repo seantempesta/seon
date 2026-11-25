@@ -41,7 +41,7 @@
   [["invalid-schema" "child-error"]
    "Hint: In Malli use predicate symbols like `number?`, `pos-int?`, `nat-int?` (NEVER `:number`/`:pos-int`), or built-ins `:int`, `:double`, `:string`, `:boolean`, `:keyword`, `:map`, `:vector`, `:any`."]
   [["Unsupported escape character"]
-   "Hint: Inside Clojure \"...\" strings, double backslashes (e.g. `\\\\[`, `\\\\d`, `\\\\-`, `\\\\n`) or write a Python/shell script via `(user/fs-write \"/tmp/run.py\" ...)` instead of escaping regexes in bash one-liners."]
+  "Hint: Inside Clojure \"...\" strings, double backslashes (e.g. `\\\\[`, `\\\\d`, `\\\\-`, `\\\\n`) — for regex searches pass `#\"a|b\"` or a vector `(user/grep-src [\"a\" \"b\"])` instead of `\"a\\|b\"`."]
   [["Store :id must be a UUID type"]
    "Hint: Datahike `:memory` stores require `:id (java.util.UUID/randomUUID)` — or prefer `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` for Seon schema tests."]
   [["No such var: seon.ctx/"]
@@ -87,10 +87,14 @@
    "Hint: Pass `(:e dt)` (the integer entity ID), not the Datom record itself, to `(d/pull db '[...] (:e dt))`."]
   [["Alias d already exists in namespace repl" "Alias str already exists in namespace repl"]
    "Hint: `d` (`datahike.api`), `str` (`clojure.string`), `fs` (`jolt.fs`), and `proc` (`jolt.process`) are pre-aliased in `user`/`repl` — pick a distinct alias (e.g. `:as diag`)."]
-  [["No such namespace: seon.db"]
-   "Hint: There is no `seon.db` namespace — query Datahike with `(d/q ... (user/db))` or `(d/datoms (user/db) :avet :attr val)` (`datahike.api` is pre-aliased as `d`)."]
+  [["No such namespace: seon.db" "Could not locate seon/db"]
+  "Hint: There is no `seon.db` namespace — query Datahike with `(d/q ... (user/db))` or `(d/datoms (user/db) :avet :attr val)` (`datahike.api` is pre-aliased as `d`)."]
   [["Var cannot be cast to class clojure.lang.Named"]
-   "Hint: Pass a quoted symbol `'ns/var` (not a Var `#'ns/var`) to helpers expecting a symbol."]])
+   "Hint: Pass a quoted symbol `'ns/var` (not a Var `#'ns/var`) to helpers expecting a symbol."]
+  [["user$conn cannot be cast to class java.util.concurrent.Future"]
+   "Hint: `user/conn` is a 0-arg function — use `(user/db)` directly (or `@(user/conn)`), not `@user/conn`."]
+  [["datahike.db.DB cannot be cast to class clojure.lang.IFn"]
+   "Hint: A Datahike DB is not a function — pass it to `(d/pull db '[...] ref)`, `(d/datoms db :avet :attr val)`, or `(d/entity db ref)`."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
@@ -122,7 +126,9 @@
       (when (> (count (re-seq #"\(user/edit-fn!(?:\s|$)" c)) 1)
         (vswap! hints conj "Hint: Batch edits to the same fn in 1 parse+compile: `(user/edit-fn! 'ns/fn [[old1 new1] [old2 new2]])`."))
       (when (and (re-find #"(?:run-tests|run-test-var|test-var)\b" c) (not (str/includes? c "user/run-tests!")))
-      (vswap! hints conj "Hint: Run tests with `(user/run-tests! 'ns-test)` or `(user/run-tests! 'ns-test/test-var)` (12 GB budget override) instead of `clojure.test/run-tests`/`run-test-var`.")))
+        (vswap! hints conj "Hint: Run tests with `(user/run-tests! 'ns-test)` or `(user/run-tests! 'ns-test/test-var)` (12 GB budget override) instead of `clojure.test/run-tests`/`run-test-var`."))
+      (when (re-find #"\((?:d|datahike\.api)/q\b" c)
+        (vswap! hints conj "Hint: Full-DB `d/q` joins can exceed the 256 MB eval cap — use indexed `(d/datoms db :avet/:aevt :attr val)` + `(d/pull db '[...] (:e dt))` or `(user/search ...)` / `(user/grep-src ...)`.")))
     (when (and (re-find #"\((?:d|datahike\.api)/datoms\b[^()]*?(?:\([^()]*\))?\s+:(?:aevt|avet)\s*\)" c)
                (or (str/includes? e "allocation budget") (str/includes? e "tick budget")
                    (str/includes? e "Wrong number of args") (str/includes? e "datoms")))
@@ -153,6 +159,8 @@
       (vswap! hints conj "Hint: Quote the symbol argument (e.g. `'seon.ns/fn` or `'user/edit-fn!`), not the unquoted function value."))
     (when (re-find #"No such namespace: u(?:\s|$)" e)
       (vswap! hints conj "Hint: REPL helpers live in `user/` (e.g. `(user/source ...)`, `(user/grep-src ...)`), not `u/`."))
+    (when (re-find #"No such namespace: d(?:\s|$)" e)
+      (vswap! hints conj "Hint: Alias `d` (`datahike.api`) is pre-aliased in `user`/`repl` only — inside another `(in-ns '...)` qualify `datahike.api/datoms` or require `[datahike.api :as d]`."))
     (doseq [[needles hint] static-error-hints]
       (when (some #(str/includes? e %) needles) (vswap! hints conj hint)))
     (if (seq @hints) (str e "\n" (str/join "\n" (distinct @hints))) e)))
