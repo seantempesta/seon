@@ -90,12 +90,16 @@
                                      (if ref (ent-link ref (rdata/entity-short-label (or (:data item) ref)) "mono tiny strong") (str (:entity item)))])
                       prov-bar [:div {:class "ent-prov-bar"}
                                 [:div {:class "pill-row"}
-                                 (if (qualified-symbol? cfn)
-                                   (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny muted")
-                                   [:span {:class "mono tiny muted"} (str (some-> cfn name))])
-                                 [:span {:class "mono tiny muted"} (str "· " (:tokens item 0) " tok")]
-                                 (when (number? sem)
-                                   (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
+                                (when-let [r0 (first (filter qualified-keyword? (:rules item)))]
+                                  (ent-link [:seon.rule/id r0] (name r0) "badge blue tiny mono"))
+                                (if (qualified-symbol? cfn)
+                                  (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny strong")
+                                  [:span {:class "mono tiny muted"} (str (some-> cfn name))])
+                                (badge (if (and (qualified-symbol? (:fn item)) (= (:fn item) cfn)) "amber" "muted")
+                                       (if (and (qualified-symbol? (:fn item)) (= (:fn item) cfn)) "rule pinned :fn" "auto-fit"))
+                                [:span {:class "mono tiny muted"} (str (:tokens item 0) " tok")]
+                                (when (number? sem)
+                                  (badge "purple" (str "cos " (/ (Math/round (* (double sem) 100.0)) 100.0))))]
                                 (when ref (ent-link ref "Inspect →" "tiny mono"))]]]
             [:div {:class "surface-entity-item"
                    :style (str "view-transition-name:" vt)

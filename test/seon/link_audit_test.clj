@@ -35,7 +35,8 @@
             [seon.web :as web]
             [seon.web.actions :as actions]
             [seon.web.styles :as styles]
-            [seon.render.entities.infra :as rinfra]))
+            [seon.render.entities.infra :as rinfra]
+            [seon.rule.seed :as rseed]))
 
 (defn- unit-vec [dims idx]
   (vec (for [i (range dims)] (if (= i idx) 1.0 (if (= i (mod (inc idx) dims)) 0.1 0.0)))))
@@ -221,8 +222,9 @@
                                    {:eid h-eid :digest "ah"} {:eid d-eid :digest "ad"}]
                                   [(unit-vec 16 0) (unit-vec 16 0) (unit-vec 16 1) (unit-vec 16 2)]
                                   [12 24 18 15] "test-embed+v1")})
+      (do (d/transact conn {:tx-data (filterv #(= :rule.ctx/system-overview (:seon.rule/id %)) (rseed/starter-rules))})
       {:fix-id fix-id :err-id err-id :ev1-id ev1-id :ev2-id ev2-id :ev3-id ev3-id
-       :call-id call-id :form-key f-key :tx1 tx1 :c-eid c-eid :t-eid t-eid})))
+       :call-id call-id :form-key f-key :tx1 tx1 :c-eid c-eid :t-eid t-eid}))))
 
 (deftest ^{:cost/ticks 120000000} exhaustive-callable-and-link-completeness-audit-test
   (testing "ALL 4 views, shell units, 15 inspector kinds, entities, tails, signals, and breadcrumbs have 0 broken callables and complete clickable links"

@@ -3,7 +3,6 @@
    `:system` (`[:seon.system/id :root]`), and `:inspect` (Entity Full View) — powered by
    ONE `seon.ctx/gather-agent-candidates`, `project-entity-view`, and `seon.render.wire/build-live-wire-request`."
   (:require [datahike.api :as d]
-            [seon.ctx :as ctx]
             [seon.render.data :as rdata]
             [seon.render.fit :as fit]
             [seon.render.links :as rlinks :refer [db-schema kicker safe-as-of]]
@@ -53,18 +52,17 @@
     {:wire nil :fitted {:selected [] :tokens 0 :budget 16000} :ctx-trace nil :pool-count 0}
 
     :else
-    (let [t (case canon :context :debug :system :workspace :canvas)
-        gather-fn #(ctx/gather-agent-candidates emdb ebdb aid {:agent ag :target t :semantic? true :enrich? true :rich-ns? false :situational? false})
-        proj (sentity/project-entity-view
-              emdb ebdb [:seon.agent/id aid]
-              (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) (:max-items fopts) 8))))]
-    {:wire (when (:include-wire? o)
-             (rwire/build-live-wire-request
-              emdb ebdb aid
-              (select-keys o [:conn :viewport-screenshot :vision? :already-shown :token-budget :strategy])))
-     :fitted (:fitted proj)
-     :pool-count (:pool-count proj 0)
-     :ctx-trace (:ctx-trace proj)})))
+    (let [proj (sentity/project-entity-view
+                emdb ebdb [:seon.agent/id aid]
+                (assoc fopts :perspective-agent aid :agent ag
+                       :max-items (long (or (:max-items o) (:max-items fopts) 8))))]
+      {:wire (when (:include-wire? o)
+               (rwire/build-live-wire-request
+                emdb ebdb aid
+                (select-keys o [:conn :viewport-screenshot :vision? :already-shown :token-budget :strategy])))
+       :fitted (:fitted proj)
+       :pool-count (:pool-count proj 0)
+       :ctx-trace (:ctx-trace proj)})))
 
 (defn windowed-history-indices
   "Selects up to 14 bounded step indices for the interactive `d/as-of` timeline scrubber."
