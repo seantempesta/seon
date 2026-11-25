@@ -15,11 +15,11 @@
             [seon.signals.cache :as scache]
             [seon.store :as store]
             [seon.vector.flow :as vflow]
-            [seon.render.text :refer [clamp-pct]]))
+            [seon.render.text :refer [clamp-pct round2]]))
 
 (defonce ^:private ^:seon.flow/edge preview-html-cache (store/lru-cache 128))
 
-(defn- r2 [x] (if (number? x) (/ (Math/round (* (double x) 100.0)) 100.0) 0.0))
+(defn- r2 [x] (round2 x))
 
 (defn- lvl-cls [lvl] (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
 

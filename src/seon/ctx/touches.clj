@@ -7,7 +7,8 @@
             [datahike.api :as d]
             [seon.ctx.diff :as diff]
             [seon.ctx.frontier :as frontier]
-            [seon.store :as store :refer [db-schema live-cid]]))
+            [seon.store :as store :refer [db-schema live-cid]]
+            [seon.render.text :refer [safe-long]]))
 
 (def ^:private energy-decay 0.55)
 
@@ -22,12 +23,6 @@
 
 (defonce ^:private ^:seon.flow/edge eval-parse-cache
   (store/lru-cache 512))
-
-(defn- safe-long [x dflt]
-  (cond
-    (integer? x) (long x)
-    (number? x) (let [v (double x)] (if (and (== v v) (not (Double/isInfinite v))) (long v) (long dflt)))
-    :else (long dflt)))
 
 (defn- excluded-attr? [a]
   (when (qualified-keyword? a)

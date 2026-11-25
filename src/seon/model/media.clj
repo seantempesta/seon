@@ -98,22 +98,26 @@
     (some try-db dbs)))
 
 (defn- normalize-media-image [m]
-  (when (and (map? m) (not (str/blank? (str (:seon.media/base64 m)))))
-    (let [w (if (number? (:seon.media/width m)) (max 0 (long (:seon.media/width m))) 0)
-          h (if (number? (:seon.media/height m)) (max 0 (long (:seon.media/height m))) 0)
-          mime (or (when (and (string? (:seon.media/mime m)) (not (str/blank? (:seon.media/mime m))))
-                     (str/trim (:seon.media/mime m)))
-                   "image/jpeg")
-          lbl (or (when (and (string? (:seon.media/label m)) (not (str/blank? (:seon.media/label m))))
-                    (str/trim (:seon.media/label m)))
-                  (str w "px"))]
+(when (and (map? m) (string? (:seon.media/base64 m)))
+  (let [b64 (str/trim (:seon.media/base64 m))
+        raw-mime (:seon.media/mime m)
+        mime (cond (nil? raw-mime) "image/jpeg"
+                   (and (string? raw-mime) (str/starts-with? (str/lower-case (str/trim raw-mime)) "image/"))
+                   (str/trim raw-mime)
+                   :else nil)
+        w (if (number? (:seon.media/width m)) (long (:seon.media/width m)) 0)
+        h (if (number? (:seon.media/height m)) (long (:seon.media/height m)) 0)
+        lbl (or (when (and (string? (:seon.media/label m)) (not (str/blank? (:seon.media/label m))))
+                  (str/trim (:seon.media/label m)))
+                (str w "px"))]
+    (when (and mime (pos? w) (pos? h) (not (str/blank? b64)) (re-matches #"^[A-Za-z0-9+/=_-]+$" b64))
       (cond-> {:mime mime
-               :base64 (str (:seon.media/base64 m))
+               :base64 b64
                :label lbl
                :width w
                :height h
                :dom (if (map? (:seon.media/dom m)) (:seon.media/dom m) {})}
-        (:seon.media/id m) (assoc :id (:seon.media/id m))))))
+        (:seon.media/id m) (assoc :id (:seon.media/id m)))))))
 
 (defn- eval-entity-image-refs [dbs c]
   (let [ev-id (or (:eval-id c) (:seon.agent.eval/id c))
@@ -150,17 +154,23 @@
                    nil)
                  (coll? v) v
                  :else nil)
-        from-tree (when (coll? parsed)
+        metadata-map? (fn [x]
+                        (and (map? x)
+                             (or (contains? x :seon.schema/key)
+                                 (contains? x :seon.code.form/key)
+                                 (contains? x :seon.code.var/name))))
+        from-tree (when (and (coll? parsed) (not (metadata-map? parsed)))
                     (keep (fn [node]
                             (cond
+                              (metadata-map? node) nil
                               (and (vector? node) (= 2 (count node)) (= :seon.media/id (first node)) (uuid? (second node)))
                               node
-                              (and (map? node) (not (str/blank? (str (:seon.media/base64 node)))))
+                              (and (map? node) (string? (:seon.media/base64 node)) (not (str/blank? (:seon.media/base64 node))))
                               node
                               (and (map? node) (uuid? (:seon.media/id node)))
                               [:seon.media/id (:seon.media/id node)]
                               :else nil))
-                          (tree-seq coll? seq parsed)))
+                          (tree-seq #(and (coll? %) (not (metadata-map? %))) seq parsed)))
         from-re (when (and (string? v) (str/includes? v ":seon.media/id"))
                   (map (fn [[_ us]] [:seon.media/id (java.util.UUID/fromString us)])
                        (re-seq #":seon\.media/id\s+#uuid\s+\"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\"" v)))]
@@ -212,3 +222,33 @@
                    (recur (rest xs) seen acc)
                    (recur (rest xs) (conj seen dk) (conj acc img))))
                (recur (rest xs) seen acc)))))))))
+
+(defn valid-image-data-url?
+  "Returns true when `url` is a `data:image/...;base64,...` string whose decoded bytes start with valid PNG, JPEG, GIF, or WebP magic bytes."
+  {:malli/schema [:=> {:examples [[["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="] true]
+                                  [["data:image/jpeg;base64,y"] false]
+                                  [["data:3w;base64,Kt"] false]
+                                  [[nil] false]]}
+                  [:cat [:maybe :string]] :boolean]
+   :cost/ticks 500000}
+  [url]
+  (boolean
+   (when (string? url)
+     (when-let [[_ b64] (re-matches #"(?is)^data:image/(?:png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\s]+)$" (str/trim url))]
+       (let [clean (str/replace b64 #"\s+" "")]
+         (when (and (>= (count clean) 16) (re-matches #"^[A-Za-z0-9+/]{16}.*" clean))
+           (let [bs (.decode (java.util.Base64/getDecoder) (subs clean 0 16))]
+             (when (and bs (>= (alength ^bytes bs) 4))
+               (let [b0 (bit-and 0xff (aget ^bytes bs 0))
+                     b1 (bit-and 0xff (aget ^bytes bs 1))
+                     b2 (bit-and 0xff (aget ^bytes bs 2))
+                     b3 (bit-and 0xff (aget ^bytes bs 3))]
+                 (or (and (= b0 0x89) (= b1 0x50) (= b2 0x4e) (= b3 0x47))
+                     (and (= b0 0xff) (= b1 0xd8) (= b2 0xff))
+                     (and (= b0 0x47) (= b1 0x49) (= b2 0x46) (= b3 0x38))
+                     (and (>= (alength ^bytes bs) 12)
+                          (= b0 0x52) (= b1 0x49) (= b2 0x46) (= b3 0x46)
+                          (= (bit-and 0xff (aget ^bytes bs 8)) 0x57)
+                          (= (bit-and 0xff (aget ^bytes bs 9)) 0x45)
+                          (= (bit-and 0xff (aget ^bytes bs 10)) 0x42)
+                          (= (bit-and 0xff (aget ^bytes bs 11)) 0x50))))))))))))

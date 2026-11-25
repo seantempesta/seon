@@ -18,7 +18,8 @@
             [jolt.http.sse :as sse]
             [seon.model.wire :as wire]
             [seon.error :as error]
-            [seon.model.messages :as messages]))
+            [seon.model.messages :as messages]
+            [seon.model.media :as media]))
 
 (defn- sync-model-filter [st]
   (if (>= (count (:in-flight st)) (:max-slots st))
@@ -180,13 +181,39 @@
         (let [lo (str/lower-case body-str)]
           (some #(str/includes? lo %)
                 ["image_url"
-                 "multimodal"
-                 "vision"
-                 "unknown variant"
-                 "invalid content"
-                 "does not support image"])))))
+                "multimodal"
+                "vision"
+                "unknown variant"
+                "invalid content"
+                "does not support image"
+                "uploaded an unsupported"
+                "unsupported image"
+                "invalid image"])))))
 
 (defonce ^:private ^:seon.flow/edge multimodal-unsupported-endpoints (atom #{}))
+
+(defn sanitize-wire-image-parts
+  "Drops malformed or non-image `data:` `image_url` blocks before live HTTP submission so fake/test base64 never causes HTTP 400 provider rejections."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]
+   :cost/ticks 2000000}
+  [messages]
+  (mapv (fn [m]
+          (let [c (:content m)]
+            (if-not (sequential? c)
+              m
+              (let [kept (filterv (fn [p]
+                                    (if (and (map? p)
+                                             (or (= "image_url" (:type p)) (= :image_url (:type p)) (contains? p :image_url)))
+                                      (let [u (get-in p [:image_url :url])]
+                                        (if (and (string? u) (str/starts-with? (str/lower-case u) "data:"))
+                                          (media/valid-image-data-url? u)
+                                          true))
+                                      true))
+                                  c)]
+                (if (some #(and (map? %) (or (= "image_url" (:type %)) (= :image_url (:type %)) (contains? % :image_url))) kept)
+                  (assoc m :content kept)
+                  (assoc m :content (str/join "\n" (keep #(cond (string? %) % (map? %) (:text %) :else nil) kept))))))))
+        messages))
 
 (defn ^:seon.flow/edge openai-stream-chat!
   "Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
@@ -205,14 +232,14 @@
        (throw (ex-info (str "Missing model API key in env var " api-key-env)
                        {:error :seon.model/missing-api-key :env api-key-env})))
      (let [base-url (or (:base-url prov) "https://api.deepseek.com")
-           url (str (str/replace base-url #"/+$" "") "/chat/completions")
-           raw-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
-                                       system-prompt history user-prompt)
-           endpoint-k [base-url (or (:model prov) (:model raw-req))]
-           init-req (if (and (contains? @multimodal-unsupported-endpoints endpoint-k)
-                             (messages-have-image-parts? (:messages raw-req)))
-                      (update raw-req :messages strip-image-parts)
-                      raw-req)]
+          url (str (str/replace base-url #"/+$" "") "/chat/completions")
+          raw-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
+                                      system-prompt history user-prompt)
+          endpoint-k [base-url (or (:model prov) (:model raw-req))]
+          init-req (if (and (contains? @multimodal-unsupported-endpoints endpoint-k)
+                            (messages-have-image-parts? (:messages raw-req)))
+                     (update raw-req :messages strip-image-parts)
+                     raw-req)]
        (loop [attempt 0
               req-map init-req
               unsupported-4xx? false]
@@ -250,15 +277,16 @@
                    (if (and (zero? attempt)
                             (messages-have-image-parts? (:messages req-map))
                             (multimodal-unsupported-error? status body-str))
-                     (do
-                       (swap! multimodal-unsupported-endpoints conj endpoint-k)
-                       (when-not (contains? @multimodal-fallback-logged endpoint-k)
-                         (swap! multimodal-fallback-logged conj endpoint-k)
-                         (binding [*out* *err*]
-                           (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
-                                         ") rejected image_url parts (HTTP " status
-                                         "); stripping image parts and retrying text-only."))))
-                       (recur 1 (update req-map :messages strip-image-parts) true))
+                     (let [payload-err? (boolean (re-find #"(?i)uploaded an unsupported|unsupported image|invalid image" body-str))]
+                     (when-not payload-err?
+                       (swap! multimodal-unsupported-endpoints conj endpoint-k))
+                     (when-not (contains? @multimodal-fallback-logged endpoint-k)
+                       (swap! multimodal-fallback-logged conj endpoint-k)
+                       (binding [*out* *err*]
+                         (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
+                                       ") rejected image_url parts (HTTP " status
+                                       "); stripping image parts and retrying text-only."))))
+                     (recur 1 (update req-map :messages strip-image-parts) (not payload-err?)))
                      (let [hdrs (:headers resp)
                            retry-after (some (fn [[k v]]
                                                (when (= "retry-after" (str/lower-case (str k)))
