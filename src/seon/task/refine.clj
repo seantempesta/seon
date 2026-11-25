@@ -4,7 +4,8 @@
      from `:template/refine-task-proofs` into `:seon.task/needs`.
    - Rule B (`:rule.trigger/spawn-unassigned-prereq`) sees the unassigned prerequisite -> spawns a Refiner on the
      parent worker's branch (`:merge-target` = parent agent) so red TDD proofs stay isolated from `:main`.
-   - `evaluate-refinement-gate` mechanically verifies the parent task now has real compiling proof(s) + resolved refs."
+   - `evaluate-refinement-gate` mechanically verifies the parent task now has real compiling proof(s) + resolved refs.
+   - `expected-red-proof-vars` identifies newly authored parent proof `deftest`s allowed to fail RED on a Refiner branch."
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.cite :as cite]
@@ -88,7 +89,6 @@
            :when (and (qualified-keyword? rtid)
                       (not (true? (eav1 main-db re :seon.task/done?)))
                       (not (true? (eav1 main-db re :seon.task/template?)))
-                      ;; No active agent already assigned to this refinement task
                       (not (some (fn [adt]
                                    (let [ae (:e adt)]
                                      (and (not (true? (eav1 main-db ae :seon.agent/archived?)))
@@ -124,7 +124,9 @@
                        (when-not (str/blank? (str (:seon.task/plan pt)))
                          (str "Initial request:\n" (:seon.task/plan pt) "\n\n"))
                        (or (:seon.task/plan tpl)
-                           "1. Search widely (`user/search`, `user/grep-src`, `user/ns-outline`, schemas) to find existing functions & schemas.\n2. Write failing `(deftest ...)` proof var(s) and Malli `[:=> {:examples [...]} [:cat In] Out]` contracts.\n3. Update the parent task with `:proofs`/`:tests` and backticked `:plan` references, then call `(user/ready!)`."))
+                           (str "1. Search widely (`user/search`, `user/grep-src`, `user/ns-outline`, schemas) to find existing functions & schemas.\n"
+                                "2. Write compiling failing `(deftest ...)` proof var(s) and Malli `[:=> {:examples [...]} [:cat In] Out]` contracts (use a schema-conforming dummy stub for new fns so Malli checks stay green while the `deftest` fails RED).\n"
+                                "3. Call `(user/update-task! {:id " parent-task-id " :proofs ['<test-ns>/<deftest>] :tests ['<test-ns>/<deftest>] :plan \"...\"})` citing real symbols/schemas/doc-atoms, then call `(user/ready!)`.")))
         cites (cite/resolve-doc-refs db (str title "\n" base-plan))
         tpl-refs (into #{} (keep #(if (map? %) (:db/id %) %)) (:seon.task/refs tpl))
         all-refs (into (cond-> tpl-refs pe (conj pe)) (:refs cites))
@@ -139,6 +141,17 @@
               (and (contains? dh :seon.task/refs) (seq all-refs)) (assoc :seon.task/refs all-refs)
               (and (contains? dh :seon.task/ref-order) (seq all-order)) (assoc :seon.task/ref-order all-order))]
     [ent {:seon.task/id parent-task-id :seon.task/needs #{rid}}]))
+
+(defn- task-proof-syms [db teid]
+  (when (and db teid)
+    (let [by-tests (when (dh-has? db :seon.task/tests)
+                     (keep #(when (qualified-symbol? (:v %)) (:v %)) (d/datoms db :eavt teid :seon.task/tests)))
+          by-ref (fn [a]
+                   (when (dh-has? db a)
+                     (keep #(let [s (eav1 db (:v %) :seon.code.var/name)]
+                              (when (qualified-symbol? s) s))
+                           (d/datoms db :eavt teid a))))]
+      (into (sorted-set) (concat by-tests (by-ref :seon.task/proofs) (by-ref :seon.task/test-vars))))))
 
 (defn evaluate-refinement-gate
   "Mechanical proof gate for a `:template/refine-task-proofs` prerequisite task:
@@ -157,13 +170,7 @@
             b-pe (when ptid (eid-of bdb :seon.task/id ptid))
             p-db (if b-pe bdb mdb)
             eff-pe (or b-pe pe)
-            proof-syms (when eff-pe
-                         (let [by-tests (when (dh-has? p-db :seon.task/tests)
-                                          (keep #(when (symbol? (:v %)) (:v %)) (d/datoms p-db :eavt eff-pe :seon.task/tests)))
-                               by-ref (fn [a]
-                                        (when (dh-has? p-db a)
-                                          (keep #(eav1 p-db (:v %) :seon.code.var/name) (d/datoms p-db :eavt eff-pe a))))]
-                           (into (sorted-set) (concat by-tests (by-ref :seon.task/proofs) (by-ref :seon.task/test-vars)))))
+            proof-syms (or (task-proof-syms p-db eff-pe) (sorted-set))
             existing-proofs (filterv #(boolean (or (eid-of bdb :seon.code.var/name %) (eid-of mdb :seon.code.var/name %))) proof-syms)
             refs-count (if eff-pe
                          (let [stored (if (dh-has? p-db :seon.task/refs) (count (d/datoms p-db :eavt eff-pe :seon.task/refs)) 0)
@@ -187,6 +194,131 @@
          :proofs existing-proofs
          :refs-count refs-count
          :blockers blockers}))))
+
+(defn expected-red-proof-vars
+  "Returns the set of newly authored parent-task proof `deftest` symbols allowed to fail RED on a
+   `:template/refine-task-proofs` Refiner branch (never includes pre-existing `:main` test vars)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:set :qualified-symbol]]
+   :cost/ticks 5000000}
+  [main-db branch-db agent-id]
+  (if-not (and main-db branch-db agent-id)
+    #{}
+    (let [task-ids (distinct
+                    (concat
+                     (when-let [ae (eid-of main-db :seon.agent/id agent-id)]
+                       (keep #(eav1 main-db (:v %) :seon.task/id) (d/datoms main-db :eavt ae :seon.agent/tasks)))
+                     (when-let [ae (eid-of branch-db :seon.agent/id agent-id)]
+                       (keep #(eav1 branch-db (:v %) :seon.task/id) (d/datoms branch-db :eavt ae :seon.agent/tasks)))))
+          ref-tids (filter (fn [tid]
+                             (let [re (or (eid-of branch-db :seon.task/id tid) (eid-of main-db :seon.task/id tid))]
+                               (= :template/refine-task-proofs
+                                  (or (eav1 branch-db re :seon.task/template) (eav1 main-db re :seon.task/template)))))
+                           task-ids)]
+      (if (empty? ref-tids)
+        #{}
+        (into #{}
+              (for [rtid ref-tids
+                    :let [pe (or (when (dh-has? branch-db :seon.task/needs) (:e (first (d/datoms branch-db :avet :seon.task/needs rtid))))
+                                 (when (dh-has? main-db :seon.task/needs) (:e (first (d/datoms main-db :avet :seon.task/needs rtid)))))
+                          ptid (or (eav1 branch-db pe :seon.task/id) (eav1 main-db pe :seon.task/id))
+                          b-pe (when ptid (eid-of branch-db :seon.task/id ptid))]
+                    :when b-pe
+                    sym (task-proof-syms branch-db b-pe)
+                    :when (and (eid-of branch-db :seon.code.var/name sym)
+                               (nil? (eid-of main-db :seon.code.var/name sym)))]
+                sym))))))
+
+(defn passed-non-template-tasks
+  "Filters `passed-tasks` to concrete (non-template) `:seon.task/id` keywords eligible to be marked `:done? true`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe [:sequential :any]]] [:vector :qualified-keyword]]
+   :cost/ticks 1000000}
+  [db passed-tasks]
+  (if-not (and db (seq passed-tasks))
+    []
+    (vec (filter (fn [tid]
+                   (and (qualified-keyword? tid)
+                        (when-let [te (eid-of db :seon.task/id tid)]
+                          (not (true? (eav1 db te :seon.task/template?))))))
+                 passed-tasks))))
+
+(defn branch-update-task-tx
+  "Builds branch-local Datahike tx-data for `(user/update-task! spec)` resolving `:proofs`, `:test-vars`,
+   `:refs`, and `:ref-order` directly against `db` (so branch-only `deftest` vars resolve cleanly)."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :map] [:vector :map]]
+   :cost/ticks 5000000}
+  [db tid {:keys [title plan scope needs tests proofs test-vars summary done? owner]}]
+  (let [dh (or (:schema db) {})
+        ext? (contains? dh :seon.task/owner)
+        cur (when (eid-of db :seon.task/id tid)
+              (d/pull db '[:seon.task/title :seon.task/plan] [:seon.task/id tid]))
+        eff-title (if (string? title) title (:seon.task/title cur))
+        eff-plan (if (string? plan) plan (:seon.task/plan cur))
+        cites (when (or (string? title) (string? plan))
+                (let [txt (str (or eff-title "") "\n" (or eff-plan ""))]
+                  (when-not (str/blank? txt)
+                    (cite/resolve-doc-refs db txt))))
+        proof-eids (when (and (seq (concat proofs test-vars)) (contains? dh :seon.code.var/name))
+                     (into #{}
+                           (keep (fn [x]
+                                   (cond
+                                     (integer? x) x
+                                     (and (vector? x) (= :seon.code.var/name (first x)))
+                                     (eid-of db :seon.code.var/name (second x))
+                                     (qualified-symbol? x) (eid-of db :seon.code.var/name x)
+                                     :else nil)))
+                           (concat proofs test-vars)))
+        ent (cond-> {:seon.task/id tid}
+              (string? title) (assoc :seon.task/title title)
+              (string? plan) (assoc :seon.task/plan plan)
+              scope (assoc :seon.task/scope scope)
+              (some? done?) (assoc :seon.task/done? (boolean done?))
+              (and ext? (string? summary)) (assoc :seon.task/summary summary)
+              (and ext? owner (qualified-keyword? owner)) (assoc :seon.task/owner owner)
+              (and (seq (:refs cites)) (contains? dh :seon.task/refs)) (assoc :seon.task/refs (:refs cites))
+              (and (seq (:ordered cites)) (contains? dh :seon.task/ref-order)) (assoc :seon.task/ref-order (:ordered cites)))]
+    (vec (remove nil?
+                 [ent
+                  (when (seq needs) {:seon.task/id tid :seon.task/needs (set needs)})
+                  (when (seq tests) {:seon.task/id tid :seon.task/tests (set tests)})
+                  (when (and (seq proof-eids) (contains? dh :seon.task/proofs))
+                    {:seon.task/id tid :seon.task/proofs proof-eids})]))))
+
+(defn ^:seon.flow/edge apply-update-task!
+  "Executes `(user/update-task! spec)` cleanly for `agent-ctx`: transacts onto branch `conn` (resolving
+   branch-only `:proofs`/`:refs`) and mirrors to `:main` via `tx-main-sync!` unless forked/proof-bearing."
+  {:malli/schema [:=> [:cat :map :map :seon.host/fn :seon.host/fn] :map]
+   :cost/ticks 10000000}
+  [{:keys [conn branch agent-id]} spec refresh-fn tx-main-fn]
+  (let [bdb @conn
+        mdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb)
+        pull-t #(some (fn [x]
+                        (when-let [eid (if (map? x) (:db/id x) x)]
+                          (:seon.task/id (d/pull %1 '[:seon.task/id] eid))))
+                      (:seon.agent/tasks (d/pull %2 '[:seon.agent/tasks] [:seon.agent/id agent-id])))
+        tid (or (:id spec) (pull-t bdb bdb) (pull-t mdb mdb) (pull-t mdb bdb))]
+    (if-not tid
+      {:ok? false :error "No active :seon.agent/tasks on your agent; pass {:id :ns/task ...} or create one via (user/create-task! ...)."}
+      (let [ag-m (when (first (d/datoms mdb :avet :seon.agent/id agent-id))
+                   (d/pull mdb '[:seon.agent/forked-from :seon.agent/merge-target] [:seon.agent/id agent-id]))
+            branch-only? (and (some? branch) (not= branch :main)
+                              (or (some? (:seon.agent/forked-from ag-m))
+                                  (some? (:seon.agent/merge-target ag-m))
+                                  (seq (:proofs spec))
+                                  (seq (:test-vars spec))))
+            seed-op (when (and (not= branch :main)
+                               (not (first (d/datoms bdb :avet :seon.task/id tid)))
+                               (first (d/datoms mdb :avet :seon.task/id tid)))
+                      (dissoc (d/pull mdb '[:seon.task/id :seon.task/title :seon.task/plan :seon.task/scope :seon.task/done?] [:seon.task/id tid]) :db/id))
+            _ (when seed-op (d/transact conn {:tx-data [seed-op]}))
+            b-tx (when (not= branch :main) (branch-update-task-tx @conn tid spec))
+            br (when (seq b-tx)
+                 (let [r (d/transact conn {:tx-data b-tx})]
+                   (when refresh-fn (refresh-fn (:db-after r) (:tx-data r)))
+                   r))]
+        (if branch-only?
+          {:ok? true :task tid :branch branch :branch-only? true :tx (when br (:max-tx (:db-after br)))}
+          (or (when tx-main-fn (tx-main-fn (assoc spec :op :update-task :id tid)))
+              {:ok? true :task tid :branch branch :tx (when br (:max-tx (:db-after br)))}))))))
 
 (defn compute-trigger-ops
   "General recursive `:rule.trigger/*` reconciler dispatcher:
@@ -212,7 +344,7 @@
                                          :reason [:trigger/pause-for-prereq parent-agent rtid]}
                                         {:op :spawn-agent :id rid :parent parent-agent :forked-from parent-agent
                                          :merge-target [:seon.agent/id parent-agent] :tasks [rtid] :auto-merge? true
-                                         :config {:seon.config/max-tool-turns 8}
+                                         :config {:seon.config/max-tool-turns 10}
                                          :goal (str "Refine & write failing proofs for " parent-task " (" rtid ")")}]))
                                    (sort-by (comp str first) spawn-facts)))]
         (into refine-ops spawn-ops)))))

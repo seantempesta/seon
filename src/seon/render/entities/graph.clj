@@ -29,9 +29,9 @@
   {:malli/schema [:=> [:cat [:map [:seon.graph/chain-boundary :seon.graph/chain-boundary]]]
                   [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1000000}
-  [{{:keys [steps input-schema output-schema sample-in sample-out known-refs doc-atoms]} :seon.graph/chain-boundary}]
+  [{{:keys [steps input-schema output-schema input-type output-type sample-in sample-out known-refs doc-atoms]} :seon.graph/chain-boundary}]
   (let [chain-str (if (seq steps) (str/join " -> " (map str steps)) "(empty chain)")
-        sig-str (str (or input-schema :any) " -> " (or output-schema :any))]
+        sig-str (str (or input-schema input-type :any) " -> " (or output-schema output-type :any))]
     {:seon.ui/hiccup
      [:div {:class "card tile-card" :data-min-width 360}
       [:div {:class "card-head"}

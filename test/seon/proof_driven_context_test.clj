@@ -2,8 +2,9 @@
   "End-to-end proofs for:
    1. Bidirectional ordered doc-atom citations (var docstrings, schema docs, task plans — zero doc levels).
    2. Malli relational :=> postconditions, concrete :examples, deterministic shrinking, and typed contract blame.
-   3. Backward proof graph walk, eval-frontier bridge, blame-cut localization, chain-boundary witness, Known-Set back-refs.
-   4. Recursive decoupled :rule.trigger/* cascade (Rule A -> Data B -> Rule B -> Data C -> mechanical refinement gate)."
+   3. Backward proof graph walk (scope focus + reverse :needs + harness exclusion), eval-frontier bridge, blame-cut localization, chain-boundary witness, Known-Set back-refs.
+   4. Recursive decoupled :rule.trigger/* cascade (Rule A -> Data B -> Rule B -> Data C -> mechanical refinement gate).
+   5. Live Refiner red-TDD acceptance, branch-local update-task!, fork-merge marking prereq done, and zero-conflict 3-way merge to :main."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -11,13 +12,17 @@
             [seon.code :as code]
             [seon.ctx.graph :as cgraph]
             [seon.error :as serr]
+            [seon.merge :as merge]
             [seon.render :as render]
             [seon.render.entities.graph :as rgraph]
             [seon.rule.seed :as rseed]
             [seon.schema :as schema]
+            [seon.store :as store]
             [seon.task.gate :as gate]
             [seon.task.refine :as refine]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.transactor.merge :as tmerge]
+            [seon.transactor.spawn :as tspawn]))
 
 (deftest ^{:cost/ticks 90000000} bidirectional-ordered-doc-atoms-and-task-refs-test
   (testing "ordered-citations and resolve-doc-refs preserve appearance order of exact :seon.code.doc/id atoms and wire var/schema doc-refs"
@@ -86,6 +91,7 @@
             code-src (str "(ns demo.chain)\n"
                           "(defn f1 \"See `docs/spec.md#step-one`.\" {:malli/schema [:=> {:examples [[[{:n 1}] {:m 2}]]} [:cat :seon.chain/in] :seon.chain/mid] :cost/ticks 10000} [{:keys [n]}] {:m (inc n)})\n"
                           "(defn f2 \"See `docs/spec.md#step-two`.\" {:malli/schema [:=> [:cat :seon.chain/mid] :seon.chain/out] :cost/ticks 10000} [{:keys [m]}] {:ok? (pos? m)})\n"
+                          "(defn prim-step {:malli/schema [:=> {:examples [[[\"ab\"] 2]]} [:cat :string] :int] :cost/ticks 10000} [s] (count s))\n"
                           "(defn proof-chain-test [] (f2 (f1 {:n 1})))\n")]
         (d/transact conn {:tx-data (code/file-import-tx @conn "docs/spec.md" doc-md false)})
         (doseq [[k f doc] [[:seon.chain/in [:map {:gen/elements [{:n 1}]} [:n :int]] "Input doc `docs/spec.md#input-shape`."]
@@ -104,7 +110,7 @@
               doc-in-e (:e (first (d/datoms db1 :avet :seon.code.doc/id "docs/spec.md#input-shape")))
               doc-f1-e (:e (first (d/datoms db1 :avet :seon.code.doc/id "docs/spec.md#step-one")))]
           (d/transact conn {:tx-data [{:seon.task/id :task/demo-chain :seon.task/title "Fix chain" :seon.task/done? false
-                                       :seon.task/proofs #{proof-e}}
+                                       :seon.task/scope 'demo.chain :seon.task/proofs #{proof-e}}
                                       {:seon.agent/id :agent/chain-worker :seon.agent/branch :branch/chain
                                        :seon.agent/tasks #{[:seon.task/id :task/demo-chain]}}]})
           (let [rows (cgraph/proof-backward-rows @conn @conn :agent/chain-worker)
@@ -119,12 +125,17 @@
             (is (contains? eids doc-f1-e)))
           (let [cb (cgraph/build-chain-boundary @conn '[demo.chain/f1 demo.chain/f2]
                                                 {f1-e {:turn 1 :handle 'result/e1} doc-f1-e {:turn 1}})
-                txt (render/hiccup->text (:seon.ui/hiccup (rgraph/render-chain-boundary {:seon.graph/chain-boundary cb})))]
+                txt (render/hiccup->text (:seon.ui/hiccup (rgraph/render-chain-boundary {:seon.graph/chain-boundary cb})))
+                cb-prim (cgraph/build-chain-boundary @conn '[demo.chain/prim-step])
+                txt-prim (render/hiccup->text (:seon.ui/hiccup (rgraph/render-chain-boundary {:seon.graph/chain-boundary cb-prim})))]
             (is (= :seon.chain/in (:input-schema cb)))
             (is (= :seon.chain/out (:output-schema cb)))
             (is (str/includes? txt ":seon.chain/in -> :seon.chain/out"))
             (is (str/includes? txt "demo.chain/f1 (see Turn 1 / result/e1)"))
-            (is (not-any? #(= "docs/spec.md#step-one" (:id %)) (:doc-atoms cb)) "Already-shown doc atom must be omitted"))
+            (is (not-any? #(= "docs/spec.md#step-one" (:id %)) (:doc-atoms cb)) "Already-shown doc atom must be omitted")
+            (is (= :string (:input-type cb-prim)))
+            (is (= :int (:output-type cb-prim)))
+            (is (str/includes? txt-prim ":string -> :int")))
           (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/chain-worker
                                        :seon.agent.eval/turn 1 :seon.agent.eval/code "(demo.chain/f1 {:n 1})"
                                        :seon.agent.eval/called-vars #{f1-e}
@@ -204,3 +215,88 @@
                       seon.render.entities.graph/render-blame-cut]]
           (let [r (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (true? (:ok? r)) (str sym " failed seed=42 check: " (pr-str r)))))))))
+
+(deftest ^{:cost/ticks 180000000} refiner-red-tdd-fork-merge-and-clean-main-merge-test
+  (testing "Full t0->t7 lifecycle: spawn refiner -> expected-red-proof-vars excludes :main tests -> fork-merge marks prereq done & unpauses worker -> zero-conflict 3-way merge to :main"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (rseed/starter-rules)})
+      ;; Existing :main code + test (must NEVER become expected-red!)
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/slug.clj"
+                                                      "(ns demo.slug)\n(defn clean-slug \"Normalizes text.\" {:malli/schema [:=> [:cat :string] :string] :cost/ticks 10000} [s] s)\n" false)})
+      (d/transact conn {:tx-data (code/file-import-tx @conn "test/demo/slug_test.clj"
+                                                      "(ns demo.slug-test (:require [clojure.test :refer [deftest is]] [demo.slug :as slug]))\n(deftest existing-slug-test (is (= \"a\" (slug/clean-slug \"a\"))))\n" false)})
+      (d/transact conn {:tx-data [{:seon.rule/id :rule.trigger/unproven-task :seon.rule/category :trigger
+                                   :seon.rule/stratum 26 :seon.rule/enabled? true :seon.rule/target :any
+                                   :seon.rule/query '[:find ?ag ?tid :in $main :where [(seon.task.refine/unproven-task-rows $main) [[?ag ?tid]]]]
+                                   :seon.rule/assert '[[?tid :trigger/refine-task {:agent ?ag}]]}
+                                  {:seon.rule/id :rule.trigger/spawn-unassigned-prereq :seon.rule/category :trigger
+                                   :seon.rule/stratum 27 :seon.rule/enabled? true :seon.rule/target :any
+                                   :seon.rule/query '[:find ?ag ?ptid ?rtid :in $main :where [(seon.task.refine/unassigned-prereq-rows $main) [[?ag ?ptid ?rtid]]]]
+                                   :seon.rule/assert '[[?rtid :trigger/spawn-prereq {:parent-agent ?ag :parent-task ?ptid}]]}
+                                  {:seon.task/id :template/refine-task-proofs :seon.task/title "Refine proofs"
+                                   :seon.task/template? true :seon.task/done? false :seon.task/plan "Write proofs referencing `demo.slug/clean-slug`."}
+                                  {:seon.config/key :seon.config/root :seon.config/auto-refine-tasks? true}]})
+      ;; t0: Create rough task + spawn worker on :branch/worker-slug
+      (let [st0 {:conn conn :cfg cfg :msg-seq 0 :writes 0 :commit-git? false}
+            [st1 _] (tspawn/handle-create-task! st0 {:id :demo/slug-task :title "Lowercase slugs"
+                                                     :plan "Make slug normalization lowercase and dash-separated."
+                                                     :scope 'demo.slug :spawn-agent? true :agent-id :worker/slug}
+                                                (d/commit-id @conn))
+            ;; t1: Rule A -> stamp :refine/demo-slug-task on :main
+            ops1 (refine/compute-trigger-ops @conn)
+            _ (is (= 1 (count ops1)))
+            _ (d/transact conn {:tx-data (:tx-data (first ops1))})
+            ;; t2: Rule B -> pause worker + spawn Refiner forked from :worker/slug
+            ops2 (refine/compute-trigger-ops @conn)
+            pause-op (first (filter #(= :transact (:op %)) ops2))
+            spawn-op (first (filter #(= :spawn-agent (:op %)) ops2))
+            _ (d/transact conn {:tx-data (:tx-data pause-op)})
+            [st2 _] (tspawn/handle-spawn-agent! st1 spawn-op (d/commit-id @conn))
+            ref-aid (:id spawn-op)
+            ref-branch (:seon.agent/branch (d/pull @conn '[:seon.agent/branch] [:seon.agent/id ref-aid]))
+            ref-tid (refine/refinement-task-id :demo/slug-task)]
+        ;; Refiner branch has normalized parent-task ref + reverse :needs walk pulls parent task!
+        (let [rconn (store/connect cfg ref-branch)]
+          (try
+            (let [rows0 (cgraph/proof-backward-rows @conn @rconn ref-aid)
+                  parent-eid (:e (first (d/datoms @rconn :avet :seon.task/id :demo/slug-task)))]
+              (is (some #(= parent-eid (first %)) rows0) "Refiner Turn-0 backward walk must surface parent task"))
+            ;; t3: Refiner authors RED deftest on its branch + updates parent task via branch-update-task-tx
+            (d/transact rconn {:tx-data (code/file-import-tx @rconn "test/demo/slug_test.clj"
+                                                             "(ns demo.slug-test (:require [clojure.test :refer [deftest is]] [demo.slug :as slug]))\n(deftest existing-slug-test (is (= \"a\" (slug/clean-slug \"a\"))))\n(deftest new-red-slug-proof-test (is (= \"hello-world\" (slug/clean-slug \"Hello World\"))))\n" false)})
+            (let [utx (refine/branch-update-task-tx @rconn :demo/slug-task
+                                                    {:proofs ['demo.slug-test/new-red-slug-proof-test
+                                                              'demo.slug-test/existing-slug-test]
+                                                     :tests ['demo.slug-test/new-red-slug-proof-test]
+                                                     :plan "Update `demo.slug/clean-slug` so `demo.slug-test/new-red-slug-proof-test` passes."})]
+              (d/transact rconn {:tx-data utx}))
+            ;; t4: expected-red-proof-vars includes ONLY newly authored proof, NEVER pre-existing :main test!
+            (let [exp-red (refine/expected-red-proof-vars @conn @rconn ref-aid)]
+              (is (= #{'demo.slug-test/new-red-slug-proof-test} exp-red))
+              (is (not (contains? exp-red 'demo.slug-test/existing-slug-test))))
+            (is (true? (:ok? (gate/evaluate-agent-gate @conn @rconn ref-aid))))
+            (finally (d/release rconn))))
+        ;; t5: Fork-merge Refiner -> worker branch marks :refine/* done on BOTH branches & unpauses :worker/slug!
+        (let [worker-branch (:seon.agent/branch (d/pull @conn '[:seon.agent/branch] [:seon.agent/id :worker/slug]))
+              [_ _] (tmerge/handle-merge-op! st2 {:op :merge :branch ref-branch :agent-id ref-aid} (d/commit-id @conn))]
+          (is (true? (:seon.task/done? (d/pull @conn '[:seon.task/done?] [:seon.task/id ref-tid])))
+              "Fork-merge must mark prerequisite refinement task :done? true on :main")
+          (is (false? (boolean (:seon.agent/paused? (d/pull @conn '[:seon.agent/paused?] [:seon.agent/id :worker/slug]))))
+              "Fork-merge must unpause parent worker")
+          (is (empty? (refine/compute-trigger-ops @conn))
+              "Recursive triggers must settle to empty once prereq is done (no infinite respawn loop)")
+          ;; t6: Worker wakes with backward-walked proof context & implements green fix
+          (let [wconn (store/connect cfg worker-branch)]
+            (try
+              (let [wrows (cgraph/proof-backward-rows @conn @wconn :worker/slug)
+                    w-eids (set (map first wrows))
+                    slug-e (:e (first (d/datoms @wconn :avet :seon.code.var/name 'demo.slug/clean-slug)))
+                    proof-e (:e (first (d/datoms @wconn :avet :seon.code.var/name 'demo.slug-test/new-red-slug-proof-test)))]
+                (is (contains? w-eids proof-e) "Worker Turn-0 walk must include newly merged proof deftest")
+                (is (contains? w-eids slug-e) "Worker Turn-0 walk must include target fn called by proof"))
+              (d/transact wconn {:tx-data (code/file-import-tx @wconn "src/demo/slug.clj"
+                                                               "(ns demo.slug (:require [clojure.string :as str]))\n(defn clean-slug \"Normalizes text.\" {:malli/schema [:=> [:cat :string] :string] :cost/ticks 10000} [s] (-> s str/lower-case (str/replace #\"\\s+\" \"-\")))\n" false)})
+              (finally (d/release wconn))))
+          ;; t7: 3-way merge worker branch -> :main succeeds with ZERO conflicts!
+          (let [plan (merge/three-way conn cfg worker-branch {:skip-health? true})]
+            (is (true? (:ok? plan)) (str "Worker -> :main 3-way merge must have 0 conflicts: " (pr-str (:conflicts plan))))))))))
