@@ -135,7 +135,7 @@
 (defn changed-form-ops
   {:malli/schema [:=> [:cat :seon.host/conn :any :any] :map]}
   [conn from-cid to-cid]
-  (if (= from-cid to-cid)
+  (if (or (nil? from-cid) (nil? to-cid) (= from-cid to-cid))
     {:upserts [] :retracted-keys #{} :schema-keys #{} :retracted-schemas #{}
      :rule-ids #{} :retracted-rules #{} :boot-affected? false}
     (let [cur @conn
