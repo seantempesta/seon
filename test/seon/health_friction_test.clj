@@ -1,17 +1,18 @@
 (ns seon.health-friction-test
-  "Unit, synthetic trace friction, allocation budget, dedup, renderer, and seed=42 generative tests for `seon.health.friction`."
+  "Unit, synthetic trace friction, allocation budget, dedup, renderer, regression, and seed=42 generative tests for `seon.health.metrics` friction APIs."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.code :as code]
-            [seon.health.friction :as friction]
+            [seon.fork.calls :as fcalls]
+            [seon.health :as health]
+            [seon.health.metrics :as metrics]
             [seon.render.entities.diagnostics :as rdiag]
             [seon.render.fit :as rfit]
             [seon.render.text :as rtext]
             [seon.schema :as schema]
             [seon.store :as st]
-            [seon.test-fixture :refer [with-test-store]]
-            [seon.fork.calls :as fcalls]))
+            [seon.test-fixture :refer [with-test-store]]))
 
 (defn- tx-branch! [cfg branch tx-data]
   (let [bc (st/connect cfg branch)]
@@ -62,9 +63,9 @@
          (eval-tx :worker/hot 6 0 'result/e6 {:seon.agent.eval/error "reader syntax error: unmatched delimiter 42" :seon.agent.eval/prefix-hash "ph-2"})
          (eval-tx :worker/hot 6 1 'result/e7 {:seon.agent.eval/error "reader syntax error: unmatched delimiter 99" :seon.agent.eval/prefix-hash "ph-2"})])
       (let [mdb (st/head conn :main)
-            calm (friction/agent-friction-summary conn mdb :worker/calm {:max-tool-turns 4})
-            hot (friction/agent-friction-summary conn mdb :worker/hot {:max-tool-turns 4})
-            rep (friction/friction-report conn mdb {:max-tool-turns 4 :include-renderers? false :include-static? false})
+            calm (metrics/agent-friction-summary conn mdb :worker/calm {:max-tool-turns 4})
+            hot (metrics/agent-friction-summary conn mdb :worker/hot {:max-tool-turns 4})
+            rep (metrics/friction-report conn mdb {:max-tool-turns 4 :include-renderers? false :include-static? false})
             fkinds (set (map :kind (:findings rep)))]
         (is (= :calm (:level calm)))
         (is (= 0 (:ooms calm)) "Large non-error eval is NOT counted as OOM")
@@ -97,8 +98,8 @@
       (tx-branch! cfg :branch/perf
         (mapv #(eval-tx :worker/perf % 0 (symbol "result" (str "e" %)) {}) (range 1 21)))
       (let [mdb (st/head conn :main)
-            m1 (code/measure-call #(friction/friction-report conn mdb {:include-renderers? false :include-static? false}))
-            m2 (code/measure-call #(friction/friction-report conn mdb {:include-renderers? false :include-static? false}))]
+            m1 (code/measure-call #(metrics/friction-report conn mdb {:include-renderers? false :include-static? false}))
+            m2 (code/measure-call #(metrics/friction-report conn mdb {:include-renderers? false :include-static? false}))]
         (is (< (:bytes m1) 31457280) (str "Cold bytes >= 30 MB: " (:bytes m1)))
         (is (< (:ms m1) 50.0) (str "Cold ms >= 50 ms: " (:ms m1)))
         (is (= 1 (:agents-scanned (:val m1))))
@@ -113,7 +114,7 @@
             f2 {:id :hygiene/trace-rogue-fs-worker-b :kind :rogue-fs :scope 'seon.fork.helpers
                 :title "Rogue 1x :worker/b" :summary "Rogue 1x :worker/b" :curated [[:seon.agent/id :worker/b]] :impact 94}]
         (d/transact conn {:tx-data [{:seon.task/id (:id f1) :seon.task/title "Existing task" :seon.task/done? false}]})
-        (let [txs (friction/propose-tasks-tx @conn {:findings [f1 f2]} {:limit 5})]
+        (let [txs (metrics/propose-tasks-tx @conn {:findings [f1 f2]} {:limit 5})]
           (is (= 1 (count txs)))
           (is (= (:id f2) (:seon.task/id (first txs))))
           (is (false? (:seon.task/done? (first txs)))))))))
@@ -139,28 +140,28 @@
         (let [disc (set (rfit/discover-renderers @conn :seon.health/friction))]
           (is (contains? disc 'seon.render.entities.diagnostics/render-friction-chip))
           (is (contains? disc 'seon.render.entities.diagnostics/render-friction-card)))
-        (doseq [sym ['seon.health.friction/score-agent-friction
+        (doseq [sym ['seon.health.metrics/score-agent-friction
                      'seon.render.entities.diagnostics/render-friction-chip
                      'seon.render.entities.diagnostics/render-friction-card]]
           (let [res (schema/stress-var @conn sym)]
             (is (:ok? res) (str "seed=42 stress-var failed for " sym ": " (pr-str res)))))))))
 
 (deftest r-rog-no-lookbehind-oom-and-repl-friction-ergonomics-test
-  (testing "r-rog has zero negative-lookbehind OOM on 5,000-char code (< 20 ms / < 10 MB) and matches fs/write & jolt.fs/write accurately"
-    (let [r-rog @#'friction/r-rog
+  (testing "rogue-fs-pattern has zero negative-lookbehind OOM on 5,000-char code (< 20 ms / < 10 MB) and matches fs/write & jolt.fs/write accurately"
+    (let [rogue-pat @#'metrics/rogue-fs-pattern
           pad (apply str (repeat 250 "(let [x (+ 1 2)] x) "))
           big-clean (str "(do " pad " (my-fs/write \"a\" \"b\") (user/fs-write \"c\" \"d\"))")
           big-rog-1 (str "(do " pad " (fs/write \"a\" \"b\"))")
           big-rog-2 (str "(do " pad " (jolt.fs/write \"a\" \"b\"))")
-          m-clean (code/measure-call #(re-find r-rog big-clean))
-          m-rog1 (code/measure-call #(re-find r-rog big-rog-1))
-          m-rog2 (code/measure-call #(re-find r-rog big-rog-2))]
+          m-clean (code/measure-call #(re-find rogue-pat big-clean))
+          m-rog1 (code/measure-call #(re-find rogue-pat big-rog-1))
+          m-rog2 (code/measure-call #(re-find rogue-pat big-rog-2))]
       (is (>= (count big-clean) 5000))
-      (is (nil? (:val m-clean)) "my-fs/write and user/fs-write must not match r-rog")
-      (is (some? (:val m-rog1)) "(fs/write ...) must match r-rog")
-      (is (some? (:val m-rog2)) "(jolt.fs/write ...) must match r-rog")
-      (is (some? (re-find r-rog "fs/write")) "start-of-string fs/write must match r-rog")
-      (is (some? (re-find r-rog "jolt.fs/write")) "start-of-string jolt.fs/write must match r-rog")
+      (is (nil? (:val m-clean)) "my-fs/write and user/fs-write must not match rogue-fs-pattern")
+      (is (some? (:val m-rog1)) "(fs/write ...) must match rogue-fs-pattern")
+      (is (some? (:val m-rog2)) "(jolt.fs/write ...) must match rogue-fs-pattern")
+      (is (some? (re-find rogue-pat "fs/write")) "start-of-string fs/write must match rogue-fs-pattern")
+      (is (some? (re-find rogue-pat "jolt.fs/write")) "start-of-string jolt.fs/write must match rogue-fs-pattern")
       (doseq [[lbl m] [["clean" m-clean] ["rog1" m-rog1] ["rog2" m-rog2]]]
         (is (< (:ms m) 20.0) (str lbl " took " (:ms m) " ms (>= 20 ms)"))
         (is (< (:bytes m) 10485760) (str lbl " allocated " (:bytes m) " B (>= 10 MB)")))))
@@ -174,11 +175,11 @@
         (tx-branch! cfg :branch/root-erg
           [(eval-tx :agent/root 1 0 'result/e1 {:seon.agent.eval/code big-code})])
         (let [mdb (st/head conn :main)
-              m-an (code/measure-call #(friction/analyze-agent-friction (st/head conn :branch/root-erg) :agent/root {:main-db mdb}))
-              rep-map (friction/friction-report conn mdb {:agent :agent/root :include-renderers? false :include-static? false})
+              m-an (code/measure-call #(metrics/analyze-agent-friction (st/head conn :branch/root-erg) :agent/root {:main-db mdb}))
+              rep-map (metrics/friction-report conn mdb {:agent :agent/root :include-renderers? false :include-static? false})
               [rep-kw rep-opt] (binding [fcalls/*agent-ctx* {:conn conn :branch :main :agent-id :agent/root}]
-                                 [(friction/repl-friction :agent/root)
-                                  (friction/repl-friction {:agent :agent/root})])]
+                                 [(metrics/repl-friction :agent/root)
+                                  (metrics/repl-friction {:agent :agent/root})])]
           (is (< (:ms m-an) 20.0) (str "analyze-agent-friction 5k code took " (:ms m-an) " ms"))
           (is (< (:bytes m-an) 10485760) (str "analyze-agent-friction 5k code allocated " (:bytes m-an) " B"))
           (is (= 0 (:rogue-fs-count (:val m-an))))
@@ -187,3 +188,72 @@
           (is (= [:agent/root] (mapv :agent (:agents rep-opt))))
           (is (= {:seon/schema :seon.health/friction} (meta rep-kw)))
           (is (:ok? (schema/validate-against mdb :seon.health/friction rep-kw))))))))
+
+(deftest friction-bugfix-regressions-and-health-parity-test
+  (testing "Prose reply with blank code has :empty-code-turns 0, :last-snippet is nil (never ': '), {:window 0}/{:agents []} take < 10 ms, main-db updates invalidate cache, and large-fn findings match seon.health/report"
+    (with-test-store [{:keys [conn cfg]}]
+      (st/branch! conn :main :branch/prose)
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/prose :seon.agent/branch :branch/prose}]})
+      ;; Prose reply: blank code, non-blank thought, no handle -> NOT an empty turn, :last-snippet nil (never ": ")
+      (tx-branch! cfg :branch/prose
+        [(-> (eval-tx :agent/prose 1 0 nil {:seon.agent.eval/code "" :seon.agent.eval/thought "All checks passed cleanly."})
+             (dissoc :seon.agent.eval/handle))])
+      (let [mdb1 (st/head conn :main)
+            prose-row (metrics/agent-friction-summary conn mdb1 :agent/prose)
+            m-w0 (code/measure-call #(metrics/friction-report conn mdb1 {:window 0 :include-renderers? false :include-static? false}))
+            m-empty (code/measure-call #(metrics/friction-report conn mdb1 {:agents [] :include-renderers? false :include-static? false}))
+            rep1 (metrics/friction-report conn mdb1 {:agents [:agent/prose] :include-renderers? false :include-static? false})]
+        (is (= 0 (:empty-code-turns prose-row)) "Prose reply with non-blank thought must not count as empty-code-turn")
+        (is (= :calm (:level prose-row)))
+        (is (nil? (:last-snippet prose-row)) "Blank handle and blank code must yield nil, never ': '")
+        (is (= 0 (:agents-scanned (:val m-w0))))
+        (is (< (:ms m-w0) 10.0) (str "{:window 0} took " (:ms m-w0) " ms"))
+        (is (= 0 (:agents-scanned (:val m-empty))))
+        (is (< (:ms m-empty) 10.0) (str "{:agents []} took " (:ms m-empty) " ms"))
+        (is (= 0 (:test-failure-messages (first (:agents rep1)))))
+        ;; Mutate main-db with a test-failure message + delegated call (branch-db unchanged) -> inner cache MUST invalidate!
+        (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid) :seon.agent.message/seq 1 :seon.agent.message/from :system
+                                     :seon.agent.message/to :agent/prose :seon.agent.message/type :test-failure :seon.agent.message/body "red"}
+                                    {:seon.agent.call/id (random-uuid) :seon.agent.call/caller :agent/prose :seon.agent.call/callee :ns/demo :seon.agent.call/status :resolved}]})
+        (let [mdb2 (st/head conn :main)
+              rep2 (metrics/friction-report conn mdb2 {:agents [:agent/prose] :include-renderers? false :include-static? false})
+              row2 (first (:agents rep2))]
+          (is (= 1 (:test-failure-messages row2)) "Inner cache key must include main-db sig so main-db messages refresh")
+          (is (= 1 (:delegated-calls row2)) "Inner cache key must include main-db sig so delegated calls refresh"))
+        ;; Large-function parity between friction-findings and seon.health/report (including >7.2k-char <120L functions!)
+        (let [wide-line (apply str (repeat 200 "x"))
+              char-heavy-fn (str "(ns demo.parity)\n(defn wide-fn [x]\n" (str/join "\n" (repeat 40 (str "  \"" wide-line "\""))) "\n  x)\n")
+              line-heavy-fn (str "(defn tall-fn [x]\n" (str/join "\n" (repeat 125 "  x")) ")\n")]
+          (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/parity.clj" (str char-heavy-fn line-heavy-fn) false)})
+          (let [db3 (st/head conn :main)
+              hrep (health/report db3)
+              health-large (filterv #(= :large-function (:class %)) (:problems hrep))
+              ff-large (filterv #(= :large-function (:kind %))
+                                (metrics/friction-findings db3 [] {:include-renderers? false :include-static? true}))]
+          (is (= 2 (count health-large)))
+          (is (= (count health-large) (count ff-large)) "friction-findings large-function count must match seon.health/report")
+          (let [r0 (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main}
+                                               {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root
+                                                :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
+                                                :seon.agent.eval/code "(old-eval)" :seon.agent.eval/error "old error"}
+                                               {:seon.agent.call/id (random-uuid) :seon.agent.call/caller :agent/root
+                                                :seon.agent.call/callee :ns/seon.old :seon.agent.call/status :resolved}]})
+                base-tx (:max-tx (:db-after r0))
+                _ (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root
+                                               :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0
+                                               :seon.agent.eval/code "(user/ask! :ns/seon.health)"}
+                                              {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root
+                                               :seon.agent.eval/turn 3 :seon.agent.eval/call-index 0
+                                               :seon.agent.eval/code "" :seon.agent.eval/thought "Both checks passed cleanly."}
+                                              {:seon.agent.call/id (random-uuid) :seon.agent.call/caller :agent/root
+                                               :seon.agent.call/callee :ns/seon.health :seon.agent.call/status :resolved}
+                                              {:seon.agent.call/id (random-uuid) :seon.agent.call/caller :agent/root
+                                               :seon.agent.call/callee :ns/seon.code :seon.agent.call/status :resolved}
+                                              {:seon.agent.call/id (random-uuid) :seon.agent.call/caller :agent/root
+                                               :seon.agent.call/callee :ns/seon.rule :seon.agent.call/status :pending}]})
+                tr (metrics/analyze-agent-friction @conn :agent/root {:main-db @conn :after-tx base-tx :after-main-tx base-tx})]
+            (is (= 2 (:evals tr)))
+            (is (= 0 (:eval-errors tr)))
+            (is (= 3 (:delegated-calls tr)))
+            (is (= 2 (:settled-delegated-calls tr)))
+            (is (= "Both checks passed cleanly." (:last-reply tr))))))))))

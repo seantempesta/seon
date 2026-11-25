@@ -19,7 +19,9 @@
             [clojure.core.async :as a]
             [clojure.data.json :as json]
             [seon.web.actions :as wact]
-            [seon.transactor.calls :as tcalls]))
+            [seon.transactor.calls :as tcalls]
+            [seon.bench.golden :as golden]
+            [seon.render.tails :as rtails]))
 
 (def ^:private summary-forms
   {:seon.summary/id [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
@@ -178,7 +180,7 @@
       (is (= 1 (:tail-merges full)))
       (is (<= (:chars tight) 260))
       (is (true? (:truncated? tight)))
-      (is (some? (chronicle/chronicle-tail {:main-db @c}))))))
+      (is (some? (rtails/render-chronicle-tail {:seon.tail/chronicle (rtails/gather-chronicle-data @c)}))))))
 
 (deftest ^{:cost/ticks 28000000} living-canvas-chronicle-and-summary-tile-render-test
   (testing "Unified surface renders agent canvas with Chronicle summaries, freshness, d/as-of rewind, and summary-tile"
@@ -411,34 +413,34 @@
           (a/close! srv-ch))))))
 
 (deftest bench-runs-rollup-aggregates-and-tolerates-partial-maps-test
-  (testing "empty and nil collections roll up to a safe zero result"
-    (is (= {:runs 0 :total 0 :passed 0 :failed 0 :pass-rate 0.0 :mean-evals 0.0
-            :total-tokens 0 :kv-cache-hit-rate 0.0}
-           (chronicle/bench-runs-rollup nil)))
-    (is (= 0 (:runs (chronicle/bench-runs-rollup [])))))
-  (testing "declared counts, trial evals, tokens, and KV hit rate aggregate across runs"
-    (let [r1 {:seon.bench.run/total 2 :seon.bench.run/passed 1 :seon.bench.run/failed 1
-              :seon.bench.run/proxy-stats {:prompt-tokens 100 :completion-tokens 40 :cache-hit-tokens 50}
-              :seon.bench.run/trials [{:status :passed :evals 3} {:status :failed :evals 1}]}
-          r2 {:seon.bench.run/trials [{:status :merged :evals 4} {:status :timeout :evals 0} {:status :booting}]
-              :seon.bench.run/proxy-stats {:prompt-tokens 300 :completion-tokens 60 :cache-hit-tokens 10}}
-          out (chronicle/bench-runs-rollup [r1 r2])]
-      (is (= 2 (:runs out)))
-      (is (= 5 (:total out)))
-      (is (= 2 (:passed out)))
-      (is (= 2 (:failed out)))
-      (is (= 0.4 (:pass-rate out)))
-      (is (= 2.0 (:mean-evals out)))
-      (is (= 500 (:total-tokens out)))
-      (is (= 0.15 (:kv-cache-hit-rate out)))))
-  (testing "non-map, token-less, and status-only partial inputs never throw"
-    (let [out (chronicle/bench-runs-rollup [nil :bogus {:seon.bench.run/id :x}
-                                            {:seon.bench.run/trials [{:status :passed} {:status :failed}]}
-                                            {:seon.bench.run/proxy-stats {:prompt-tokens "bad"}}])]
-      (is (= 3 (:runs out)))
-      (is (= 1 (:passed out)))
-      (is (= 1 (:failed out)))
-      (is (= 0.5 (:pass-rate out)))
-      (is (= 0.0 (:mean-evals out)))
-      (is (= 0 (:total-tokens out)))
-      (is (= 0.0 (:kv-cache-hit-rate out))))))
+  (testing "empty collection rolls up to a safe zero-run scoreboard"
+    (let [empty-sb (golden/compute-scoreboard [] {:include-legacy? true})]
+      (is (= 0 (:runs-count empty-sb)))
+      (is (= 0.0 (:merge-rate-pct empty-sb)))
+      (is (= 0.0 (:overall-pass-rate-pct empty-sb)))
+      (is (= :warm (:level empty-sb)))))
+  (testing "trial statuses, eval counts, proxy-stats KV hit rate, and timeouts aggregate cleanly across runs"
+    (let [run-1 {:seon.bench.run/id (random-uuid) :seon.bench.run/started-ms 1000
+                 :seon.bench.run/total 2 :seon.bench.run/passed 1 :seon.bench.run/failed 1
+                 :seon.bench.run/proxy-stats {:prompt-tokens 100 :completion-tokens 40 :cache-hit-tokens 50}
+                 :seon.bench.run/trials [{:status :passed :evals 3} {:status :failed :evals 1}]}
+          run-2 {:seon.bench.run/id (random-uuid) :seon.bench.run/started-ms 2000
+                 :seon.bench.run/trials [{:status :merged :merged? true :evals 4}
+                                         {:status :timeout :evals 0 :turn-overrun? false}
+                                         {:status :booting}]
+                 :seon.bench.run/proxy-stats {:prompt-tokens 300 :completion-tokens 60 :cache-hit-tokens 30}}
+          out (golden/compute-scoreboard [run-1 run-2] {:include-legacy? true})]
+      (is (= 2 (:runs-count out)))
+      (is (= 33.3 (:overall-pass-rate-pct out)))
+      (is (= 10.0 (:kv-cache-hit-pct out)))
+      (is (= 1 (:timeouts out)))
+      (is (= 0 (:livelocks out)))))
+  (testing "token-less, malformed proxy-stats, and status-only partial run maps never throw"
+    (let [out (golden/compute-scoreboard
+                [{:seon.bench.run/id :x :seon.bench.run/started-ms 1}
+                 {:seon.bench.run/started-ms 2 :seon.bench.run/trials [{:status :passed} {:status :failed}]}
+                 {:seon.bench.run/started-ms 3 :seon.bench.run/proxy-stats {:prompt-tokens "bad"}}]
+                {:include-legacy? true})]
+      (is (= 3 (:runs-count out)))
+      (is (= 0.0 (:overall-pass-rate-pct out)))
+      (is (nil? (:kv-cache-hit-pct out))))))
