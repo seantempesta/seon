@@ -626,4 +626,12 @@
   :seon.fix/error-class :seon.code/examples-quote-parity-and-turn0-callees,
   :seon.fix/root-cause "set-defn-meta-src printed raw symbols in :examples unquoted while apply-live-var-meta! skipped unquoting; add-turn0-var-neighborhood! only walked reverse callers; docs/malli.md had a duplicate entity docs/malli.md#section; handle-fork-merge-back! sets both :paused? true and :merged-tx.",
   :seon.fix/regression-test seon.alloc-guard-test/wave16b-turn0-callees-examples-quote-parity-and-tuner-merged-test,
-  :seon.fix/id #uuid "b1901c0e-59ab-4f8a-9238-09049e49d232"}]
+  :seon.fix/id #uuid "b1901c0e-59ab-4f8a-9238-09049e49d232"}
+ {:seon.fix/created-ms 1795646121725,
+  :seon.fix/symptom "W29A: 3-way B+-tree :agent/root timed out at 480s on T16-T18 looking for merged child tests; 8/10 errors in contract-transactor-spawn-msg-ent from :as user; 8t 0-err trial-message-op false-negative on reexport stub.",
+  :seon.fix/change-summary "Added cached seon.repl.search/effective-code-db wired into grep-src, ns-list, callers, callees, tests-for, ns-outline; renamed :as user -> :as tuser in seon.transactor and seon.transactor.spawn; fixed fuzzy-user-helper-hint + added #uuid/result/e hints; excluded :seon.code/reexport stubs in Pool 1, followed :seon.code/reexport in verify-task-spec, added :multi-ns-tests; normalized arities in check-examples-against-arities.",
+  :seon.fix/before-after "Before: 3-way B+-tree root timed out T16-T18, 8/10 :as user errs, reexport stub false-negative. After: clean branches read-through to :main, 0 :as user aliases in src/seon/, reexport stubs excluded & followed, :multi-ns-tests verified.",
+  :seon.fix/error-class :stale-coordinator-branch-read-and-as-user-shadowing,
+  :seon.fix/root-cause "1) ns-outline, tests-for, grep-src, ns-list, callers, callees read @conn (stale branch) instead of reading through to :main on clean coordinator branches. 2) [seon.transactor.user :as user] shadowed user/* REPL helpers and fuzzy-user-helper-hint echoed Did you mean: user/<same>. 3) seon.bench.sampler sampled/verified :seon.code/reexport stubs and lacked :multi-ns-tests. 4) check-examples-against-arities crashed on bare :variadic / vector arities.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave29b-clean-branch-read-through-reexport-sampler-and-as-user-test,
+  :seon.fix/id #uuid "9feaf249-7e03-451e-a32a-dc94605b7cd7"}]

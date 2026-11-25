@@ -19,6 +19,12 @@
   (boolean (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
                  (tree-seq coll? seq sch))))
 
+(defn- reexport-target-sym [db fkey]
+  (when (and db fkey (contains? (db-schema db) :seon.code.form/key))
+    (when-let [fsrc (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey]))]
+      (when-let [m (re-find #":seon\.code/reexport\s+'([a-zA-Z0-9_.\-\!\?\*]+/[a-zA-Z0-9_.\-\!\?\*]+)" (str fsrc))]
+        (symbol (second m))))))
+
 (defn sample-random-tasks
   "Deterministically samples `n` diverse, verified, unrigged real tasks live from Datahike `db` (using `seed`)
    across 3 non-vacuous pools (pure loose-return contracts, namespaces with pure defns, and under-rendered schemas)
@@ -48,7 +54,7 @@
                                        (not (str/ends-with? (name vns) "-test"))
                                        (not (contains? '#{seon.main seon.fork} vns))
                                        (not (str/ends-with? (name vnm) "!"))
-                                       (not (str/ends-with? (name vnm) "-proc"))
+                                       (and (not (str/ends-with? (name vnm) "-proc")) (not (reexport-target-sym db (eav1 e :seon.code.var/form))))
                                        (not (eav1 e :seon.code.var/private?))
                                        (not (eav1 e :seon.code.var/flow-edge?))
                                        (not (eav1 e :seon.code.var/macro?))
@@ -146,18 +152,32 @@
           {:ok? false :kind :all :reason (:reason first-fail) :results sub-res}
           {:ok? true :kind :all :results sub-res}))
 
+      :multi-ns-tests
+      (verify-task-spec db {:kind :all
+                            :after-main-tx (:after-main-tx spec)
+                            :specs (mapv (fn [nsym] {:kind :ns-test-or-example :ns nsym}) (:namespaces spec))})
+
       :tighten-return-contract
-      (let [vsym (:var spec)
-            ve (:e (first (d/datoms db :avet :seon.code.var/name vsym)))
-            sch (when ve (:v (first (d/datoms db :eavt ve :seon.code.var/schema))))
-            still-loose? (or (nil? sch) (loose-map-return? sch))
-            stress (when (and (not still-loose?) (schema/generatable-function-schema? sch))
-                     (try (schema/stress-var db vsym {:samples 50 :seed 42}) (catch Throwable _ nil)))]
-        (cond
-          (nil? ve) {:ok? false :kind :tighten-return-contract :reason (str "Var not found: " vsym)}
-          still-loose? {:ok? false :kind :tighten-return-contract :reason (str vsym " still has loose return schema: " (pr-str sch))}
-          (and stress (false? (:ok? stress))) {:ok? false :kind :tighten-return-contract :reason (str "stress-var failed: " (:reason stress))}
-          :else {:ok? true :kind :tighten-return-contract :var vsym :schema sch}))
+      (let [check-one (fn [s]
+                        (let [ve (:e (first (d/datoms db :avet :seon.code.var/name s)))
+                              sch (when ve (:v (first (d/datoms db :eavt ve :seon.code.var/schema))))
+                              still-loose? (or (nil? sch) (loose-map-return? sch))
+                              stress (when (and (not still-loose?) (schema/generatable-function-schema? sch))
+                                       (try (schema/stress-var db s {:samples 50 :seed 42}) (catch Throwable _ nil)))]
+                          (cond
+                            (nil? ve) {:ok? false :kind :tighten-return-contract :reason (str "Var not found: " s)}
+                            still-loose? {:ok? false :kind :tighten-return-contract :reason (str s " still has loose return schema: " (pr-str sch))}
+                            (and stress (false? (:ok? stress))) {:ok? false :kind :tighten-return-contract :reason (str "stress-var failed: " (:reason stress))}
+                            :else {:ok? true :kind :tighten-return-contract :var s :schema sch})))
+            vsym (:var spec)
+            ve0 (:e (first (d/datoms db :avet :seon.code.var/name vsym)))
+            fk0 (when ve0 (:v (first (d/datoms db :eavt ve0 :seon.code.var/form))))
+            re-target (reexport-target-sym db fk0)
+            r0 (check-one vsym)]
+        (if (and (false? (:ok? r0)) re-target)
+          (let [r1 (check-one re-target)]
+            (if (:ok? r1) (assoc r1 :reexport-from vsym) r0))
+          r0))
 
       :ns-test-or-example
       (let [nsym (:ns spec)

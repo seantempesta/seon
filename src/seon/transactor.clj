@@ -11,7 +11,7 @@
             [seon.store :as store]
             [seon.transactor.calls :as tcalls]
             [seon.transactor.merge :as tmerge]
-            [seon.transactor.user :as user]
+            [seon.transactor.user :as tuser]
             [seon.transactor.spawn :as spawn]))
 
 (defn- focus-tx [& args] (apply spawn/focus-tx args))
@@ -24,7 +24,7 @@
 
 (defn- git-wb [& args] (apply spawn/git-wb args))
 
-(defn- show-user-tx [& args] (apply user/show-user-tx args))
+(defn- show-user-tx [& args] (apply tuser/show-user-tx args))
 
 (defn- handle-boot-init! [st]
   (let [{:keys [conn fork-out]} st db @conn cid (d/commit-id db)

@@ -22,7 +22,8 @@
             [seon.repl.search :as rsearch]
             [seon.bench.sampler]
             [seon.code.errors]
-            [seon.code.reach.delta]))
+            [seon.code.reach.delta]
+            [seon.code.cst.meta]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -766,3 +767,70 @@
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "class malli.registry$composite_registry$reify__1 cannot be cast to class clojure.lang.IFn" {}) "malli.core/schema"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "No matching clause: :ave" {}) ":avet"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Lookup ref should contain 2 elements: [12345]" {}) "never `[eid]`"))))
+
+(deftest ^{:cost/ticks 200000000 :cost/bytes 1073741824} wave29b-clean-branch-read-through-reexport-sampler-and-as-user-test
+  (testing "effective-code-db reads through to :main on clean branches and untouched namespaces"
+    (let [tmp (str "/tmp/seon-w29b-" (random-uuid))
+          {:keys [conn] :as st} (seon.store/open! tmp)]
+      (try
+        (let [base-tx (seon.code/file-import-tx @conn "src/seon/demo_a.clj" "(ns seon.demo-a)\n(defn f1 [] 1)\n" true)]
+          (d/transact conn {:tx-data base-tx})
+          (seon.store/branch! conn :main :branch/clean-coord)
+          (seon.store/branch! conn :main :branch/dirty-spec)
+          ;; Advance :main with a newly merged namespace (simulating child merge)
+          (let [m-tx (seon.code/file-import-tx @conn "src/seon/demo_b.clj" "(ns seon.demo-b)\n(defn f2 [] 2)\n" true)]
+            (d/transact conn {:tx-data m-tx}))
+          ;; Clean coordinator branch only has non-code eval writes
+          (let [cc (seon.store/connect (:cfg st) :branch/clean-coord)]
+            (try
+              (d/transact cc {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root :seon.agent.eval/turn 1 :seon.agent.eval/code "1"}]})
+              (let [edb (seon.repl.search/effective-code-db cc :branch/clean-coord)]
+                (is (some? (first (d/datoms edb :avet :seon.code.var/name 'seon.demo-b/f2)))
+                    "clean branch must see newly merged :main vars"))
+              (finally (d/release cc))))
+          ;; Dirty branch edited demo-a only: sees own demo-a edit AND reads through to :main for untouched demo-b
+          (let [dc (seon.store/connect (:cfg st) :branch/dirty-spec)]
+            (try
+              (let [d-tx (seon.code/file-import-tx @dc "src/seon/demo_a.clj" "(ns seon.demo-a)\n(defn f1 [] 99)\n" true)]
+                (d/transact dc {:tx-data d-tx}))
+              (let [db-a (seon.repl.search/effective-code-db dc :branch/dirty-spec 'seon.demo-a)
+                    db-b (seon.repl.search/effective-code-db dc :branch/dirty-spec 'seon.demo-b)]
+                (is (clojure.string/includes? (str (:seon.code.form/src (d/pull db-a '[:seon.code.form/src] [:seon.code.form/key "seon.demo-a/f1"]))) "99"))
+                (is (some? (first (d/datoms db-b :avet :seon.code.var/name 'seon.demo-b/f2)))))
+              (finally (d/release dc)))))
+        (finally
+          (seon.store/close! st)
+          (seon.store/rm-rf! tmp)))))
+  (testing "fuzzy-user-helper-hint detects :as user shadowing + #uuid and result/e hints"
+    (let [idx {"stress-var" {:arglists "([sym])"} "db" {:arglists "([])"}}
+          h1 (seon.code.errors/enrich-eval-error "(user/stress-var 'a/b)" "No such var: user/stress-var" idx)
+          h2 (seon.code.errors/enrich-eval-error "'[[#uuid \"00000000-0000-0000-0000-000000000001\"]]" "emit-quoted: unsupported quoted form #uuid \"00000000-0000-0000-0000-000000000001\"" idx)
+          h3 (seon.code.errors/enrich-eval-error "result/e11" "No such var: result/e11" idx)]
+      (is (clojure.string/includes? h1 ":as user"))
+      (is (not (clojure.string/includes? h1 "Did you mean: user/stress-var")))
+      (is (clojure.string/includes? h2 "UUID/fromString"))
+      (is (clojure.string/includes? h3 "result/e<n>"))))
+  (testing "check-examples-against-arities handles bare :variadic and vector arities"
+    (is (nil? (seon.code.cst.meta/check-examples-against-arities [[[1 2] 3]] :variadic 'a/f "a/f" :any)))
+    (is (nil? (seon.code.cst.meta/check-examples-against-arities [[[1] 2]] [1 2] 'a/f "a/f" :any)))
+    (is (= :malli-examples-arity-mismatch
+           (:error (seon.code.cst.meta/check-examples-against-arities [[[1 2 3] 4]] [1 2] 'a/f "a/f" :any)))))
+  (testing "sampler skips :seon.code/reexport stubs and verify-task-spec supports :multi-ns-tests"
+    (let [tmp (str "/tmp/seon-w29b-samp-" (random-uuid))
+          {:keys [conn] :as st} (seon.store/open! tmp)]
+      (try
+        (let [tx1 (seon.code/file-import-tx @conn "src/seon/demo_impl.clj" "(ns seon.demo-impl)\n(defn foo {:malli/schema [:=> [:cat :int] [:map [:x :int]]]} [x] {:x x})\n" true)
+              tx2 (seon.code/file-import-tx @conn "src/seon/demo_api.clj" "(ns seon.demo-api (:require [seon.demo-impl :as impl]))\n(defn ^{:seon.code/reexport 'seon.demo-impl/foo :malli/schema [:=> [:cat :int] :map]} foo [& args] (apply impl/foo args))\n" true)
+              _ (d/transact conn {:tx-data (vec (concat tx1 tx2))})
+              db @conn
+              sampled (seon.bench.sampler/sample-random-tasks db {:n 20 :seed 124})
+              v-re (seon.bench.sampler/verify-task-spec db {:kind :tighten-return-contract :var 'seon.demo-api/foo})
+              v-multi (seon.bench.sampler/verify-task-spec db {:kind :multi-ns-tests :namespaces ['seon.demo-impl 'seon.demo-api] :after-main-tx 0})]
+          (is (not (some #(= 'seon.demo-api/foo (get-in % [:verify-spec :var])) sampled))
+              "re-export stubs must never be sampled in Pool 1")
+          (is (true? (:ok? v-re)) "verify-task-spec follows :seon.code/reexport to tightened target")
+          (is (= 'seon.demo-impl/foo (:var v-re)))
+          (is (false? (:ok? v-multi)) "multi-ns-tests fails strictly when namespaces lack new tests/examples"))
+        (finally
+          (seon.store/close! st)
+          (seon.store/rm-rf! tmp))))))

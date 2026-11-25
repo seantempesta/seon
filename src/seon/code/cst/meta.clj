@@ -164,22 +164,26 @@
   {:malli/schema [:=> [:cat :any :any :any :any :any] :any], :cost/ticks 1000000}
   [exs arities target key sch]
   (when (some? exs)
-    (if-not (and (coll? exs) (not (map? exs)))
-      {:ok? false :error :invalid-malli-examples :target target :key key :schema sch
-       :hint ":examples must be a vector of [[arg1 ...] expected-out] pairs."}
-      (some (fn [ex]
-              (cond
-                (not (and (vector? ex) (= 2 (count ex)) (vector? (first ex))))
-                {:ok? false :error :invalid-malli-examples :target target :key key :example ex :expected-arities arities
-                 :hint (str "Each :examples entry must be [[arg1 ...] expected-out] (e.g. [[] out] for 0-arg, [[x] out] for 1-arg). Got: " (pr-str ex))}
+    (let [arity-set (cond (set? arities) arities
+                          (coll? arities) (set arities)
+                          (some? arities) #{arities}
+                          :else #{})]
+      (if-not (and (coll? exs) (not (map? exs)))
+        {:ok? false :error :invalid-malli-examples :target target :key key :schema sch
+         :hint ":examples must be a vector of [[arg1 ...] expected-out] pairs."}
+        (some (fn [ex]
+                (cond
+                  (not (and (vector? ex) (= 2 (count ex)) (vector? (first ex))))
+                  {:ok? false :error :invalid-malli-examples :target target :key key :example ex :expected-arities arity-set
+                   :hint (str "Each :examples entry must be [[arg1 ...] expected-out] (e.g. [[] out] for 0-arg, [[x] out] for 1-arg). Got: " (pr-str ex))}
 
-                (and (seq arities) (not (contains? arities :variadic)) (not (contains? arities (count (first ex)))))
-                {:ok? false :error :malli-examples-arity-mismatch :target target :key key :example ex
-                 :example-arity (count (first ex)) :expected-arities arities
-                 :hint (str "Example args " (pr-str (first ex)) " has arity " (count (first ex))
-                            " but schema expects arity " arities
-                            " (0-arg: [[] out]; 1-arg taking a vector/seq [a b]: [[[a b]] out] — outer vector is the arg list!).")}))
-            exs))))
+                  (and (seq arity-set) (not (contains? arity-set :variadic)) (not (contains? arity-set (count (first ex)))))
+                  {:ok? false :error :malli-examples-arity-mismatch :target target :key key :example ex
+                   :example-arity (count (first ex)) :expected-arities arity-set
+                   :hint (str "Example args " (pr-str (first ex)) " has arity " (count (first ex))
+                              " but schema expects arity " arity-set
+                              " (0-arg: [[] out]; 1-arg taking a vector/seq [a b]: [[[a b]] out] — outer vector is the arg list!).")}))
+              exs)))))
 
 (defn- quote-examples-for-src [x]
   (letfn [(has-sym? [v] (boolean (some symbol? (tree-seq coll? seq v))))

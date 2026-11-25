@@ -488,25 +488,25 @@
 
 (defn install-user-helpers!
   "Interns `user/ns-outline` and `user/move-vars!` into `user` with complete `:doc`/`:arglists` metadata and budget override."
-  {:malli/schema [:=> [:cat :any :any] :any]}
+  {:malli/schema [:=> [:cat :any :any] :any], :seon.flow/edge true}
   [get-agent-ctx-fn refresh-ctx-fn]
   (let [u (create-ns 'user)
+        eff-db (fn [conn branch target]
+                 ((requiring-resolve 'seon.repl.search/effective-code-db) conn (or branch :main) target))
         _ (intern u (with-meta 'ns-outline
                       {:doc "Return {:ns :total-tokens :form-count :forms [{:sym :key :lines :chars :tokens :private? :local-deps :callers}]} for nsym (or seq of nsyms)."
                        :arglists '([] [nsym] [nsym & more])})
                   (fn
-                  ([] (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                        ((requiring-resolve 'seon.repl.search/ns-size-summary) @conn {})))
+                  ([] (when-let [{:keys [conn branch]} (get-agent-ctx-fn)]
+                        ((requiring-resolve 'seon.repl.search/ns-size-summary) (eff-db conn branch nil) {})))
                   ([nsym]
-                   (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                     (let [db @conn]
-                       (cond (map? nsym) ((requiring-resolve 'seon.repl.search/ns-size-summary) db nsym)
-                             (coll? nsym) (into {} (map (fn [n] [n (ns-form-outline db n)])) nsym)
-                             :else (ns-form-outline db nsym)))))
+                   (when-let [{:keys [conn branch]} (get-agent-ctx-fn)]
+                     (cond (map? nsym) ((requiring-resolve 'seon.repl.search/ns-size-summary) (eff-db conn branch nil) nsym)
+                           (coll? nsym) (into {} (map (fn [n] [n (ns-form-outline (eff-db conn branch n) n)])) nsym)
+                           :else (ns-form-outline (eff-db conn branch nsym) nsym))))
                   ([nsym & more]
-                   (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                     (let [db @conn]
-                       (into {} (map (fn [n] [n (ns-form-outline db n)])) (cons nsym more)))))))
+                   (when-let [{:keys [conn branch]} (get-agent-ctx-fn)]
+                     (into {} (map (fn [n] [n (ns-form-outline (eff-db conn branch n) n)])) (cons nsym more))))))
         mv (intern u (with-meta 'move-vars!
                        {:doc "Atomically move vars from :from ns to child :to ns. Spec: {:from 'ns :to 'ns.child :vars '[v1 v2] :alias 'child :doc \"...\" :include-deps? true :re-export-public? true :keep-private? :auto :dry-run? false}. Only moved private helpers still called by :from are promoted to defn."
                         :arglists '([spec])

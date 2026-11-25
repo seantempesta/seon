@@ -46,33 +46,6 @@
                            multi? (assoc :pattern hit-p))))
       @out)))
 
-(defn grep-src
-  "Cached single- or multi-pattern grep across forms (falls back to `:seon.schema/*` when pattern mentions `seon.`). Accepts `{:ns 'ns :limit 30}` or a bare namespace symbol as 2nd arg."
-  {:malli/schema [:function [:=> [:cat :any] [:maybe [:vector :map]]] [:=> [:cat :any :any] [:maybe [:vector :map]]]]}
-  ([pattern] (grep-src pattern {}))
-  ([pattern opts-or-ns]
-   (let [{:keys [ns limit] :or {limit 30}} (cond (map? opts-or-ns) opts-or-ns (integer? opts-or-ns) {:limit (max 1 (long opts-or-ns))} :else {:ns opts-or-ns})]
-     (when-let [{:keys [conn]} *agent-ctx*]
-       (let [bdb @conn ns-pref (when ns (if (string? ns) ns (name ns)))
-             multi? (and (coll? pattern) (not (map? pattern)))
-             compiled (mapv #(if (instance? java.util.regex.Pattern %) {:raw (str %) :re? true :re %} {:raw (str %) :re? false :low (str/lower-case (str %))})
-                            (if multi? (vec pattern) [pattern]))
-             mlow? (fn [{:keys [re? re low]} ^String s ^String ls] (if re? (boolean (re-find re s)) (str/includes? ls low)))
-             mline? (fn [{:keys [re? re low]} ^String l] (if re? (boolean (re-find re l)) (str/includes? (str/lower-case l) low)))
-             hits (volatile! [])]
-         (doseq [{:keys [key sym src low] :as e} (cached-form-index bdb)
-                 :while (< (count @hits) limit) :let [ens (:ns e)]
-                 :when (or (nil? ns-pref) (= ens ns-pref) (str/starts-with? (str ens) (str ns-pref ".")))
-                 :let [mp (filterv #(mlow? % src low) compiled)] :when (seq mp)]
-           (doseq [[i line] (map-indexed vector (str/split-lines src))
-                   :while (< (count @hits) limit)
-                   :let [hp (some #(when (mline? % line) (:raw %)) mp)] :when hp
-                   :let [t (str/trim line)]]
-             (vswap! hits conj (cond-> {:key key :sym sym :ns ens :line (inc i)
-                                        :text (if (> (count t) 120) (str (subs t 0 120) "…") t)}
-                                 multi? (assoc :pattern hp)))))
-         (into @hits (grep-schema-hits bdb ns-pref compiled multi? mlow? (- (long limit) (count @hits)))))))))
-
 (defn- search-db-hits [db q]
   (let [sm (:schema db) vs (volatile! []) ss (volatile! []) ds (volatile! [])
         hit? #(str/includes? (str/lower-case (str %)) q)
@@ -157,14 +130,114 @@
               (take (max 1 lim))
               vec))))))
 
+(defonce ^:private ^:seon.flow/edge branch-code-delta-cache (store/lru-cache 32))
+
+(defn- ^:seon.flow/edge branch-code-delta [conn bdb mdb branch]
+  (let [bcid (d/commit-id bdb)
+        mcid (d/commit-id mdb)
+        st (:store bdb)
+        sid (get-in bdb [:config :store :id])]
+    (if (or (nil? bcid) (nil? mcid) (= bcid mcid)
+            (not (get-in bdb [:config :commit-graph?] true)))
+      {:main-ahead? false :dirty? false :nss #{}}
+      (store/lru-get! branch-code-delta-cache 32 [sid branch bcid mcid]
+        (fn []
+          (let [base-cid (when (and st (d/commit-graph-record st mcid) (d/commit-graph-record st bcid))
+                           (d/merge-base bdb mcid bcid))]
+            (if (or (nil? base-cid) (= base-cid mcid))
+              {:main-ahead? false :dirty? true :nss #{}}
+              (let [changes (when (d/commit-graph-record st base-cid) (d/changes conn base-cid bcid))]
+                (if (nil? changes)
+                  {:main-ahead? true :dirty? true :nss #{}}
+                  (let [code-eids (volatile! #{})
+                        dirty? (volatile! false)]
+                    (doseq [dt changes
+                            :let [a (:a dt)]]
+                      (when (or (= a :seon.code.form/hash)
+                                (= a :seon.code.form/src)
+                                (= a :seon.code.form/key)
+                                (= a :seon.code.var/name)
+                                (= a :seon.schema/form))
+                        (vreset! dirty? true)
+                        (when (or (= a :seon.code.form/hash) (= a :seon.code.form/src) (= a :seon.code.form/key))
+                          (vswap! code-eids conj (:e dt)))))
+                    (let [base-db-delay (delay (d/commit-as-db conn base-cid))
+                          nss (if (empty? @code-eids)
+                                #{}
+                                (into #{}
+                                      (keep (fn [e]
+                                              (or (:v (first (d/datoms bdb :eavt e :seon.code.form/ns)))
+                                                  (when-let [base-db @base-db-delay]
+                                                    (:v (first (d/datoms base-db :eavt e :seon.code.form/ns)))))))
+                                      @code-eids))]
+                      {:main-ahead? true :dirty? @dirty? :nss nss})))))))))))
+
+(defn ^:seon.flow/edge effective-code-db
+  "Returns the freshest code-reading DB for `(conn, branch)` (optionally scoped to single-ns `target`).
+   When `:main` advanced past `merge-base(main, branch)` and `branch` has no code edits (or did not edit `target`'s ns),
+   returns `:main` so coordinators and clean branches immediately see merged code, vars, and tests."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/conn :keyword] :seon.host/db]
+                  [:=> [:cat :seon.host/conn :keyword :any] :seon.host/db]]
+   :cost/ticks 15000000}
+  ([conn branch] (effective-code-db conn branch nil))
+  ([conn branch target]
+   (let [bdb @conn]
+     (if (= branch :main)
+       bdb
+       (let [mdb (when (store/branch? conn :main) (store/head conn :main))]
+         (if (or (nil? mdb) (= (d/commit-id mdb) (d/commit-id bdb)))
+           bdb
+           (let [{:keys [main-ahead? dirty? nss]} (branch-code-delta conn bdb mdb branch)]
+             (if-not main-ahead?
+               bdb
+               (if-not dirty?
+                 mdb
+                 (let [tns (cond
+                             (and (symbol? target) (namespace target)) (symbol (namespace target))
+                             (symbol? target) target
+                             (string? target) (let [s (symbol target)] (if (namespace s) (symbol (namespace s)) s))
+                             :else nil)]
+                   (if (and tns (seq nss) (not (contains? nss tns)))
+                     mdb
+                     bdb)))))))))))
+
+(defn grep-src
+  "Cached single- or multi-pattern grep across forms (falls back to `:seon.schema/*` when pattern mentions `seon.`). Accepts `{:ns 'ns :limit 30}` or a bare namespace symbol as 2nd arg."
+  {:malli/schema [:function [:=> [:cat :any] [:maybe [:vector :map]]] [:=> [:cat :any :any] [:maybe [:vector :map]]]]}
+  ([pattern] (grep-src pattern {}))
+  ([pattern opts-or-ns]
+   (let [{:keys [ns limit] :or {limit 30}} (cond (map? opts-or-ns) opts-or-ns (integer? opts-or-ns) {:limit (max 1 (long opts-or-ns))} :else {:ns opts-or-ns})]
+     (when-let [{:keys [conn branch]} *agent-ctx*]
+       (let [bdb (effective-code-db conn (or branch :main))
+             ns-pref (when ns (if (string? ns) ns (name ns)))
+             multi? (and (coll? pattern) (not (map? pattern)))
+             compiled (mapv #(if (instance? java.util.regex.Pattern %) {:raw (str %) :re? true :re %} {:raw (str %) :re? false :low (str/lower-case (str %))})
+                            (if multi? (vec pattern) [pattern]))
+             mlow? (fn [{:keys [re? re low]} ^String s ^String ls] (if re? (boolean (re-find re s)) (str/includes? ls low)))
+             mline? (fn [{:keys [re? re low]} ^String l] (if re? (boolean (re-find re l)) (str/includes? (str/lower-case l) low)))
+             hits (volatile! [])]
+         (doseq [{:keys [key sym src low] :as e} (cached-form-index bdb)
+                 :while (< (count @hits) limit) :let [ens (:ns e)]
+                 :when (or (nil? ns-pref) (= ens ns-pref) (str/starts-with? (str ens) (str ns-pref ".")))
+                 :let [mp (filterv #(mlow? % src low) compiled)] :when (seq mp)]
+           (doseq [[i line] (map-indexed vector (str/split-lines src))
+                   :while (< (count @hits) limit)
+                   :let [hp (some #(when (mline? % line) (:raw %)) mp)] :when hp
+                   :let [t (str/trim line)]]
+             (vswap! hits conj (cond-> {:key key :sym sym :ns ens :line (inc i)
+                                        :text (if (> (count t) 120) (str (subs t 0 120) "…") t)}
+                                 multi? (assoc :pattern hp)))))
+         (into @hits (grep-schema-hits bdb ns-pref compiled multi? mlow? (- (long limit) (count @hits)))))))))
+
 (defn ns-list
   "Lists namespaces ranked by token size (`{:ns :forms :vars :chars :tokens}`). Pass optional substring/prefix or `{:prefix ... :include-tests? true :top 30}`."
   {:malli/schema [:function [:=> [:cat] [:maybe [:vector :map]]] [:=> [:cat :any] [:maybe [:vector :map]]]]
    :seon.eval/budget-override {:ticks 200000000 :bytes 536870912}}
   ([] (ns-list {}))
   ([filter-or-opts]
-   (when-let [{:keys [conn]} *agent-ctx*]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
      (let [opts (cond (map? filter-or-opts) filter-or-opts
                       (or (string? filter-or-opts) (symbol? filter-or-opts)) {:prefix filter-or-opts :include-tests? true :limit 50}
                       :else {})]
-       (ns-size-summary @conn opts)))))
+       (ns-size-summary (effective-code-db conn (or branch :main)) opts)))))

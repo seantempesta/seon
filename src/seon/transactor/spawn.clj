@@ -7,7 +7,7 @@
             [seon.store :as store]
             [seon.transactor.calls :as tcalls]
             [seon.transactor.merge :as tmerge]
-            [seon.transactor.user :as user :refer [norm-ref show-user-tx]]
+            [seon.transactor.user :as tuser :refer [norm-ref show-user-tx]]
             [seon.fork.worker-support :as wsup]
             [seon.cite :as cite]))
 
