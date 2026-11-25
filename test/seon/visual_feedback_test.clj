@@ -21,17 +21,18 @@
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.test-fixture :refer [with-test-store]]
-            [seon.web.css :as wcss]))
-
-(defn- throwing-canvas-fn [_db _agent]
-  (throw (ex-info "intentional canvas boom" {:boom true})))
+            [seon.web.css :as wcss]
+            [clojure.core.async :as a]
+            [seon.agent :as agent]
+            [seon.code.graph :as graph]
+            [seon.render.fit :as fit]))
 
 (defn- clean-canvas-fn [_db agent]
   (viz/bar-chart {:title (str "Agent " (:seon.agent/id agent))
                   :items [{:label "Pass" :value 9} {:label "Fail" :value 1}]}))
 
 (deftest sanitize-hiccup-drop-reporting-test
-  (testing "sanitize-hiccup-with-report captures forbidden tags, attrs, URLs, actions, styles, and raw maps"
+  (testing "sanitize-hiccup-with-report captures forbidden tags, attrs, URLs, actions, styles, raw maps, and sanitize-svg normalizes ratios"
     (let [r1 (sanitize/sanitize-hiccup-with-report
               [:div {:class "box" :onclick "evil()" :style "background:expression(1)"}
                [:script "alert(1)"]
@@ -47,7 +48,9 @@
               [:div {:class "card"} [:h2 "Clean"] [:p "Safe text"]])
           r4 (sanitize/sanitize-hiccup-with-report
               [:button {:type "button" :on-click (quote (seon.web/navigate-url! "/chat"))} "Chat"]
-              {:allow-seon-actions? true})]
+              {:allow-seon-actions? true})
+          san-svg (sanitize/sanitize-svg
+                   "<svg viewBox=\"0 0 100 40\"><script>x()</script><circle onclick=\"evil()\" cx=\"10/3\" cy=\"20\" r=\"5\"/></svg>")]
       (is (= [:div {:class "box"} [:a "bad-link"] [:img] "ok"] (:hiccup r1)))
       (is (some #(str/includes? % ":onclick") (:dropped r1)))
       (is (some #(str/includes? % ":style") (:dropped r1)))
@@ -64,59 +67,61 @@
                            [:div {:class "box" :onclick "evil()" :style "background:expression(1)"}
                             [:script "alert(1)"] [:style "body{display:none}"]
                             [:a {:href "javascript:alert(1)"} "bad-link"]
-                            [:img {:src "data:text/html,<h1>x</h1>"}] {:seon/raw "<b>raw</b>"} "ok"]))))))
+                            [:img {:src "data:text/html,<h1>x</h1>"}] {:seon/raw "<b>raw</b>"} "ok"])))
+      (is (string? san-svg))
+      (is (not (str/includes? san-svg "<script")))
+      (is (not (str/includes? san-svg "onclick")))
+      (is (str/includes? san-svg "cx=\"3.33\""))
+      (is (nil? (sanitize/sanitize-svg "<div>not-svg</div>"))))))
 
 (deftest viewport-tail-and-preview-summary-defects-test
-  (testing "render-viewport-tail emits crisp 0 defects when clean and loud numbered VISUAL DEFECTS even with vision? = false"
-    (let [clean-res (rtails/render-viewport-tail
-                     {:seon.tail/viewport
-                      {:enabled? true :vision? false
-                       :snapshot {:route "/" :width 1280 :height 820
-                                  :dom {:viewing ":agent/root" :mode "session" :theme "dark"
-                                        :overflowX false :svgCount 2 :visual-defects []}}}})
-          clean-txt (render/hiccup->text (:seon.ui/hiccup clean-res))
-          bad-res (rtails/render-viewport-tail
-                   {:seon.tail/viewport
-                    {:enabled? true :vision? false
-                     :snapshot {:route "/" :width 1280 :height 820
-                                :dom {:viewing ":agent/root" :mode "session" :theme "dark"
-                                      :overflowX true :svgCount 1 :clipped-count 2
-                                      :clipped-selectors ["#seon-header" ".card"]
-                                      :visual-defects ["SVG #1 paints bright white card in dark theme"
-                                                       "Low contrast (1.3:1) on p ('dim text')"]}}}})
-          bad-txt (render/hiccup->text (:seon.ui/hiccup bad-res))]
-      (is (= "live-viewport" (:tag clean-res)))
-      (is (nil? (:image clean-res)))
-      (is (str/includes? clean-txt "0 defects"))
-      (is (not (str/includes? clean-txt "VISUAL DEFECTS")))
-      (is (= "live-viewport" (:tag bad-res)))
-      (is (nil? (:image bad-res)))
-      (is (str/includes? bad-txt "VISUAL DEFECTS (4) — FIX BEFORE ANSWERING:"))
-      (is (str/includes? bad-txt "[1] SVG #1 paints bright white card in dark theme"))
-      (is (str/includes? bad-txt "[2] Low contrast (1.3:1) on p ('dim text')"))
-      (is (str/includes? bad-txt "[3] Horizontal document overflow"))
-      (is (str/includes? bad-txt "[4] 2 clipped element(s): #seon-header, .card"))))
+  (testing "render-viewport-tail emits crisp factual DOM metadata and attaches real :image when vision? is true"
+    (let [snap {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "IMGDATA"
+                :dom {:viewing ":agent/root" :mode "canvas" :theme "dark" :overflowX false :svgCount 2}}
+          vis-res (rtails/render-viewport-tail {:seon.tail/viewport {:enabled? true :vision? true :snapshot snap}})
+          txt-res (rtails/render-viewport-tail {:seon.tail/viewport {:enabled? true :vision? false :snapshot snap}})
+          vis-txt (render/hiccup->text (:seon.ui/hiccup vis-res))]
+      (is (= "live-viewport" (:tag vis-res)))
+      (is (= {:mime "image/jpeg" :base64 "IMGDATA" :raw snap} (:image vis-res)))
+      (is (nil? (:image txt-res)))
+      (is (str/includes? vis-txt "viewing=:agent/root"))
+      (is (str/includes? vis-txt "mode=canvas"))
+      (is (str/includes? vis-txt "theme=dark"))
+      (is (str/includes? vis-txt "overflowX=false"))
+      (is (str/includes? vis-txt "svgs=2"))
+      (is (not (str/includes? vis-txt "VISUAL DEFECTS")))))
 
-  (testing "format-preview-summary and aggregate-frame-defects surface clean vs defective frames"
-    (let [ok-f (preview/normalize-ephemeral-frame (quote demo/ok-card) :db
-                                                  {:seon.media/width 360 :seon.media/height 140 :seon.media/label "ok · 360px"
-                                                   :seon.media/dom {:overflow-x? false :visual-defects []}})
-          bad-f (preview/normalize-ephemeral-frame (quote demo/bad-card) :db
-                                                   {:seon.media/width 360 :seon.media/height 140 :seon.media/label "bad · 360px"
-                                                    :seon.media/dom {:overflow-x? true :visual-defects ["SVG #1 is empty (300x160px with 0 primitives)"]}})
-          ok-s (preview/format-preview-summary [ok-f])
-          bad-s (preview/format-preview-summary [bad-f])
-          agg-ok (measure/aggregate-frame-defects [ok-f])
-          agg-bad (measure/aggregate-frame-defects [bad-f])]
-      (is (true? (:visual-ok? ok-f)))
-      (is (false? (:visual-ok? bad-f)))
-      (is (str/includes? ok-s "0 defects"))
-      (is (str/includes? bad-s "DEFECTS(2):"))
-      (is (str/includes? bad-s "SVG #1 is empty"))
-      (is (= {:visual-ok? true :visual-defects []} agg-ok))
-      (is (false? (:visual-ok? agg-bad)))
-      (is (= ["[360px] SVG #1 is empty (300x160px with 0 primitives)" "[360px] Horizontal overflow at 360px"]
-             (:visual-defects agg-bad))))))
+  (testing "format-preview-summary coaches missing :examples, single-large-renderer nudge, and multi-footprint siblings"
+    (let [f-single (preview/normalize-ephemeral-frame
+                    (quote demo/big-card) :generated
+                    {:seon.media/width 360 :seon.media/height 180 :seon.media/label "big-card · 360px"
+                     :seon.media/dom {:w 360 :h 180 :overflow-x? false}}
+                    {:tokens 142 :has-examples? false :input-schemas [:demo/item]
+                     :siblings [{:var (quote demo/big-card) :tokens 142}]})
+          f-single-wide (preview/normalize-ephemeral-frame
+                         (quote demo/big-card) :generated
+                         {:seon.media/width 640 :seon.media/height 160 :seon.media/label "big-card · 640px"
+                          :seon.media/dom {:w 640 :h 160 :overflow-x? false}}
+                         {:tokens 142 :has-examples? false :input-schemas [:demo/item]
+                          :siblings [{:var (quote demo/big-card) :tokens 142}]})
+          s1 (preview/format-preview-summary [f-single f-single-wide])
+          f-multi (preview/normalize-ephemeral-frame
+                   (quote demo/card) :db
+                   {:seon.media/width 360 :seon.media/height 110 :seon.media/label "card · 360px"
+                    :seon.media/dom {:w 360 :h 110 :overflow-x? false}}
+                   {:tokens 74 :has-examples? true :input-schemas [:demo/item]
+                    :siblings [{:var (quote demo/full) :tokens 210}
+                               {:var (quote demo/chip) :tokens 18}
+                               {:var (quote demo/card) :tokens 74}]})
+          s2 (preview/format-preview-summary [f-multi])]
+      (is (not (contains? f-single :visual-defects)))
+      (is (not (contains? f-single :visual-ok?)))
+      (is (str/includes? s1 "Rendered edited `:seon.ui/hiccup` component(s) in WKWebView"))
+      (is (str/includes? s1 "- demo/big-card (input=generated, 142 tok) [big-card · 360px]: 360×180px · overflowX=false"))
+      (is (= 1 (count (re-seq #"missing `:examples`" s1))) "Missing :examples note emitted once per var")
+      (is (str/includes? s1 "Footprints for `:demo/item`: 1 renderer (`demo/big-card` 142 tok). Consider adding a compact variation"))
+      (is (not (str/includes? s2 "missing `:examples`")))
+      (is (str/includes? s2 "Footprints for `:demo/item`: demo/chip (18 tok), demo/card (74 tok), demo/full (210 tok).")))))
 
 (deftest ^{:cost/ticks 120000000} viz-primitives-and-seed42-generative-test
   (testing "seon.render.viz builders emit zero Clojure ratio literals and handle empty, single, and dense data cleanly"
@@ -135,7 +140,7 @@
       (is (not (str/includes? html "Infinity")))
       (is (not (str/includes? empty-html "<svg")) "Empty viz states must not emit empty SVG canvases")))
 
-  (testing "seed=42 Malli generative checks pass across viz, sanitize, measure, and tail pure functions"
+  (testing "seed=42 Malli generative checks pass across viz, sanitize, measure, preview, and tail pure functions"
     (with-test-store [{:keys [conn]}]
       (let [db @conn]
         (doseq [sym (quote [seon.render.viz/bar-chart
@@ -143,48 +148,28 @@
                             seon.render.viz/sparkline
                             seon.render.viz/stat-grid
                             seon.render.sanitize/sanitize-svg
-                            seon.render.sanitize/svg-static-defects
-                            seon.browser.measure/aggregate-frame-defects
+                            seon.browser.measure/normalize-snippet-measurement
+                            seon.browser.measure/analyze-pixel-fit
+                            seon.browser.preview/normalize-ephemeral-frame
+                            seon.browser.preview/format-preview-summary
                             seon.render.tails/render-viewport-tail])]
           (let [r (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (true? (:ok? r)) (str "seed=42 stress failed for " sym ": " (pr-str r)))))))))
 
 (deftest ^{:cost/ticks 120000000} wkwebview-live-visual-audit-negative-and-positive-test
   (when-let [bin (browser/default-binary-path)]
-    (let [tmp (fs/create-temp-dir {:prefix "seon-visual-audit-"})
+    (let [tmp (fs/create-temp-dir {:prefix "seon-visual-measure-"})
           host-file (str (fs/path tmp "host.html"))
           host-url (str "file://" host-file)]
       (try
         (spit host-file (str "<!doctype html><html><head><meta charset=\"utf-8\"><style>"
                              wcss/app-css
                              "</style></head><body><div id=\"seon-app\" data-theme=\"dark\"><div>a</div><div>b</div></div></body></html>"))
-        (testing "Negative WKWebView audit catches white dark-mode card, ratio attr, collapsed circles, overlapping SVG text, and low contrast"
-          (let [bad-html (str "<div class=\"card\" style=\"background:#ffffff;color:#111;width:320px;height:80px\">"
-                              "<p style=\"color:#1f1e1d;background:#1a1918\">Unreadable dark text</p>"
-                              "<svg viewBox=\"0 0 300 160\" width=\"300\" height=\"160\">"
-                              "<rect x=\"0\" y=\"0\" width=\"300\" height=\"160\" fill=\"#ffffff\"/>"
-                              "<circle cx=\"1153/12\" cy=\"40\" r=\"5\" fill=\"#f0b429\"/>"
-                              "<circle cx=\"0\" cy=\"60\" r=\"5\" fill=\"#f0b429\"/>"
-                              "<circle cx=\"1\" cy=\"80\" r=\"5\" fill=\"#f0b429\"/>"
-                              "<text x=\"50\" y=\"50\" fill=\"#111\" font-size=\"14\">Label A</text>"
-                              "<text x=\"52\" y=\"51\" fill=\"#111\" font-size=\"14\">Label B</text>"
-                              "</svg></div>")
-                res (browser/render-hiccup-frames! host-url bad-html {:widths [360] :theme :dark :binary-path bin})
-                dom (:seon.media/dom (first (:frames res)))
-                defs (:visual-defects dom)]
-            (is (true? (:ok? res)))
-            (is (false? (:visual-ok? dom)))
-            (is (some #(str/includes? % "bright white card") defs))
-            (is (some #(str/includes? % "collapsed on left edge") defs))
-            (is (some #(str/includes? % "overlapping <text>") defs))
-            (is (some #(str/includes? % "Low contrast") defs))
-            (is (some #(str/includes? % "invalid numeric") defs))))
-
-        (testing "Positive WKWebView audit passes ALL 4 seon.render.viz primitives cleanly at [360 960] in BOTH :dark and :light themes"
+        (testing "Real WKWebView measures ALL 4 seon.render.viz primitives cleanly at [360 960] in :dark and :light themes"
           (let [viz-html (str (render/hiccup->html
                                [:div {:class "stack"}
                                 (viz/bar-chart {:title "Timings" :subtitle "ms" :unit "ms"
-                                                :items [{:label "Parse" :value 1153/12} {:label "Render" :value 42.5} {:label "Audit" :value 18}]})
+                                                :items [{:label "Parse" :value 1153/12} {:label "Render" :value 42.5} {:label "Measure" :value 18}]})
                                 (viz/line-chart {:title "Trend" :unit "t"
                                                  :series [{:name "Turns" :points (mapv #(hash-map :x (inc %) :y (+ 8 (* % 2)) :label (str "W" (inc %))) (range 8))}]})
                                 [:div {:class "card"} (viz/sparkline {:values [10 14 12 18 22 25] :label "Velocity"})]
@@ -192,78 +177,129 @@
                                                 :items [{:label "Auto-Merge" :value "9/9" :delta "+100%" :tone :good :sparkline [4 6 8 9]}
                                                         {:label "Avg Turns" :value 13/2 :delta "-22%" :tone :info}]})]))
                 r-dark (browser/render-hiccup-frames! host-url viz-html {:widths [360 960] :theme :dark :binary-path bin})
-                r-light (browser/render-hiccup-frames! host-url viz-html {:widths [360 960] :theme :light :binary-path bin})
-                agg-d (measure/aggregate-frame-defects (:frames r-dark))
-                agg-l (measure/aggregate-frame-defects (:frames r-light))]
+                r-light (browser/render-hiccup-frames! host-url viz-html {:widths [360 960] :theme :light :binary-path bin})]
             (is (true? (:ok? r-dark)))
             (is (true? (:ok? r-light)))
-            (is (= {:visual-ok? true :visual-defects []} agg-d))
-            (is (= {:visual-ok? true :visual-defects []} agg-l))))
+            (doseq [f (concat (:frames r-dark) (:frames r-light))
+                    :let [dom (:seon.media/dom f)]]
+              (is (pos? (long (:w dom 0))) (str "Expected w > 0 in " (pr-str dom)))
+              (is (pos? (long (:h dom 0))) (str "Expected h > 0 in " (pr-str dom)))
+              (is (false? (:overflow-x? dom)) (str "Expected overflow-x? false in " (pr-str dom))))))
+
+        (testing "measure-schema-renderers! measures all variations in WKWebView and populates fit/cached-browser-box"
+          (with-test-store [{:keys [conn]}]
+            (preview/clear-preview-cache!)
+            (fit/clear-browser-box-cache!)
+            (let [src (str "(ns seon.render.entities)\n"
+                           "(defn render-task-chip {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] (seon.render.entities/render-task-chip m))\n"
+                           "(defn render-task-card {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] (seon.render.entities/render-task-card m))\n")]
+              (d/transact conn {:tx-data (concat [{:seon.task/id :task/wk-box :seon.task/title "Measure Task" :seon.task/done? false}]
+                                                 (code/file-import-tx @conn "src/seon/render/entities.clj" src false))})
+              (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn {:analyze-compiler? false})})
+              (let [db @conn
+                    res (preview/measure-schema-renderers! host-url db :seon.task/entity {:widths [360 640] :binary-path bin})]
+                (is (true? (:ok? res)))
+                (is (= :seon.task/entity (:schema res)))
+                (is (= :db (:source res)))
+                (is (= 2 (count (:renderers res))))
+                (doseq [{:keys [var boxes]} (:renderers res)
+                        :let [fh (:seon.code.form/hash (d/pull db (quote [:seon.code.form/hash]) [:seon.code.form/key (str var)]))
+                              b360 (fit/cached-browser-box var fh 360)
+                              b640 (fit/cached-browser-box var fh 640)]]
+                  (is (= 2 (count boxes)))
+                  (is (every? #(and (pos? (:w %)) (pos? (:h %))) boxes))
+                  (is (and (map? b360) (pos? (:w b360)) (pos? (:h b360))) (str "Missing cached 360px box for " var))
+                  (is (and (map? b640) (pos? (:w b640)) (pos? (:h b640))) (str "Missing cached 640px box for " var)))))))
         (finally
           (store/rm-rf! tmp))))))
 
 (deftest ^{:cost/ticks 120000000} synchronous-canvas-status-and-preview-audit-integration-test
-  (with-test-store [{:keys [conn]}]
-    (d/transact conn {:tx-data [{:seon.agent/id :agent/viz-test :seon.agent/branch :main :seon.agent/label "VizTester"}
+  (with-test-store [{:keys [conn cfg]}]
+    (preview/clear-preview-cache!)
+    (fit/clear-browser-box-cache!)
+    (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/ai-model "deepseek-flash" :seon.config/viewport-screenshot? true}
+                                {:seon.agent/id :agent/viz-test :seon.agent/branch :main :seon.agent/label "VizTester"}
+                                {:seon.agent/id :agent/worker-canvas :seon.agent/branch :branch/worker-canvas :seon.agent/label "CanvasWorker"}
+                                {:seon.agent/id :agent/worker-status :seon.agent/branch :branch/worker-status :seon.agent/label "StatusWorker"}
+                                {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/viz-test] :seon.user/viewport-w 1280 :seon.user/viewport-h 820}
                                 {:seon.task/id :task/viz-prev :seon.task/title "Viz Preview" :seon.task/done? false}]})
     (let [ok-render (fn [_ {:keys [widths]}]
                       {:ok? true :widths widths
                        :frames (mapv #(hash-map :seon.media/width % :seon.media/height 120 :seon.media/base64 "AA=="
                                                 :seon.media/label (str % "px")
-                                                :seon.media/dom {:w % :h 120 :overflow-x? false :visual-defects [] :visual-ok? true}) widths)})
-          bad-render (fn [_ {:keys [widths]}]
-                       {:ok? true :widths widths
-                        :frames (mapv #(hash-map :seon.media/width % :seon.media/height 120 :seon.media/base64 "AA=="
-                                                 :seon.media/label (str % "px")
-                                                 :seon.media/dom {:w % :h 120 :overflow-x? false :visual-defects ["SVG #1 paints bright white card in dark theme"] :visual-ok? false}) widths)})]
+                                                :seon.media/dom {:slot-w % :w % :h 120 :overflow-x? false}) widths)})]
       (binding [fcalls/*agent-ctx* {:conn conn :agent-id :agent/viz-test :branch :main}]
-        (testing "set-status! immediately flags broken/script/ratio SVGs and passes clean SVG"
-          (let [r-bad (rstatus/set-status! {:label "Bad" :svg "<svg viewBox=\"0 0 100 40\"><script>x()</script><circle cx=\"10/3\" cy=\"20\" r=\"5\"/></svg>" :render-fn ok-render})
-                r-rej (rstatus/set-status! {:label "Rej" :svg "<div>not svg</div>" :render-fn ok-render})
-                r-ok (rstatus/set-status! {:label "Good" :svg "<svg viewBox=\"0 0 100 40\"><rect x=\"12\" y=\"10\" width=\"60\" height=\"16\" fill=\"#f0b429\"/></svg>" :render-fn ok-render})]
-            (is (false? (:visual-ok? r-bad)))
-            (is (true? (:svg-normalized? r-bad)))
-            (is (some #(str/includes? % "<script>") (:visual-defects r-bad)))
-            (is (some #(str/includes? % "ratio") (:visual-defects r-bad)))
-            (is (false? (:visual-ok? r-rej)))
-            (is (some #(str/includes? % "rejected") (:visual-defects r-rej)))
-            (is (true? (:visual-ok? r-ok)))
-            (is (false? (:svg-normalized? r-ok)))
-            (is (= [] (:visual-defects r-ok)))))
+        (testing "set-status! sanitizes SVG and returns clean factual map without heuristic defect keys"
+          (let [r-san (rstatus/set-status! {:label "San" :svg "<svg viewBox=\"0 0 100 40\"><script>x()</script><circle cx=\"10/3\" cy=\"20\" r=\"5\"/></svg>"})
+                r-rej (rstatus/set-status! {:label "Rej" :svg "<div>not svg</div>"})
+                r-ok (rstatus/set-status! {:label "Good" :svg "<svg viewBox=\"0 0 100 40\"><rect x=\"12\" y=\"10\" width=\"60\" height=\"16\" fill=\"#f0b429\"/></svg>"})]
+            (doseq [r [r-san r-rej r-ok]]
+              (is (true? (:ok? r)))
+              (is (not (contains? r :visual-ok?)))
+              (is (not (contains? r :visual-defects))))
+            (is (not (str/includes? (str (get-in r-san [:status :seon.ui.status/svg])) "<script")))
+            (is (str/includes? (str (get-in r-san [:status :seon.ui.status/svg])) "3.33"))
+            (is (nil? (get-in r-rej [:status :seon.ui.status/svg])))))
 
-        (testing "set-canvas! and audit-canvas-entry! immediately catch dropped <script>, throwing fn, and visual defects"
-          (let [c-drop (fcalls/set-canvas! [:div {:onclick "evil()"} [:script "x"] "hi"] {:render-fn ok-render})
-                c-boom (fcalls/set-canvas! (quote seon.visual-feedback-test/throwing-canvas-fn) {:render-fn ok-render})
-                c-def (fcalls/set-canvas! [:div "looks white"] {:render-fn bad-render})
-                c-ok (fcalls/set-canvas! (quote seon.visual-feedback-test/clean-canvas-fn) {:render-fn ok-render})]
-            (is (false? (:visual-ok? c-drop)))
+        (testing "set-canvas! returns fast factual drop/warning feedback with zero browser calls"
+          (let [c-drop (fcalls/set-canvas! [:div {:onclick "evil()"} [:script "x"] "hi"])
+                c-unres (fcalls/set-canvas! (quote seon.nonexistent.ns/missing-canvas-fn))
+                c-clean (fcalls/set-canvas! [:div {:class "card"} "Clean"])
+                c-fn (fcalls/set-canvas! (quote seon.visual-feedback-test/clean-canvas-fn))]
+            (doseq [c [c-drop c-unres c-clean c-fn]]
+              (is (true? (:ok? c)))
+              (is (not (contains? c :visual-ok?)))
+              (is (not (contains? c :visual-defects))))
             (is (some #(str/includes? % ":script") (:dropped c-drop)))
-            (is (false? (:visual-ok? c-boom)))
-            (is (str/includes? (str (:eval-error c-boom)) "intentional canvas boom"))
-            (is (false? (:visual-ok? c-def)))
-            (is (some #(str/includes? % "bright white card") (:visual-defects c-def)))
-            (is (true? (:visual-ok? c-ok)))
-            (is (= [] (:dropped c-ok)))
-            (is (= [] (:visual-defects c-ok)))))
+            (is (= "Renderer var not resolved yet" (:warning c-unres)))
+            (is (not (contains? c-clean :dropped)))
+            (is (not (contains? c-fn :warning)))))
 
-        (testing "render-preview! and ui-patch! surface :visual-ok? and :visual-defects"
-          (let [rp-bad (helpers/render-preview! [:div "x"] {:widths [360] :render-fn bad-render})
-                rp-ok (helpers/render-preview! [:div "x"] {:widths [360] :render-fn ok-render})
+        (testing "render-preview!, ui-patch!, and measure-renderers! return clean factual authoring maps"
+          (let [rp (helpers/render-preview! [:div "x"] {:widths [360] :render-fn ok-render})
                 demo-ns (quote seon.demo.viz-patch)
                 demo-var (quote seon.demo.viz-patch/render-demo)]
-            (is (false? (:visual-ok? rp-bad)))
-            (is (seq (:visual-defects rp-bad)))
-            (is (true? (:visual-ok? rp-ok)))
-            (is (= [] (:visual-defects rp-ok)))
+            (is (true? (:ok? rp)))
+            (is (not (contains? rp :visual-ok?)))
+            (is (not (contains? rp :visual-defects)))
             (try
               (create-ns demo-ns)
               (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo/viz_patch.clj"
                                                               (str "(ns seon.demo.viz-patch)\n"
                                                                    "(defn render-demo {:malli/schema [:=> [:cat [:map [:seon.task/entity :seon.task/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [{t :seon.task/entity}] {:seon.ui/hiccup [:div \"Old\" (:seon.task/title t)]})\n")
                                                               false)})
-              (let [up (helpers/ui-patch! demo-var "\"Old\"" "\"New\"" {:render-fn bad-render :widths [360]})]
+              (let [up (helpers/ui-patch! demo-var "\"Old\"" "\"New\"" {:render-fn ok-render :widths [360]})]
                 (is (true? (:ok? up)))
-                (is (false? (:visual-ok? up)))
-                (is (some #(str/includes? % "bright white card") (:visual-defects up))))
+                (is (false? (get-in up [:preview :has-examples?])))
+                (is (pos? (long (get-in up [:preview :tokens] 0))))
+                (is (not (contains? up :visual-ok?)))
+                (is (not (contains? up :visual-defects))))
               (finally
-                (remove-ns demo-ns)))))))))
+                (remove-ns demo-ns))))))
+
+      (testing "seon.agent dynamic vision enables image_url for deepseek-flash and captures viewport on Canvas & Status edits"
+        (store/branch! conn :main :branch/worker-canvas)
+        (store/branch! conn :main :branch/worker-status)
+        (let [bconn1 (store/connect cfg :branch/worker-canvas)
+              bconn2 (store/connect cfg :branch/worker-status)]
+          (try
+            (d/transact bconn1 {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/worker-canvas
+                                           :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
+                                           :seon.agent.eval/code "(user/set-canvas! [:div \"Live Chart\"])"}]})
+            (d/transact bconn2 {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/worker-status
+                                           :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
+                                           :seon.agent.eval/code "(user/set-status! {:label \"Building\" :pct 50})"}]})
+            (finally (d/release bconn1) (d/release bconn2)))
+          (let [st0 (agent/agents-proc {:conn conn :cfg cfg :fork-out (a/chan 4) :fork-agent-in (a/chan 4)
+                                        :max-os-procs 2 :browser-enabled? true :vision? false})
+                [st1 out1] (agent/agents-proc st0 :fork-ev {:ev :child-frame :agent-id :agent/worker-canvas :pid 11
+                                                            :frame {:ev :model-request :req-id "c-1" :branch :branch/worker-canvas}})
+                [_ out2] (agent/agents-proc st0 :fork-ev {:ev :child-frame :agent-id :agent/worker-status :pid 12
+                                                          :frame {:ev :model-request :req-id "s-1" :branch :branch/worker-status}})
+                [_ fin1] (agent/agents-proc st1 :browser-res {:req-id "c-1" :agent-id :agent/worker-canvas
+                                                              :snapshot {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "FLASHIMG" :dom {:theme "dark"}}})
+                tail-parts (:content (peek (get-in fin1 [:request 0 :wire-messages])))]
+            (is (some #(= :snapshot (:op %)) (:browser-req out1)) "Canvas paint must trigger viewport snapshot")
+            (is (some #(= :snapshot (:op %)) (:browser-req out2)) "Status update must trigger viewport snapshot")
+            (is (vector? tail-parts) "Dynamic vision for deepseek-flash must attach multimodal content parts even when :vision? st is false")
+            (is (some #(str/includes? (str (get-in % [:image_url :url])) "FLASHIMG") tail-parts))))))))

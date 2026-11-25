@@ -252,7 +252,7 @@
                     (is (:ok? a-chat-1280-dk) (str "1280x800 dark /chat failed (SVG/contrast): " (pr-str (:defects a-chat-1280-dk))))
                     (is (:ok? a-chat-1280-lt) (str "1280x800 light /chat failed: " (pr-str (:defects a-chat-1280-lt))))
                     (is (:ok? a-chat-375-dk) (str "375x812 dark /chat failed: " (pr-str (:defects a-chat-375-dk))))
-                    (is (:visual-ok? st-dk) (str "Sanitized white SVG card failed dark visual audit: " (pr-str (:visual-defects st-dk))))
+                    (is (and (:ok? st-dk) (not (:overflow-x? st-dk)) (pos? (:w st-dk)) (pos? (:h st-dk))) (str "Sanitized white SVG card failed dark stage measurement: " (pr-str st-dk)))
                     (is (:ok? a-sys) (str "1280x800 dark /system failed: " (pr-str (:defects a-sys)))))
                   (finally ((:stop! sess))))))
             (finally

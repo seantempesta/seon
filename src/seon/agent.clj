@@ -14,7 +14,10 @@
             [seon.store :as store]
             [seon.ctx.touches :as ctouches]
             [seon.browser.preview :as preview]
-            [seon.render.data :as rdata]))
+            [seon.render.data :as rdata]
+            [clojure.string :as str]
+            [seon.model :as model]
+            [seon.render.fit :as fit]))
 
 (defn- build-wire-monitored [st main-db bdb aid opts]
   (let [t0 (System/nanoTime)
@@ -302,7 +305,9 @@
     {:width vw :height vh :theme th :viewing-agent (get-in u [:seon.user/viewing :seon.agent/id])}))
 
 (defn- finish-model-request [st main-db bdb aid pid frame snap preview-frames]
-  (let [vis? (boolean (:vision? st))
+  (let [vis? (or (boolean (:vision? st))
+                 (and (:browser-enabled? st)
+                      (model/vision-capable-model? (store/config-val main-db aid :seon.config/ai-model))))
         {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid
                                                    (cond-> {:vision? vis?}
                                                      snap (assoc :viewport-screenshot snap)))
@@ -313,9 +318,8 @@
      (cond-> {:request [(assoc frame :router? router? :wire-messages final-msgs)]}
        (seq tx) (assoc :tx tx))]))
 
-(defn- plan-derived-previews [main-db bdb aid theme]
-  (let [evals (rdata/agent-evals-in bdb aid)
-        edited-vars (take 2 (preview/recent-edited-renderer-vars main-db bdb evals))
+(defn- plan-derived-previews [main-db bdb evals theme]
+  (let [edited-vars (take 2 (preview/recent-edited-renderer-vars main-db bdb evals))
         widths [360 640]]
     (reduce (fn [acc vsym]
               (let [ev (preview/eval-renderer-preview bdb vsym)]
@@ -345,10 +349,13 @@
       [st nil])))
 
 (defn- handle-preview-res
-  [st {:keys [req-id var form-hash input-hash source widths theme res]}]
+  [st {:keys [req-id var form-hash input-hash source widths theme tokens has-examples? input-schemas siblings res]}]
   (if-let [entry (get-in st [:pending-browser req-id])]
-    (let [frames (when (and (map? res) (:ok? res) (seq (:frames res)))
-                   (let [fs (mapv #(preview/normalize-ephemeral-frame var source %) (:frames res))]
+    (let [meta-info {:tokens tokens :has-examples? has-examples? :input-schemas input-schemas :siblings siblings}
+          frames (when (and (map? res) (:ok? res) (seq (:frames res)))
+                   (let [fs (mapv #(preview/normalize-ephemeral-frame var source % meta-info) (:frames res))]
+                     (doseq [f fs :when (map? (:dom f))]
+                       (fit/record-browser-box! var form-hash (long (:width f)) (:dom f)))
                      (preview/cache-preview-frames! var form-hash input-hash widths theme fs)
                      fs))
           entry1 (-> entry
@@ -387,6 +394,62 @@
                     (and (some? viewing-agent) (= viewing-agent agent-id))
                     has-ui-previews?)))))
 
+(defn- handle-fork-refused [st msg]
+  (let [explicit-aid (:agent-id msg)
+        code (:code msg)
+        forking-aids (if explicit-aid
+                       [explicit-aid]
+                       (vec (keep (fn [[aid v]] (when (= :forking (:pid v)) aid)) (:live st))))
+        err-str (str "COW fork refused (code " code ")"
+                     (when (seq forking-aids) (str " for " (pr-str forking-aids))))
+        aid-set (set forking-aids)
+        matching-w (filter (fn [[_ w]] (contains? aid-set (:agent-id w))) (:eval-waiters st))
+        _ (doseq [[_ w] matching-w]
+            (reply! (:reply-ch w) {:ok? false :agent-id (:agent-id w) :error err-str :class :fork-refused}))
+        st' (-> st
+                (update :live #(apply dissoc % forking-aids))
+                (update :eval-waiters #(apply dissoc % (map first matching-w)))
+                sync-agents-filter)
+        faults (if (seq forking-aids)
+                 (mapv (fn [aid]
+                         {:op :record-fault :proc :agents :class :fork-refused :severity :error
+                          :agent aid :subject (str aid) :message err-str})
+                       forking-aids)
+                 [{:op :record-fault :proc :agents :class :fork-refused :severity :error
+                   :subject "seon.agent/fork" :message err-str}])
+        exits (mapv (fn [aid] {:ev :exited :agent-id aid :pid :forking :raw-status code}) forking-aids)]
+    [st' (cond-> {:tx faults
+                  :clojure.core.async.flow/report [(str "[:agents] " err-str)]}
+           (seq exits) (assoc :exits exits))]))
+
+(defn- latest-turn-painted-ui? [main-db bdb evals]
+  (let [evs (if (sequential? evals) (filterv map? evals) [])
+        max-t (reduce max 0 (map #(long (or (:seon.agent.eval/turn %) 0)) evs))
+        cur-evs (filter #(= max-t (long (or (:seon.agent.eval/turn %) 0))) evs)
+        in-code? (some (fn [e]
+                         (let [c (str (or (:seon.agent.eval/code e) ""))]
+                           (or (str/includes? c "set-canvas!")
+                               (str/includes? c "set-status!")
+                               (str/includes? c ":seon.agent/canvas-hiccup")
+                               (str/includes? c ":seon.agent/canvas-fn")
+                               (str/includes? c ":seon.ui.status/id"))))
+                       cur-evs)]
+    (boolean
+     (or in-code?
+         (when (and main-db bdb (not (identical? main-db bdb)))
+           (let [ptx (reduce max 0 (map #(long (or (:seon.agent.eval/tx %)
+                                                   (when (integer? (:db/id %))
+                                                     (some-> (first (datahike.api/datoms bdb :eavt (:db/id %) :seon.agent.eval/turn)) :tx long))
+                                                   0))
+                                        (filter #(< (long (or (:seon.agent.eval/turn %) 0)) max-t) evs)))
+                 ws (ctouches/branch-write-eids main-db bdb nil)
+                 dh (store/db-schema bdb)]
+             (some (fn [[e {:keys [max-tx]}]]
+                     (when (or (empty? evs) (> (long (or max-tx 0)) ptx))
+                       (some #(and (contains? dh %) (first (datahike.api/datoms bdb :eavt e %)))
+                             [:seon.agent/canvas-hiccup :seon.agent/canvas-fn :seon.ui.status/id])))
+                   ws)))))))
+
 (defn- handle-model-request
   {:seon.flow/edge true}
   [st msg]
@@ -396,10 +459,12 @@
         main-db @(:conn st)
         b (or (:branch f) :main)
         bdb (rdata/branch-db-for main-db (:conn st) b)
+        evals (rdata/agent-evals-in bdb aid)
         {:keys [width height theme viewing-agent]} (user-viewport-dims main-db)
         {:keys [cached-frames to-render]} (if (:browser-enabled? st)
-                                            (plan-derived-previews main-db bdb aid theme)
+                                            (plan-derived-previews main-db bdb evals theme)
                                             {:cached-frames [] :to-render []})
+        painted-ui? (when (:browser-enabled? st) (latest-turn-painted-ui? main-db bdb evals))
         dh (store/db-schema main-db)
         agent-ov (when (and main-db aid (contains? dh :seon.config/viewport-screenshot?)
                             (first (datahike.api/datoms main-db :avet :seon.agent/id aid)))
@@ -411,7 +476,7 @@
                      :agent-override agent-ov
                      :agent-id aid
                      :viewing-agent viewing-agent
-                     :has-ui-previews? (boolean (or (seq cached-frames) (seq to-render)))})
+                     :has-ui-previews? (boolean (or painted-ui? (seq cached-frames) (seq to-render)))})
         preview-ch (:preview-res-ch st)
         preview-reqs (when (and (seq to-render) preview-ch)
                        (mapv (fn [{:keys [var ev widths theme]}]
@@ -423,6 +488,10 @@
                                                        :form-hash (:form-hash ev)
                                                        :input-hash (:input-hash ev)
                                                        :source (:source ev)
+                                                       :tokens (:tokens ev)
+                                                       :has-examples? (:has-examples? ev)
+                                                       :input-schemas (:input-schemas ev)
+                                                       :siblings (:siblings ev)
                                                        :widths widths
                                                        :theme theme
                                                        :res res})))
@@ -488,34 +557,6 @@
       (handle-child-exception st msg)
 
       [st nil])))
-
-(defn- handle-fork-refused [st msg]
-  (let [explicit-aid (:agent-id msg)
-        code (:code msg)
-        forking-aids (if explicit-aid
-                       [explicit-aid]
-                       (vec (keep (fn [[aid v]] (when (= :forking (:pid v)) aid)) (:live st))))
-        err-str (str "COW fork refused (code " code ")"
-                     (when (seq forking-aids) (str " for " (pr-str forking-aids))))
-        aid-set (set forking-aids)
-        matching-w (filter (fn [[_ w]] (contains? aid-set (:agent-id w))) (:eval-waiters st))
-        _ (doseq [[_ w] matching-w]
-            (reply! (:reply-ch w) {:ok? false :agent-id (:agent-id w) :error err-str :class :fork-refused}))
-        st' (-> st
-                (update :live #(apply dissoc % forking-aids))
-                (update :eval-waiters #(apply dissoc % (map first matching-w)))
-                sync-agents-filter)
-        faults (if (seq forking-aids)
-                 (mapv (fn [aid]
-                         {:op :record-fault :proc :agents :class :fork-refused :severity :error
-                          :agent aid :subject (str aid) :message err-str})
-                       forking-aids)
-                 [{:op :record-fault :proc :agents :class :fork-refused :severity :error
-                   :subject "seon.agent/fork" :message err-str}])
-        exits (mapv (fn [aid] {:ev :exited :agent-id aid :pid :forking :raw-status code}) forking-aids)]
-    [st' (cond-> {:tx faults
-                  :clojure.core.async.flow/report [(str "[:agents] " err-str)]}
-           (seq exits) (assoc :exits exits))]))
 
 (defn- handle-fork-ev
   [st tick msg]

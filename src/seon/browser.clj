@@ -424,7 +424,7 @@
 (defn- maybe-auto-recover [st analysis raw-val]
   (if (and (nil? (:verify st))
            (get-in st [:handle :send!])
-           (or (some #(and (string? %) (str/includes? % "Missing #seon-app")) (:visual-defects analysis))
+           (or (false? (:app? analysis))
                (and (map? raw-val) (contains? raw-val :app) (not (:app raw-val)))))
     (begin-verify st)
     [st nil]))
@@ -440,23 +440,21 @@
     :verify-timeout (if (and (:verify st) (= (:id msg) (get-in st [:verify :cmd-id])))
                       (verify-probe-reply st {:error "verify-timeout"}) [st nil])
     (let [cmd-id (:id msg)]
-      (if-let [{:keys [req-id agent-id reply-ch op phase job snap] :as pending} (get-in st [:pending cmd-id])]
-        (if (= op :snapshot-enrich-dom)
-          (finish-snapshot (update st :pending dissoc cmd-id) pending snap nil)
-          (do
-            (when (and (= op :render-hiccup-frames) (not= phase :clear))
-              (when-let [send! (get-in st [:handle :send!])]
-                (send! {:id 0 :op "eval_js" :code (measure/clear-stage-js)}))
-              (restore-size! st))
-            (reply! reply-ch
-                    (if (and (= op :render-hiccup-frames) (= phase :clear) (nil? (:error job)) (seq (:frames job)))
-                      {:ok? true :widths (:all-widths job) :frames (vec (:frames job))}
-                      (error-reply st op (case op
-                                           (:measure-dom :measure-snippet) :measure-timeout
-                                           :render-hiccup-frames :render-frames-timeout
-                                           :snapshot-timeout) job)))
-            [(update st :pending dissoc cmd-id)
-             (when req-id {:agents-res [{:req-id req-id :agent-id agent-id :snapshot (:last-snap st)}]})]))
+      (if-let [{:keys [req-id agent-id reply-ch op phase job]} (get-in st [:pending cmd-id])]
+        (do
+          (when (and (= op :render-hiccup-frames) (not= phase :clear))
+            (when-let [send! (get-in st [:handle :send!])]
+              (send! {:id 0 :op "eval_js" :code (measure/clear-stage-js)}))
+            (restore-size! st))
+          (reply! reply-ch
+                  (if (and (= op :render-hiccup-frames) (= phase :clear) (nil? (:error job)) (seq (:frames job)))
+                    {:ok? true :widths (:all-widths job) :frames (vec (:frames job))}
+                    (error-reply st op (case op
+                                         (:measure-dom :measure-snippet) :measure-timeout
+                                         :render-hiccup-frames :render-frames-timeout
+                                         :snapshot-timeout) job)))
+          [(update st :pending dissoc cmd-id)
+           (when req-id {:agents-res [{:req-id req-id :agent-id agent-id :snapshot (:last-snap st)}]})])
         [st nil]))))
 
 (defn- handle-render-frames-ipc [st {:keys [phase cur-width reply-ch job]} msg]
@@ -522,26 +520,8 @@
         [st nil])
     :snapshot
     (if-let [snap (normalize-snapshot msg)]
-      [(send-cmd st {:op "eval_js" :code (measure/measure-boxes-js)}
-                 {:op :snapshot-enrich-dom :snap snap :req-id req-id :agent-id agent-id :reply-ch reply-ch}
-                 1500)
-       nil]
+      (finish-snapshot st pending snap nil)
       (finish-snapshot st pending nil (:error msg)))
-    :snapshot-enrich-dom
-    (let [base (:snap pending)]
-      (if (:ok msg)
-        (let [a (measure/analyze-pixel-fit (:value msg))
-              enriched {:visual-defects (vec (or (:visual-defects a) []))
-                        :visual-ok? (boolean (:ok? a))
-                        :clipped-count (count (:clipped-items a))
-                        :clipped-items (vec (take 6 (:clipped-items a)))
-                        :viewport (:viewport a)
-                        :summary (:summary a)}
-              snap (update base :dom #(merge (or % {}) enriched))
-              [st1 rec-out] (maybe-auto-recover st a (:value msg))
-              [st2 fin-out] (finish-snapshot st1 pending snap nil)]
-          [st2 (if rec-out (merge-with into fin-out rec-out) fin-out)])
-        (finish-snapshot st pending base nil)))
     (do (reply! reply-ch {:ok? (boolean (:ok msg)) :raw msg})
         [st (when req-id {:agents-res [{:req-id req-id :agent-id agent-id :snapshot nil}]})])))
 
@@ -553,11 +533,9 @@
       [st {:clojure.core.async.flow/report (into (get out :clojure.core.async.flow/report []) [ready])}])
 
     (= "exited" (:event msg))
-    (let [outs (keep (fn [[_ {:keys [req-id agent-id reply-ch op job snap]}]]
-                     (reply! reply-ch (if (and (= op :snapshot-enrich-dom) snap)
-                     {:ok? true :snapshot snap :error nil}
-                     (error-reply st op :browser-exited job)))
-                     (when req-id {:req-id req-id :agent-id agent-id :snapshot (when (= op :snapshot-enrich-dom) snap)}))
+    (let [outs (keep (fn [[_ {:keys [req-id agent-id reply-ch op job]}]]
+                     (reply! reply-ch (error-reply st op :browser-exited job))
+                     (when req-id {:req-id req-id :agent-id agent-id :snapshot nil}))
                      (:pending st))]
       [(assoc st :handle nil :ready? false :pending {} :verify nil)
        (when (seq outs) {:agents-res (vec outs)})])
