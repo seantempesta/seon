@@ -394,8 +394,9 @@
 (defn stress-var
   "Deterministically exercises `fn-sym` with concrete `:examples`, relational `:=>` guard, `seed = 42` generated inputs,
    deterministic counterexample shrinking, and `:cost/*` budgets."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :qualified-symbol] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
-  ([db fn-sym] (stress-var db fn-sym {}))
+  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
+  ([fn-sym] (stress-var nil fn-sym {}))
+  ([a b] (if (qualified-symbol? a) (stress-var nil a (if (map? b) b {})) (stress-var a b {})))
   ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
    (when-let [v (resolve fn-sym)]
      (let [m0 (meta v)

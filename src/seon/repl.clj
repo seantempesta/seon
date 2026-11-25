@@ -213,27 +213,27 @@
         (d/merge-base bdb mcid bcid)))))
 
 (defn run-tests!
-  "Runs reach-selected or explicit `deftest`s live, surfacing `:main-pass?` and concise `:failure-lines`."
+  "Runs reach-selected or explicit `deftest`s live (accepting syms, namespaces, or `{:vars [...]}`)."
   {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]] :seon.eval/budget-override {:ticks 2000000000 :bytes 4294967296}}
   ([] (run-tests! nil))
   ([target & more]
    (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [t0 (System/nanoTime) bdb @conn
-           mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
+     (let [t0 (System/nanoTime) bdb @conn mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
            base-cid (branch-merge-base-cid mdb bdb branch)
            ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
-           _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb {:upserts (:upserts ops) :retracted-keys (:retracted-keys ops)}))
-           tlist (vec (mapcat #(cond (nil? %) nil (or (vector? %) (set? %) (seq? %)) % :else [%]) (if (seq more) (cons target more) [target])))
+           _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb (select-keys ops [:upserts :retracted-keys])))
+           raw (if (seq more) (cons target more) [target]) opt-m (when (map? (last raw)) (last raw))
+           tlist (if-let [vs (or (:vars opt-m) (:tests opt-m))] (if (coll? vs) (vec vs) [vs])
+                   (vec (mapcat #(cond (or (nil? %) (map? %)) nil (coll? %) % :else [%]) raw)))
            test-syms (if (seq tlist)
                        (->> tlist
                             (mapcat (fn [x]
                                       (let [s (if (string? x) (symbol x) x)]
-                                        (cond
-                                          (namespace s) [s]
-                                          (str/ends-with? (name s) "-test")
-                                          (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))] (when (:seon.code.var/test? v) (:seon.code.var/name v)))
-                                                (d/datoms bdb :avet :seon.code.var/ns s))
-                                          :else (code/reaching-tests bdb s)))))
+                                        (cond (namespace s) [s]
+                                              (str/ends-with? (name s) "-test")
+                                              (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))] (when (:seon.code.var/test? v) (:seon.code.var/name v)))
+                                                    (d/datoms bdb :avet :seon.code.var/ns s))
+                                              :else (code/reaching-tests bdb s)))))
                             distinct sort vec)
                        (->> (distinct (keep :seon.code.form/ns (:upserts ops))) (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
            results (wsup/call-with-candidate-overrides bdb (fn [_] (mapv #(wsup/run-single-test-var bdb % (str "local:" %)) test-syms)))
