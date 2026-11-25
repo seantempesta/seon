@@ -208,44 +208,6 @@
                          targets)]
        {:ok? (every? :ok? results) :dry-run? (boolean dry-run?) :count (count results) :results results}))))
 
-(defn- branch-merge-base-cid [mdb bdb branch]
-  (when (and (not= branch :main) mdb bdb (get-in bdb [:config :commit-graph?] true))
-    (let [mcid (d/commit-id mdb) bcid (d/commit-id bdb) st (:store bdb)]
-      (when (and mcid bcid st (d/commit-graph-record st mcid) (d/commit-graph-record st bcid))
-        (d/merge-base bdb mcid bcid)))))
-
-(defn inspect-branch
-  "Inspects a branch or agent: changed forms, health errors, proofs, recent evals, and diffs."
-  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :keyword] [:maybe :map]]]}
-  ([] (inspect-branch (:branch *agent-ctx*)))
-  ([branch-or-agent]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [mdb (store/head conn :main)
-           ag-ent (when (first (d/datoms mdb :avet :seon.agent/id branch-or-agent))
-                    (d/pull mdb '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/goal {:seon.agent/tasks [:seon.task/id]}] [:seon.agent/id branch-or-agent]))
-           branch (or (:seon.agent/branch ag-ent) branch-or-agent)
-           bdb (when (contains? (d/branches conn) branch) (store/head conn branch))]
-       (if-not bdb
-         {:ok? false :error :branch-not-found :target branch-or-agent :branch branch}
-         (let [base-cid (branch-merge-base-cid mdb bdb branch) base-db (when base-cid (d/commit-as-db conn base-cid))
-               ops (if base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)) {:upserts [] :retracted-keys #{} :schema-keys #{}})
-               tnss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
-               errs (if (= branch :main) [] (health/caused-by-branch mdb bdb {} tnss))
-               aid (or (:seon.agent/id ag-ent)
-                       (some #(let [a (d/pull bdb '[:seon.agent/id :seon.agent/branch] (:e %))] (when (= branch (:seon.agent/branch a)) (:seon.agent/id a))) (d/datoms bdb :aevt :seon.agent/id)))
-               b-ag (when aid (d/pull bdb '[:seon.agent/last-proofs :seon.agent/ready? :seon.agent/waiting?] [:seon.agent/id aid]))
-               recent-evals (when aid (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
-                                           (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/handle :seon.agent.eval/intent :seon.agent.eval/error :seon.agent.eval/ms] (:e %)))
-                                           (sort-by #(or (:seon.agent.eval/turn %) 0)) (take-last 6) vec))
-               diffs (into {} (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
-                                      (let [old-s (when base-db (:seon.code.form/src (d/pull base-db '[:seon.code.form/src] [:seon.code.form/key key])))
-                                            ud (cst/unified-diff (or old-s "") (or src "") key)]
-                                        [key (if (> (count ud) 1200) (str (subs ud 0 1200) "\n…") ud)]))) (take 6 (:upserts ops)))]
-           {:ok? true :agent aid :branch branch :branch-tx (:max-tx bdb) :ready? (boolean (:seon.agent/ready? b-ag))
-            :last-proofs (:seon.agent/last-proofs b-ag) :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
-            :retracted (vec (sort (:retracted-keys ops))) :schemas (vec (sort (:schema-keys ops)))
-            :health-errors errs :recent-evals recent-evals :diffs diffs}))))))
-
 (defn ^{:seon.code/reexport 'seon.repl.context/help} help [& args] (apply context/help args))
 
 (defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.repl.context/simulate-context} simulate-context [& args] (apply context/simulate-context args))
@@ -316,6 +278,64 @@
                           distinct sort vec)))]
     {:ordered-tests (order-direct-tests-first ops tlist test-syms) :gen-vars gen-vars}))
 
+(defonce ^:private ^:seon.flow/edge merge-base-cache (store/lru-cache 32))
+
+(defn- branch-merge-base-cid [mdb bdb branch]
+  (when (and (not= branch :main) mdb bdb (get-in bdb [:config :commit-graph?] true))
+    (let [mcid (d/commit-id mdb) bcid (d/commit-id bdb) st (:store bdb)
+          sid (get-in bdb [:config :store :id])]
+      (when (and mcid bcid st)
+        (let [compute #(when (and (d/commit-graph-record st mcid) (d/commit-graph-record st bcid))
+                         (d/merge-base bdb mcid bcid))]
+          (if sid
+            (store/lru-get! merge-base-cache 32 [sid mcid bcid] compute)
+            (compute)))))))
+
+(defn inspect-branch
+  "Inspects a branch or agent: changed forms, health errors, proofs, recent evals, and diffs."
+  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :keyword] [:maybe :map]]]}
+  ([] (inspect-branch (:branch *agent-ctx*)))
+  ([branch-or-agent]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [mdb (store/head conn :main)
+           ag-ent (when (first (d/datoms mdb :avet :seon.agent/id branch-or-agent))
+                    (d/pull mdb '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/goal {:seon.agent/tasks [:seon.task/id]}] [:seon.agent/id branch-or-agent]))
+           branch (or (:seon.agent/branch ag-ent) branch-or-agent)
+           bdb (when (contains? (d/branches conn) branch) (store/head conn branch))]
+       (if-not bdb
+         {:ok? false :error :branch-not-found :target branch-or-agent :branch branch}
+         (let [base-cid (branch-merge-base-cid mdb bdb branch) base-db (when base-cid (d/commit-as-db conn base-cid))
+               ops (if base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)) {:upserts [] :retracted-keys #{} :schema-keys #{}})
+               tnss (vec (distinct (keep :seon.code.form/ns (:upserts ops))))
+               errs (if (= branch :main) [] (health/caused-by-branch mdb bdb {} tnss))
+               aid (or (:seon.agent/id ag-ent)
+                       (some #(let [a (d/pull bdb '[:seon.agent/id :seon.agent/branch] (:e %))] (when (= branch (:seon.agent/branch a)) (:seon.agent/id a))) (d/datoms bdb :aevt :seon.agent/id)))
+               b-ag (when aid (d/pull bdb '[:seon.agent/last-proofs :seon.agent/ready? :seon.agent/waiting?] [:seon.agent/id aid]))
+               recent-evals (when aid (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
+                                           (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/handle :seon.agent.eval/intent :seon.agent.eval/error :seon.agent.eval/ms] (:e %)))
+                                           (sort-by #(or (:seon.agent.eval/turn %) 0)) (take-last 6) vec))
+               diffs (into {} (keep (fn [{:keys [:seon.code.form/key :seon.code.form/src]}]
+                                      (let [old-s (when base-db (:seon.code.form/src (d/pull base-db '[:seon.code.form/src] [:seon.code.form/key key])))
+                                            ud (cst/unified-diff (or old-s "") (or src "") key)]
+                                        [key (if (> (count ud) 1200) (str (subs ud 0 1200) "\n…") ud)]))) (take 6 (:upserts ops)))]
+           {:ok? true :agent aid :branch branch :branch-tx (:max-tx bdb) :ready? (boolean (:seon.agent/ready? b-ag))
+            :last-proofs (:seon.agent/last-proofs b-ag) :upserts (vec (sort (map :seon.code.form/key (:upserts ops))))
+            :retracted (vec (sort (:retracted-keys ops))) :schemas (vec (sort (:schema-keys ops)))
+            :health-errors errs :recent-evals recent-evals :diffs diffs}))))))
+
+(defonce ^:private ^:seon.flow/edge last-run-tests-overlay (atom nil))
+
+(defn- diff-upserts-vs-main [mdb upserts]
+  (if (or (nil? mdb) (empty? upserts))
+    upserts
+    (filterv (fn [f]
+               (let [k (:seon.code.form/key f)
+                     h (:seon.code.form/hash f)
+                     me (when k (:e (first (d/datoms mdb :avet :seon.code.form/key k))))
+                     mh (when me (:v (first (d/datoms mdb :eavt me :seon.code.form/hash))))]
+                 (or (nil? me) (nil? h) (not= h mh))))
+             upserts)))
+
 (defn run-tests!
   "Runs reach-selected or explicit `deftest`s (direct tests first, soft-capped inside in-process eval budget) AND `seed=42` Malli generative checks on edited/target contracted vars."
   {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]], :seon.eval/budget-override {:ticks 6000000000, :bytes 12884901888}, :seon.flow/edge true}
@@ -325,9 +345,14 @@
      (let [t0 (System/nanoTime) bdb @conn mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
            base-cid (branch-merge-base-cid mdb bdb branch)
            ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
-           branch-dirty? (boolean (or (seq (:upserts ops)) (seq (:retracted-keys ops)) (seq (:schema-keys ops))))
+           overlay-upserts (if (= branch :main) [] (diff-upserts-vs-main mdb (:upserts ops)))
+           retracted-vs-main (if (= branch :main) #{} (into #{} (filter #(first (d/datoms mdb :avet :seon.code.form/key %))) (:retracted-keys ops)))
+           branch-dirty? (boolean (or (seq overlay-upserts) (seq retracted-vs-main) (seq (:schema-keys ops))))
            eff-db (if (or (= branch :main) branch-dirty?) bdb mdb)
-           _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb (select-keys ops [:upserts :retracted-keys])))
+           ov-sig [branch (d/commit-id bdb) (d/commit-id mdb)]
+           _ (when (and (or (seq overlay-upserts) (seq retracted-vs-main)) (not= @last-run-tests-overlay ov-sig))
+               (wsup/apply-form-overlay! bdb {:upserts overlay-upserts :retracted-keys retracted-vs-main})
+               (reset! last-run-tests-overlay ov-sig))
            {:keys [ordered-tests gen-vars]} (resolve-run-tests-targets eff-db mdb ops target more)
            b0 (code/alloc-bytes) soft-byte-cap 4294967296
            {:keys [results skipped-by-budget gen-results]}

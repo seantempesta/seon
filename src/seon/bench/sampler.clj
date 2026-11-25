@@ -5,7 +5,8 @@
             [seon.fork.calls :as fcalls]
             [clojure.string :as str]
             [seon.render.fit :as fit]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.code :as code]))
 
 (defn- loose-map-return? [sch]
   (let [one? (fn [s] (and (vector? s) (= :=> (first s))
@@ -167,14 +168,17 @@
                           :when (and sch-dt (> (long (:tx sch-dt 0)) after-tx)
                                      (str/includes? (pr-str (:v sch-dt)) ":examples"))]
                       (:v (first (d/datoms db :eavt e :seon.code.var/name))))
+            reaching (set (code/reaching-tests db nsym))
             test-hits (for [dt (d/datoms db :aevt :seon.code.var/test?)
                             :when (and (true? (:v dt)) (> (long (:tx dt 0)) after-tx))
                             :let [e (:e dt)
+                                  vname (:v (first (d/datoms db :eavt e :seon.code.var/name)))
                                   vns (:v (first (d/datoms db :eavt e :seon.code.var/ns)))
                                   refs (map :v (d/datoms db :eavt e :seon.code.var/refs))]
                             :when (or (= vns (symbol (str (name nsym) "-test")))
-                                      (some #(= (name nsym) (namespace %)) refs))]
-                        (:v (first (d/datoms db :eavt e :seon.code.var/name))))]
+                                      (some #(= (name nsym) (namespace %)) refs)
+                                      (contains? reaching vname))]
+                        vname)]
         (if (or (seq ex-hits) (seq test-hits))
           {:ok? true :kind :ns-test-or-example :ns nsym :examples (vec ex-hits) :tests (vec test-hits)}
           {:ok? false :kind :ns-test-or-example :reason (str "No new unit test or contract examples recorded for " nsym " after tx " after-tx)}))

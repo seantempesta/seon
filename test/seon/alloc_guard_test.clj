@@ -19,7 +19,9 @@
             [seon.fork.calls :as fcalls]
             [seon.ctx.touches :as ctouches]
             [clojure.java.io :as io]
-            [seon.repl.search :as rsearch]))
+            [seon.repl.search :as rsearch]
+            [seon.bench.sampler]
+            [seon.code.errors]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -725,3 +727,39 @@
     (is (fn? seon.health.coverage/lint-rule-generality))
     (is (fn? seon.health.static/form-meta-snapshot))
     (is (fn? seon.health.static/used-before-defined))))
+
+(deftest wave20b-o1-changed-ops-run-tests-cache-and-verify-reach-test
+  (testing "changed-form-ops-aevt matches d/changes path for upserts, retracts, schemas, rules, and caches cleanly"
+    (seon.test-fixture/with-test-store [{:keys [conn]}]
+      (let [c0 (d/commit-id @conn)
+            _ (d/transact conn {:tx-data (seon.code/file-import-tx @conn "src/demo/reach_aevt.clj"
+                                           "(ns demo.reach-aevt)\n(defn f [x] (inc x))" false)})
+            c1 (d/commit-id @conn)
+            from-db (d/commit-as-db conn c0)
+            to-db @conn
+            via-aevt (#'seon.code.reach/changed-form-ops-aevt from-db to-db)
+            via-ops (seon.code.reach/changed-form-ops conn c0 c1)
+            via-cached (seon.code.reach/changed-form-ops conn c0 c1)]
+        (is (= (set (map :seon.code.form/key (:upserts via-ops)))
+               (set (map :seon.code.form/key (:upserts via-aevt)))))
+        (is (= (:retracted-keys via-ops) (:retracted-keys via-aevt)))
+        (is (= (:schema-keys via-ops) (:schema-keys via-aevt)))
+        (is (= (:rule-ids via-ops) (:rule-ids via-aevt)))
+        (is (= via-ops via-cached)))))
+  (testing "verify-task-spec :ns-test-or-example credits new tests reaching a child ns through a parent re-export"
+    (seon.test-fixture/with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (seon.code/file-import-tx @conn "src/demo/child.clj"
+                                   "(ns demo.child)\n(defn helper [x] (inc x))" false)})
+      (d/transact conn {:tx-data (seon.code/file-import-tx @conn "src/demo/parent.clj"
+                                   "(ns demo.parent (:require [demo.child :as c]))\n(defn helper [x] (c/helper x))" false)})
+      (let [t0 (:max-tx @conn)]
+        (is (false? (:ok? (seon.bench.sampler/verify-task-spec @conn {:kind :ns-test-or-example :ns 'demo.child :after-main-tx t0}))))
+        (d/transact conn {:tx-data (seon.code/file-import-tx @conn "test/demo/parent_test.clj"
+                                     "(ns demo.parent-test (:require [clojure.test :refer [deftest is]] [demo.parent :as p]))\n(deftest via-reexport-test (is (= 2 (p/helper 1))))" false)})
+        (let [vr (seon.bench.sampler/verify-task-spec @conn {:kind :ns-test-or-example :ns 'demo.child :after-main-tx t0})]
+          (is (true? (:ok? vr)))
+          (is (some #{'demo.parent-test/via-reexport-test} (:tests vr)))))))
+  (testing "Wave 20A static error hints fire cleanly"
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "class malli.registry$composite_registry$reify__1 cannot be cast to class clojure.lang.IFn" {}) "malli.core/schema"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "No matching clause: :ave" {}) ":avet"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Lookup ref should contain 2 elements: [12345]" {}) "never `[eid]`"))))
