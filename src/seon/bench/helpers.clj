@@ -417,20 +417,18 @@
          (when (dh :seon.schema/key)
            (->> (d/datoms db :aevt :seon.schema/key)
                 (keep (fn [dt]
-                        (let [e (:e dt) sk (:v dt)
-                              pol (eav1 e :seon.schema/context-policy)
-                              rcnt (count (fit/discover-renderers db sk))]
-                          (when (and (qualified-keyword? sk) (= "entity" (name sk))
-                                     (str/starts-with? (namespace sk) "seon.")
-                                     (not (contains? #{:never :internal} pol))
-                                     (< rcnt 2))
-                            (let [tid (keyword "rand" (str "render-" (str/replace (namespace sk) "." "-")))]
-                              {:id tid :category :entity-renderers
-                               :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
-                               :verify-spec {:kind :entity-renderers :schema sk :min-renderers 2}
-                               :task {:id tid :scope 'seon.render.entities
-                                      :title (str "Add compact and detailed renderers for " sk)
-                                      :plan (str "Inspect how `" sk "` is currently rendered across compact and detailed views. Ensure it has clean distinct compact and detailed renderers with unit tests proving both.")}})))))
+                      (let [e (:e dt) sk (:v dt)]
+                        (when (and (qualified-keyword? sk) (= "entity" (name sk))
+                                   (str/starts-with? (namespace sk) "seon.")
+                                   (not (contains? #{:never :internal} (eav1 e :seon.schema/context-policy)))
+                                   (< (count (fit/discover-renderers db sk)) 2))
+                          (let [tid (keyword "rand" (str "render-" (str/replace (namespace sk) "." "-")))]
+                            {:id tid :category :entity-renderers
+                             :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                             :verify-spec {:kind :entity-renderers :schema sk :min-renderers 2}
+                             :task {:id tid :scope 'seon.render.entities
+                                    :title (str "Add compact and detailed renderers for " sk)
+                                    :plan (str "Inspect how `" sk "` is currently rendered across compact and detailed views. Ensure it has clean distinct compact and detailed renderers with unit tests proving both.")}})))))
                 (sort-by #(str (:id %))) vec))
          pools (filterv seq [(det-shuffle loose-vars) (det-shuffle ns-tasks) (det-shuffle schema-tasks)])]
      (vec (take n (loop [ps pools acc []]

@@ -572,7 +572,7 @@
      :else {:error :invalid-schema-query :query query})))
 
 (defn safe-example
-  {:malli/schema [:=> [:cat :any :map] :any], :cost/ticks 500000}
+  {:malli/schema [:=> [:cat :any :map] :any], :cost/ticks 500000, :seon.flow/edge true}
   [input-sch opts]
   (try
     (mg/generate input-sch (assoc opts :seed 42 :size 4))
