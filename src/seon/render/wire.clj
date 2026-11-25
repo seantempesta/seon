@@ -260,6 +260,11 @@
                       anchor-cid anchor-cid base-cid base-cid (pos? reset-tx) [:main-reset reset-tx] :else :main-session)
         task-ids (vec (sort-by str (distinct (concat (rdata/agent-task-ids branch-db ag) (rdata/agent-task-ids main-db ag)))))
         task? (boolean (and (seq task-ids) (some #(first (d/datoms branch-db :avet :seon.task/id %)) task-ids)))
+        task-sig (when (and (seq task-ids) (or (= eff-cid :main-session) (= branch :main)))
+                   (let [tdb (if task? branch-db main-db)]
+                     (mapv #(when-let [eid (:e (first (d/datoms tdb :avet :seon.task/id %)))]
+                              (d/pull tdb (quote [:seon.task/title :seon.task/description :seon.task/plan :seon.task/summary :seon.task/done? :seon.task/scope]) eid))
+                           task-ids)))
         dis-key (when (seq (:disabled-rules opts)) (vec (sort (:disabled-rules opts))))
         msig (rules/rules-db-sig main-db)
         bsig (if (identical? main-db branch-db) msig (rules/rules-db-sig branch-db))

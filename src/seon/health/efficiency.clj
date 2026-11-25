@@ -40,11 +40,14 @@
           (str (dd/value-of v))))
     (str v)))
 
+(defn- eav1 [db eid attr]
+  (:v (first (d/datoms db :eavt eid attr))))
+
 (defn- fetch-missing-srcs [db ^java.util.HashSet needed]
   (let [hm (java.util.HashMap. (max 16 (.size needed)))]
     (when (pos? (.size needed))
       (if (<= (.size needed) 150)
-        (doseq [e needed] (when-let [dt (first (d/datoms db :eavt e :seon.code.form/src))] (.put hm e (str (:v dt)))))
+        (doseq [e needed] (when-let [v (eav1 db e :seon.code.form/src)] (.put hm e (str v))))
         (binding [di/*read-key-attrs* #{}]
           (doseq [dt (d/datoms db :aevt :seon.code.form/src) :let [e (:e dt)] :when (.contains needed e)]
             (.put hm e (resolve-src-value db (:v dt)))))))
@@ -60,19 +63,31 @@
     (when (and k nested-scan? (not (contains? #{"seon.health/schema-violations" "seon.health.static/schema-violations"} k)))
       (vswap! nested conj (assoc base :class :nested-db-scan :severity :warning :message (str "Nested full DB scan in " k ". Hoist or use `:avet`."))))))
 
+(defn- aevt-hm [db attr cap]
+  (let [hm (java.util.HashMap. (int cap))]
+    (when (contains? (:schema db) attr)
+      (doseq [dt (d/datoms db :aevt attr)]
+        (.put hm (:e dt) (:v dt))))
+    hm))
+
 (defn- collect-forms-by-ns [db scope]
   (if scope
-    (into {}
-          (for [nsym (->> (d/datoms db :aevt :seon.code.ns/name) (map :v) (filter #(and (not (str/ends-with? (name %) "-test")) (ns-in-scope? scope %))))
-                :let [fs (mapv #(let [p (d/pull db '[:seon.code.form/key :seon.code.form/hash :seon.code.form/chars :seon.code.form/lines :seon.code.form/nested-scan?] (:e %))]
-                                  {:e (:e %) :key (:seon.code.form/key p) :hash (:seon.code.form/hash p) :chars (:seon.code.form/chars p) :lines (:seon.code.form/lines p) :nested-scan? (:seon.code.form/nested-scan? p)})
-                               (d/datoms db :avet :seon.code.form/ns nsym))]
-                :when (seq fs)]
-            [nsym fs]))
-    (let [ek (java.util.HashMap. 1400) eh (java.util.HashMap. 1400) by-ns (java.util.HashMap. 160)]
-      (when (contains? (:schema db) :seon.code.form/key) (doseq [dt (d/datoms db :aevt :seon.code.form/key)] (.put ek (:e dt) (:v dt))))
-      (when (contains? (:schema db) :seon.code.form/hash) (doseq [dt (d/datoms db :aevt :seon.code.form/hash)] (.put eh (:e dt) (:v dt))))
-      (doseq [dt (d/datoms db :aevt :seon.code.form/ns) :let [nsym (:v dt) e (:e dt)] :when (and nsym (not (str/ends-with? (name nsym) "-test")))]
+    (let [pat (quote [:seon.code.form/key :seon.code.form/hash :seon.code.form/chars :seon.code.form/lines :seon.code.form/nested-scan?])
+          row (fn [dt]
+                (let [{:seon.code.form/keys [key hash chars lines nested-scan?]} (d/pull db pat (:e dt))]
+                  {:e (:e dt) :key key :hash hash :chars chars :lines lines :nested-scan? nested-scan?}))]
+      (into {}
+            (for [nsym (map :v (d/datoms db :aevt :seon.code.ns/name))
+                  :when (and (not (str/ends-with? (name nsym) "-test")) (ns-in-scope? scope nsym))
+                  :let [fs (mapv row (d/datoms db :avet :seon.code.form/ns nsym))]
+                  :when (seq fs)]
+              [nsym fs])))
+    (let [ek (aevt-hm db :seon.code.form/key 1400)
+          eh (aevt-hm db :seon.code.form/hash 1400)
+          by-ns (java.util.HashMap. 160)]
+      (doseq [dt (d/datoms db :aevt :seon.code.form/ns)
+              :let [nsym (:v dt) e (:e dt)]
+              :when (and nsym (not (str/ends-with? (name nsym) "-test")))]
         (let [arr (or (.get by-ns nsym) (let [a (java.util.ArrayList. 16)] (.put by-ns nsym a) a))]
           (.add ^java.util.ArrayList arr {:e e :key (.get ek e) :hash (.get eh e)})))
       (into {} (map (fn [^java.util.Map$Entry en] [(.getKey en) (vec ^java.util.ArrayList (.getValue en))])) (.entrySet by-ns)))))
@@ -93,10 +108,13 @@
                                lib)))))
                      (:requires decl))))))
 
+(def ^:private code-edit-attrs
+  #{:seon.code.form/key :seon.code.form/src :seon.code.form/hash :seon.code.var/name :seon.code.ns/name})
+
 (defn- suppress-heavy-eval? [branch-db br aid opts]
   (let [cdb (or (:main-db opts) branch-db)
         res? (when (and cdb aid (contains? (:schema cdb) :seon.agent.call/callee))
-               (let [sts (mapv #(:v (first (d/datoms cdb :eavt (:e %) :seon.agent.call/status))) (d/datoms cdb :avet :seon.agent.call/callee aid))]
+               (let [sts (mapv #(eav1 cdb (:e %) :seon.agent.call/status) (d/datoms cdb :avet :seon.agent.call/callee aid))]
                  (and (seq sts) (some #(= :resolved %) sts) (not-any? #(= :pending %) sts))))
         no-ed? (when (not= br :main)
                  (if (contains? opts :branch-edited)
@@ -106,8 +124,7 @@
                      (let [mdb (or (:main-db opts) (try (store/head (:store branch-db) :main) (catch Throwable _ nil)))
                            base (when mdb (diff/fast-merge-base mdb branch-db)) cid (store/live-cid branch-db)]
                        (not (and base cid (not= base cid)
-                                 (some #(contains? #{:seon.code.form/key :seon.code.form/src :seon.code.form/hash :seon.code.var/name :seon.code.ns/name} (:a %))
-                                       (diff/branch-changes branch-db base cid))))))))]
+                                 (some #(contains? code-edit-attrs (:a %)) (diff/branch-changes branch-db base cid))))))))]
     (boolean (or res? no-ed?))))
 
 (def ^:private eval-pull-pat
@@ -115,106 +132,84 @@
     :seon.agent.eval/prefix-hash :seon.agent.eval/ms :seon.agent.eval/ticks :seon.agent.eval/bytes
     :seon.agent.eval/error :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens])
 
+(defn- attr-long [m k]
+  (long (or (get m k) 0)))
+
 (defn- eval-warnings-for-agent [branch-db br aid es opts]
-  (let [ces (filter #(or (pos? (long (or (:seon.agent.eval/cache-hit-tokens %) 0))) (pos? (long (or (:seon.agent.eval/cache-miss-tokens %) 0)))) es)
-        hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-hit-tokens %) 0)) ces))
-        tot (+ hits (reduce + 0 (map #(long (or (:seon.agent.eval/cache-miss-tokens %) 0)) ces)))
+  (let [mk (fn [cls subj msg extra]
+             (merge {:class cls :severity :warning :kind :live :agent aid :subject subj :branch br :message msg} extra))
+        hit-fn #(attr-long % :seon.agent.eval/cache-hit-tokens)
+        miss-fn #(attr-long % :seon.agent.eval/cache-miss-tokens)
+        ces (filter #(or (pos? (hit-fn %)) (pos? (miss-fn %))) es)
+        hits (reduce + 0 (map hit-fn ces))
+        tot (+ hits (reduce + 0 (map miss-fn ces)))
         cw (when (and (>= (count ces) 2) (>= tot 2000) (< (/ (double hits) tot) 0.60))
-             [{:class :low-cache-hit :severity :warning :kind :live :agent aid :subject (str aid) :branch br
-               :message (str "Low KV-cache hit on " aid ": " (Math/round (* 100.0 (/ (double hits) tot))) "% (" hits "/" tot " tok).")}])
-        trows (->> es (filter #(let [ci (:seon.agent.eval/call-index %)] (or (nil? ci) (zero? (long ci)))))
-                   (filter #(or (:seon.agent.eval/prefix-hash %) (:seon.agent.eval/cache-hit-tokens %)))
-                   (sort-by #(long (or (:seon.agent.eval/turn %) 0))))
+             [(mk :low-cache-hit (str aid)
+                  (str "Low KV-cache hit on " aid ": " (Math/round (* 100.0 (/ (double hits) tot))) "% (" hits "/" tot " tok).") nil)])
+        trows (->> es
+                   (filter (fn [{:seon.agent.eval/keys [call-index prefix-hash cache-hit-tokens]}]
+                             (and (or (nil? call-index) (zero? (long call-index))) (or prefix-hash cache-hit-tokens))))
+                   (sort-by #(attr-long % :seon.agent.eval/turn)))
         busts (vec (keep (fn [[a b]]
-                           (let [t1 (long (or (:seon.agent.eval/turn a) 0)) t2 (long (or (:seon.agent.eval/turn b) 0))
+                           (let [n1 (attr-long a :seon.agent.eval/turn) n2 (attr-long b :seon.agent.eval/turn)
                                  p1 (:seon.agent.eval/prefix-hash a) p2 (:seon.agent.eval/prefix-hash b)
                                  h1 (:seon.agent.eval/cache-hit-tokens a) h2 (:seon.agent.eval/cache-hit-tokens b)
                                  hc? (and (some? p1) (some? p2) (not= p1 p2))
                                  hd? (and (number? h1) (number? h2) (> (long h1) 512) (< (long h2) (- (long h1) 256)))]
-                             (when (and (= t2 (inc t1)) (or hc? hd?))
-                               {:turn t2 :prev-hash p1 :cur-hash p2 :prev-hit h1 :cur-hit h2 :reason (if hc? :prefix-hash-changed :cache-hit-drop)})))
+                             (when (and (= n2 (inc n1)) (or hc? hd?))
+                               {:turn n2 :prev-hash p1 :cur-hash p2 :prev-hit h1 :cur-hit h2
+                                :reason (if hc? :prefix-hash-changed :cache-hit-drop)})))
                          (partition 2 1 trows)))
         bw (when (seq busts)
-             (let [b (peek busts)]
-               [{:class :prefix-cache-bust :severity :warning :kind :live :agent aid :subject (str aid "/t" (:turn b)) :branch br :bust-count (count busts)
-                 :message (str "KV-cache prefix bust on " aid " (" (count busts) "x, t" (:turn b)
-                               (if (= :prefix-hash-changed (:reason b)) (str ": " (:prev-hash b) " -> " (:cur-hash b)) (str ": " (:prev-hit b) " -> " (:cur-hit b) " tok")) ").")}]))
-        heavy (filterv #(or (> (long (or (:seon.agent.eval/bytes %) 0)) 134217728)
-                            (> (long (or (:seon.agent.eval/ticks %) 0)) 50000000)
+             (let [{:keys [turn reason prev-hash cur-hash prev-hit cur-hit]} (peek busts)]
+               [(mk :prefix-cache-bust (str aid "/t" turn)
+                    (str "KV-cache prefix bust on " aid " (" (count busts) "x, t" turn
+                         (if (= :prefix-hash-changed reason) (str ": " prev-hash " -> " cur-hash) (str ": " prev-hit " -> " cur-hit " tok")) ").")
+                    {:bust-count (count busts)})]))
+        heavy (filterv #(or (> (attr-long % :seon.agent.eval/bytes) 134217728)
+                            (> (attr-long % :seon.agent.eval/ticks) 50000000)
                             (str/includes? (str (:seon.agent.eval/error %)) "Eval exceeded")) es)
         hw (when (and (seq heavy) (not (suppress-heavy-eval? branch-db br aid opts)))
-             (let [n (count heavy) mb (quot (reduce max 0 (map #(long (or (:seon.agent.eval/bytes %) 0)) heavy)) 1048576)]
-               [{:class :heavy-eval :severity :warning :kind :live :agent aid :subject (str aid) :branch br :count n :max-mb mb
-                 :message (str "Telemetry notice (non-blocking, immutable eval ledger — do not retry or retract): " n " heavy evals on branch (max " mb " MB)")}]))]
+             (let [n (count heavy) mb (quot (reduce max 0 (map #(attr-long % :seon.agent.eval/bytes) heavy)) 1048576)]
+               [(mk :heavy-eval (str aid)
+                    (str "Telemetry notice (non-blocking, immutable eval ledger — do not retry or retract): " n " heavy evals on branch (max " mb " MB)")
+                    {:count n :max-mb mb})]))]
     (vec (concat cw bw hw))))
 
-(defn- ^:seon.flow/edge try-advance-eval-eff [bdb br anc cid]
-  (try
-    (let [dirty (volatile! #{}) full? (volatile! false)]
-      (doseq [dt (d/changes bdb (:cid anc) cid) :let [a (:a dt)]]
-        (cond (and (keyword? a) (= "seon.agent.eval" (namespace a)))
-              (if (:added dt) (vswap! dirty conj (:e dt)) (vreset! full? true))
-              (= :seon.agent.call/status a) (vreset! full? true)))
-      (when-not @full?
-        (if (empty? @dirty) anc
-            (let [aids (into #{} (keep #(:v (first (d/datoms bdb :eavt % :seon.agent.eval/agent)))) @dirty)
-                  by-ag' (reduce (fn [m aid]
-                                   (let [es (mapv #(d/pull bdb eval-pull-pat (:e %)) (d/datoms bdb :avet :seon.agent.eval/agent aid))
-                                         ws (eval-warnings-for-agent bdb br aid es nil)]
-                                     (if (seq ws) (assoc m aid ws) (dissoc m aid))))
-                                 (:by-ag anc) aids)]
-              {:by-ag by-ag' :out (vec (mapcat val by-ag'))}))))
-    (catch Throwable _ nil)))
+(defn- scan-eval-attr! [db sm ^java.util.HashSet eids attr pred]
+  (when (contains? sm attr)
+    (doseq [dt (d/datoms db :aevt attr) :when (pred (:v dt))]
+      (.add eids (:e dt)))))
 
 (defn- scan-interesting-evals [db]
   (let [sm (:schema db)
-        eids (java.util.HashSet. 128)]
-    (when (contains? sm :seon.agent.eval/cache-hit-tokens)
-      (doseq [dt (d/datoms db :aevt :seon.agent.eval/cache-hit-tokens) :when (pos? (long (or (:v dt) 0)))] (.add eids (:e dt))))
-    (when (contains? sm :seon.agent.eval/cache-miss-tokens)
-      (doseq [dt (d/datoms db :aevt :seon.agent.eval/cache-miss-tokens) :when (pos? (long (or (:v dt) 0)))] (.add eids (:e dt))))
-    (when (contains? sm :seon.agent.eval/prefix-hash)
-      (doseq [dt (d/datoms db :aevt :seon.agent.eval/prefix-hash) :when (some? (:v dt))] (.add eids (:e dt))))
-    (when (contains? sm :seon.agent.eval/bytes)
-      (doseq [dt (d/datoms db :aevt :seon.agent.eval/bytes) :when (> (long (or (:v dt) 0)) 134217728)] (.add eids (:e dt))))
-    (when (contains? sm :seon.agent.eval/ticks)
-      (doseq [dt (d/datoms db :aevt :seon.agent.eval/ticks) :when (> (long (or (:v dt) 0)) 50000000)] (.add eids (:e dt))))
-    (when (contains? sm :seon.agent.eval/error)
-      (doseq [dt (d/datoms db :aevt :seon.agent.eval/error) :when (str/includes? (str (:v dt)) "Eval exceeded")] (.add eids (:e dt))))
+        eids (java.util.HashSet. 128)
+        pos-l? #(pos? (long (or % 0)))]
+    (scan-eval-attr! db sm eids :seon.agent.eval/cache-hit-tokens pos-l?)
+    (scan-eval-attr! db sm eids :seon.agent.eval/cache-miss-tokens pos-l?)
+    (scan-eval-attr! db sm eids :seon.agent.eval/prefix-hash some?)
+    (scan-eval-attr! db sm eids :seon.agent.eval/bytes #(> (long (or % 0)) 134217728))
+    (scan-eval-attr! db sm eids :seon.agent.eval/ticks #(> (long (or % 0)) 50000000))
+    (scan-eval-attr! db sm eids :seon.agent.eval/error #(str/includes? (str %) "Eval exceeded"))
     (mapv #(d/pull db eval-pull-pat %) eids)))
 
-(defn eval-efficiency-warnings
-  "Inspects agent evals on `branch-db` for `:low-cache-hit`, `:prefix-cache-bust`, and `:heavy-eval`."
-  {:malli/schema [:function [:=> [:cat :any] [:vector :seon.health/problem]] [:=> [:cat :any :any] [:vector :seon.health/problem]] [:=> [:cat :any :any :any] [:vector :seon.health/problem]] [:=> [:cat :any :any :any [:maybe :map]] [:vector :seon.health/problem]]]}
-  ([branch-db] (eval-efficiency-warnings branch-db nil nil nil))
-  ([branch-db agent-id] (eval-efficiency-warnings branch-db agent-id nil nil))
-  ([branch-db agent-id prefetched-evals] (eval-efficiency-warnings branch-db agent-id prefetched-evals nil))
-  ([branch-db agent-id prefetched-evals opts]
-   (if-not (or (seq prefetched-evals) (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent)))
-     []
-     (let [br (if branch-db (get-in branch-db [:config :branch] :main) :main)
-           cid (when (and (nil? agent-id) (nil? prefetched-evals) (empty? opts) branch-db) (store/live-cid branch-db))]
-       (if cid
-         (let [sid (store/store-id branch-db) mtx (long (:max-tx branch-db 0))]
-           (rec-reads! [:seon.agent.eval/agent])
-           (store/lru-get! eval-eff-cache 16 [sid br cid mtx]
-             (fn []
-               (binding [di/*reads* nil]
-                 (let [ak [sid br] anc (get @eval-eff-anchor ak)
-                       res (or (when (and anc (:cid anc) (not= cid (:cid anc)) (< 0 (- mtx (long (:max-tx anc 0))) 256))
-                                 (try-advance-eval-eff branch-db br anc cid))
-                               (let [evs (scan-interesting-evals branch-db)
-                                     by-ag (reduce-kv (fn [m a es] (let [ws (eval-warnings-for-agent branch-db br a es nil)] (if (seq ws) (assoc m a ws) m))) {} (group-by :seon.agent.eval/agent evs))]
-                                 {:by-ag by-ag :out (vec (mapcat val by-ag))}))
-                       entry (assoc res :cid cid :max-tx mtx)]
-                   (swap! eval-eff-anchor #(let [b (if (> (count %) 16) {} %)] (if (>= mtx (long (:max-tx (get b ak) 0))) (assoc b ak entry) b)))
-                   (:out entry))))))
-         (let [evals (if (some? prefetched-evals)
-                       (if agent-id (filterv #(or (= agent-id (:seon.agent.eval/agent %)) (nil? (:seon.agent.eval/agent %))) prefetched-evals) (vec prefetched-evals))
-                       (if agent-id
-                         (mapv #(d/pull branch-db eval-pull-pat (:e %)) (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
-                         (scan-interesting-evals branch-db)))]
-           (vec (mapcat (fn [[aid es]] (eval-warnings-for-agent branch-db br aid es opts)) (group-by #(or (:seon.agent.eval/agent %) agent-id) evals)))))))))
+(defn- ^:seon.flow/edge anchored-branch-cache! [db cache-atom anchor-atom attrs advance-fn full-fn res-key]
+  (let [sid (store/store-id db) br (get-in db [:config :branch] :main)
+        cid (store/live-cid db) mtx (long (:max-tx db 0))]
+    (rec-reads! attrs)
+    (store/lru-get! cache-atom 16 [sid br cid mtx]
+      (fn []
+        (binding [di/*reads* nil]
+          (let [ak [sid br] anc (get @anchor-atom ak)
+                res (or (when (and anc (:cid anc) (not= cid (:cid anc))
+                                   (< 0 (- mtx (long (:max-tx anc 0))) 256)
+                                   (diff/ancestor-within? db (:cid anc) cid 16))
+                          (advance-fn db br anc cid))
+                        (full-fn db br))
+                entry (assoc res :cid cid :max-tx mtx)]
+            (swap! anchor-atom #(let [b (if (> (count %) 16) {} %)]
+                                  (if (>= mtx (long (:max-tx (get b ak) 0))) (assoc b ak entry) b)))
+            (get entry res-key)))))))
 
 (defn- top2-map->hm [m]
   (let [hm (java.util.HashMap. (max 16 (* 2 (count m))))]
@@ -263,72 +258,23 @@
   [db]
   (if-not (and db (contains? (:schema db) :seon.test/var))
     {:top2 (java.util.HashMap.) :var-sig [0 0] :pass-sig [0 0] :supersession {:var->green-tx {} :eid->pass-tx {}}}
-    (if-let [cid (store/live-cid db)]
-      (let [sid (store/store-id db) br (get-in db [:config :branch] :main) mtx (long (:max-tx db 0))]
-        (rec-reads! [:seon.test/var :seon.test/pass?])
-        (store/lru-get! test-snap-cache 16 [sid br cid mtx]
-          (fn []
-            (binding [di/*reads* nil]
-              (let [ak [sid br] anc (get @test-snap-anchor ak)
-                    res (or (when (and anc (:cid anc) (not= cid (:cid anc)) (< 0 (- mtx (long (:max-tx anc 0))) 256))
-                              (try-advance-test-snap db anc cid))
-                            (build-full-test-snap db))
-                    entry (assoc res :cid cid :max-tx mtx)]
-                (swap! test-snap-anchor #(let [b (if (> (count %) 16) {} %)] (if (>= mtx (long (:max-tx (get b ak) 0))) (assoc b ak entry) b)))
-                (:snap entry))))))
+    (if (store/live-cid db)
+      (anchored-branch-cache! db test-snap-cache test-snap-anchor
+                              [:seon.test/var :seon.test/pass?]
+                              (fn [d _ anc cid] (try-advance-test-snap d anc cid))
+                              (fn [d _] (build-full-test-snap d))
+                              :snap)
       (:snap (build-full-test-snap db)))))
 
-(defn- compute-test-eff [db br top2]
-  (let [sm (:schema db)
-        hm? (contains? sm :seon.test/ms) ht? (contains? sm :seon.test/ticks) hb? (contains? sm :seon.test/bytes)
-        rd #(hash-map :ms (double (or (when hm? (:v (first (d/datoms db :eavt % :seon.test/ms)))) 0.0))
-                      :ticks (long (or (when ht? (:v (first (d/datoms db :eavt % :seon.test/ticks)))) 0))
-                      :bytes (long (or (when hb? (:v (first (d/datoms db :eavt % :seon.test/bytes)))) 0)))
-        ordered (->> (.entrySet ^java.util.HashMap top2)
-                     (filter (fn [^java.util.Map$Entry en] (let [s (.getKey en)] (and (symbol? s) (or (str/ends-with? (name s) "-test") (and (namespace s) (str/ends-with? (namespace s) "-test")))))))
-                     (sort-by (fn [^java.util.Map$Entry en] (aget ^longs (.getValue en) 0))))
-        cands (volatile! []) out (volatile! [])]
-    (doseq [^java.util.Map$Entry en ordered]
-      (let [vs (.getKey en) ^longs sl (.getValue en) cur (rd (aget sl 0))]
-        (when (or (> (:ms cur) 200.0) (> (:ticks cur) 5000000) (> (:bytes cur) 33554432))
-          (let [nsym (when (namespace vs) (symbol (namespace vs))) e2 (aget sl 2)]
-            (when (> (:ms cur) 1000.0)
-              (vswap! out conj {:class :slow-test :severity :warning :kind :live :ns nsym :var vs :subject (str vs) :branch br
-                                :message (str "Slow test " vs ": " (Math/round (:ms cur)) " ms, " (quot (:bytes cur) 1048576) " MB (> 1000 ms).")}))
-            (when (pos? e2) (vswap! cands conj [e2 vs nsym cur]))))))
-    (doseq [[e2 vs nsym cur] (sort-by first @cands)]
-      (let [prev (rd e2)
-            tr (when (pos? (:ticks prev)) (/ (double (:ticks cur)) (:ticks prev)))
-            bratio (when (pos? (:bytes prev)) (/ (double (:bytes cur)) (:bytes prev)))
-            mr (when (> (:ms prev) 20.0) (/ (double (:ms cur)) (:ms prev))) dms (- (:ms cur) (:ms prev))]
-        (when (or (and tr (> tr 2.5) (> (- (:ticks cur) (:ticks prev)) 5000000))
-                  (and bratio (> bratio 2.5) (> (- (:bytes cur) (:bytes prev)) 33554432))
-                  (and mr (> mr 2.5) (> dms 200.0)))
-          (vswap! out conj {:class :cost-regression :severity :warning :kind :live :ns nsym :var vs :subject (str vs) :branch br
-                            :message (str "Cost regression in " vs ": " (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms.")}))))
-    (vec (sort-by :subject @out))))
-
-(defn test-efficiency-warnings
-  "Checks latest passing test verdicts per `:seon.test/var` for `:slow-test` and `:cost-regression`."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]]}
-  ([db] (test-efficiency-warnings db nil))
-  ([db test-snap]
-   (if-not (and db (contains? (:schema db) :seon.test/var))
-     []
-     (let [br (get-in db [:config :branch] :main) snap (or test-snap (test-snapshot db)) top2 (:top2 snap)
-           ck (when (and (store/live-cid db) (:var-sig snap) (:pass-sig snap)) [(store/store-id db) br (:var-sig snap) (:pass-sig snap)])]
-       (if ck
-         (do (rec-reads! [:seon.test/ms :seon.test/ticks :seon.test/bytes])
-             (store/lru-get! test-eff-cache 16 ck #(binding [di/*reads* nil] (compute-test-eff db br top2))))
-         (compute-test-eff db br top2))))))
-
-(defn- metrics->info [{:seon.code.form/keys [lines chars nested-scan?]}]
+(defn- metrics->info [chars lines nested-scan?]
   (let [ln (long (or lines 0))]
     {:ns-hdr? false :chars (long (or chars 0)) :defn? (pos? ln) :lines ln :nested-scan? (true? nested-scan?)}))
 
 (defn- analyze-form-static [ns-hdr? ^String s]
-  (if ns-hdr? {:ns-hdr? true :chars (.length s) :decl (when-let [f (safe-read-form s)] (parse/parse-ns-decl f))}
-      (metrics->info (parse/form-static-metrics s nil))))
+  (if ns-hdr?
+    {:ns-hdr? true :chars (.length s) :decl (when-let [f (safe-read-form s)] (parse/parse-ns-decl f))}
+    (let [{:seon.code.form/keys [chars lines nested-scan?]} (parse/form-static-metrics s nil)]
+      (metrics->info chars lines nested-scan?))))
 
 (defn- load-persisted-metrics [db scope forms-by-ns ^java.util.HashSet miss]
   (let [pinfo (java.util.HashMap. (max 16 (.size miss))) sm (:schema db)]
@@ -336,20 +282,15 @@
       (cond
         scope
         (doseq [[_ fs] forms-by-ns {:keys [e chars lines nested-scan?]} fs :when (and (some? chars) (.contains miss e))]
-          (.put pinfo e (metrics->info {:seon.code.form/chars chars :seon.code.form/lines lines :seon.code.form/nested-scan? nested-scan?})))
+          (.put pinfo e (metrics->info chars lines nested-scan?)))
         (<= (.size miss) 150)
         (let [hl? (contains? sm :seon.code.form/lines) hn? (contains? sm :seon.code.form/nested-scan?)]
-          (doseq [e miss]
-            (when-let [ch (:v (first (d/datoms db :eavt e :seon.code.form/chars)))]
-              (.put pinfo e (metrics->info {:seon.code.form/chars ch
-                                            :seon.code.form/lines (when hl? (:v (first (d/datoms db :eavt e :seon.code.form/lines))))
-                                            :seon.code.form/nested-scan? (when hn? (:v (first (d/datoms db :eavt e :seon.code.form/nested-scan?))))})))))
+          (doseq [e miss :let [ch (eav1 db e :seon.code.form/chars)] :when ch]
+            (.put pinfo e (metrics->info ch (when hl? (eav1 db e :seon.code.form/lines)) (when hn? (eav1 db e :seon.code.form/nested-scan?))))))
         :else
-        (let [el (java.util.HashMap. 1400) en (java.util.HashMap. 1400)]
-          (when (contains? sm :seon.code.form/lines) (doseq [dt (d/datoms db :aevt :seon.code.form/lines)] (.put el (:e dt) (:v dt))))
-          (when (contains? sm :seon.code.form/nested-scan?) (doseq [dt (d/datoms db :aevt :seon.code.form/nested-scan?)] (.put en (:e dt) (:v dt))))
+        (let [el (aevt-hm db :seon.code.form/lines 1400) en (aevt-hm db :seon.code.form/nested-scan? 1400)]
           (doseq [dt (d/datoms db :aevt :seon.code.form/chars) :let [e (:e dt)] :when (.contains miss e)]
-            (.put pinfo e (metrics->info {:seon.code.form/chars (:v dt) :seon.code.form/lines (.get el e) :seon.code.form/nested-scan? (.get en e)}))))))
+            (.put pinfo e (metrics->info (:v dt) (.get el e) (.get en e)))))))
     pinfo))
 
 (defn ns-forms-hash
@@ -366,12 +307,12 @@
   (let [sm (:schema db)]
     (if-not (and (contains? sm :seon.code.ns/forms-hash) (contains? sm :seon.code.ns/unused-requires) (contains? sm :seon.code.ns/name))
       {}
-      (let [en (java.util.HashMap. 160) eh (java.util.HashMap. 160) out (java.util.HashMap. 160)]
-        (doseq [dt (d/datoms db :aevt :seon.code.ns/name)] (.put en (:e dt) (:v dt)))
-        (doseq [dt (d/datoms db :aevt :seon.code.ns/forms-hash)] (.put eh (:e dt) (:v dt)))
-        (doseq [dt (d/datoms db :aevt :seon.code.ns/unused-requires) :let [e (:e dt)]]
-          (when-let [nsym (.get en e)] (when-let [h (.get eh e)] (.put out nsym {:hash h :unused (:v dt)}))))
-        (into {} (map (fn [^java.util.Map$Entry e] [(.getKey e) (.getValue e)])) (.entrySet out))))))
+      (let [en (aevt-hm db :seon.code.ns/name 160)
+            eh (aevt-hm db :seon.code.ns/forms-hash 160)]
+        (reduce (fn [acc dt]
+                  (let [e (:e dt) nsym (.get en e) h (.get eh e)]
+                    (if (and nsym h) (assoc acc nsym {:hash h :unused (:v dt)}) acc)))
+                {} (d/datoms db :aevt :seon.code.ns/unused-requires))))))
 
 (defn- compute-static-eff [db br scope form-snap]
   (let [forms-by-ns (if (and (nil? scope) form-snap) (:src-forms-by-ns form-snap) (collect-forms-by-ns db scope))
@@ -398,7 +339,7 @@
               (when (or (nil? hc) (let [d (:decl hc)] (or (seq (:aliases d)) (seq (:refers d)))))
                 (doseq [{:keys [e key]} forms :when (not (hdr? key))] (.add needed e)))))))
       (let [src-hm (fetch-missing-srcs db needed)
-            get-src! #(or (.get src-hm %) (let [s (str (:v (first (d/datoms db :eavt % :seon.code.form/src))))] (.put src-hm % s) s))
+            get-src! #(or (.get src-hm %) (let [s (str (eav1 db % :seon.code.form/src))] (.put src-hm % s) s))
             new-f (volatile! {}) new-r (volatile! {}) ov (volatile! []) ur (volatile! []) ns (volatile! []) lf (volatile! [])]
         (doseq [[nsym forms] forms-by-ns]
           (let [hd (volatile! nil) tc (volatile! 0) ph? (.containsKey p-ok nsym)]
@@ -443,3 +384,129 @@
          (do (rec-reads! [:seon.code.form/src])
              (store/lru-get! stat-eff-cache 16 [csig scope br] #(binding [di/*reads* nil] (compute-static-eff db br scope form-snap))))
          (compute-static-eff db br scope form-snap))))))
+
+(defn- eval-test-pair-alerts [br vsym cur prev-fn]
+  (when (or (> (:ms cur) 200.0) (> (:ticks cur) 5000000) (> (:bytes cur) 33554432))
+    (let [nsym (when (namespace vsym) (symbol (namespace vsym)))
+          base {:severity :warning :kind :live :ns nsym :var vsym :subject (str vsym) :branch br}
+          slow (when (> (:ms cur) 1000.0)
+                 (assoc base :class :slow-test :message (str "Slow test " vsym ": " (Math/round (:ms cur)) " ms, " (quot (:bytes cur) 1048576) " MB (> 1000 ms).")))
+          prev (when prev-fn (prev-fn))
+          regr? (when prev
+                  (some (fn [[k fl dl]]
+                          (let [pv (double (get prev k)) cv (double (get cur k))]
+                            (and (> pv fl) (> (/ cv pv) 2.5) (> (- cv pv) dl))))
+                        [[:ticks 0.0 5000000.0] [:bytes 0.0 33554432.0] [:ms 20.0 200.0]]))]
+      (cond-> []
+        slow (conj slow)
+        regr? (conj (assoc base :class :cost-regression :message (str "Cost regression in " vsym ": " (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms.")))))))
+
+(defn- test-cost-reader [db]
+  (let [sm (:schema db)
+        hm? (contains? sm :seon.test/ms)
+        ht? (contains? sm :seon.test/ticks)
+        hb? (contains? sm :seon.test/bytes)]
+    (fn [eid]
+      {:ms (double (or (when hm? (eav1 db eid :seon.test/ms)) 0.0))
+       :ticks (long (or (when ht? (eav1 db eid :seon.test/ticks)) 0))
+       :bytes (long (or (when hb? (eav1 db eid :seon.test/bytes)) 0))})))
+
+(defn- compute-test-eff [db br top2]
+  (let [rd (test-cost-reader db)
+        tsym? #(and (symbol? %) (or (str/ends-with? (name %) "-test") (and (namespace %) (str/ends-with? (namespace %) "-test"))))
+        ordered (->> (.entrySet ^java.util.HashMap top2) (filter #(tsym? (.getKey ^java.util.Map$Entry %))) (sort-by #(aget ^longs (.getValue ^java.util.Map$Entry %) 0)))
+        out (volatile! [])]
+    (doseq [^java.util.Map$Entry en ordered]
+      (let [vsym (.getKey en) ^longs slot (.getValue en) pe (aget slot 2)]
+        (when-let [al (eval-test-pair-alerts br vsym (rd (aget slot 0)) (when (pos? pe) #(rd pe)))]
+          (vswap! out into al))))
+    (vec (sort-by :subject @out))))
+
+(defn test-efficiency-warnings
+  "Checks latest passing test verdicts per `:seon.test/var` for `:slow-test` and `:cost-regression`."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :seon.health/problem]]]}
+  ([db] (test-efficiency-warnings db nil))
+  ([db test-snap]
+   (if-not (and db (contains? (:schema db) :seon.test/var))
+     []
+     (let [br (get-in db [:config :branch] :main) snap (or test-snap (test-snapshot db)) top2 (:top2 snap)
+           ck (when (and (store/live-cid db) (:var-sig snap) (:pass-sig snap)) [(store/store-id db) br (:var-sig snap) (:pass-sig snap)])]
+       (if ck
+         (do (rec-reads! [:seon.test/ms :seon.test/ticks :seon.test/bytes])
+             (store/lru-get! test-eff-cache 16 ck #(binding [di/*reads* nil] (compute-test-eff db br top2))))
+         (compute-test-eff db br top2))))))
+
+(defn- scoped-test-alerts-for-var [db br rd [vsym runs]]
+  (let [recent (vec (take 2 (filter #(true? (eav1 db (first %) :seon.test/pass?)) (rseq (vec (sort-by second runs))))))]
+    (when (seq recent)
+      (eval-test-pair-alerts br vsym (rd (ffirst recent))
+                             (when (= 2 (count recent)) #(rd (first (second recent))))))))
+
+(defn scoped-test-efficiency-warnings
+  "Fast O(log N + K) scoped `:slow-test` and `:cost-regression` alerts via `:avet :seon.test/var` seek."
+  {:malli/schema [:=> [:cat :any :any] [:vector :seon.health/problem]]
+   :cost/ticks 10000000}
+  [db scope]
+  (if-not (and (map? db) (symbol? scope) (get-in (:schema db) [:seon.test/var :db/index]))
+    []
+    (let [sc (name scope) pfx (str sc ".") br (get-in db [:config :branch] :main) rd (test-cost-reader db)
+          seek-ns (fn [start pred]
+                    (into [] (comp (take-while #(and (= :seon.test/var (:a %)) (symbol? (:v %)) (pred (namespace (:v %)))))
+                                   (map (juxt :v :e :tx)))
+                          (d/seek-datoms db :avet :seon.test/var start)))
+          by-var (reduce (fn [acc [vsym eid tx]] (update acc vsym (fnil conj []) [eid (long (or tx 0))])) {}
+                         (into (seek-ns (symbol sc "") #(= % sc)) (seek-ns (symbol pfx "") #(and % (str/starts-with? % pfx)))))]
+      (vec (sort-by :subject (mapcat #(scoped-test-alerts-for-var db br rd %) by-var))))))
+
+(defn- pull-agent-evals [db aid]
+  (mapv #(d/pull db eval-pull-pat (:e %)) (d/datoms db :avet :seon.agent.eval/agent aid)))
+
+(defn- ^:seon.flow/edge try-advance-eval-eff [bdb br anc cid]
+  (try
+    (let [dirty (volatile! #{}) full? (volatile! false)]
+      (doseq [dt (d/changes bdb (:cid anc) cid)
+              :let [ra (:a dt) attr (if (keyword? ra) ra (or (get-in bdb [:ref-ident-map ra]) ra))]]
+        (cond
+          (and (keyword? attr) (= "seon.agent.eval" (namespace attr)))
+          (if (:added dt) (vswap! dirty conj (:e dt)) (vreset! full? true))
+          (or (= :seon.agent.call/status attr) (contains? code-edit-attrs attr))
+          (vreset! full? true)))
+      (when-not @full?
+        (if (empty? @dirty)
+          anc
+          (let [aids (into #{} (keep #(eav1 bdb % :seon.agent.eval/agent)) @dirty)
+                by-ag (reduce (fn [m aid]
+                                (let [es (pull-agent-evals bdb aid)
+                                      ws (eval-warnings-for-agent bdb br aid es nil)]
+                                  (if (seq ws) (assoc m aid ws) (dissoc m aid))))
+                              (:by-ag anc) aids)]
+            {:by-ag by-ag :out (vec (mapcat val by-ag))}))))
+    (catch Throwable _ nil)))
+
+(defn eval-efficiency-warnings
+  "Inspects agent evals on `branch-db` for `:low-cache-hit`, `:prefix-cache-bust`, and `:heavy-eval`."
+  {:malli/schema [:function [:=> [:cat :any] [:vector :seon.health/problem]] [:=> [:cat :any :any] [:vector :seon.health/problem]] [:=> [:cat :any :any :any] [:vector :seon.health/problem]] [:=> [:cat :any :any :any [:maybe :map]] [:vector :seon.health/problem]]]}
+  ([branch-db] (eval-efficiency-warnings branch-db nil nil nil))
+  ([branch-db agent-id] (eval-efficiency-warnings branch-db agent-id nil nil))
+  ([branch-db agent-id prefetched-evals] (eval-efficiency-warnings branch-db agent-id prefetched-evals nil))
+  ([branch-db agent-id prefetched-evals opts]
+   (if-not (or (seq prefetched-evals) (and branch-db (contains? (:schema branch-db) :seon.agent.eval/agent)))
+     []
+     (if (and (nil? agent-id) (nil? prefetched-evals) (empty? opts) branch-db (store/live-cid branch-db))
+       (let [full-fn (fn [db br]
+                       (let [by-ag (reduce-kv (fn [m aid es]
+                                                (if-let [ws (seq (eval-warnings-for-agent db br aid es nil))]
+                                                  (assoc m aid (vec ws)) m))
+                                              {} (group-by :seon.agent.eval/agent (scan-interesting-evals db)))]
+                         {:by-ag by-ag :out (vec (mapcat val by-ag))}))]
+         (anchored-branch-cache! branch-db eval-eff-cache eval-eff-anchor
+                                 [:seon.agent.eval/agent :seon.agent.call/status :seon.code.form/src]
+                                 try-advance-eval-eff full-fn :out))
+       (let [br (if branch-db (get-in branch-db [:config :branch] :main) :main)
+             evals (cond
+                     (some? prefetched-evals)
+                     (if agent-id (filterv #(or (= agent-id (:seon.agent.eval/agent %)) (nil? (:seon.agent.eval/agent %))) prefetched-evals) (vec prefetched-evals))
+                     agent-id (pull-agent-evals branch-db agent-id)
+                     :else (scan-interesting-evals branch-db))]
+         (vec (mapcat (fn [[aid es]] (eval-warnings-for-agent branch-db br aid es opts))
+                      (group-by #(or (:seon.agent.eval/agent %) agent-id) evals))))))))

@@ -120,53 +120,6 @@
              (lru-put! merge-base-lru 128 ck (if (some? base) base ::none))
              base)))))))
 
-(defn ^:seon.flow/edge branch-changes
-  "Incremental `d/changes` between merge-base and `branch-db`: appends ONLY `(d/changes branch-db prev-bc bc)`
-   when `branch-db` advances by one single-parent commit. Returns datom vector or nil if unavailable."
-  {:malli/schema [:function
-                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:maybe [:vector :any]]]
-                  [:=> [:cat [:maybe :seon.host/db] :any :any] [:maybe [:vector :any]]]]
-   :cost/ticks 10000000}
-  ([main-db branch-db]
-   (cond
-     (or (nil? branch-db) (identical? main-db branch-db)) []
-     (and (live-cid main-db) (= (live-cid main-db) (live-cid branch-db))) []
-     :else (when-let [base (fast-merge-base main-db branch-db)]
-             (branch-changes branch-db base (live-cid branch-db)))))
-  ([branch-db base-cid bc]
-   (when (and (instance? datahike.db.DB branch-db) base-cid bc)
-     (if (= base-cid bc)
-       []
-       (let [sid (store/store-id branch-db)
-             ck [sid base-cid bc]
-             hit (lru-peek branch-changes-lru 64 ck)]
-         (if-not (identical? ::miss hit)
-           (when-not (identical? ::none hit) hit)
-           (let [bbr (get-in branch-db [:config :branch] :main)
-                 ak [sid bbr base-cid]
-                 anc (get @branch-changes-anchors ak)
-                 bp (single-parent-of branch-db)
-                 inc-res (when (and anc bp (= bp (:cid anc)))
-                           (store/without-agent-eval-reads
-                            #(try
-                               (let [delta (d/changes branch-db (:cid anc) bc)
-                                     by-eav (net-datom-map (:by-eav anc) delta)]
-                                 {:by-eav by-eav :datoms (vec (vals by-eav))})
-                               (catch Throwable _ nil))))
-                 full-res (or inc-res
-                              (store/without-agent-eval-reads
-                               #(try
-                                  (let [ds (vec (d/changes branch-db base-cid bc))
-                                        by-eav (into {} (map (fn [dt] [[(:e dt) (:a dt) (:v dt)] dt])) ds)]
-                                    {:by-eav by-eav :datoms ds})
-                                  (catch Throwable _ nil))))]
-             (if full-res
-               (let [ds (:datoms full-res)]
-                 (bounded-assoc! branch-changes-anchors 64 ak (assoc full-res :cid bc))
-                 (lru-put! branch-changes-lru 64 ck ds))
-               (do (lru-put! branch-changes-lru 64 ck ::none)
-                   nil)))))))))
-
 (defn ^:seon.flow/edge commit-holding-tx-cached
   "Cached `datahike.versioning/commit-holding-tx` keyed by `[sid branch-cid tx]` with single-parent promotion."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :int]] [:maybe :map]]
@@ -213,6 +166,54 @@
 (defn- rule-attr? [a]
   (and (qualified-keyword? a) (= "seon.rule" (namespace a))))
 
+(defonce ^:private ^:seon.flow/edge commit-parent-lru (store/lru-cache 512))
+
+(defn- ^:seon.flow/edge single-parent-cid [db store sid cid]
+  (if (and (instance? datahike.db.DB db) (= cid (live-cid db)))
+    (single-parent-of db)
+    (let [cache-key [sid cid]
+          hit (lru-peek commit-parent-lru 512 cache-key)]
+      (if-not (identical? ::miss hit)
+        (when-not (identical? ::none hit) hit)
+        (let [record (store/without-agent-eval-reads
+                      #(try (dv/commit-graph-record store cid) (catch Throwable _ nil)))
+              parents (:datahike/parents record)
+              parent (when (and (set? parents) (= 1 (count parents)))
+                       (first parents))]
+          (lru-put! commit-parent-lru 512 cache-key (if (some? parent) parent ::none))
+          parent)))))
+
+(defn ^:seon.flow/edge ancestor-within?
+  "True iff `anc-cid` is reachable from `cur-cid` via at most `max-hops` single-parent commits.
+   Uses in-memory `single-parent-of` for hop 1 and cached `datahike.versioning/commit-graph-record`
+   thereafter so callers never trigger `:datahike/changes-not-ancestor` throws or error logs."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] :any :any] :boolean]
+                  [:=> [:cat [:maybe :seon.host/db] :any :any :int] :boolean]]
+   :cost/ticks 2000000}
+  ([db anc-cid cur-cid]
+   (ancestor-within? db anc-cid cur-cid 16))
+  ([db anc-cid cur-cid max-hops]
+   (cond
+     (or (nil? db) (nil? anc-cid) (nil? cur-cid)) false
+     (= anc-cid cur-cid) true
+     (not (instance? datahike.db.DB db)) false
+     :else
+     (let [store (:store db)
+           sid (store/store-id db)
+           limit (long (max 0 (or max-hops 0)))]
+       (if-not (and store sid (pos? limit))
+         false
+         (loop [cid cur-cid
+                hops 0]
+           (if (>= hops limit)
+             false
+             (if-let [parent (single-parent-cid db store sid cid)]
+               (if (= parent anc-cid)
+                 true
+                 (recur parent (inc hops)))
+               false))))))))
+
 (defn- ^:seon.flow/edge attr-ns-sig [db kind pred]
   (cond
     (not (instance? datahike.db.DB db)) (store/db-cache-sig db)
@@ -240,7 +241,7 @@
                               (< 0 (- mtx (long (:max-tx anc 0))) 65))
                          {:cid (:cid anc) :sig (:sig anc)}
                          :else nil)
-                  unchanged? (when prev
+                  unchanged? (when (and prev (ancestor-within? db (:cid prev) bc 16))
                                (store/without-agent-eval-reads
                                 #(try
                                    (not-any? (fn [dt] (pred (resolve-attr db (:a dt))))
@@ -267,3 +268,58 @@
   [db]
   (when (and db (contains? (store/db-schema db) :seon.rule/id))
     (attr-ns-sig db :rules rule-attr?)))
+
+(defn- sort-change-datoms [datoms]
+  (vec (sort-by (fn [dt]
+                  [(long (or (:tx dt) 0))
+                   (long (or (:e dt) 0))
+                   (str (:a dt))])
+                datoms)))
+
+(defn ^:seon.flow/edge branch-changes
+  "Incremental `d/changes` between merge-base and `branch-db`: appends ONLY `(d/changes branch-db prev-bc bc)`
+   when `branch-db` advances by one single-parent commit, preserving deterministic `[tx e a]` ordering.
+   Returns datom vector or nil if unavailable."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] [:maybe [:vector :any]]]
+                  [:=> [:cat [:maybe :seon.host/db] :any :any] [:maybe [:vector :any]]]]
+   :cost/ticks 10000000}
+  ([main-db branch-db]
+   (cond
+     (or (nil? branch-db) (identical? main-db branch-db)) []
+     (and (live-cid main-db) (= (live-cid main-db) (live-cid branch-db))) []
+     :else (when-let [base (fast-merge-base main-db branch-db)]
+             (branch-changes branch-db base (live-cid branch-db)))))
+  ([branch-db base-cid bc]
+   (when (and (instance? datahike.db.DB branch-db) base-cid bc)
+     (if (= base-cid bc)
+       []
+       (let [sid (store/store-id branch-db)
+             ck [sid base-cid bc]
+             hit (lru-peek branch-changes-lru 64 ck)]
+         (if-not (identical? ::miss hit)
+           (when-not (identical? ::none hit) hit)
+           (let [bbr (get-in branch-db [:config :branch] :main)
+                 ak [sid bbr base-cid]
+                 anc (get @branch-changes-anchors ak)
+                 bp (single-parent-of branch-db)
+                 inc-res (when (and anc bp (= bp (:cid anc)))
+                           (store/without-agent-eval-reads
+                            #(try
+                               (let [delta (d/changes branch-db (:cid anc) bc)
+                                     by-eav (net-datom-map (:by-eav anc) delta)]
+                                 {:by-eav by-eav :datoms (sort-change-datoms (vals by-eav))})
+                               (catch Throwable _ nil))))
+                 full-res (or inc-res
+                              (store/without-agent-eval-reads
+                               #(try
+                                  (let [ds (sort-change-datoms (d/changes branch-db base-cid bc))
+                                        by-eav (into {} (map (fn [dt] [[(:e dt) (:a dt) (:v dt)] dt])) ds)]
+                                    {:by-eav by-eav :datoms ds})
+                                  (catch Throwable _ nil))))]
+             (if full-res
+               (let [ds (:datoms full-res)]
+                 (bounded-assoc! branch-changes-anchors 64 ak (assoc full-res :cid bc))
+                 (lru-put! branch-changes-lru 64 ck ds))
+               (do (lru-put! branch-changes-lru 64 ck ::none)
+                   nil)))))))))

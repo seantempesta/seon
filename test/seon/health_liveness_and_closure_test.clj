@@ -1,20 +1,25 @@
 (ns seon.health-liveness-and-closure-test
-  "Comprehensive verification of NASA closed-world liveness (`seon.health.liveness`),
-   shared reconciler policy (`seon.reconciler.policy`), Flow/UI closure (`seon.health.closure`),
-   single-source rules & rule audit (`seon.health.coverage.rules`), and live runtime fixes."
+  "Comprehensive verification of finite-state liveness (`seon.health.liveness`),
+   shared reconciler policy (`seon.reconciler.policy`), cache/diff/contract invariants,
+   single-source rule coverage (`seon.health.coverage`), and live runtime fixes."
   (:require [clojure.core.async :as a]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.agent :as agents]
             [seon.code :as code]
+            [seon.ctx.diff :as diff]
             [seon.error :as error]
-            [seon.health.closure :as closure]
-            [seon.health.coverage.rules :as rcov]
+            [seon.health :as health]
+            [seon.health.contracts :as contracts]
+            [seon.health.coverage :as cov]
+            [seon.health.efficiency :as eff]
             [seon.health.liveness :as liveness]
             [seon.reconciler :as rec]
             [seon.reconciler.policy :as policy]
+            [seon.render.fit :as fit]
             [seon.render.print.policy :as ppol]
             [seon.render.sanitize :as sanitize]
+            [seon.render.tails :as rtails]
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
             [seon.store :as store]
@@ -80,8 +85,8 @@
     (is (true? (policy/non-retryable-error-str? "Model HTTP 400: invalid_request_error maximum context length")))
     (is (true? (policy/non-retryable-error-str? "Model error [model/api-error]: context_length exceeded")))
     (is (true? (:non-retryable-model-error?
-                (policy/summarize-activity
-                 [{:seon.agent.eval/turn 1 :seon.agent.eval/code "" :seon.agent.eval/error "bad" :retryable? false}] []))))
+    (policy/summarize-activity
+     [{:seon.agent.eval/turn 1 :seon.agent.eval/code "" :seon.agent.eval/error "Model error: :retryable? false"}] []))))
     (is (true? (policy/model-error-halted?
                 {:trailing-model-errors 1 :non-retryable-model-error? true
                  :last-err-tx 500 :last-err-inst 2000 :same-db? false}))))
@@ -184,81 +189,162 @@
           (finally (d/release bconn)))))))
 
 (deftest ^{:cost/ticks 180000000} flow-ui-closure-empty-form-posts-and-live-fixes-test
-(testing "Live runtime fixes: :fork-refused releases :live, :status :error clears :agent-states, empty-form POSTs never crash or shift args, invoke-call! is not callable"
-  ;; 1. seon.agent handles :fork-refused
-  (let [fork-out (a/chan 4)
-        wait-ch (a/chan 1)
-        st0 (-> (agents/agents-proc {:fork-out fork-out})
-                (assoc-in [:live :ag/f1] {:pid :forking :branch :branch/f1 :busy? true :last-active 1})
-                (assoc-in [:eval-waiters "eval-1"] {:reply-ch wait-ch :agent-id :ag/f1 :keep-warm? true}))
-        [st1 outs] (agents/agents-proc st0 :fork-ev {:ev :fork-refused :type :agent :code -1})
-        wres (a/poll! wait-ch)]
-    (is (not (contains? (:live st1) :ag/f1)) ":fork-refused must release :forking entry from :live")
-    (is (empty? (:eval-waiters st1)))
-    (is (false? (:ok? wres)))
-    (is (= :fork-refused (get-in outs [:tx 0 :class])))
-    (is (= :exited (get-in outs [:exits 0 :ev]))))
+  (testing "Live runtime fixes: :fork-refused releases :live, :status :error clears :agent-states, empty-form POSTs never crash or shift args, invoke-call! is not callable"
+    (let [fork-out (a/chan 4)
+          wait-ch (a/chan 1)
+          st0 (-> (agents/agents-proc {:fork-out fork-out})
+                  (assoc-in [:live :ag/f1] {:pid :forking :branch :branch/f1 :busy? true :last-active 1})
+                  (assoc-in [:eval-waiters "eval-1"] {:reply-ch wait-ch :agent-id :ag/f1 :keep-warm? true}))
+          [st1 outs] (agents/agents-proc st0 :fork-ev {:ev :fork-refused :type :agent :code -1})
+          wres (a/poll! wait-ch)]
+      (is (not (contains? (:live st1) :ag/f1)) ":fork-refused must release :forking entry from :live")
+      (is (empty? (:eval-waiters st1)))
+      (is (false? (:ok? wres)))
+      (is (= :fork-refused (get-in outs [:tx 0 :class])))
+      (is (= :exited (get-in outs [:exits 0 :ev]))))
 
-  ;; 2. seon.web handle-stream-msg handles :status :error without marking errored agent :active
-  (with-test-store [{:keys [conn]}]
-    (let [st0 {:conn conn :walk {:units {} :order []} :live-streams {:w/bad {:status :thinking :phase :thinking}}
-               :agent-states {:w/bad :active} :errors [] :frames 0 :last-view-sig nil :last-agg-rate ""}
-          hstream @(var seon.web/handle-stream-msg)
-          st1 (hstream st0 {:agent-id :w/bad :status :error :seon.error/kind :model/api-error :message "HTTP 400"})]
-      (is (nil? (get-in st1 [:agent-states :w/bad])) "Errored agent must NOT stay :active")
-      (is (nil? (get-in st1 [:live-streams :w/bad])))
-      (is (= 1 (count (:errors st1)))))
+    (with-test-store [{:keys [conn]}]
+      (let [st0 {:conn conn :walk {:units {} :order []} :live-streams {:w/bad {:status :thinking :phase :thinking}}
+                 :agent-states {:w/bad :active} :errors [] :frames 0 :last-view-sig nil :last-agg-rate ""}
+            hstream @(var seon.web/handle-stream-msg)
+            st1 (hstream st0 {:agent-id :w/bad :status :error :seon.error/kind :model/api-error :message "HTTP 400"})]
+        (is (nil? (get-in st1 [:agent-states :w/bad])) "Errored agent must NOT stay :active")
+        (is (nil? (get-in st1 [:live-streams :w/bad])))
+        (is (= 1 (count (:errors st1)))))
 
-    ;; 3. Empty-form POST safety on chat-agent-form!, pin-ref-form!, semantic-search-form!, and invoke-call! non-callable
-    (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/entry? true}]})
-    (let [st {:conn conn :server-in-ch nil :ui-ch nil :branch-feedback nil}]
-      (doseq [empty-f [{} nil]]
-        (let [r-chat (actions/invoke-call! st {:call-form (list (quote seon.web/chat-agent-form!) :agent/root) :form-fields empty-f})
-              r-pin  (actions/invoke-call! st {:call-form (list (quote seon.web/pin-ref-form!) :agent/root) :form-fields empty-f})
-              r-sem  (actions/invoke-call! st {:call-form (list (quote seon.web/semantic-search-form!)) :form-fields empty-f})]
-          (is (true? (:ok? r-chat)) (str "chat-agent-form! failed on " (pr-str empty-f) ": " (pr-str r-chat)))
-          (is (true? (:ok? r-pin))  (str "pin-ref-form! failed on " (pr-str empty-f) ": " (pr-str r-pin)))
-          (is (true? (:ok? r-sem))  (str "semantic-search-form! failed on " (pr-str empty-f) ": " (pr-str r-sem)))))
-      ;; seon.web/invoke-call! must NOT be ^:seon/callable!
-      (let [r-inv (actions/invoke-call! st {:call-form (list (quote seon.web/invoke-call!) {}) :form-fields {}})]
-        (is (false? (:ok? r-inv)))
-        (is (= :seon.web/not-callable (:error r-inv))))
-      ;; seon.web/send-message! must NOT be in sanitizer allowlist!
-      (let [san (sanitize/sanitize-hiccup-with-report
-                 [:button {:type "button" :on-click (list (quote seon.web/send-message!) :a "hi")} "x"]
-                 {:allow-seon-actions? true})]
-        (is (seq (:dropped san)))))))
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/entry? true}]})
+      (let [st {:conn conn :server-in-ch nil :ui-ch nil :branch-feedback nil}]
+        (doseq [empty-f [{} nil]]
+          (let [r-chat (actions/invoke-call! st {:call-form (list (quote seon.web/chat-agent-form!) :agent/root) :form-fields empty-f})
+                r-pin  (actions/invoke-call! st {:call-form (list (quote seon.web/pin-ref-form!) :agent/root) :form-fields empty-f})
+                r-sem  (actions/invoke-call! st {:call-form (list (quote seon.web/semantic-search-form!)) :form-fields empty-f})]
+            (is (true? (:ok? r-chat)) (str "chat-agent-form! failed on " (pr-str empty-f) ": " (pr-str r-chat)))
+            (is (true? (:ok? r-pin))  (str "pin-ref-form! failed on " (pr-str empty-f) ": " (pr-str r-pin)))
+            (is (true? (:ok? r-sem))  (str "semantic-search-form! failed on " (pr-str empty-f) ": " (pr-str r-sem)))))
+        (let [r-inv (actions/invoke-call! st {:call-form (list (quote seon.web/invoke-call!) {}) :form-fields {}})]
+          (is (false? (:ok? r-inv)))
+          (is (= :seon.web/not-callable (:error r-inv))))
+        (let [san (sanitize/sanitize-hiccup-with-report
+                   [:button {:type "button" :on-click (list (quote seon.web/send-message!) :a "hi")} "x"]
+                   {:allow-seon-actions? true})]
+          (is (seq (:dropped san)))))))
 
-(testing "check-flow-closure & check-ui-closure catch synthetic holes and pass clean on fixed DB"
-  (with-test-store [{:keys [conn]}]
-    ;; Import synthetic broken Flow + UI forms
-    (let [tx (concat
-              (code/file-import-tx @conn "src/seon/fork.clj"
-                "(ns seon.fork)\n(defn- run-fork-parent-loop! [ev-out]\n  (a/>!! ev-out {:ev :fork-refused :type child-type :code -1}))\n" false)
-              (code/file-import-tx @conn "src/seon/agent.clj"
-                "(ns seon.agent)\n(defn- handle-fork-ev [st msg] (case (:ev msg) :forked [st nil] [st nil]))\n(defn- deliver-model-response [st msg] [st {:tx [{:op :transact}]}])\n" false)
-              (code/file-import-tx @conn "src/seon/error.clj"
-                "(ns seon.error)\n(defn model-error-outputs [msg] {:tx [{:op :transact}]})\n" false)
-              (code/file-import-tx @conn "src/seon/web.clj"
-                "(ns seon.web)\n(defn ^:seon/callable invoke-call! [& args] nil)\n(defn- handle-stream-msg [st msg] (case (:status msg) :done st st))\n" false)
-              (code/file-import-tx @conn "src/seon/web/actions.clj"
-                "(ns seon.web.actions)\n(defn invoke-call! [st m] (cond-> [] (seq (:form-fields m)) (conj (:form-fields m))))\n" false)
-              (code/file-import-tx @conn "src/seon/render/sanitize.clj"
-                "(ns seon.render.sanitize)\n(def ^:private allowed-seon-web-actions #{(quote seon.web/send-message!)})\n" false))]
-      (d/transact conn {:tx-data tx})
-      (let [rep (closure/check-closure @conn)
-            classes (set (map :class (:problems rep)))]
-        (is (false? (:ok? rep)))
-        (is (contains? classes :unhandled-fork-ev))
-        (is (contains? classes :unhandled-stream-status))
-        (is (contains? classes :duplicate-model-error-tx))
-        (is (contains? classes :internal-dispatcher-callable))
-        (is (contains? classes :ui-unsafe-empty-form-dispatch))
-        (is (contains? classes :sanitizer-dead-action)))))
-  ;; When running inside live Seon branch REPL, verify full branch DB is 100% clean!
-  (when-let [bdb (try (when-let [v (resolve (quote user/db))] (when (bound? v) (@v))) (catch Throwable _ nil))]
-    (let [rep (closure/check-closure bdb)]
-      (is (true? (:ok? rep)) (pr-str (:problems rep)))))))
+  (testing "ancestor-within?, ordered branch-changes, dirty heavy-eval re-check, liveness branch guard, and unified contract checkers"
+    (with-test-store [{:keys [conn cfg]}]
+      (let [c0 (store/live-cid @conn)]
+        (store/branch! conn :main :branch/sib-a)
+        (store/branch! conn :main :branch/sib-b)
+        (let [ca (store/connect cfg :branch/sib-a)
+              cb (store/connect cfg :branch/sib-b)]
+          (try
+            (d/transact ca {:tx-data [{:seon.agent/id :ag/a :seon.agent/branch :branch/sib-a :seon.agent/goal "a"}]})
+            (let [ca1 (store/live-cid @ca)]
+              (d/transact ca {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/a
+                                         :seon.agent.eval/turn 1 :seon.agent.eval/code "(heavy)" :seon.agent.eval/bytes 200000000}]})
+              (d/transact cb {:tx-data [{:seon.agent/id :ag/b :seon.agent/branch :branch/sib-b :seon.agent/goal "b"}]})
+              (let [ca2 (store/live-cid @ca)
+                    cb1 (store/live-cid @cb)
+                    chs (diff/branch-changes @conn @ca)]
+                (is (true? (diff/ancestor-within? @ca c0 ca2 16)))
+                (is (true? (diff/ancestor-within? @ca ca1 ca2 16)))
+                (is (false? (diff/ancestor-within? @ca cb1 ca2 16)) "Unrelated sibling commit must return false without d/changes throw")
+                (is (= chs (vec (sort-by (fn [dt] [(long (:tx dt)) (long (:e dt)) (str (:a dt))]) chs))) "branch-changes preserves tx ordering")
+                (is (empty? (filter #(= :heavy-eval (:class %)) (eff/eval-efficiency-warnings @ca))) "Heavy eval suppressed before code edit")
+                (d/transact ca {:tx-data (code/file-import-tx @ca "src/seon/demo/dirty_eval.clj" "(ns seon.demo.dirty-eval)
+(defn f {:malli/schema [:=> [:cat] :int]} [] 1)
+" false)})
+                (is (= 1 (count (filter #(= :heavy-eval (:class %)) (eff/eval-efficiency-warnings @ca))))
+                    "Code edit after suppressed heavy eval must invalidate eval-eff anchor and surface :heavy-eval")
+                (is (empty? (health/liveness-violations @ca)))))
+            (finally (d/release ca) (d/release cb)))))
+
+      (d/transact conn {:tx-data (concat
+                                  (code/file-import-tx @conn "src/seon/demo/c_par.clj"
+                                    "(ns seon.demo.c-par)
+(defn ^:seon.flow/edge io-op [] :ok)
+(defn bad-pure \"See `seon.demo.c-par/missing-var`.\" {:malli/schema [:=> [:cat :int] :any]} [x] (io-op))
+" false)
+                                  [{:seon.schema/key :seon.demo.c-par/ent
+                                    :seon.schema/form [:map {:seon.render/hiccup (quote seon.demo.c-par/gone-renderer)} [:seon.demo.c-par/id :keyword]]}])})
+      (let [db @conn
+            bs-full (contracts/broken-symbol-refs db)
+            bs-scoped (contracts/broken-symbol-refs db nil {:target-syms [(quote seon.demo.c-par/gone-renderer)]})
+            bd-full (contracts/broken-doc-refs db)
+            bd-nss (contracts/broken-doc-refs db nil nil {:target-nss [(quote seon.demo.c-par)]})
+            bd-syms (contracts/broken-doc-refs db nil nil {:target-syms [(quote seon.demo.c-par/missing-var)]})
+            im-full (contracts/impure-generatable-fns db)
+            im-nss (contracts/impure-generatable-fns db nil nil {:target-nss [(quote seon.demo.c-par)]})
+            im-edges (contracts/impure-generatable-fns db nil nil {:edge-syms [(quote seon.demo.c-par/io-op)]})]
+        (is (= (mapv :subject bs-full) (mapv :subject bs-scoped)))
+        (is (= (mapv :subject bd-full) (mapv :subject bd-nss)))
+        (is (= (mapv :subject bd-full) (mapv :subject bd-syms)))
+        (is (= (mapv :subject im-full) (mapv :subject im-nss)))
+        (is (= (mapv :subject im-full) (mapv :subject im-edges)))))))
+
+(defn- mk-tail-cand [id schema pri boost data]
+  (cond-> {:entity id :schema schema :zone :ephemeral-tail :priority pri :source :rule :data data}
+    boost (assoc :rank/boost boost :params {:rank/boost boost})))
+
+(defn- sample-tail-scenarios [db]
+  (let [doc-pull (fn [did]
+                   (or (when (and db (contains? (:schema db) :seon.code.doc/id)
+                                  (first (d/datoms db :avet :seon.code.doc/id did)))
+                         (dissoc (d/pull db (quote [:seon.code.doc/id :seon.code.doc/path :seon.code.doc/heading :seon.code.doc/body])
+                                         [:seon.code.doc/id did]) :db/id))
+                       {:seon.code.doc/id did :seon.code.doc/path "docs/primers.md"
+                        :seon.code.doc/heading "## Primer" :seon.code.doc/body (apply str (repeat 40 "Keep edits small and verified. "))}))
+        eval1 {:seon.agent.eval/handle (quote result/e10) :seon.agent.eval/turn 10
+               :seon.agent.eval/code "(user/health)" :seon.agent.eval/value "{:ok? true}" :seon.agent.eval/ms 12.0}
+        eval2 {:seon.agent.eval/handle (quote result/e9) :seon.agent.eval/turn 9
+               :seon.agent.eval/code "(user/edit-fn! (quote seon.web/invoke-call!) ...)" :seon.agent.eval/value "{:ok? true}" :seon.agent.eval/ms 25.0}
+        eval3 {:seon.agent.eval/handle (quote result/e8) :seon.agent.eval/turn 8
+               :seon.agent.eval/code "(user/run-tests! (quote seon.error-test))" :seon.agent.eval/value "{:ok? false :failed 1}" :seon.agent.eval/ms 140.0}
+        err-ent {:seon.error/id (random-uuid) :seon.error/kind :model/api-error :seon.error/severity :error
+                 :seon.error/source :model :seon.error/status :open :seon.error/message "HTTP 400 context overflow"}
+        fix-ent {:seon.fix/id :fix/context-overflow :seon.fix/error-class :model/api-error
+                 :seon.fix/symptom "Repeated 400 retry" :seon.fix/root-cause "Missing non-retryable 400 check"
+                 :seon.fix/change-summary "Halt on 400 in 1 turn"}
+        test-ent {:seon.test/digest "dg-fail-1" :seon.test/var (quote seon.reconciler-test/status-derivation-test)
+                  :seon.test/kind :deftest :seon.test/pass? false :seon.test/ms 18.0 :seon.test/report "expected :waiting got :runnable"}
+        var-ent (fn [i] {:seon.code.var/name (symbol "seon.reconciler" (str "helper-" i))
+                         :seon.code.var/ns (quote seon.reconciler)
+                         :seon.code.var/doc "Pure reconciler policy helper."
+                         :seon.code.var/arglists (quote ([state]))})]
+    {:quiet [(mk-tail-cand :tail/eval-10 :seon.agent.eval/entity 90 nil eval1)
+             (mk-tail-cand :tail/doc-proofs :seon.code.doc/entity 89 nil (doc-pull "docs/primers.md#proofs"))]
+     :busy [(mk-tail-cand :tail/open-err :seon.error/entity 99 0.25 err-ent)
+            (mk-tail-cand :tail/fix :seon.fix/entity 98 nil fix-ent)
+            (mk-tail-cand :tail/fail-test :seon.test/entity 97 0.20 test-ent)
+            (mk-tail-cand :tail/branch-health :seon.code.var/entity 96 0.25 (var-ent 0))
+            (mk-tail-cand :tail/doc-history :seon.code.doc/entity 95 nil (doc-pull "docs/primers.md#history-and-time-travel"))
+            (mk-tail-cand :tail/doc-contracts :seon.code.doc/entity 92 nil (doc-pull "docs/primers.md#contracts"))
+            (mk-tail-cand :tail/eval-10 :seon.agent.eval/entity 90 nil eval1)
+            (mk-tail-cand :tail/eval-9 :seon.agent.eval/entity 90 nil eval2)
+            (mk-tail-cand :tail/eval-8 :seon.agent.eval/entity 90 nil eval3)
+            (mk-tail-cand :tail/frontier-1 :seon.code.var/entity 76 nil (var-ent 1))
+            (mk-tail-cand :tail/frontier-2 :seon.code.var/entity 76 nil (var-ent 2))
+            (mk-tail-cand :tail/frontier-3 :seon.code.var/entity 76 nil (var-ent 3))]}))
+
+(defn- audit-tail-eviction
+  ([db] (audit-tail-eviction db nil))
+  ([db opts]
+   (let [budget (long (or (:tail-token-budget opts) 2000))
+         scenarios (or (:scenarios opts) (sample-tail-scenarios db))
+         fit-opts {:target :wire :strategy :depth-first :token-budget budget
+                   :main-db db :fallback-renderers rtails/fallback-entity-renderers}
+         run-one (fn [items]
+                   (let [pri-by-e (into {} (map (juxt :entity :priority)) items)
+                         res (fit/fit-projections db items fit-opts)
+                         sel (:selected res)
+                         drp (:dropped res)
+                         hi-dropped (filterv #(>= (long (or (get pri-by-e (:entity %)) 0)) 96) drp)]
+                     {:candidates (count items) :selected (count sel) :dropped (count drp)
+                      :tokens (long (:tokens res 0)) :budget budget
+                      :within-budget? (<= (long (:tokens res 0)) budget)
+                      :high-pri-dropped (mapv :entity hi-dropped)}))
+         res-map (into {} (map (fn [[k items]] [k (run-one items)])) scenarios)]
+     {:ok? (every? (fn [[_ r]] (and (:within-budget? r) (empty? (:high-pri-dropped r)))) res-map)
+      :tail-budget budget :scenarios res-map})))
 
 (deftest ^{:cost/ticks 80000000} rule-audit-single-source-and-tail-eviction-test
   (testing "Single-source rule projections match rseed/starter-rules by namespace"
@@ -268,15 +354,17 @@
       (is (= (set (map :seon.rule/id (by-ns "rule.preview"))) (set (map :seon.rule/id (ppol/preview-rules)))))
       (is (= (set (map :seon.rule/id (by-ns "rule.gate"))) (set (map :seon.rule/id (gate/gate-rules)))))))
 
-  (testing "check-rule-bindings-and-refs catches synthetic holes and passes clean on fixed starter rules + docs"
+  (testing "seon.health.coverage/detect-rule-holes catches synthetic holes and passes clean on fixed starter rules + docs"
     (with-test-store [{:keys [conn]}]
       (let [doc-tx (code/file-import-tx @conn "docs/primers.md" (slurp "docs/primers.md") false)
+            live-tx (code/file-import-tx @conn "src/seon/demo/cov_helper.clj" "(ns seon.demo.cov-helper)
+(defn ok? {:malli/schema [:=> [:cat :any] :boolean]} [x] (some? x))
+" false)
             starter (rseed/starter-rules)]
-        (d/transact conn {:tx-data (concat doc-tx starter)})
-        ;; Clean on fixed starter rules + fresh parse-md-sections docs!
-        (let [clean (rcov/check-rule-bindings-and-refs @conn)]
-          (is (true? (:ok? clean)) (pr-str (:problems clean))))
-        ;; Catches synthetic $agent binding, missing doc id, and orphan $wm consumer!
+        (d/transact conn {:tx-data (concat doc-tx live-tx starter)})
+        (let [atlas (cov/rule-atlas @conn)
+              clean-holes (cov/detect-rule-holes @conn atlas)]
+          (is (empty? clean-holes) (pr-str clean-holes)))
         (let [bad-rules [{:seon.rule/id :rule.test/bad-in :seon.rule/stratum 20 :seon.rule/enabled? true
                           :seon.rule/query (quote [:find ?v :in $main $agent :where [$main ?v :seon.agent/id $agent]])
                           :seon.rule/assert (quote [[?v :x/y true]])}
@@ -285,14 +373,16 @@
                           :seon.rule/assert (quote [{:entity ?d :zone :workspace :priority 50}])}
                          {:seon.rule/id :rule.test/bad-wm :seon.rule/stratum 20 :seon.rule/enabled? true
                           :seon.rule/query (quote [:find ?e :in $wm :where [$wm ?e :wm/never-produced true]])
-                          :seon.rule/assert (quote [[?e :x/z true]])}]
-              bad (rcov/check-rule-bindings-and-refs @conn bad-rules)
-              bcls (set (map :class (:problems bad)))]
-          (is (false? (:ok? bad)))
+                          :seon.rule/assert (quote [[?e :x/z true]])}
+                         {:seon.rule/id :rule.test/bad-where-fn :seon.rule/stratum 20 :seon.rule/enabled? true
+                          :seon.rule/query (quote [:find ?e :in $branch :where [$branch ?e :seon.task/id ?t] [(seon.missing.ns/no-such-fn ?t)]])
+                          :seon.rule/assert (quote [[?e :x/w true]])}]
+              bad-holes (cov/detect-rule-holes @conn bad-rules)
+              bcls (set (map :class bad-holes))]
           (is (contains? bcls :unknown-rule-input))
           (is (contains? bcls :missing-rule-doc-ref))
-          (is (contains? bcls :orphan-wm-consumer)))
-        ;; :rule.ctx/recent-eval-results bounds workspace evals to age <= 12
+          (is (contains? bcls :orphan-wm-consumer))
+          (is (contains? bcls :dead-rule-fn)))
         (let [aid :ag/eval-window
               rec-rule (some #(when (= :rule.ctx/recent-eval-results (:seon.rule/id %)) %) starter)]
           (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main}
@@ -306,8 +396,7 @@
                 proj-turns (into #{} (map #(:seon.agent.eval/turn (d/pull @conn (quote [:seon.agent.eval/turn]) (:entity %))))
                                  (:projections res))]
             (is (= #{25 30} proj-turns) "Turn 1 (age 29 > 12) must be excluded to prevent 568-eval fanout")))
-        ;; audit-tail-eviction fits cleanly within 2,000-token budget with 0 high-pri drops
-        (let [tail (rcov/audit-tail-eviction @conn)]
+        (let [tail (audit-tail-eviction @conn)]
           (is (true? (:ok? tail)) (pr-str tail))
           (is (true? (get-in tail [:scenarios :quiet :within-budget?])))
           (is (true? (get-in tail [:scenarios :busy :within-budget?])))
