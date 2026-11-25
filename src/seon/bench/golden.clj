@@ -294,7 +294,8 @@
 
 (defn build-ab-tasks
   "Expands `base-tasks` across named `arms` (`{:control {...} :treatment {...}}` or seq of `[arm-kw cfg]`)
-   into paired isolated trial specs ready for `seon.bench.cluster/run-parallel-trial!`."
+   into paired isolated trial specs ready for `seon.bench.cluster/run-parallel-trial!`, preserving `:verify-spec`,
+   `:chat-agent`, `:branch`, `:body`, and `:min-delegated-calls`."
   {:malli/schema [:=> {:examples [[[[{:id :t/one :scope 'seon.render.text :title "T1" :plan "Do X."}]
                                      [[:control {:seon.config/auto-refine-tasks? false}]
                                       [:treatment {:seon.config/auto-refine-tasks? true}]]
@@ -324,7 +325,8 @@
                               (when (number? (:task-timeout-ms o)) (long (:task-timeout-ms o))))
          inc-trace? (boolean (:include-trace? o))]
      (vec (for [[idx raw] (map-indexed vector (filter map? base-tasks))
-                :let [inner (if (map? (:task raw)) (:task raw) raw)
+                :let [chat-aid (:chat-agent raw)
+                      inner (if (map? (:task raw)) (:task raw) raw)
                       raw-pid (or (:pair-id raw) (:id inner) (:id raw))
                       pair-id (if (keyword? raw-pid) raw-pid (keyword "ab" (str "t" (inc idx))))
                       base-cfg (if (map? (:config raw)) (:config raw) {})]
@@ -337,10 +339,17 @@
                      :require-merge? (if (contains? raw :require-merge?) (boolean (:require-merge? raw)) true)
                      :auto-merge? (if (contains? raw :auto-merge?) (boolean (:auto-merge? raw)) true)
                      :timeout-ms (long (or explicit-timeout (when (number? (:timeout-ms raw)) (:timeout-ms raw)) 240000))
-                     :config (merge base-cfg (if (map? arm-cfg) arm-cfg {}))
-                     :task (select-keys inner [:id :scope :title :plan :description :refs :curated :tests :needs])}
-              (:category raw) (assoc :category (:category raw))
-              inc-trace? (assoc :include-trace? true)))))))
+                     :config (merge base-cfg (if (map? arm-cfg) arm-cfg {}))}
+              (not chat-aid)              (assoc :task (select-keys inner [:id :scope :title :plan :description :refs :curated :tests :needs]))
+              chat-aid                    (assoc :chat-agent chat-aid)
+              (:branch raw)               (assoc :branch (:branch raw))
+              (:body raw)                 (assoc :body (:body raw))
+              (:min-delegated-calls raw)  (assoc :min-delegated-calls (:min-delegated-calls raw))
+              (:verify-spec raw)          (assoc :verify-spec (:verify-spec raw))
+              (:eval-code raw)            (assoc :eval-code (:eval-code raw))
+              (:retest-main? raw)         (assoc :retest-main? (:retest-main? raw))
+              (:category raw)             (assoc :category (:category raw))
+              inc-trace?                  (assoc :include-trace? true)))))))
 
 (defn summarize-ab
   "Pure side-by-side paired A/B summary over trial result maps tagged with `:arm` and `:pair-id`."

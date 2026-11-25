@@ -185,6 +185,17 @@
 
 (defn- scan-interesting-evals [db]
   (let [sm (:schema db)
+        inactive-aids (let [id-by-e (when (contains? sm :seon.agent/id)
+                                      (into {} (map (fn [dt] [(:e dt) (:v dt)])) (d/datoms db :aevt :seon.agent/id)))
+                            inact (java.util.HashSet. 64)]
+                        (when (seq id-by-e)
+                          (when (contains? sm :seon.agent/archived?)
+                            (doseq [dt (d/datoms db :aevt :seon.agent/archived?) :when (true? (:v dt))]
+                              (when-let [aid (get id-by-e (:e dt))] (.add inact aid))))
+                          (when (contains? sm :seon.agent/merged-tx)
+                            (doseq [dt (d/datoms db :aevt :seon.agent/merged-tx) :when (and (integer? (:v dt)) (pos? (long (:v dt))))]
+                              (when-let [aid (get id-by-e (:e dt))] (.add inact aid)))))
+                        inact)
         eids (java.util.HashSet. 128)
         pos-l? #(pos? (long (or % 0)))]
     (scan-eval-attr! db sm eids :seon.agent.eval/cache-hit-tokens pos-l?)
@@ -193,7 +204,14 @@
     (scan-eval-attr! db sm eids :seon.agent.eval/bytes #(> (long (or % 0)) 134217728))
     (scan-eval-attr! db sm eids :seon.agent.eval/ticks #(> (long (or % 0)) 50000000))
     (scan-eval-attr! db sm eids :seon.agent.eval/error #(str/includes? (str %) "Eval exceeded"))
-    (mapv #(d/pull db eval-pull-pat %) eids)))
+    (if (zero? (.size inactive-aids))
+      (mapv #(d/pull db eval-pull-pat %) eids)
+      (into []
+            (keep (fn [e]
+                    (let [aid (eav1 db e :seon.agent.eval/agent)]
+                      (when-not (and aid (.contains inactive-aids aid))
+                        (d/pull db eval-pull-pat e)))))
+            eids))))
 
 (defn- ^:seon.flow/edge anchored-branch-cache! [db cache-atom anchor-atom attrs advance-fn full-fn res-key]
   (let [sid (store/store-id db) br (get-in db [:config :branch] :main)

@@ -460,6 +460,15 @@
   (if-not (and db (map? spec) (:kind spec))
     {:ok? true :kind :none}
     (case (:kind spec)
+      :all
+      (let [amtx (:after-main-tx spec)
+            sub-res (mapv #(verify-task-spec db (cond-> % (and amtx (nil? (:after-main-tx %))) (assoc :after-main-tx amtx)))
+                          (:specs spec))
+            first-fail (some #(when (false? (:ok? %)) %) sub-res)]
+        (if first-fail
+          {:ok? false :kind :all :reason (:reason first-fail) :results sub-res}
+          {:ok? true :kind :all :results sub-res}))
+
       :tighten-return-contract
       (let [vsym (:var spec)
             ve (:e (first (d/datoms db :avet :seon.code.var/name vsym)))
