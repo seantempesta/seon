@@ -215,14 +215,23 @@
                   (assoc m :content (str/join "\n" (keep #(cond (string? %) % (map? %) (:text %) :else nil) kept))))))))
         messages))
 
-(defn ^:seon.flow/edge openai-stream-chat!
-  "Streams an OpenAI-compat / DeepSeek `/chat/completions` call over `jolt.http.core`, invoking
-   `(on-delta {:kind :token|:reasoning-token :text s})` per chunk and returning `finalize-stream-state`.
-   Automatically strips `image_url` parts and retries once on HTTP 400/422 multimodal-unsupported
-   errors (caching proven text-only endpoints in memory) or transient transport drops (without caching)."
-  {:malli/schema [:function [:=> [:cat :map [:maybe :string] :any :string :any] :any]
-                  [:=> [:cat :map [:maybe :string] :any :string :any :any] :any]]
-   :cost/ticks 100000000}
+(defn transient-network-error?
+  "True when `ex` is a transient pre-response transport/socket failure (e.g. Broken pipe, Connection reset, EOF) safe to retry on a fresh socket."
+  {:malli/schema [:=> {:examples [[[nil] false] [[{:msg "Broken pipe"}] false]]}
+                  [:cat :any] :boolean]
+   :cost/ticks 50000}
+  [ex]
+  (boolean
+   (when (instance? Throwable ex)
+     (or (instance? java.io.IOException ex)
+         (when-let [m (.getMessage ^Throwable ex)]
+           (boolean (re-find #"(?i)broken pipe|connection reset|eof reached|no bytes|socket closed|timed out|connection refused" m)))))))
+
+(defn openai-stream-chat!
+  "Streams one OpenAI-compatible `/chat/completions` request via `jolt.http-client` with `jolt.http.sse`.
+   Automatically retries transient pre-response transport IO errors (`Broken pipe`, `Connection reset`, etc.)
+   on a fresh socket (`Connection: close`) and transparently retries text-only if an endpoint rejects `image_url` parts."
+  {:malli/schema [:function [:=> [:cat :map [:maybe :string] [:maybe [:sequential :map]] [:maybe :string] [:maybe :seon.host/fn]] :map] [:=> [:cat :map [:maybe :string] [:maybe [:sequential :map]] [:maybe :string] [:maybe [:sequential :map]] [:maybe :seon.host/fn]] :map]], :seon.flow/edge true, :cost/ticks 100000000}
   ([prov system-prompt history user-prompt on-delta]
    (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
   ([prov system-prompt history user-prompt wire-messages on-delta]
@@ -232,40 +241,51 @@
        (throw (ex-info (str "Missing model API key in env var " api-key-env)
                        {:error :seon.model/missing-api-key :env api-key-env})))
      (let [base-url (or (:base-url prov) "https://api.deepseek.com")
-          url (str (str/replace base-url #"/+$" "") "/chat/completions")
-          raw-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
-                                      system-prompt history user-prompt)
-          endpoint-k [base-url (or (:model prov) (:model raw-req))]
-          init-req (if (and (contains? @multimodal-unsupported-endpoints endpoint-k)
-                            (messages-have-image-parts? (:messages raw-req)))
-                     (update raw-req :messages strip-image-parts)
-                     raw-req)]
+           url (str (str/replace base-url #"/+$" "") "/chat/completions")
+           raw-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
+                                       system-prompt history user-prompt)
+           endpoint-k [base-url (or (:model prov) (:model raw-req))]
+           init-req (if (and (contains? @multimodal-unsupported-endpoints endpoint-k)
+                             (messages-have-image-parts? (:messages raw-req)))
+                      (update raw-req :messages strip-image-parts)
+                      raw-req)]
        (loop [attempt 0
               req-map init-req
-              unsupported-4xx? false]
+              unsupported-4xx? false
+              net-retries 0]
          (let [req-body (json/write-str req-map)
+               hdrs (cond-> {"Authorization" (str "Bearer " api-key)
+                             "Content-Type" "application/json"
+                             "Accept" "text/event-stream"}
+                      (pos? net-retries) (assoc "Connection" "close"))
                post-res (try
                           {:ok? true
-                           :resp (http/post url {:headers {"Authorization" (str "Bearer " api-key)
-                                                           "Content-Type" "application/json"
-                                                           "Accept" "text/event-stream"}
+                           :resp (http/post url {:headers hdrs
                                                  :body req-body
                                                  :as :stream
                                                  :throw false})}
                           (catch Throwable ex
                             {:ok? false :ex ex}))]
            (if-not (:ok? post-res)
-             (if (and (zero? attempt)
-                      (messages-have-image-parts? (:messages req-map)))
-               (do
-                 (when-not (contains? @multimodal-fallback-logged endpoint-k)
-                   (swap! multimodal-fallback-logged conj endpoint-k)
-                   (binding [*out* *err*]
-                     (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
-                                   ") dropped connection on image_url parts (" (.getMessage ^Throwable (:ex post-res))
-                                   "); stripping image parts and retrying text-only (transient, not cached)."))))
-                 (recur 1 (update req-map :messages strip-image-parts) false))
-               (throw ^Throwable (:ex post-res)))
+             (cond
+             (and (zero? attempt)
+                  (messages-have-image-parts? (:messages req-map)))
+             (do
+               (when-not (contains? @multimodal-fallback-logged endpoint-k)
+                 (swap! multimodal-fallback-logged conj endpoint-k)
+                 (binding [*out* *err*]
+                   (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
+                                 ") dropped connection on image_url parts (" (.getMessage ^Throwable (:ex post-res))
+                                 "); stripping image parts and retrying text-only (transient, not cached)."))))
+               (recur 1 (update req-map :messages strip-image-parts) false net-retries))
+
+             (and (< net-retries 2) (transient-network-error? (:ex post-res)))
+             (do
+               (Thread/sleep (long (* 250 (inc net-retries))))
+               (recur attempt req-map unsupported-4xx? (inc net-retries)))
+
+             :else
+             (throw ^Throwable (:ex post-res)))
              (let [resp (:resp post-res)
                    status (long (or (:status resp) 0))
                    body (:body resp)]
@@ -278,15 +298,15 @@
                             (messages-have-image-parts? (:messages req-map))
                             (multimodal-unsupported-error? status body-str))
                      (let [payload-err? (boolean (re-find #"(?i)uploaded an unsupported|unsupported image|invalid image" body-str))]
-                     (when-not payload-err?
-                       (swap! multimodal-unsupported-endpoints conj endpoint-k))
-                     (when-not (contains? @multimodal-fallback-logged endpoint-k)
-                       (swap! multimodal-fallback-logged conj endpoint-k)
-                       (binding [*out* *err*]
-                         (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
-                                       ") rejected image_url parts (HTTP " status
-                                       "); stripping image parts and retrying text-only."))))
-                     (recur 1 (update req-map :messages strip-image-parts) (not payload-err?)))
+                       (when-not payload-err?
+                         (swap! multimodal-unsupported-endpoints conj endpoint-k))
+                       (when-not (contains? @multimodal-fallback-logged endpoint-k)
+                         (swap! multimodal-fallback-logged conj endpoint-k)
+                         (binding [*out* *err*]
+                           (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
+                                         ") rejected image_url parts (HTTP " status
+                                         "); stripping image parts and retrying text-only."))))
+                       (recur 1 (update req-map :messages strip-image-parts) (not payload-err?) net-retries))
                      (let [hdrs (:headers resp)
                            retry-after (some (fn [[k v]]
                                                (when (= "retry-after" (str/lower-case (str k)))
