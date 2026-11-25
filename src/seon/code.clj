@@ -156,8 +156,10 @@
                      (let [nm (name x)]
                        (if (or (= nm "run-tests") (= nm "run-all-tests") (= nm "test-vars") (= nm "test-var"))
                          test-ov
-                         (when-let [v (try (resolve x) (catch Throwable _ nil))]
-                           (:seon.eval/budget-override (meta v))))))]
+                         (when-let [v (if-let [ns-s (namespace x)]
+                                        (when-let [nso (find-ns (symbol ns-s))] (ns-resolve nso (symbol nm)))
+                                        (ns-resolve *ns* x))]
+                           (when (var? v) (:seon.eval/budget-override (meta v)))))))]
          [(max t (long (or (:ticks ov) t)))
           (max b (long (or (:bytes ov) b)))]
          [t b]))
@@ -256,8 +258,9 @@
             ns-after (ns-name *ns*) is-ns? (= 'ns form-head)
             _ (when (= 'in-ns form-head)
                 (when (empty? (ns-refers *ns*)) (clojure.core/refer-clojure))
-                (when (and (str/ends-with? (name ns-after) "-test") (nil? (ns-resolve *ns* 'deftest)))
-                  (try (clojure.core/require '[clojure.test :refer [deftest is testing]]) (catch Throwable _ nil))))
+                (when (and (str/ends-with? (name ns-after) "-test")
+                         (or (nil? (ns-resolve *ns* 'deftest)) (nil? (ns-resolve *ns* 'testing))))
+                (try (clojure.core/require '[clojure.test :refer [deftest is testing]]) (catch Throwable _ nil))))
             _ (when is-ns? (register-loaded-ns! ns-after))
             target-ns (if is-ns? ns-after ns-before)
             _ (when-not (contains? '#{user repl} target-ns)
