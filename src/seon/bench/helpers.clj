@@ -160,33 +160,43 @@
                                      0 (min 120 (count (str (:seon.agent.eval/error e))))))))))))
 
 (defn- pull-failure-diagnostics [conn main-db brs aid br after-mtx after-tx]
-(let [dbx (if (and br (contains? brs br)) (store/head conn br) main-db)
-      sch (db-schema dbx)
-      atx (long (or (when (pos? (long (or after-tx 0))) after-tx) (when (or (nil? br) (= br :main)) after-mtx) 0))
-      err-samples (if (sch :seon.agent.eval/agent)
-                    (->> (d/datoms dbx :avet :seon.agent.eval/agent aid)
-                         (filter #(or (not (pos? atx)) (> (long (:tx % 0)) atx)))
-                         (map #(d/pull dbx '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/error] (:e %)))
-                         (filter #(not (str/blank? (str (:seon.agent.eval/error %)))))
-                         (sort-by #(long (or (:seon.agent.eval/turn %) 0)))
-                         (take 6)
-                         (mapv (fn [e]
-                                 {:turn (long (or (:seon.agent.eval/turn e) 0))
-                                  :code (clip (:seon.agent.eval/code e) 110)
-                                  :error (clip (:seon.agent.eval/error e) 200)})))
-                    [])
-      amtx (long (or after-mtx 0))
-      fail-tests (if (sch :seon.test/pass?)
-                   (->> (d/datoms dbx :avet :seon.test/pass? false)
-                        (filter #(or (not (pos? amtx)) (> (long (:tx % 0)) amtx)))
-                        (map #(d/pull dbx '[:seon.test/var :seon.test/report :seon.test/digest] (:e %)))
-                        (filter :seon.test/var)
-                        (take 5)
-                        (mapv (fn [v]
-                                {:var (:seon.test/var v)
-                                 :report (clip (:seon.test/report v) 220)})))
-                   [])]
-  {:error-samples err-samples :failing-tests fail-tests}))
+  (let [dbx (if (and br (contains? brs br)) (store/head conn br) main-db)
+        sch (db-schema dbx)
+        atx (long (or (when (pos? (long (or after-tx 0))) after-tx) (when (or (nil? br) (= br :main)) after-mtx) 0))
+        err-samples (if (sch :seon.agent.eval/agent)
+                      (->> (d/datoms dbx :avet :seon.agent.eval/agent aid)
+                           (filter #(or (not (pos? atx)) (> (long (:tx % 0)) atx)))
+                           (map #(d/pull dbx '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/error] (:e %)))
+                           (filter #(not (str/blank? (str (:seon.agent.eval/error %)))))
+                           (sort-by #(long (or (:seon.agent.eval/turn %) 0)))
+                           (take 6)
+                           (mapv (fn [e]
+                                   {:turn (long (or (:seon.agent.eval/turn e) 0))
+                                    :code (clip (:seon.agent.eval/code e) 110)
+                                    :error (clip (:seon.agent.eval/error e) 200)})))
+                      [])
+        amtx (long (or after-mtx 0))
+        fail-tests (if (sch :seon.test/pass?)
+                     (->> (d/datoms dbx :avet :seon.test/pass? false)
+                          (filter #(or (not (pos? amtx)) (> (long (:tx % 0)) amtx)))
+                          (map #(d/pull dbx '[:seon.test/var :seon.test/report :seon.test/digest] (:e %)))
+                          (filter :seon.test/var)
+                          (take 5)
+                          (mapv (fn [v]
+                                  {:var (:seon.test/var v)
+                                   :report (clip (:seon.test/report v) 220)})))
+                     [])
+        msch (db-schema main-db)
+        bounces (if (and main-db (msch :seon.agent.message/to))
+                  (->> (d/datoms main-db :avet :seon.agent.message/to aid)
+                       (filter #(or (not (pos? amtx)) (> (long (:tx % 0)) amtx)))
+                       (map #(d/pull main-db '[:seon.agent.message/seq :seon.agent.message/type :seon.agent.message/body] (:e %)))
+                       (filter #(contains? #{:test-failure :merge-conflict :health-block :gate-blocked :turn-cap-wrapup} (:seon.agent.message/type %)))
+                       (sort-by #(long (or (:seon.agent.message/seq %) 0)))
+                       (take-last 3)
+                       (mapv (fn [m] {:type (:seon.agent.message/type m) :body (clip (:seon.agent.message/body m) 260)})))
+                  [])]
+    {:error-samples err-samples :failing-tests fail-tests :bounce-messages bounces}))
 
 (defn ^:seon.flow/edge trial-audit-summary
   "Runs inside an isolated trial instance before teardown: combines `seon.health.metrics/agent-friction-summary`
@@ -246,21 +256,22 @@
                                                       :evals (pull-compact-evals conn main-db brs cid (:branch cr))})
                                         child-ids child-rows)})]
      (cond-> (assoc base
-                    :child-count (long (count child-rows))
-                    :child-merged? (boolean (some :merged? child-rows))
-                    :child-turns c-turns
-                    :child-evals c-evals
-                    :total-turns (+ (as-l (:turns base)) c-turns)
-                    :total-evals (+ (as-l (:evals base)) c-evals)
-                    :total-prompt-tokens tot-pt
-                    :total-completion-tokens (+ (as-l (:completion-tokens base)) c-ct)
-                    :total-kv-hit-pct tot-kv
-                    :backward-walk-rows bw-rows
-                    :new-scope-vars new-scope-vars
-                    :new-test-vars new-test-vars)
-       (seq (:error-samples diag)) (assoc :error-samples (:error-samples diag))
-       (seq (:failing-tests diag)) (assoc :failing-tests (:failing-tests diag))
-       compact-evs (assoc :eval-trace compact-evs)))))
+                  :child-count (long (count child-rows))
+                  :child-merged? (boolean (some :merged? child-rows))
+                  :child-turns c-turns
+                  :child-evals c-evals
+                  :total-turns (+ (as-l (:turns base)) c-turns)
+                  :total-evals (+ (as-l (:evals base)) c-evals)
+                  :total-prompt-tokens tot-pt
+                  :total-completion-tokens (+ (as-l (:completion-tokens base)) c-ct)
+                  :total-kv-hit-pct tot-kv
+                  :backward-walk-rows bw-rows
+                  :new-scope-vars new-scope-vars
+                  :new-test-vars new-test-vars)
+     (seq (:error-samples diag)) (assoc :error-samples (:error-samples diag))
+     (seq (:failing-tests diag)) (assoc :failing-tests (:failing-tests diag))
+     (seq (:bounce-messages diag)) (assoc :bounce-messages (:bounce-messages diag))
+     compact-evs (assoc :eval-trace compact-evs)))))
 
 (def telemetry-numeric-pairs
   [[:turns :turns] [:cache-hit-tokens :kv-hit-tokens] [:cache-miss-tokens :kv-miss-tokens]

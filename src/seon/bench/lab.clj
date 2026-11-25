@@ -115,8 +115,8 @@
        :kv-hit-pct (when (pos? pt) (/ (Math/round (* 1000.0 (/ (double ht) pt))) 10.0))
        :proxy px
        :trials (mapv #(select-keys % [:id :pair-id :arm :status :merged? :turns :evals :elapsed-ms
-                                      :health-ok? :eval-errors :total-kv-hit-pct :last-error
-                                      :error-samples :failing-tests :phase :trigger :tuner-merged? :tuner-effective? :rolled-back-evals? :verify-ok? :verify-reason :tuner-diff :tuner-upserts :tuner-new-rules])
+                                     :health-ok? :eval-errors :total-kv-hit-pct :last-error
+                                     :error-samples :failing-tests :bounce-messages :phase :trigger :tuner-merged? :tuner-effective? :rolled-back-evals? :verify-ok? :verify-reason :tuner-diff :tuner-upserts :tuner-new-rules])
                      ts)})))
 
 (defn ^:seon.flow/edge bench-run
