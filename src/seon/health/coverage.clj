@@ -34,17 +34,6 @@
   (let [t (str/trim (str/replace (str (or s "")) #"\s+" " "))]
     (if (> (count t) n) (str (subs t 0 (dec n)) "…") t)))
 
-(defn- parse-query [q]
-  (let [secs #{:find :keys :syms :strs :with :in :where}]
-    (cond
-      (map? q) (select-keys q [:find :keys :syms :strs :with :in :where])
-      (sequential? q)
-      (:a (reduce (fn [{:keys [k] :as m} x]
-                    (if (secs x) {:k x :a (assoc (:a m) x [])}
-                        (if k (update-in m [:a k] conj x) m)))
-                  {:k nil :a {}} q))
-      :else {})))
-
 (defn- entity-clauses [clauses ent neg?]
   (let [nv #(if (or (= '_ %) (lvar? %)) '_ %)]
     (reduce
@@ -83,23 +72,59 @@
      :schemas (into #{} (filter qualified-keyword?) (rv :schema))
      :attrs (set/union (into #{} (mapcat pks) (rv :pull)) wa) :pattern pat}))
 
+(defn- extract-where-fn-syms [where-clauses]
+  (into #{}
+        (keep (fn [node]
+                (when (and (seq? node) (qualified-symbol? (first node)))
+                  (first node))))
+        (tree-seq coll? seq where-clauses)))
+
+(defn- doc-id-literal [clause]
+  (when (and (vector? clause) (>= (count clause) 4)
+             (= :seon.code.doc/id (nth clause 2))
+             (string? (nth clause 3)))
+    (nth clause 3)))
+
+(defn- extract-doc-ref-checks [where-clauses]
+  (let [out (volatile! [])]
+    (letfn [(walk [node]
+              (cond
+                (doc-id-literal node)
+                (vswap! out conj {:kind :required :ids [(doc-id-literal node)]})
+
+                (and (seq? node) (#{(quote or) (quote or-join)} (first node)))
+                (let [branches (if (= (quote or-join) (first node)) (drop 2 node) (rest node))
+                      branch-doc-ids (mapv (fn [b] (vec (keep doc-id-literal (tree-seq coll? seq b)))) branches)]
+                  (if (every? seq branch-doc-ids)
+                    (vswap! out conj {:kind :any-of :ids (vec (distinct (apply concat branch-doc-ids)))})
+                    (doseq [b branches] (walk b))))
+
+                (and (seq? node) (#{(quote and) (quote not) (quote not-join)} (first node)))
+                (doseq [sub (if (= (quote not-join) (first node)) (drop 2 node) (rest node))]
+                  (walk sub))
+
+                :else nil))]
+      (doseq [cl where-clauses] (walk cl)))
+    @out))
+
 (defn- analyze-rule [r]
-  (let [pq (parse-query (:seon.rule/query r))
-        ws (or (:where pq) []) nodes (tree-seq coll? seq ws)
-        ins (vec (or (seq (:in pq)) ['$]))
+  (let [pq (rules/parse-query (:seon.rule/query r))
+        ws (or (:where pq) [])
+        nodes (tree-seq coll? seq ws)
+        ins (vec (or (seq (:in pq)) [(quote $)]))
         grounds (reduce
                  (fn [m n]
                    (if (and (vector? n) (= 2 (count n)) (seq? (first n))
-                            (= 'ground (ffirst n)) (= 2 (count (first n))) (lvar? (second n)))
+                            (= (quote ground) (ffirst n)) (= 2 (count (first n))) (lvar? (second n)))
                      (update m (second n) (fnil conj #{}) (second (first n))) m))
                  {} nodes)
         wm-r (->> nodes
                   (reduce
                    (fn [a n]
                      (cond
-                       (and (vector? n) (>= (count n) 3) (= '$wm (first n)))
+                       (and (vector? n) (>= (count n) 3) (= (quote $wm) (first n)))
                        (conj a (if (keyword? (nth n 2)) (nth n 2) :*))
-                       (and (seq? n) (some #(= '$wm %) n))
+                       (and (seq? n) (some #(= (quote $wm) %) n))
                        (let [ks (filter keyword? n)] (if (seq ks) (into a ks) (conj a :*)))
                        :else a))
                    #{})
@@ -117,7 +142,11 @@
                        (map second) distinct sort vec)
        :db-sources (->> ins (filter #(and (symbol? %) (str/starts-with? (name %) "$"))) distinct sort vec)
        :doc (clip-doc (:seon.rule/doc r) 64)}
-      {:seon.coverage/fns (->> ps (mapcat :fns) distinct sort vec) :seon.coverage/projections ps})))
+      {:seon.coverage/fns (->> ps (mapcat :fns) distinct sort vec)
+       :seon.coverage/projections ps
+       :seon.coverage/in-syms ins
+       :seon.coverage/doc-checks (extract-doc-ref-checks ws)
+       :seon.coverage/where-fns (extract-where-fn-syms ws)})))
 
 (defn rule-atlas
   "Reuses cached `seon.rule/load-rules` returning a deterministic, stratum-sorted vector of all `:seon.rule/*` entities."
@@ -260,26 +289,69 @@
          :subject (str (:rule a) "<->" (:rule b) "@" (:stratum a) "/" (name (:zone a)))
          :message (str (:rule a) " vs " (:rule b) " conflict in s" (:stratum a) " " (:zone a) ".")}))))
 
+(defn- rule-fn-exists? [db fsym]
+  (or (some? (first (d/datoms db :avet :seon.code.var/name fsym)))
+      (boolean (when-let [ns-obj (find-ns (symbol (namespace fsym)))]
+                 (ns-resolve ns-obj (symbol (name fsym)))))))
+
+(def supported-query-inputs
+  "Exact `:in` input symbols resolved by `seon.rule/resolve-query-inputs`."
+  #{(quote $) (quote $main) (quote $branch) (quote $code) (quote $task)
+    (quote $wm) (quote ?agent) (quote ?agent-eid) (quote ?hierarchy) (quote %)})
+
 (defn detect-rule-holes
-  "Pure audit detecting `:orphan-wm-consumer`, `:dead-rule-fn`, and `:conflicting-rule-priority`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:vector :any]] [:vector :map]] :cost/ticks 15000000}
+  "Pure audit detecting `:orphan-wm-consumer`, `:dead-rule-fn`, `:unknown-rule-input`, `:missing-rule-doc-ref`, and `:conflicting-rule-priority`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:vector :any]] [:vector :map]] :cost/ticks 25000000}
   [db atlas]
   (let [dh (db-schema db)
-        enabled (filterv #(not (false? (:enabled? %))) atlas)
+        normalized (mapv #(if (and (map? %) (:seon.rule/id %)) (analyze-rule %) %) atlas)
+        enabled (filterv #(not (false? (:enabled? %))) normalized)
         allowed (set/union known-runtime-wm-seeders (into #{} (mapcat :wm-writes) enabled))
         orphan (for [r enabled a (:wm-reads r) :when (and (keyword? a) (not= :* a) (not (allowed a)))]
                  {:class :orphan-wm-consumer :severity :warning :rule (:id r) :attr a
                   :subject (str (:id r) "<-" a) :message (str (:id r) " reads unproduced $wm " a ".")})
-        has-vars? (and db (dh :seon.code.var/name) (first (d/datoms db :aevt :seon.code.var/name)))
-        dead (when has-vars?
-               (for [r enabled f (or (:seon.coverage/fns (meta r)) (->> (rule-projs db r) (mapcat :fns) distinct sort))
-                     :when (and (qualified-symbol? f) (nil? (first (d/datoms db :avet :seon.code.var/name f))))]
-                 {:class :dead-rule-fn :severity :error :rule (:id r) :fn f
-                  :subject (str (:id r) "->" f) :message (str (:id r) " asserts missing :fn " f ".")}))
+        has-vars? (boolean (and db (dh :seon.code.var/name) (first (d/datoms db :aevt :seon.code.var/name))))
+        dead-proj (when has-vars?
+                    (for [r enabled
+                          f (or (:seon.coverage/fns (meta r)) (->> (rule-projs db r) (mapcat :fns) distinct sort))
+                          :when (and (qualified-symbol? f) (nil? (first (d/datoms db :avet :seon.code.var/name f))))]
+                      {:class :dead-rule-fn :severity :error :rule (:id r) :fn f
+                       :subject (str (:id r) "->" f) :message (str (:id r) " asserts missing :fn " f ".")}))
+        dead-where (when has-vars?
+                     (for [r enabled
+                           fsym (:seon.coverage/where-fns (meta r))
+                           :when (not (rule-fn-exists? db fsym))]
+                       {:class :dead-rule-fn :severity :error :rule (:id r) :fn fsym
+                        :subject (str (:id r) "->" fsym) :message (str (:id r) " calls missing helper fn " fsym " in :where.")}))
+        dead (vals (reduce (fn [acc h] (if (contains? acc (:subject h)) acc (assoc acc (:subject h) h)))
+                           {} (concat dead-proj dead-where)))
+        unk-in (for [r enabled
+                     sym (:seon.coverage/in-syms (meta r))
+                     :when (not (contains? supported-query-inputs sym))]
+                 {:class :unknown-rule-input :severity :error :rule (:id r)
+                  :subject (str (:id r) " :in " sym)
+                  :message (str "Rule " (:id r) " binds unsupported :in symbol " sym " (not in seon.rule/resolve-query-inputs).")})
+        doc-ids (when (and db (contains? dh :seon.code.doc/id))
+                  (let [s (into #{} (map :v) (d/datoms db :aevt :seon.code.doc/id))]
+                    (when (seq s) s)))
+        miss-doc (when doc-ids
+                   (mapcat (fn [r]
+                             (mapcat (fn [{:keys [kind ids]}]
+                                       (if (= kind :any-of)
+                                         (when-not (some doc-ids ids)
+                                           [{:class :missing-rule-doc-ref :severity :error :rule (:id r)
+                                             :subject (str (:id r) "->" (first ids))
+                                             :message (str "Rule " (:id r) " references none of existing :seon.code.doc/id targets " (pr-str ids) ".")}])
+                                         (for [did ids :when (not (contains? doc-ids did))]
+                                           {:class :missing-rule-doc-ref :severity :error :rule (:id r)
+                                            :subject (str (:id r) "->" did)
+                                            :message (str "Rule " (:id r) " references missing :seon.code.doc/id " (pr-str did) ".")})))
+                                     (:seon.coverage/doc-checks (meta r))))
+                           enabled))
         claims (for [r enabled p (rule-projs db r) :when (seq (:pattern p)) z (:zones p) f (:fns p)]
                  {:rule (:id r) :stratum (:stratum r) :target (or (:target r) :any) :zone z :fn f :pattern (:pattern p)})
         confs (distinct (mapcat claim-conflicts (vals (group-by (juxt :stratum :zone :pattern) claims))))]
-    (->> (concat orphan dead confs) (sort-by (juxt #(name (:class %)) :subject)) vec)))
+    (->> (concat orphan dead unk-in miss-doc confs) (sort-by (juxt #(name (:class %)) :subject)) vec)))
 
 (defn- ^:seon.flow/edge compute-coverage-report [db include-atlas?]
   (let [dh (db-schema db)
@@ -288,37 +360,30 @@
         stored-es (stored-entity-schemas db)
         matrix (schema-renderer-matrix* db stored-es)
         rb (group-by :class (detect-renderer-holes* db matrix atlas stored-es))
-        missing (vec (:missing-entity-renderer rb)) single (vec (:single-footprint-renderer rb))
+        missing (vec (:missing-entity-renderer rb))
+        single (vec (:single-footprint-renderer rb))
         ambiguous (vec (:ambiguous-renderer-pair rb))
-        base-holes (detect-rule-holes db atlas)
-        audit-fn (when (seq raw-rules) (requiring-resolve 'seon.health.coverage.rules/check-rule-bindings-and-refs))
-        raw-audit (when audit-fn (@audit-fn db raw-rules))
-        has-docs? (boolean (and db (contains? dh :seon.code.doc/id) (first (d/datoms db :aevt :seon.code.doc/id))))
-        rules-audit (if raw-audit
-                      (let [ps (if has-docs? (:problems raw-audit) (filterv #(not= :missing-rule-doc-ref (:class %)) (:problems raw-audit)))]
-                        (assoc raw-audit :ok? (empty? ps) :counts (frequencies (map :class ps)) :problems ps))
-                      {:ok? true :rules-checked 0 :counts {} :problems [] :wm-producers {} :wm-consumers {} :unreferenced-wm-producers []})
-        seen-rh (into #{} (map (juxt :class :subject)) base-holes)
-        extra-rh (filterv #(not (contains? seen-rh [(:class %) (:subject %)])) (:problems rules-audit))
-        rule-holes (vec (sort-by (juxt #(name (:class %)) :subject) (concat base-holes extra-rh)))
+        rule-holes (detect-rule-holes db atlas)
         hb (group-by :class rule-holes)
-        orphan (vec (:orphan-wm-consumer hb)) dead (vec (:dead-rule-fn hb)) confs (vec (:conflicting-rule-priority hb))
-        unk-in (vec (:unknown-rule-input hb)) miss-doc (vec (:missing-rule-doc-ref hb)) miss-fn (vec (:missing-rule-fn hb))
+        orphan (vec (:orphan-wm-consumer hb))
+        dead (vec (:dead-rule-fn hb))
+        confs (vec (:conflicting-rule-priority hb))
+        unk-in (vec (:unknown-rule-input hb))
+        miss-doc (vec (:missing-rule-doc-ref hb))
         rn (count (filter #(pos? (:renderer-count %)) matrix))
         counts {:entity-schemas (count matrix) :rendered-schemas rn :total-renderers (reduce + 0 (map :renderer-count matrix))
                 :missing-renderers (count missing) :single-footprint (count single) :ambiguous-renderers (count ambiguous)
                 :rules (count atlas) :enabled-rules (count (filter :enabled? atlas)) :rule-holes (count rule-holes)
                 :orphan-wm-consumer (count orphan) :dead-rule-fn (count dead) :conflicting-rule-priority (count confs)
-                :unknown-rule-input (count unk-in) :missing-rule-doc-ref (count miss-doc) :missing-rule-fn (count miss-fn)
-                :unreferenced-wm-producers (count (:unreferenced-wm-producers rules-audit))}
+                :unknown-rule-input (count unk-in) :missing-rule-doc-ref (count miss-doc)}
         summary (str (count matrix) " entity schemas (" rn " rendered, " (count missing) " missing, "
                      (count single) " single-footprint, " (count ambiguous) " ambiguous) | "
                      (count atlas) " rules (" (count orphan) " orphan-wm, " (count dead) " dead-fn, "
                      (count unk-in) " unknown-in, " (count miss-doc) " missing-doc, " (count confs) " conflict)")
         base (array-map :ok? (and (empty? ambiguous) (empty? dead) (empty? orphan)
-                                  (empty? unk-in) (empty? miss-doc) (empty? miss-fn))
+                                  (empty? unk-in) (empty? miss-doc))
                         :summary summary :counts counts :missing-renderers missing :ambiguous-renderers ambiguous
-                        :single-footprint single :rule-holes rule-holes :rules-audit rules-audit)]
+                        :single-footprint single :rule-holes rule-holes)]
     (with-meta (if include-atlas? (assoc base :rule-atlas atlas) base)
                {:seon/schema :seon.health/coverage})))
 

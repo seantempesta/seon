@@ -233,11 +233,18 @@
 (defonce ^:private ^:seon.flow/edge db-registry-anchor (atom {}))
 
 (defn- db-schema-unchanged-since? [db prev-cid cur-cid]
-  (try
-    (let [kws [:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/examples]
-          attrs (into (set kws) (keep #(get-in db [:ident-ref-map %])) kws)]
-      (not-any? #(contains? attrs (:a %)) (d/changes db prev-cid cur-cid)))
-    (catch Throwable _ false)))
+  (let [anc-fn (some-> (find-ns (quote seon.ctx.diff)) (ns-resolve (quote ancestor-within?)))
+        anc-ok? (if anc-fn
+                  (boolean (anc-fn db prev-cid cur-cid 16))
+                  (let [parents (get-in db [:meta :datahike/parents])]
+                    (and (set? parents) (= 1 (count parents)) (= prev-cid (first parents)))))]
+    (if-not anc-ok?
+      false
+      (try
+        (let [kws [:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/examples]
+              attrs (into (set kws) (keep #(get-in db [:ident-ref-map %])) kws)]
+          (not-any? #(contains? attrs (:a %)) (d/changes db prev-cid cur-cid)))
+        (catch Throwable _ false)))))
 
 (defn registry-for-db
   "Returns `{:registry :forms :reg-sig :merge-meta :declarations :decl-by-id :entity-index}` with commit-anchored promotion."

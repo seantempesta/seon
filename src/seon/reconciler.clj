@@ -274,7 +274,7 @@
     (if (number? v) (long v) (long dflt))))
 
 (defn- build-policy-input
-  [main-db branch-db ma ba e ready-dt unread act live-entry awaiting-blocked? gate-ok? testing-set merging-set gate-notified-set seen inbox eval-ents]
+  [main-db branch-db ma ba ready-dt unread act live-entry awaiting-blocked? gate-ok? testing-set merging-set gate-notified-set seen inbox eval-ents]
   (let [aid (:seon.agent/id ma) b (:seon.agent/branch ma) head-tx (:max-tx branch-db)
         same-db? (or (identical? main-db branch-db) (= b :main) (nil? b))
         ready-tx (or (:tx ready-dt) 0) ready-inst (tx-instant-ms branch-db (:tx ready-dt))
@@ -303,12 +303,12 @@
      :newest-external-unread-inst (when (seq ext-insts) (reduce max ext-insts))
      :latest-failure-tx (:latest-failure-tx act) :latest-failure-inst (:latest-failure-inst act)
      :post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? (:last-was-tool? act) under-tt? ready-tx seen inbox eval-ents has-tgt?)
-     :has-pending-review-ops? false :eval-count (:eval-count act) :last-was-tool? (:last-was-tool? act)
+     :has-pending-review-ops? false :last-was-tool? (:last-was-tool? act)
      :tool-streak (:tool-streak act) :turns-since-external (:turns-since-external act)
      :bounce-streak (:bounce-streak act) :trailing-model-errors (:trailing-model-errors act)
      :last-err-tx (:last-err-tx act) :last-err-inst (:last-err-inst act)
      :non-retryable-model-error? (:non-retryable-model-error? act)
-     :max-tool-turns max-tt :max-bounces max-b :max-total-turns max-tot :agent-eid e}))
+     :max-tool-turns max-tt :max-bounces max-b :max-total-turns max-tot}))
 
 (defn derive-agent-status
   {:malli/schema [:function
@@ -346,8 +346,8 @@
            gate (agent-gate-summary main-db branch-db agent-id)
            gate-ok? (boolean (:ok? gate true))
            live-entry (get live-map agent-id)
-           step-in (build-policy-input main-db branch-db ma ba e ready-dt unread act live-entry awaiting-blocked?
-                                       gate-ok? testing-set merging-set gate-notified-set seen inbox eval-ents)
+           step-in (build-policy-input main-db branch-db ma ba ready-dt unread act live-entry awaiting-blocked?
+                   gate-ok? testing-set merging-set gate-notified-set seen inbox eval-ents)
            d0 (policy/decide-agent-step step-in)
            has-unread-rev-note? (boolean (some #(= :review-note (:seon.agent.message/type %)) unread))
            review-ops (cond

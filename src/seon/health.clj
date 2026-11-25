@@ -293,41 +293,6 @@
      :pass-sig (:pass-sig tsnap)
      :test-eff (eff/test-efficiency-warnings db tsnap)}))
 
-(defn- fast-scoped-test-alerts [db scope]
-  (when (and db scope (get-in (:schema db) [:seon.test/var :db/index]))
-    (let [sc (name scope) p1 (str sc ".") br (get-in db [:config :branch] :main)
-          take-ns (fn [st pred]
-                    (into [] (comp (take-while #(and (= :seon.test/var (:a %)) (symbol? (:v %)) (pred (namespace (:v %)))))
-                                   (map (juxt :v :e :tx)))
-                          (d/seek-datoms db :avet :seon.test/var st)))
-          by-v (reduce (fn [m [v e tx]] (update m v (fnil conj []) [e (long (or tx 0))])) {}
-                       (into (take-ns (symbol sc "") #(= % sc)) (take-ns (symbol p1 "") #(and % (str/starts-with? % p1)))))
-          ea (fn [e a dflt] (if-let [dt (first (d/datoms db :eavt e a))] (:v dt) dflt))
-          rd (fn [[e tx]]
-               {:tx tx :pass? (ea e :seon.test/pass? false)
-                :ms (double (or (ea e :seon.test/ms 0.0) 0.0))
-                :ticks (long (or (ea e :seon.test/ticks 0) 0))
-                :bytes (long (or (ea e :seon.test/bytes 0) 0))})]
-      (vec (mapcat (fn [[v xs]]
-                     (let [sxs (take-last 2 (sort-by second xs))
-                           cur (rd (last sxs))
-                           nsym (when (namespace v) (symbol (namespace v)))]
-                       (when (and (:pass? cur) (or (> (:ms cur) 200.0) (> (:ticks cur) 5000000) (> (:bytes cur) 33554432)))
-                         (concat
-                          (when (> (:ms cur) 1000.0)
-                            [{:class :slow-test :severity :warning :kind :live :ns nsym :var v :subject (str v) :branch br
-                              :message (str "Slow test " v ": " (Math/round (:ms cur)) " ms (> 1000 ms).")}])
-                          (when (= 2 (count sxs))
-                            (let [p (rd (first sxs)) tr (when (pos? (:ticks p)) (/ (double (:ticks cur)) (:ticks p)))
-                                  br' (when (pos? (:bytes p)) (/ (double (:bytes cur)) (:bytes p)))
-                                  mr (when (> (:ms p) 20.0) (/ (double (:ms cur)) (:ms p)))]
-                              (when (or (and tr (> tr 2.5) (> (- (:ticks cur) (:ticks p)) 5000000))
-                                        (and br' (> br' 2.5) (> (- (:bytes cur) (:bytes p)) 33554432))
-                                        (and mr (> mr 2.5) (> (- (:ms cur) (:ms p)) 200.0)))
-                                [{:class :cost-regression :severity :warning :kind :live :ns nsym :var v :subject (str v) :branch br
-                                  :message (str "Cost regression in " v " (" (Math/round (:ms p)) " -> " (Math/round (:ms cur)) " ms).")}])))))))
-                   by-v)))))
-
 (defn fast-scoped-alerts
   "Fast O(log N + K) scoped alerts for wire tails (zero full-codebase scans!)."
   {:malli/schema [:=> [:cat :any :any :any :any :any [:maybe :map]] [:vector :seon.health/problem]], :cost/ticks 15000000}
@@ -364,7 +329,7 @@
                                     (filter (fn [x] (and (or (= :error (:severity x)) (:fix x))
                                                          (not (contains? base-keys (p-key x)))))))
                            nss)))]
-      (vec (take 8 (distinct (concat err-a edit-a (fast-scoped-test-alerts main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals {:main-db main-db :branch-edited branch-edited}) sig-a)))))))
+      (vec (take 8 (distinct (concat err-a edit-a (eff/scoped-test-efficiency-warnings main-db scope) (eff/eval-efficiency-warnings (or branch-db main-db) aid evals {:main-db main-db :branch-edited branch-edited}) sig-a)))))))
 
 (defonce ^:private ^:seon.flow/edge branch-base-health-cache (store/lru-cache 8))
 
@@ -385,11 +350,13 @@
 (defonce ^:private ^:seon.flow/edge liveness-cache (atom nil))
 
 (defn- ^:seon.flow/edge cached-liveness-check []
-  (let [pns (find-ns 'seon.reconciler.policy)
-        sig (when pns
-              (into [liveness/check-liveness]
-                    (map #(when (bound? %) (var-get %)))
-                    (vals (ns-interns pns))))
+  (let [policy-ns (find-ns (quote seon.reconciler.policy))
+        liveness-ns (find-ns (quote seon.health.liveness))
+        sig (when (and policy-ns liveness-ns)
+              (into []
+                    (comp (mapcat #(vals (sort-by key (ns-interns %))))
+                          (map #(when (bound? %) (var-get %))))
+                    [policy-ns liveness-ns]))
         cur @liveness-cache]
     (if (and sig (= sig (:sig cur)))
       (:res cur)
@@ -397,22 +364,48 @@
         (when sig (reset! liveness-cache {:sig sig :res res}))
         res))))
 
+(defn- ns-form-hashes [db nsym]
+  (when (and db (contains? (:schema db) :seon.code.form/ns))
+    (into {}
+          (keep (fn [dt]
+                  (let [eid (:e dt)
+                        fkey (:v (first (d/datoms db :eavt eid :seon.code.form/key)))
+                        fhash (:v (first (d/datoms db :eavt eid :seon.code.form/hash)))]
+                    (when fkey [fkey fhash]))))
+          (d/datoms db :avet :seon.code.form/ns nsym))))
+
+(defn- ^:seon.flow/edge matches-main-liveness-code? [db]
+  (let [branch (get-in db [:config :branch] :main)]
+    (if (= :main branch)
+      true
+      (let [st (:store db)
+            main-db (when st (try (store/head st :main) (catch Throwable _ nil)))]
+        (if-not main-db
+          false
+          (and (= (ns-form-hashes db (quote seon.reconciler.policy))
+                  (ns-form-hashes main-db (quote seon.reconciler.policy)))
+               (= (ns-form-hashes db (quote seon.health.liveness))
+                  (ns-form-hashes main-db (quote seon.health.liveness)))))))))
+
 (defn liveness-violations
-  "Runs finite-state liveness verification (`seon.health.liveness/check-liveness`, cached by `seon.reconciler.policy` var identities) on live DBs containing `seon.reconciler.policy/decide-agent-step`, surfacing any livelock, orphan-paused-parent, wedged inflight, crashed auto-merge, or stranded ready bug as `:error`."
+  "Runs finite-state liveness verification (`seon.health.liveness/check-liveness`, cached by `seon.reconciler.policy`
+   and `seon.health.liveness` var identities) on live DBs matching `:main` policy and liveness code, surfacing any
+   livelock, orphan-paused-parent, wedged inflight, crashed auto-merge, or stranded ready bug as `:error`."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.health/problem]] :cost/ticks 60000000}
   [db]
   (if-not (and db
                (not (instance? datahike.db.AsOfDB db))
                (not (instance? datahike.db.HistoricalDB db))
                (contains? (:schema db) :seon.code.form/key)
-               (first (d/datoms db :avet :seon.code.form/key "seon.reconciler.policy/decide-agent-step")))
+               (first (d/datoms db :avet :seon.code.form/key "seon.reconciler.policy/decide-agent-step"))
+               (matches-main-liveness-code? db))
     []
     (let [res (cached-liveness-check)]
       (if (:ok? res)
         []
         (let [br (get-in db [:config :branch] :main)
               mk (fn [cls subj msg]
-                   {:class cls :severity :error :kind :static :ns 'seon.reconciler.policy
+                   {:class cls :severity :error :kind :static :ns (quote seon.reconciler.policy)
                     :subject subj :branch br :message msg})]
           (cond-> []
             (:truncated? res)

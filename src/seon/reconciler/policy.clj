@@ -78,9 +78,7 @@
         trailing-errs (vec (take-while model-err-eval? (rseq evs)))
         last-err (first trailing-errs)
         last-err-msg (when last-err (str (or (:seon.agent.eval/error last-err) "")))
-        non-retryable? (boolean (and last-err
-                                     (or (false? (:retryable? last-err))
-                                         (non-retryable-error-str? last-err-msg))))
+        non-retryable? (boolean (and last-err (non-retryable-error-str? last-err-msg)))
         non-err-evals (filterv #(not (model-err-eval? %)) evs)
         last-non-err (peek non-err-evals)
         tool-streak (loop [i (dec (count non-err-evals)), turns #{}]
@@ -164,7 +162,7 @@
            in-testing? in-merging? review-notified? has-unread? has-external-unread?
            has-unread-failure? fail-after-ready? newest-external-unread-tx newest-external-unread-inst
            latest-failure-tx latest-failure-inst post-ready-reply? has-pending-review-ops?
-           eval-count last-was-tool? tool-streak turns-since-external bounce-streak
+           last-was-tool? tool-streak turns-since-external bounce-streak
            trailing-model-errors last-err-tx last-err-inst non-retryable-model-error?
            max-tool-turns max-bounces max-total-turns]}]
   (let [non-main? (and (some? branch) (not= branch :main))
@@ -186,7 +184,6 @@
         eff-tool-streak (if (integer? tool-streak) (long tool-streak) 0)
         eff-bounces (if has-external-unread? 0 (if (integer? bounce-streak) (long bounce-streak) 0))
         eff-turns (if has-external-unread? 0 (if (integer? turns-since-external) (long turns-since-external) 0))
-        eval-n (if (integer? eval-count) (long eval-count) 0)
         ready? (effective-ready?
                 {:raw-ready? raw-ready? :ready-tx ready-tx :ready-inst ready-inst
                  :merged-tx merged-tx :same-db? same-db?
@@ -209,8 +206,7 @@
                          (and has-merge-target? non-main? (not raw-ready?) (not merged?)
                               (not err-halted?) (not has-unread?)
                               (or (and (pos? max-tt) (>= eff-tool-streak max-tt))
-                                  (and waiting? (pos? eval-n))
-                                  waiting?)))
+                              waiting?)))
         review-should-abort? (boolean
                               (and active? has-merge-target? non-main? (not merged?)
                                    (or err-halted?
