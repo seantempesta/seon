@@ -107,26 +107,37 @@
                 (add! reid :seon.rule/nil (max 74 (- 91 (min 15 idx))) (:max-tx bdb)))
               ;; 2. Walk backwards from proof deftest vars (prioritizing in-scope & cited vars, skipping test-harness boilerplate)
               (let [proof-eids (task-proof-var-eids bdb teid)]
-                (doseq [pe proof-eids]
-                  (add! pe :seon.rule/nil 93 (:max-tx bdb))
-                  (let [called (eav-vals bdb pe :seon.code.var/calls)]
-                    (doseq [ve called
-                            :let [vns (eav1 bdb ve :seon.code.var/ns)]
-                            :when (not (contains? test-harness-nss vns))]
-                      (let [focal? (or (nil? tscope) (= 'seon tscope)
-                                       (contains? ref-set ve)
-                                       (var-in-scope? tscope vns))
-                            v-pri (if focal? 92 80)
-                            s-pri (if focal? 89 79)
-                            d-pri (if focal? 86 78)]
-                        (add! ve :seon.rule/nil v-pri (:max-tx bdb))
-                        (doseq [de (doc-atoms-for-eid bdb ve)]
-                          (add! de :seon.rule/nil d-pri (:max-tx bdb)))
-                        (doseq [se (concat (eav-vals bdb ve :seon.code.var/input)
-                                           (eav-vals bdb ve :seon.code.var/output))]
-                          (add! se :seon.rule/nil s-pri (:max-tx bdb))
-                          (doseq [de (doc-atoms-for-eid bdb se)]
-                            (add! de :seon.rule/nil (dec d-pri) (:max-tx bdb)))))))))))
+              (when (and (= :template/refine-task-proofs (eav1 tdb teid :seon.task/template)) (empty? proof-eids) (symbol? tscope) (not= 'seon tscope))
+                (when-let [nse (first (avet-eids bdb :seon.code.ns/name tscope))]
+                  (add! nse :seon.rule/nil 91 (:max-tx bdb)))
+                (when-let [tnse (first (avet-eids bdb :seon.code.ns/name (symbol (str tscope "-test"))))]
+                  (add! tnse :seon.rule/nil 87 (:max-tx bdb)))
+                (doseq [ve (avet-eids bdb :seon.code.var/ns tscope)
+                        :when (not (true? (eav1 bdb ve :seon.code.var/private?)))]
+                  (add! ve :seon.rule/nil 88 (:max-tx bdb))
+                  (doseq [de (doc-atoms-for-eid bdb ve)] (add! de :seon.rule/nil 84 (:max-tx bdb)))
+                  (doseq [se (concat (eav-vals bdb ve :seon.code.var/input) (eav-vals bdb ve :seon.code.var/output))]
+                    (add! se :seon.rule/nil 86 (:max-tx bdb)))))
+              (doseq [pe proof-eids]
+                (add! pe :seon.rule/nil 93 (:max-tx bdb))
+                (let [called (eav-vals bdb pe :seon.code.var/calls)]
+                  (doseq [ve called
+                          :let [vns (eav1 bdb ve :seon.code.var/ns)]
+                          :when (not (contains? test-harness-nss vns))]
+                    (let [focal? (or (nil? tscope) (= 'seon tscope)
+                                     (contains? ref-set ve)
+                                     (var-in-scope? tscope vns))
+                          v-pri (if focal? 92 80)
+                          s-pri (if focal? 89 79)
+                          d-pri (if focal? 86 78)]
+                      (add! ve :seon.rule/nil v-pri (:max-tx bdb))
+                      (doseq [de (doc-atoms-for-eid bdb ve)]
+                        (add! de :seon.rule/nil d-pri (:max-tx bdb)))
+                      (doseq [se (concat (eav-vals bdb ve :seon.code.var/input)
+                                         (eav-vals bdb ve :seon.code.var/output))]
+                        (add! se :seon.rule/nil s-pri (:max-tx bdb))
+                        (doseq [de (doc-atoms-for-eid bdb se)]
+                          (add! de :seon.rule/nil (dec d-pri) (:max-tx bdb)))))))))))
           (vec (sort-by (fn [[e _ pri _]] [(- (long pri)) (long e)]) (vals @best))))))))
 
 (defn eval-frontier-rows

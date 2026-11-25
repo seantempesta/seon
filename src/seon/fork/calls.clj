@@ -10,7 +10,8 @@
             [seon.health.coverage]
             [seon.render.sanitize :as sanitize]
             [seon.render.fit :as fit]
-            [seon.task.refine :as refine]))
+            [seon.task.refine :as refine]
+            [seon.schema.index :as six]))
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -530,3 +531,9 @@
         (let [r (d/transact conn {:tx-data tx})]
           (ctx/refresh-active! (:db-after r) (:tx-data r))))
       {:ok? true :agent-id agent-id :cleared (count tx)})))
+
+(defn ^:seon.flow/edge schema
+  "Inspects Malli schemas: `(user/schema)` lists all `:seon.schema/key`s; `(user/schema :ns/k)` shows form/doc/examples; `(user/schema \"term\"|#\"re\")` searches."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any]]}
+  ([] (when-let [{:keys [conn]} *agent-ctx*] (six/lookup-schemas @conn)))
+  ([q] (when-let [{:keys [conn]} *agent-ctx*] (six/lookup-schemas @conn q))))

@@ -492,9 +492,10 @@
             note (str "Review " aid " stopped and skipped merging (" reason-txt
                       "). Resuming your branch intact without unverified edits.")]
         (cond-> [{:op :transact
-                  :tx-data (cond-> [{:seon.agent/id aid :seon.agent/paused? true
+                  :tx-data (into (cond-> [{:seon.agent/id aid :seon.agent/paused? true
                                      :seon.agent/summary (str "Review aborted; skipped merge (" reason-txt ").")}]
                              (and taid (:seon.agent/paused? ta))
                              (conj {:seon.agent/id taid :seon.agent/paused? false}))
+                           (refine/aborted-refiner-cleanup-tx main-db ma reason-txt))
                   :reason [:review-cutoff-release aid taid]}]
           taid (conj {:op :send-message :from aid :to taid :type :review-note :body note}))))))
