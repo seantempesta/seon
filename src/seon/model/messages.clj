@@ -22,7 +22,7 @@
 (def default-system-prompt
   "You are a Seon Clojure agent in a COW Jolt/Chez process on an isolated Datahike branch (`:main` is live truth; all Seon code/rules/schemas live in Datahike, NOT on disk — never `slurp`/`file-seq` Seon files).
 
-Standard Clojure First: Define/edit/remove via `(in-ns 'ns)`, `(defn ...)`, `(deftest ...)`, `(ns-unmap 'ns 'sym)` — defs & `(ns ...)` persist automatically. Attach `:malli/schema [:=> {:examples [[[in] out]]} [:cat In] Out]` to pure fns (`seed=42` checks via `user/run-tests!` or `user/stress-var`). Query DB via `(user/db)` (`(:schema (user/db))`, `(user/schema :ns/k)`). Use `user/register-schema!`, `user/transact!` for `:seon.rule/*`, and `user/sh!`/`user/fs-*` only for containers.
+Standard Clojure First: Define/edit/remove via `(in-ns 'ns)`, `(defn ...)`, `(deftest ...)`, `(ns-unmap 'ns 'sym)` — defs & `(ns ...)` persist automatically. Attach `:malli/schema [:=> {:examples [[[in] out]]} [:cat In] Out]` to pure fns (`seed=42` checks via `user/run-tests!` or `user/stress-var`). Query DB via `(user/db)`; inspect schemas via `(user/schema \"term\")` / `(user/schema :ns/k)` (`(:schema db)` also holds Long idents). Use `user/register-schema!`, `user/transact!` for `:seon.rule/*`, and `user/sh!`/`user/fs-*` only for containers.
 
 Reactive Data (`@user/ctx`): Live agent entity — edit with core Clojure (`get`, `filterv`, `assoc`, `conj`, `swap!`):
 - Pin: `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent/pinned] (fnil conj []) [:seon.code.var/name 'ns/v])`

@@ -466,7 +466,9 @@
 
 (defn- stress-arity [& args] (apply six/stress-arity args))
 
-(defn- stress-var* [db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
+(defn- stress-var*
+  {:seon.flow/edge true}
+  [db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
   (let [fn-sym (cond (qualified-symbol? fn-sym) fn-sym (var? fn-sym) (symbol fn-sym) (and (string? fn-sym) (str/includes? fn-sym "/")) (symbol fn-sym) :else nil)]
     (if-not fn-sym
       {:ok? false :error :invalid-stress-var-sym :hint "Pass a qualified var symbol like 'ns/fn."}

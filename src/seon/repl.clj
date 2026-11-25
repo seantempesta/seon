@@ -270,9 +270,13 @@
            base-cid (branch-merge-base-cid mdb bdb branch)
            ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
            _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb (select-keys ops [:upserts :retracted-keys])))
-           raw (if (seq more) (cons target more) [target]) opt-m (when (map? (last raw)) (last raw))
-           tlist (if-let [vs (or (:vars opt-m) (:tests opt-m))] (if (coll? vs) (vec vs) [vs])
-                   (vec (mapcat #(cond (or (nil? %) (map? %)) nil (coll? %) % :else [%]) raw)))
+           raw (if (seq more) (cons target more) [target])
+           [pos-args kw-args] (split-with (complement keyword?) raw)
+           kw-map (when (and (seq kw-args) (even? (count kw-args))) (apply hash-map kw-args))
+           opt-m (merge (when (map? (last pos-args)) (last pos-args)) kw-map)
+           tlist (if-let [vs (or (:only opt-m) (:vars opt-m) (:tests opt-m))]
+                   (if (coll? vs) (vec vs) [vs])
+                   (vec (mapcat #(cond (or (nil? %) (map? %) (keyword? %)) nil (coll? %) % :else [%]) pos-args)))
            test-syms (if (seq tlist)
                        (->> tlist
                             (mapcat (fn [x]
