@@ -478,4 +478,12 @@
   :seon.fix/error-class :ab-dropped-verify-spec-and-health-eval-oom,
   :seon.fix/root-cause "build-ab-tasks only whitelisted :category and :include-trace?; scan-interesting-evals pulled evals of merged/archived agents; user/health, seon.health/report, and mine-hygiene-findings lacked 1 GB cold budget overrides.",
   :seon.fix/regression-test seon.bench-golden-test/wave9a-build-ab-preserves-verify-and-chat-agent-test,
-  :seon.fix/id #uuid "07abebda-622d-51bb-9318-b5a7b88c3f82"}]
+  :seon.fix/id #uuid "07abebda-622d-51bb-9318-b5a7b88c3f82"}
+ {:seon.fix/created-ms 1795628415349,
+  :seon.fix/symptom "Wave 7A/8C/9B traces lost 4-8 turns (and failed Wave 8C Trial 2 & Wave 9B Trial 2) when agents defined scratch defs (measure-call / d/pull / db probes) in active seon.* namespaces and tried to remove them via (doseq [s '[...]] (ns-unmap 'ns s)).",
+  :seon.fix/change-summary "Added before/after ns-interns diff in seon.code/eval-single-form whenever src mentions ns-unmap so ANY nested (doseq/do/map) ns-unmap retracts its forms & vars from Datahike, and expanded runtime-scratch-def? to skip compile-impossible measure-call and Datahike query scratch defs.",
+  :seon.fix/before-after "Eliminates the #1 remaining failure class across Waves 7A/8C/9B (4-8 turn scratch-def cleanup traps).",
+  :seon.fix/error-class :doseq-ns-unmap-orphaned-db-forms,
+  :seon.fix/root-cause "seon.code/eval-single-form only recognized top-level (ns-unmap 'ns 'sym) and scratch-def? only checked user/* symbols, missing measure-call and d/pull/datoms/q runtime probes and missing ns-unmap inside doseq/do.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave9e-doseq-ns-unmap-and-scratch-def-guard-test,
+  :seon.fix/id #uuid "06ac8b7a-4b6a-57c8-947a-b5e7791a94c0"}]

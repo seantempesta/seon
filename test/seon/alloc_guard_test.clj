@@ -470,3 +470,25 @@
       (let [rt (seon.repl/run-tests! 'seon.alloc-guard-test :only '[seon.alloc-guard-test/wave7d-stress-var-kwargs-and-schema-docs-test])]
         (is (true? (:ok? rt)))
         (is (= 1 (:ran rt)))))))
+
+(deftest ^{:cost/ticks 60000000} wave9e-doseq-ns-unmap-and-scratch-def-guard-test
+  (testing "doseq/do (ns-unmap ...) retracts vars & forms from Datahike, and runtime scratch defs do not pollute target namespaces"
+    (with-test-store [{:keys [conn]}]
+      (let [r1 (code/eval-forms @conn {:agent-id :repl/w9e :turn 1}
+                 "(ns demo.w9e-unmap) (def keep-const 42) (def tmp-a 1) (def tmp-b 2) (def db-probe (when false (datahike.api/pull nil '[*] 1)))")
+            _ (when (seq (:tx-data r1)) (d/transact conn {:tx-data (:tx-data r1)}))
+            db1 @conn
+            has-form? (fn [db k] (boolean (first (d/datoms db :avet :seon.code.form/key k))))]
+        (is (true? (:ok? r1)))
+        (is (has-form? db1 "demo.w9e-unmap/keep-const"))
+        (is (has-form? db1 "demo.w9e-unmap/tmp-a"))
+        (is (has-form? db1 "demo.w9e-unmap/tmp-b"))
+        (is (not (has-form? db1 "demo.w9e-unmap/db-probe")) "Runtime DB-query scratch def must not persist")
+        (let [r2 (code/eval-forms @conn {:agent-id :repl/w9e :turn 2}
+                   "(doseq [s '[tmp-a tmp-b]] (ns-unmap 'demo.w9e-unmap s))")
+              _ (when (seq (:tx-data r2)) (d/transact conn {:tx-data (:tx-data r2)}))
+              db2 @conn]
+          (is (true? (:ok? r2)))
+          (is (has-form? db2 "demo.w9e-unmap/keep-const"))
+          (is (not (has-form? db2 "demo.w9e-unmap/tmp-a")) "doseq ns-unmap must retract form from Datahike")
+          (is (not (has-form? db2 "demo.w9e-unmap/tmp-b")) "doseq ns-unmap must retract form from Datahike"))))))
