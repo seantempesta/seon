@@ -413,6 +413,6 @@
                  ['simulate-context #'simulate-context] ['check-corpus #'check-corpus] ['tune-context! #'tune-context!]
                  ['friction #'hmetrics/repl-friction] ['golden-scoreboard #'bgolden/repl-golden-scoreboard]
                  ['run-golden-suite! #'bgolden/run-golden-suite!] ['run-ab! #'bgolden/run-ab!] ['summarize-ab #'bgolden/summarize-ab]
-                 ['sample-random-tasks #'bhelpers/repl-sample-random-tasks] ['run-supervisor-cycle! #'blab/run-supervisor-cycle!]
+                 ['sample-random-tasks #'bhelpers/repl-sample-random-tasks] ['run-supervisor-cycle! #'blab/run-supervisor-cycle!] ['bench-run #'blab/bench-run]
                  ['liveness #'hliveness/check-liveness]]]
     (intern-doc! u s v)))

@@ -85,10 +85,16 @@ case "$cmd" in
     post_edn "{:op :test :branch ${br}}"
     ;;
   eval)
-    br=${1:?usage: bin/seon eval :branch/name '(+ 1 2)'}
-    code=${2:?usage: bin/seon eval :branch/name '(+ 1 2)'}
+    br=${1:?usage: bin/seon eval :branch/name ['(+ 1 2)' | -]}
+    if [[ -z "${2:-}" || "${2:-}" == "-" ]]; then
+      code=$(cat)
+    else
+      code=$2
+    fi
     escaped=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$code")
-    post_edn "{:op :eval :branch ${br} :code ${escaped}}"
+    t_opt=""
+    [[ -n "${SEON_TIMEOUT_MS:-}" ]] && t_opt=" :timeout-ms ${SEON_TIMEOUT_MS}"
+    post_edn "{:op :eval :branch ${br} :code ${escaped}${t_opt}}"
     ;;
   var)
     sym=${1:?usage: bin/seon var seon.store/open!}
@@ -97,6 +103,10 @@ case "$cmd" in
   schema)
     kw=${1:?usage: bin/seon schema :seon.code.var/ticks-budget}
     post_edn "{:op :explore-schema :key ${kw}}"
+    ;;
+  scope)
+    ns=${1:?usage: bin/seon scope seon.code}
+    post_edn "{:op :explore-scope :ns ${ns}}"
     ;;
   import)
     br=${1:?usage: bin/seon import :branch/name src/foo.clj}
