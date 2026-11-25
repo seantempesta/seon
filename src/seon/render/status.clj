@@ -262,7 +262,8 @@
                      0)
         sync-tx (if (and branch-db (contains? dh :seon.tx/merged))
                   (reduce (fn [m dt] (max m (long (:tx dt))))
-                          0 (d/datoms branch-db :avet :seon.tx/merged :main))
+                  0 (concat (d/datoms branch-db :avet :seon.tx/merged :main)
+                            (d/datoms branch-db :avet :seon.tx/merged :fork-review)))
                   0)]
     (max retract-tx sync-tx)))
 

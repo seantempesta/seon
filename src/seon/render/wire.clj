@@ -124,8 +124,12 @@
                      (and (pos? reset-tx) (not read-main?) (not= branch :main))
                      (or (:commit (diff/commit-holding-tx-cached branch-db reset-tx)) (live-cid branch-db))
                      (and (:seon.agent/forked-from ag) (not read-main?) (empty? (:datahike/uncommitted (meta branch-db))))
-                     (let [ag-tx (or (:tx (first (d/datoms branch-db :avet :seon.agent/id (:seon.agent/id ag)))) 0)]
-                       (when (pos? ag-tx) (:commit (diff/commit-holding-tx-cached branch-db ag-tx)))))
+                     (let [ag-tx (or (:tx (first (d/datoms branch-db :avet :seon.agent/id (:seon.agent/id ag))))
+                                    (some #(:tx (first (d/datoms branch-db :avet :seon.task/id %)))
+                                    (rdata/agent-task-ids main-db ag))
+                                    0)]
+                     (or (when (pos? ag-tx) (:commit (diff/commit-holding-tx-cached branch-db ag-tx)))
+                         (:seon.agent/fork-commit ag))))
         base-cid (when (and (nil? anchor-cid) (nil? (:seon.agent/forked-from ag)) (not= branch :main) (not read-main?))
                    (diff/fast-merge-base main-db branch-db))]
     {:read-main? read-main? :reset-tx reset-tx :anchor-cid anchor-cid :base-cid base-cid :store-or-conn store-or-conn}))
@@ -133,8 +137,7 @@
 (defn- ^:seon.flow/edge derive-wire-walk-prefix [main-db branch-db conn ag anchor-turn opts]
   (let [branch (:seon.agent/branch ag :main)
         {:keys [read-main? reset-tx anchor-cid base-cid store-or-conn]} (resolve-walk-db main-db branch-db conn ag)
-        eff-cid (cond (seq (:already-shown opts)) (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)])
-                      anchor-cid anchor-cid base-cid base-cid (pos? reset-tx) [:main-reset reset-tx] :else :main-session)
+        eff-cid (cond anchor-cid anchor-cid base-cid base-cid (pos? reset-tx) [:main-reset reset-tx] (seq (:already-shown opts)) (let [wdb (if read-main? main-db branch-db)] [(live-cid wdb) (:max-tx wdb)]) :else :main-session)
         task-ids (vec (sort-by str (distinct (concat (rdata/agent-task-ids branch-db ag) (rdata/agent-task-ids main-db ag)))))
         task? (boolean (and (seq task-ids) (some #(first (d/datoms branch-db :avet :seon.task/id %)) task-ids)))
         task-sig (when (and (seq task-ids) (or (= eff-cid :main-session) (= branch :main)))
@@ -163,10 +166,10 @@
                                        scope (:seon.agent/scope ag)
                                        scope-in-base? (or (nil? scope) (and base-db (boolean (first (d/datoms base-db :avet :seon.code.ns/name scope)))))
                                        walk-db (cond read-main? main-db anchor-db anchor-db (and base-db scope-in-base?) base-db :else branch-db)
-                                       walk-main (if (and (not read-main?) (not (identical? walk-db branch-db))
-                                                          (first (d/datoms walk-db :avet :seon.agent/id (:seon.agent/id ag))))
-                                                   walk-db main-db)
-                                       tdb (if task? branch-db main-db)]
+                                       walk-main (if (and (not read-main?) (or (some? anchor-db) (and (some? base-db) scope-in-base?))
+                                                        (first (d/datoms walk-db :avet :seon.agent/id (:seon.agent/id ag))))
+                                                 walk-db main-db)
+                                       tdb (cond (and task? (some #(first (d/datoms walk-db :avet :seon.task/id %)) task-ids)) walk-db task? branch-db :else main-db)]
                                    {:walk-db walk-db :walk-main walk-main :task-db tdb :walk-main-cid (live-cid walk-main)
                                     :default-fit (delay (project-wire walk-main walk-db ag {:task-db tdb :turn (max 0 (dec (long anchor-turn)))
                                                                                             :use-live-touches? false}))})))
