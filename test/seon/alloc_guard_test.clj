@@ -659,3 +659,22 @@
                {"add-fn!" {:arglists "([ns-sym form])" :doc "Adds a form."}})]
       (is (clojure.string/includes? h1 "non-nil sentinel"))
       (is (clojure.string/includes? h2 "user/add-fn!")))))
+
+(deftest wave14b-media-image-validation-and-wire-sanitizer-test
+  (testing "extract-recent-eval-images ignores schema/form metadata maps and bogus non-image media examples"
+    (let [bad-schema-val (pr-str {:seon.schema/key :seon.media/image
+                                  :seon.schema/examples [{:seon.media/mime "3w" :seon.media/base64 "Kt" :seon.media/width -1 :seon.media/height -1}]})
+          bad-inline-val (pr-str {:seon.media/mime "" :seon.media/base64 "y" :seon.media/width 0 :seon.media/height 0})
+          good-inline-val (pr-str {:seon.media/mime "image/png" :seon.media/base64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" :seon.media/width 1 :seon.media/height 1})]
+      (is (empty? (seon.model.media/extract-recent-eval-images nil [{:calls [{:value bad-schema-val}]}])))
+      (is (empty? (seon.model.media/extract-recent-eval-images nil [{:calls [{:value bad-inline-val}]}])))
+      (is (= 1 (count (seon.model.media/extract-recent-eval-images nil [{:calls [{:value good-inline-val}]}]))))))
+  (testing "sanitize-wire-image-parts strips synthetic/corrupt base64 data URLs while preserving valid PNG/JPEG images"
+    (let [png-url "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+          bad-msgs [{:role "user" :content [{:type "text" :text "Check"}
+                                            {:type "image_url" :image_url {:url "data:image/jpeg;base64,y"}}]}]
+          good-msgs [{:role "user" :content [{:type "text" :text "Check"}
+                                             {:type "image_url" :image_url {:url png-url}}]}]]
+      (is (= [{:role "user" :content "Check"}] (seon.model/sanitize-wire-image-parts bad-msgs)))
+      (is (= good-msgs (seon.model/sanitize-wire-image-parts good-msgs)))
+      (is (true? (seon.model/multimodal-unsupported-error? 400 "{\"error\":{\"message\":\".messages[17].content[2]: You have uploaded an unsupported\"}}"))))))

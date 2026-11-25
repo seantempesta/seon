@@ -10,11 +10,12 @@
             [seon.render.links :as rlinks :refer [badge btn db-schema ent-link kicker mut]]
             [seon.render.status :as rstatus]
             [seon.store :as store :refer [live-cid]]
-            [seon.store.query :as sq]))
+            [seon.store.query :as sq]
+            [seon.render.text :refer [round2]]))
 
 (defonce ^:private ^:seon.flow/edge tuner-diff-cache (store/lru-cache 16))
 
-(defn- r2 [x] (/ (Math/round (* (double (or x 0.0)) 100.0)) 100.0))
+(defn- r2 [x] (round2 x))
 
 (defn- focal-agent-id [main-db v]
   (cond

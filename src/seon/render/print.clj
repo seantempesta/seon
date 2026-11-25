@@ -6,7 +6,8 @@
             [seon.render.print.expand :as pexp]
             [seon.render.print.policy :as ppol]
             [seon.render.print.select :as psel]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.model.media :as mmedia]))
 
 (defn preview-rules
   "Declarative `:seon.rule/*` rule definitions governing print policy."
@@ -118,14 +119,7 @@
   [val opts]
   (pexp/slice-value val opts))
 
-(defn- edn-tag-val [tag v]
-  (case tag
-    datahike/DB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/db})
-    datahike/AsOfDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/as-of-db})
-    datahike/HistoricalDB (with-meta (if (map? v) v {:value v}) {:seon.print/kind :datahike/historical-db})
-    datahike/Connection (with-meta (if (vector? v) {:store-id (first v) :branch (second v) :writer (nth v 2 nil)} {:value v})
-                                   {:seon.print/kind :datahike/conn})
-    (if (instance? clojure.lang.IObj v) (with-meta v {:seon.print/tag tag}) {:seon.print/tag tag :value v})))
+(defn- edn-tag-val [tag v] (mmedia/edn-tag-val tag v))
 
 (defn- resolve-result-handle [db sym agent-id]
   (let [rns (find-ns (quote result))

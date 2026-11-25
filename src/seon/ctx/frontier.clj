@@ -6,13 +6,8 @@
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.store :as store :refer [db-schema]]))
-
-(defn- safe-long [x dflt]
-  (cond
-    (integer? x) (long x)
-    (number? x) (let [v (double x)] (if (and (== v v) (not (Double/isInfinite v))) (long v) (long dflt)))
-    :else (long dflt)))
+            [seon.store :as store :refer [db-schema]]
+            [seon.render.text :refer [safe-long]]))
 
 (defn- finite-pos [x dflt]
   (if (number? x)

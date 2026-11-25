@@ -317,7 +317,7 @@
            ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
            _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb (select-keys ops [:upserts :retracted-keys])))
            {:keys [ordered-tests gen-vars]} (resolve-run-tests-targets bdb ops target more)
-           b0 (code/alloc-bytes) soft-byte-cap 8589934592
+           b0 (code/alloc-bytes) soft-byte-cap 4294967296
            {:keys [results skipped-by-budget gen-results]}
            (wsup/call-with-candidate-overrides bdb
              (fn [_]
@@ -331,11 +331,12 @@
                  {:results ran-res
                   :skipped-by-budget skipped
                   :gen-results (vec (keep (fn [vsym]
-                                            (when-let [r (schema/stress-var bdb vsym {:samples 100 :seed 42 :measure-fn code/measure-call})]
-                                              (when-not (:skipped? r)
-                                                {:seon.test/var vsym :seon.test/kind :generative :seon.test/pass? (boolean (:ok? r))
-                                                 :seon.test/ms (double (:ms r 0.0)) :seon.test/report (or (:reason r) "PASS")})))
-                                          gen-vars))})))
+                                 (when (< (- (code/alloc-bytes) b0) soft-byte-cap)
+                                   (when-let [r (schema/stress-var bdb vsym {:samples 100 :seed 42 :measure-fn code/measure-call})]
+                                     (when-not (:skipped? r)
+                                       {:seon.test/var vsym :seon.test/kind :generative :seon.test/pass? (boolean (:ok? r))
+                                        :seon.test/ms (double (:ms r 0.0)) :seon.test/report (or (:reason r) "PASS")}))))
+                               gen-vars))})))
            all-res (into results gen-results)
            fails (mapv (fn [f] (let [mp (main-test-pass? mdb (:seon.test/var f))]
                                  (assoc (select-keys f [:seon.test/var :seon.test/kind :seon.test/report :seon.test/ms]) :main-pass? mp :summary (concise-failure-line f mp))))

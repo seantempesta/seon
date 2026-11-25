@@ -175,3 +175,12 @@
    :cost/ticks 50000 :cost/bytes 16384}
   [x]
   (round-n x 10000.0))
+
+(defn round2
+  "Rounds a finite number to 2 decimal places (returns `0.0` for non-numeric or non-finite inputs)."
+  {:malli/schema [:=> {:examples [[[1.234] 1.23] [[1.236] 1.24] [[nil] 0.0]]}
+                  [:cat :any] :double]
+   :cost/ticks 50000}
+  [x]
+  (let [d (finite-double x 0.0)]
+    (/ (Math/round (* d 100.0)) 100.0)))

@@ -533,4 +533,12 @@
   :seon.fix/error-class :seon.reconciler/bplus-await-merge-race-and-repl-ergonomics,
   :seon.fix/root-cause "call-delivery-state dropped :awaiting-blocked? as soon as :pending=0 even while callee merge-in-flight held delivery; handle-await-calls! short-circuited on :resolved calls with unmerged branch edits; handle-settle-calls! did not retract stale already-delivered awaiting IDs; reconciler kept vanished candidates in :views; pprint was not referred in user/repl.",
   :seon.fix/regression-test seon.alloc-guard-test/wave13b-bplus-await-merge-sync-pprint-and-error-hints-test,
-  :seon.fix/id #uuid "52f183da-756f-480f-8949-7cdd49b3c400"}]
+  :seon.fix/id #uuid "52f183da-756f-480f-8949-7cdd49b3c400"}
+ {:seon.fix/created-ms 1795633702396,
+  :seon.fix/symptom "Pure code agent (:ns/seon.render.text) crashed with Model HTTP 400 (.messages[17].content[2]: You have uploaded an unsupported) after inspecting schema/test data containing garbage :seon.media/image examples (:mime \"3w\", :base64 \"Kt\", :width -1); run-tests! breached 12 GB hard cap when soft cap was 8 GB.",
+  :seon.fix/change-summary "Replaced garbage :seon.media/image schema examples with a valid 1x1 PNG; hardened normalize-media-image and collect-media-candidates-from-val; added pure valid-image-data-url? magic-byte verifier and sanitize-wire-image-parts before live HTTP POST; expanded multimodal-unsupported-error?; lowered run-tests! soft-byte-cap to 4 GB including gen-results; consolidated round2, safe-long, and edn-tag-val.",
+  :seon.fix/before-after "Wave 14A: 5/5 unseen seed=112 (100%, 0 OOMs), B+-tree :ns/seon.render.text hit Turn 5 HTTP 400 corrupt image -> Wave 14B 4-layer media safety + 4 GB run-tests! soft cap.",
+  :seon.fix/error-class :seon.model/corrupt-media-image-http400,
+  :seon.fix/root-cause "collect-media-candidates-from-val scraped :seon.media/base64 from arbitrary schema/form metadata maps; normalize-media-image accepted non-image MIMEs and non-positive dims; openai-stream-chat! sent unvalidated base64 image_url payloads and multimodal-unsupported-error? missed 'uploaded an unsupported'.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave14b-media-image-validation-and-wire-sanitizer-test,
+  :seon.fix/id #uuid "84c7d677-0408-4fe0-9097-9a35fe37894d"}]
