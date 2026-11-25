@@ -127,8 +127,10 @@
   (into #{} (map stem-token) (tokenize-goal s)))
 
 (defn- db-index-key [db kind]
-  (when (instance? datahike.db.DB db)
-    [kind (get-in db [:config :store :id]) (get-in db [:config :branch]) (try (d/commit-id db) (catch Throwable _ nil)) (:max-tx db)]))
+  (when (and (instance? datahike.db.DB db)
+             (not (instance? datahike.db.AsOfDB db))
+             (not (instance? datahike.db.HistoricalDB db)))
+    [kind (get-in db [:config :store :id]) (get-in db [:config :branch]) (d/commit-id db) (:max-tx db)]))
 
 (defn- build-doc-tfidf-index [db]
   (store/without-agent-eval-reads

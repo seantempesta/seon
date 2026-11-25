@@ -43,7 +43,7 @@
     :else x))
 
 (defn sort-forms-topologically
-  {:malli/schema [:=> [:cat [:sequential [:map [:seon.code.form/key :string] [:seon.code.form/ns :symbol] [:seon.code.form/order {:optional true} :int] [:seon.code.form/deps {:optional true} [:or [:set :qualified-symbol] [:sequential :qualified-symbol]]]]]] [:vector :map]], :cost/ticks 10000000}
+  {:malli/schema [:=> [:cat [:sequential [:map [:seon.code.form/key :string] [:seon.code.form/ns :symbol] [:seon.code.form/order {:optional true} :int] [:seon.code.form/deps {:optional true} [:or [:set :symbol] [:sequential :symbol]]]]]] [:vector :map]], :cost/ticks 10000000}
   [forms]
   (let [by-ns (group-by :seon.code.form/ns (filter :seon.code.form/ns forms))
         ns-set (set (keys by-ns))

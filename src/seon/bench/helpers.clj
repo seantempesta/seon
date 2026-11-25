@@ -371,6 +371,7 @@
                                        (not (str/ends-with? (name vns) "-test"))
                                        (not (contains? '#{seon.main seon.fork} vns))
                                        (not (str/ends-with? (name vnm) "!"))
+                                       (not (str/ends-with? (name vnm) "-proc"))
                                        (not (eav1 e :seon.code.var/private?))
                                        (not (eav1 e :seon.code.var/flow-edge?))
                                        (not (eav1 e :seon.code.var/macro?))
@@ -448,7 +449,7 @@
   ([] (repl-sample-random-tasks nil))
   ([opts]
    (let [ctx (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)
-         db (or (:db opts) (when-let [c (:conn ctx)] @c))]
+         db (or (:db opts) (when-let [c (:conn ctx)] (or (store/head c :main) @c)))]
      (if db (sample-random-tasks db opts) []))))
 
 (defn ^:seon.flow/edge verify-task-spec

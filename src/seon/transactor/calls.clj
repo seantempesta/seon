@@ -159,288 +159,247 @@
      :fork-commit fork-commit :merge-target mt-val
      :auto-merge? eff-auto :resolve-eid res-eid}))
 
+(defn- handle-settle-calls! [st msg prev-cid {:keys [reply! db-notice]}]
+  (let [{:keys [conn]} st
+        {:keys [caller call-ids clear-awaiting?]} msg
+        db0 @conn
+        calls (vec (keep (fn [id]
+                           (let [c (pull-call db0 id)]
+                             (when (and c (not= :pending (:seon.agent.call/status c)) (not (:seon.agent.call/delivered? c)))
+                               c)))
+                         (distinct call-ids)))]
+    (if (empty? calls)
+      (do (reply! msg {:ok? true :delivered 0}) [st nil])
+      (let [mseq (inc (:msg-seq st))
+            mid (random-uuid)
+            mark-ops (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c) :seon.agent.call/delivered? true}) calls)
+            cur-awaiting (when clear-awaiting?
+                           (set (:seon.agent/awaiting (d/pull db0 '[:seon.agent/awaiting] [:seon.agent/id caller]))))
+            retract-ops (when clear-awaiting?
+                          (vec (for [c calls :let [cid (:seon.agent.call/id c)] :when (contains? cur-awaiting cid)]
+                                 [:db/retract [:seon.agent/id caller] :seon.agent/awaiting cid])))
+            msg-ent {:seon.agent.message/id mid :seon.agent.message/seq mseq
+                     :seon.agent.message/from :seon/calls :seon.agent.message/to caller
+                     :seon.agent.message/type :call-result
+                     :seon.agent.message/body (format-call-results-body calls)}
+            r (d/transact conn {:tx-data (vec (concat retract-ops mark-ops [msg-ent]))})
+            db (:db-after r)
+            cid (d/commit-id db)]
+        (reply! msg {:ok? true :delivered (count calls) :message-id mid :tx (:max-tx db)})
+        [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
+         {:db [(db-notice prev-cid db (:tx-data r) [:settle-calls caller])]
+          ::flow/report [(str "[:transactor] delivered " (count calls) " call result(s) -> " caller)]}]))))
+
+(defn- handle-cancel-call! [st msg prev-cid {:keys [reply! db-notice]}]
+  (let [{:keys [conn]} st
+        {:keys [call-id reason]} msg
+        db0 @conn
+        targets (pending-descendant-calls db0 call-id)]
+    (if (empty? targets)
+      (do (reply! msg {:ok? true :cancelled []}) [st nil])
+      (let [err-val {:class :cancelled :reason (str (or reason "cancelled"))}
+            tx-data (mapv (fn [id]
+                            {:seon.agent.call/id id :seon.agent.call/status :cancelled
+                             :seon.agent.call/error err-val :seon.agent.call/settled-tx (long (:max-tx db0))})
+                          targets)
+            r (d/transact conn {:tx-data tx-data})
+            db (:db-after r)
+            cid (d/commit-id db)]
+        (reply! msg {:ok? true :cancelled targets :tx (:max-tx db)})
+        [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+         {:db [(db-notice prev-cid db (:tx-data r) [:cancel-call call-id])]
+          ::flow/report [(str "[:transactor] cancelled " (count targets) " call(s) under " call-id)]}]))))
+
+(defn- handle-fail-call! [st msg prev-cid {:keys [reply! db-notice]}]
+  (let [{:keys [conn]} st
+        {:keys [call-id error]} msg
+        db0 @conn
+        c (pull-call db0 call-id)]
+    (cond
+      (nil? c)
+      (do (reply! msg {:ok? false :error {:class :unknown-call :call-id call-id}}) [st nil])
+
+      (not= :pending (:seon.agent.call/status c))
+      (do (reply! msg {:ok? false :error {:class :already-settled :call-id call-id :status (:seon.agent.call/status c)}}) [st nil])
+
+      :else
+      (let [err-val (if (map? error) error {:class :failed :message (str error)})
+            r (d/transact conn {:tx-data [{:seon.agent.call/id call-id :seon.agent.call/status :failed
+                                           :seon.agent.call/error err-val :seon.agent.call/settled-tx (long (:max-tx db0))}]})
+            db (:db-after r)
+            cid (d/commit-id db)]
+        (reply! msg {:ok? true :call-id call-id :status :failed :tx (:max-tx db)})
+        [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+         {:db [(db-notice prev-cid db (:tx-data r) [:fail-call call-id])]
+          ::flow/report [(str "[:transactor] call " call-id " FAILED (" (:class err-val) ")")]}]))))
+
+(defn- handle-answer-call! [st msg prev-cid {:keys [reply! db-notice]}]
+  (let [{:keys [conn]} st
+        {:keys [call-id result]} msg
+        db0 @conn
+        c (pull-call db0 call-id)]
+    (cond
+      (nil? c)
+      (do (reply! msg {:ok? false :error {:class :unknown-call :call-id call-id}}) [st nil])
+
+      (not= :pending (:seon.agent.call/status c))
+      (do (reply! msg {:ok? false :error {:class :already-settled :call-id call-id :status (:seon.agent.call/status c)}}) [st nil])
+
+      :else
+      (let [rsch (:seon.agent.call/result-schema c)
+            check (when rsch (schema/validate-against db0 rsch result))]
+        (if (and check (not (:ok? check)))
+          (do (reply! msg {:ok? false
+                           :error {:class :schema-mismatch :call-id call-id :schema rsch :explain (:explain check)
+                                   :message (str "Result failed Malli schema " rsch ": " (pr-str (:explain check)))}})
+              [st nil])
+          (let [close-op (auto-close-subtask-op conn db0 c result)
+                tx-data (cond-> [{:seon.agent.call/id call-id :seon.agent.call/status :resolved
+                                  :seon.agent.call/result result :seon.agent.call/settled-tx (long (:max-tx db0))}]
+                          close-op (conj close-op))
+                r (d/transact conn {:tx-data tx-data})
+                db (:db-after r)
+                cid (d/commit-id db)]
+            (reply! msg (cond-> {:ok? true :call-id call-id :status :resolved :tx (:max-tx db)}
+                          close-op (assoc :closed-subtask (:seon.task/id close-op))))
+            [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+             {:db [(db-notice prev-cid db (:tx-data r) [:answer-call call-id])]
+              ::flow/report [(str "[:transactor] call " call-id " RESOLVED by " (:seon.agent.call/callee c))]}]))))))
+
+(defn- handle-await-calls! [st msg prev-cid {:keys [reply! db-notice]}]
+  (let [{:keys [conn]} st
+        {:keys [caller call-ids]} msg
+        ids (vec (distinct call-ids))
+        db0 @conn
+        pulled (mapv #(vector % (pull-call db0 %)) ids)
+        missing (keep (fn [[id c]] (when-not c id)) pulled)]
+    (cond
+      (empty? ids)
+      (do (reply! msg {:ok? true :settled? true :results {}}) [st nil])
+
+      (seq missing)
+      (do (reply! msg {:ok? false :error {:class :unknown-call :missing (vec missing)}}) [st nil])
+
+      :else
+      (let [calls (mapv second pulled)
+            pending (filterv #(= :pending (:seon.agent.call/status %)) calls)]
+        (if (empty? pending)
+          (let [deliver-tx (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c) :seon.agent.call/delivered? true}) calls)
+                r (d/transact conn {:tx-data deliver-tx})
+                db (:db-after r)
+                cid (d/commit-id db)
+                res-map (into {} (map (fn [c] [(:seon.agent.call/id c) (call-summary-map c)])) calls)]
+            (reply! msg {:ok? true :settled? true :results res-map :tx (:max-tx db)})
+            [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+             {:db [(db-notice prev-cid db (:tx-data r) [:await-settled caller])]}])
+          (let [tx-data (mapv (fn [id] [:db/add [:seon.agent/id caller] :seon.agent/awaiting id]) ids)
+                r (d/transact conn {:tx-data tx-data})
+                db (:db-after r)
+                cid (d/commit-id db)]
+            (reply! msg {:ok? true :settled? false :awaiting (mapv :seon.agent.call/id pending) :tx (:max-tx db)
+                         :note "Suspended cleanly in Datahike (0 blocked threads); will auto-resume when all awaited calls settle."})
+            [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+             {:db [(db-notice prev-cid db (:tx-data r) [:await-calls caller])]}]))))))
+
+(defn- handle-create-call! [st msg prev-cid {:keys [reply! db-notice focus-tx]}]
+  (let [{:keys [conn]} st
+        {:keys [caller callee prompt parent-call result-schema await? scope goal]} msg
+        db0 @conn
+        cycle-path (call-cycle-chain db0 caller callee)]
+    (if cycle-path
+      (do (reply! msg {:ok? false
+                       :error {:class :cycle :caller caller :callee callee :chain cycle-path
+                               :message (str "Deadlock cycle rejected: " (pr-str cycle-path))}})
+          [st nil])
+      (let [callee-e (:e (first (d/datoms db0 :avet :seon.agent/id callee)))
+            callee-exists? (boolean callee-e)
+            callee-archived? (boolean (and callee-e (:seon.agent/archived? (d/pull db0 '[:seon.agent/archived?] callee-e))))
+            fspec (resolve-fork-spec conn db0 msg)
+            fork-eid (:fork-eid fspec)
+            fork-parent (:fork-parent fspec)
+            inferred-scope (or (infer-ns-scope db0 callee scope) (:seon.agent/scope fork-parent))]
+        (if (or callee-archived? (and (not callee-exists?) (nil? inferred-scope)))
+          (do (reply! msg {:ok? false
+                           :error (if callee-archived?
+                                    {:class :callee-archived :callee callee
+                                     :message (str "Callee " callee " is archived and cannot accept calls. Spawn a fresh worker or pick an active agent.")}
+                                    {:class :unknown-callee :callee callee
+                                     :message (str "Callee " callee " does not exist. Pass {:scope 'ns.name} or use :ns/<existing-ns> to lazy-spawn a specialist.")})})
+              [st nil])
+          (let [call-id (random-uuid)
+                mid (random-uuid)
+                mseq (inc (:msg-seq st))
+                spawn-branch (when-not callee-exists?
+                               (keyword "branch" (str (or (namespace callee) "agent") "." (name callee))))
+                ns-tx (when (and (not callee-exists?) inferred-scope) (focus-tx inferred-scope))
+                eff-auto (if (some? (:auto-merge? fspec)) (:auto-merge? fspec) true)
+                spawn-ent (when-not callee-exists?
+                            (cond-> {:seon.agent/id callee :seon.agent/parent caller :seon.agent/branch spawn-branch
+                                     :seon.agent/scope inferred-scope :seon.agent/focus (str "ns/" inferred-scope)
+                                     :seon.agent/goal (or goal (str "Subsystem owner for namespace " inferred-scope " and its children. Research questions deeply (delegating to child :ns/<sub-ns> specialists when helpful), critique weak answers, edit/test code on your branch when asked to fix or refactor, and settle incoming calls via (user/answer! call-id val)."))
+                                     :seon.agent/auto-merge? eff-auto}
+                              fork-eid (assoc :seon.agent/forked-from fork-eid)
+                              (:fork-commit fspec) (assoc :seon.agent/fork-commit (:fork-commit fspec))
+                              (some? (:merge-target fspec)) (assoc :seon.agent/merge-target (:merge-target fspec))
+                              (and (nil? fork-eid) (first (d/datoms db0 :avet :seon.agent/id :example/recursive-fanout)))
+                              (assoc :seon.agent/examples #{:example/recursive-fanout})))
+                call-ent (cond-> {:seon.agent.call/id call-id :seon.agent.call/caller caller :seon.agent.call/callee callee
+                                  :seon.agent.call/message-id mid :seon.agent.call/prompt (str (or prompt ""))
+                                  :seon.agent.call/status :pending :seon.agent.call/created-tx (long (:max-tx db0))
+                                  :seon.agent.call/delivered? false}
+                           parent-call (assoc :seon.agent.call/parent-call parent-call)
+                           result-schema (assoc :seon.agent.call/result-schema result-schema))
+                msg-ent {:seon.agent.message/id mid :seon.agent.message/seq mseq
+                         :seon.agent.message/from caller :seon.agent.message/to callee
+                         :seon.agent.message/type :call
+                         :seon.agent.message/body (format-call-request-body call-id caller prompt result-schema)}
+                subtask (build-subtask-tx db0 caller callee call-id inferred-scope msg)
+                subtask-id (:task-id subtask)
+                sub-ref (when subtask-id (or (:e (first (d/datoms db0 :avet :seon.task/id subtask-id)))
+                                             (some #(when (= subtask-id (:seon.task/id %)) (:db/id %)) (:tx subtask))
+                                             [:seon.task/id subtask-id]))
+                spawn-ent (if (and spawn-ent sub-ref (contains? (:schema db0) :seon.agent/tasks))
+                            (assoc spawn-ent :seon.agent/tasks #{sub-ref})
+                            spawn-ent)
+                callee-task-ent (when (and callee-exists? sub-ref (contains? (:schema db0) :seon.agent/tasks))
+                                  {:seon.agent/id callee :seon.agent/tasks #{sub-ref}})
+                await-ent (when (and await? caller (not= caller :user))
+                            {:seon.agent/id caller :seon.agent/awaiting call-id})
+                tx-data (with-ref-mirrors db0 (concat ns-tx (:tx subtask)
+                                (remove nil? [spawn-ent callee-task-ent msg-ent await-ent
+                                              (cond-> call-ent subtask-id (assoc :seon.agent.call/task-ref [:seon.task/id subtask-id]))])))
+                r (d/transact conn {:tx-data tx-data})
+                _ (if spawn-branch
+                    (let [src-br (or (:src-branch fspec) :main)]
+                      (store/branch! conn src-br spawn-branch)
+                      (when (not= src-br :main)
+                        (mirror-callee-task-to-branch! conn (:cfg st) spawn-branch
+                          (vec (concat (:tx subtask) [(-> spawn-ent (dissoc :seon.agent/tasks :seon.agent/forked-from :seon.agent/merge-target)
+                                                          (cond-> subtask-id (assoc :seon.agent/tasks #{[:seon.task/id subtask-id]})
+                                                                  (:seon.agent/id fork-parent) (assoc :seon.agent/forked-from [:seon.agent/id (:seon.agent/id fork-parent)])))]))
+                          callee subtask-id)))
+                    (when (and callee-exists? subtask-id)
+                      (mirror-callee-task-to-branch! conn (:cfg st) (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] callee-e)) (:tx subtask) callee subtask-id)))
+                db (:db-after r)
+                cid (d/commit-id db)]
+            (reply! msg (cond-> {:ok? true :call-id call-id :caller caller :callee callee :status :pending
+                                 :spawned? (boolean spawn-ent) :awaiting? (boolean await-ent) :tx (:max-tx db)}
+                          subtask-id (assoc :task subtask-id)))
+            [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
+             {:db [(db-notice prev-cid db (:tx-data r) [:create-call caller callee])]
+              ::flow/report [(str "[:transactor] call " call-id " " caller " -> " callee
+                                  (when spawn-ent (str " (lazy-spawned " inferred-scope ")"))
+                                  (when await-ent " [awaiting]"))]}]))))))
+
 (defn handle-call-op!
   "Dispatches `:create-call`, `:await-calls`, `:answer-call`, `:fail-call`, `:cancel-call`,
    and `:settle-calls` for `:transactor`. Returns `[st' outputs]`."
   {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any :map] [:tuple :map :any]]}
-  [st msg prev-cid {:keys [reply! db-notice focus-tx]}]
-  (let [{:keys [conn]} st]
-    (case (:op msg)
-      :create-call
-      (let [{:keys [caller callee prompt parent-call result-schema await? scope goal]} msg
-            db0 @conn
-            cycle-path (call-cycle-chain db0 caller callee)]
-        (cond
-          cycle-path
-          (do (reply! msg {:ok? false
-                           :error {:class :cycle
-                                   :caller caller
-                                   :callee callee
-                                   :chain cycle-path
-                                   :message (str "Deadlock cycle rejected: " (pr-str cycle-path))}})
-              [st nil])
-
-          :else
-          (let [callee-e (:e (first (d/datoms db0 :avet :seon.agent/id callee)))
-                callee-exists? (boolean callee-e)
-                callee-archived? (boolean (and callee-e (:seon.agent/archived? (d/pull db0 '[:seon.agent/archived?] callee-e))))
-                fspec (resolve-fork-spec conn db0 msg)
-                fork-eid (:fork-eid fspec)
-                fork-parent (:fork-parent fspec)
-                inferred-scope (or (infer-ns-scope db0 callee scope) (:seon.agent/scope fork-parent))]
-            (if (or callee-archived? (and (not callee-exists?) (nil? inferred-scope)))
-              (do (reply! msg {:ok? false
-                               :error (if callee-archived?
-                               {:class :callee-archived
-                                :callee callee
-                                :message (str "Callee " callee " is archived and cannot accept calls. Spawn a fresh worker or pick an active agent.")}
-                               {:class :unknown-callee
-                                :callee callee
-                                :message (str "Callee " callee " does not exist. Pass {:scope 'ns.name} or use :ns/<existing-ns> to lazy-spawn a specialist.")})})
-                  [st nil])
-              (let [call-id (random-uuid)
-                    mid (random-uuid)
-                    mseq (inc (:msg-seq st))
-                    spawn-branch (when-not callee-exists?
-                                   (keyword "branch" (str (or (namespace callee) "agent") "." (name callee))))
-                    ns-tx (when (and (not callee-exists?) inferred-scope)
-                            (focus-tx inferred-scope))
-                    eff-auto (if (some? (:auto-merge? fspec)) (:auto-merge? fspec) true)
-                    spawn-ent (when-not callee-exists?
-                    (cond-> {:seon.agent/id callee
-                             :seon.agent/parent caller
-                             :seon.agent/branch spawn-branch
-                             :seon.agent/scope inferred-scope
-                             :seon.agent/focus (str "ns/" inferred-scope)
-                             
-                             :seon.agent/goal (or goal (str "Subsystem owner for namespace " inferred-scope " and its children. Research questions deeply (delegating to child :ns/<sub-ns> specialists when helpful), critique weak answers, edit/test code on your branch when asked to fix or refactor, and settle incoming calls via (user/answer! call-id val)."))
-                             :seon.agent/auto-merge? eff-auto}
-                      fork-eid (assoc :seon.agent/forked-from fork-eid)
-                      (:fork-commit fspec) (assoc :seon.agent/fork-commit (:fork-commit fspec))
-                      
-                      (some? (:merge-target fspec)) (assoc :seon.agent/merge-target (:merge-target fspec))
-                      (and (nil? fork-eid) (first (d/datoms db0 :avet :seon.agent/id :example/recursive-fanout)))
-                      (assoc :seon.agent/examples #{:example/recursive-fanout})))
-                    call-ent (cond-> {:seon.agent.call/id call-id
-                                      :seon.agent.call/caller caller
-                                      :seon.agent.call/callee callee
-                                      :seon.agent.call/message-id mid
-                                      :seon.agent.call/prompt (str (or prompt ""))
-                                      :seon.agent.call/status :pending
-                                      :seon.agent.call/created-tx (long (:max-tx db0))
-                                      :seon.agent.call/delivered? false}
-                               parent-call (assoc :seon.agent.call/parent-call parent-call)
-                               result-schema (assoc :seon.agent.call/result-schema result-schema))
-                    msg-ent {:seon.agent.message/id mid
-                             :seon.agent.message/seq mseq
-                             :seon.agent.message/from caller
-                             :seon.agent.message/to callee
-                             :seon.agent.message/type :call
-                             :seon.agent.message/body (format-call-request-body call-id caller prompt result-schema)}
-                    subtask (build-subtask-tx db0 caller callee call-id inferred-scope msg)
-                    subtask-id (:task-id subtask)
-                    sub-ref (when subtask-id (or (:e (first (d/datoms db0 :avet :seon.task/id subtask-id))) (some #(when (= subtask-id (:seon.task/id %)) (:db/id %)) (:tx subtask)) [:seon.task/id subtask-id]))
-                    spawn-ent (if (and spawn-ent sub-ref (contains? (:schema db0) :seon.agent/tasks))
-                                (assoc spawn-ent :seon.agent/tasks #{sub-ref})
-                                spawn-ent)
-                    callee-task-ent (when (and callee-exists? sub-ref (contains? (:schema db0) :seon.agent/tasks))
-                                      {:seon.agent/id callee :seon.agent/tasks #{sub-ref}})
-                    await-ent (when (and await? caller (not= caller :user))
-                                {:seon.agent/id caller :seon.agent/awaiting call-id})
-                    tx-data (with-ref-mirrors db0 (concat ns-tx (:tx subtask)
-                            (remove nil? [spawn-ent callee-task-ent msg-ent await-ent
-                                          (cond-> call-ent subtask-id (assoc :seon.agent.call/task-ref [:seon.task/id subtask-id]))])))
-                    r (d/transact conn {:tx-data tx-data})
-                    _ (if spawn-branch
-                      (let [src-br (or (:src-branch fspec) :main)]
-                        (store/branch! conn src-br spawn-branch)
-                        (when (not= src-br :main)
-                          (mirror-callee-task-to-branch! conn (:cfg st) spawn-branch
-                            (vec (concat (:tx subtask) [(-> spawn-ent (dissoc :seon.agent/tasks :seon.agent/forked-from :seon.agent/merge-target)
-                                                            (cond-> subtask-id (assoc :seon.agent/tasks #{[:seon.task/id subtask-id]})
-                                                                    (:seon.agent/id fork-parent) (assoc :seon.agent/forked-from [:seon.agent/id (:seon.agent/id fork-parent)])))]))
-                            callee subtask-id)))
-                      (when (and callee-exists? subtask-id)
-                        (mirror-callee-task-to-branch! conn (:cfg st) (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] callee-e)) (:tx subtask) callee subtask-id)))
-                    db (:db-after r)
-                    cid (d/commit-id db)]
-                (reply! msg (cond-> {:ok? true
-                       :call-id call-id
-                       :caller caller
-                       :callee callee
-                       :status :pending
-                       :spawned? (boolean spawn-ent)
-                       :awaiting? (boolean await-ent)
-                       :tx (:max-tx db)}
-                subtask-id (assoc :task subtask-id)))
-                [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
-                 {:db [(db-notice prev-cid db (:tx-data r) [:create-call caller callee])]
-                  ::flow/report [(str "[:transactor] call " call-id " " caller " -> " callee
-                                      (when spawn-ent (str " (lazy-spawned " inferred-scope ")"))
-                                      (when await-ent " [awaiting]"))]}])))))
-
-      :await-calls
-      (let [{:keys [caller call-ids]} msg
-            ids (vec (distinct call-ids))
-            db0 @conn
-            pulled (mapv #(vector % (pull-call db0 %)) ids)
-            missing (keep (fn [[id c]] (when-not c id)) pulled)]
-        (cond
-          (empty? ids)
-          (do (reply! msg {:ok? true :settled? true :results {}})
-              [st nil])
-
-          (seq missing)
-          (do (reply! msg {:ok? false :error {:class :unknown-call :missing (vec missing)}})
-              [st nil])
-
-          :else
-          (let [calls (mapv second pulled)
-                pending (filterv #(= :pending (:seon.agent.call/status %)) calls)]
-            (if (empty? pending)
-              (let [deliver-tx (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c)
-                                              :seon.agent.call/delivered? true})
-                                     calls)
-                    r (d/transact conn {:tx-data deliver-tx})
-                    db (:db-after r)
-                    cid (d/commit-id db)
-                    res-map (into {} (map (fn [c] [(:seon.agent.call/id c) (call-summary-map c)])) calls)]
-                (reply! msg {:ok? true :settled? true :results res-map :tx (:max-tx db)})
-                [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-                 {:db [(db-notice prev-cid db (:tx-data r) [:await-settled caller])]}])
-              (let [tx-data (mapv (fn [id] [:db/add [:seon.agent/id caller] :seon.agent/awaiting id]) ids)
-                    r (d/transact conn {:tx-data tx-data})
-                    db (:db-after r)
-                    cid (d/commit-id db)]
-                (reply! msg {:ok? true
-                             :settled? false
-                             :awaiting (mapv :seon.agent.call/id pending)
-                             :tx (:max-tx db)
-                             :note "Suspended cleanly in Datahike (0 blocked threads); will auto-resume when all awaited calls settle."})
-                [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-                 {:db [(db-notice prev-cid db (:tx-data r) [:await-calls caller])]}])))))
-
-      :answer-call
-      (let [{:keys [call-id result]} msg
-            db0 @conn
-            c (pull-call db0 call-id)]
-        (cond
-          (nil? c)
-          (do (reply! msg {:ok? false :error {:class :unknown-call :call-id call-id}})
-              [st nil])
-
-          (not= :pending (:seon.agent.call/status c))
-          (do (reply! msg {:ok? false :error {:class :already-settled :call-id call-id :status (:seon.agent.call/status c)}})
-              [st nil])
-
-          :else
-          (let [rsch (:seon.agent.call/result-schema c)
-                check (when rsch (schema/validate-against db0 rsch result))]
-            (if (and check (not (:ok? check)))
-              (do (reply! msg {:ok? false
-                               :error {:class :schema-mismatch
-                                       :call-id call-id
-                                       :schema rsch
-                                       :explain (:explain check)
-                                       :message (str "Result failed Malli schema " rsch ": " (pr-str (:explain check)))}})
-                  [st nil])
-              (let [close-op (auto-close-subtask-op conn db0 c result)
-                  tx-data (cond-> [{:seon.agent.call/id call-id
-                                    :seon.agent.call/status :resolved
-                                    :seon.agent.call/result result
-                                    :seon.agent.call/settled-tx (long (:max-tx db0))}]
-                            close-op (conj close-op))
-                  r (d/transact conn {:tx-data tx-data})
-                  db (:db-after r)
-                  cid (d/commit-id db)]
-              (reply! msg (cond-> {:ok? true :call-id call-id :status :resolved :tx (:max-tx db)}
-                            close-op (assoc :closed-subtask (:seon.task/id close-op))))
-              [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-               {:db [(db-notice prev-cid db (:tx-data r) [:answer-call call-id])]
-                ::flow/report [(str "[:transactor] call " call-id " RESOLVED by " (:seon.agent.call/callee c))]}])))))
-
-      :fail-call
-      (let [{:keys [call-id error]} msg
-            db0 @conn
-            c (pull-call db0 call-id)]
-        (cond
-          (nil? c)
-          (do (reply! msg {:ok? false :error {:class :unknown-call :call-id call-id}})
-              [st nil])
-
-          (not= :pending (:seon.agent.call/status c))
-          (do (reply! msg {:ok? false :error {:class :already-settled :call-id call-id :status (:seon.agent.call/status c)}})
-              [st nil])
-
-          :else
-          (let [err-val (if (map? error) error {:class :failed :message (str error)})
-                r (d/transact conn {:tx-data [{:seon.agent.call/id call-id
-                                               :seon.agent.call/status :failed
-                                               :seon.agent.call/error err-val
-                                               :seon.agent.call/settled-tx (long (:max-tx db0))}]})
-                db (:db-after r)
-                cid (d/commit-id db)]
-            (reply! msg {:ok? true :call-id call-id :status :failed :tx (:max-tx db)})
-            [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-             {:db [(db-notice prev-cid db (:tx-data r) [:fail-call call-id])]
-              ::flow/report [(str "[:transactor] call " call-id " FAILED (" (:class err-val) ")")]}])))
-
-      :cancel-call
-      (let [{:keys [call-id reason]} msg
-            db0 @conn
-            targets (pending-descendant-calls db0 call-id)]
-        (if (empty? targets)
-          (do (reply! msg {:ok? true :cancelled []})
-              [st nil])
-          (let [err-val {:class :cancelled :reason (str (or reason "cancelled"))}
-                tx-data (mapv (fn [id]
-                                {:seon.agent.call/id id
-                                 :seon.agent.call/status :cancelled
-                                 :seon.agent.call/error err-val
-                                 :seon.agent.call/settled-tx (long (:max-tx db0))})
-                              targets)
-                r (d/transact conn {:tx-data tx-data})
-                db (:db-after r)
-                cid (d/commit-id db)]
-            (reply! msg {:ok? true :cancelled targets :tx (:max-tx db)})
-            [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
-             {:db [(db-notice prev-cid db (:tx-data r) [:cancel-call call-id])]
-              ::flow/report [(str "[:transactor] cancelled " (count targets) " call(s) under " call-id)]}])))
-
-      :settle-calls
-      (let [{:keys [caller call-ids clear-awaiting?]} msg
-            db0 @conn
-            calls (vec (keep (fn [id]
-                               (let [c (pull-call db0 id)]
-                                 (when (and c (not= :pending (:seon.agent.call/status c)) (not (:seon.agent.call/delivered? c)))
-                                   c)))
-                             (distinct call-ids)))]
-        (if (empty? calls)
-          (do (reply! msg {:ok? true :delivered 0})
-              [st nil])
-          (let [mseq (inc (:msg-seq st))
-                mid (random-uuid)
-                mark-ops (mapv (fn [c] {:seon.agent.call/id (:seon.agent.call/id c)
-                                        :seon.agent.call/delivered? true})
-                               calls)
-                cur-awaiting (when clear-awaiting?
-                               (set (:seon.agent/awaiting (d/pull db0 '[:seon.agent/awaiting] [:seon.agent/id caller]))))
-                retract-ops (when clear-awaiting?
-                              (vec (for [c calls
-                                         :let [cid (:seon.agent.call/id c)]
-                                         :when (contains? cur-awaiting cid)]
-                                     [:db/retract [:seon.agent/id caller] :seon.agent/awaiting cid])))
-                msg-ent {:seon.agent.message/id mid
-                         :seon.agent.message/seq mseq
-                         :seon.agent.message/from :seon/calls
-                         :seon.agent.message/to caller
-                         :seon.agent.message/type :call-result
-                         :seon.agent.message/body (format-call-results-body calls)}
-                tx-data (vec (concat retract-ops mark-ops [msg-ent]))
-                r (d/transact conn {:tx-data tx-data})
-                db (:db-after r)
-                cid (d/commit-id db)]
-            (reply! msg {:ok? true :delivered (count calls) :message-id mid :tx (:max-tx db)})
-            [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
-             {:db [(db-notice prev-cid db (:tx-data r) [:settle-calls caller])]
-              ::flow/report [(str "[:transactor] delivered " (count calls) " call result(s) -> " caller)]}]))))))
+  [st msg prev-cid ctx-fns]
+  (case (:op msg)
+    :create-call  (handle-create-call! st msg prev-cid ctx-fns)
+    :await-calls  (handle-await-calls! st msg prev-cid ctx-fns)
+    :answer-call  (handle-answer-call! st msg prev-cid ctx-fns)
+    :fail-call    (handle-fail-call! st msg prev-cid ctx-fns)
+    :cancel-call  (handle-cancel-call! st msg prev-cid ctx-fns)
+    :settle-calls (handle-settle-calls! st msg prev-cid ctx-fns)))
