@@ -124,7 +124,7 @@
           [:div {:class "ctx-group-head"} (kicker title) [:span {:class "mono tiny muted"} (str (count xs))]]
           (mapv mk-item xs)])])))
 
-(defn- render-exchanges-list [prefix exchanges expert-mode?]
+(defn- render-exchanges-list [prefix exchanges expert-mode? md-opts]
   (for [[idx ex] (map-indexed vector exchanges)
         :let [emsgs (filter #(= :msg (:kind %)) ex)
               eevals (map :data (filter #(= :eval (:kind %)) ex))
@@ -135,12 +135,12 @@
                                    (not (str/blank? (str (:seon.agent.eval/reasoning %))))) eevals))]]
     [:div {:id (str prefix "-" idx) :class "ws-exchange"}
      (for [[mi m] (map-indexed vector emsgs)]
-       [:div {:id (str prefix "-" idx "-m-" mi) :class "ws-user-bubble"} (rmd/render-markdown-blocks (str (:seon.agent.message/body (:data m) "")))])
+       [:div {:id (str prefix "-" idx "-m-" mi) :class "ws-user-bubble"} (rmd/render-markdown-blocks (str (:seon.agent.message/body (:data m) "")) md-opts)])
      (when (or (seq acts) (seq prose))
        [:div {:class (str "ws-agent-turn" (when (seq prose) " has-prose"))}
         (when (seq acts) (rmd/render-activity-fold acts (str prefix "-" idx)))
         (for [[pi p] (map-indexed vector prose)]
-          [:div {:id (str prefix "-" idx "-p-" pi) :class "chat-body"} (rmd/render-markdown-blocks p)])])]))
+          [:div {:id (str prefix "-" idx "-p-" pi) :class "chat-body"} (rmd/render-markdown-blocks p md-opts)])])]))
 
 (defn- honest-status-badge [ag active?]
   (cond active? (badge "amber" "live") (pos? (long (or (:seon.agent/merged-tx ag) 0))) (badge "green" "merged")
@@ -186,9 +186,10 @@
       meta-row]
      br-acts]))
 
-(defn- render-user-session [{:keys [agent viewing-id exchanges pending-prompt latest-prose reply-prompt work-summary live-stream branch-feedback active? agent-status]} label composer]
+(defn- render-user-session [{:keys [agent viewing-id main-db branch-db viewport slot-budget ui-config exchanges pending-prompt latest-prose reply-prompt work-summary live-stream branch-feedback active? agent-status]} label composer]
   (let [prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
-        earlier (when (> (count exchanges) 1) (pop exchanges))]
+        earlier (when (> (count exchanges) 1) (pop exchanges))
+        md-opts {:db main-db :branch-db branch-db :viewport viewport :slot-budget slot-budget :ui-config ui-config :expert-mode? false :canon-mode :session}]
     [:section {:id "ws-left-unit" :class "user-chat-col"}
      [:div {:class "user-chat-head"}
       [:h2 {:class "strong"} label]
@@ -199,7 +200,7 @@
         [:div {:id "cv-live-status" :class "session-live-status"}
          (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
       (when (and (seq earlier) (not pending-prompt))
-        [:div {:class "stack-sm"} (render-exchanges-list "hx" earlier false)])
+        [:div {:class "stack-sm"} (render-exchanges-list "hx" earlier false md-opts)])
       (cond
         pending-prompt
         (let [{:keys [css-class text]} (canvas-live-progress live-stream)]
@@ -208,11 +209,11 @@
            [:div {:class "canvas-pending-status"}
             [:span {:class "dot pulsing"}]
             [:span {:class "muted sm-copy"} "Working…"]]
-           (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text) [:span {:class "cursor"} "▍"]])])
+           (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text md-opts) [:span {:class "cursor"} "▍"]])])
         prose
         [:section {:class "canvas-reply"}
          (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} reply-prompt])
-         (rmd/render-markdown-blocks prose)]
+         (rmd/render-markdown-blocks prose md-opts)]
         work-summary
         [:section {:id "cv-work-summary" :class "card stack-sm"}
          [:div {:class "pill-row"} (badge "green" (:status-label work-summary)) [:strong {:class "sm-copy"} (:latest-intent work-summary)]]
@@ -244,6 +245,7 @@
       (let [prose (when (seq latest-prose) (str/join "\n\n" latest-prose))
             earlier (when (> (count exchanges) 1) (pop exchanges))
             tx-num (or as-of-tx (:max-tx branch-db) (:max-tx main-db))
+            md-opts {:db main-db :branch-db branch-db :viewport (:viewport model) :slot-budget slot-budget :ui-config (:ui-config model) :expert-mode? true :canon-mode :session}
             pin-form [:form {:class "row-form" :on-submit (list 'seon.web/pin-ref-form! viewing-id)}
                       [:input {:class "inp sm mono flex-1" :name "ref" :placeholder "Pin ref, e.g. [:seon.code.ns/name 'seon.web]"}]
                       [:button {:type "submit" :class "btn sm"} "+ Pin"]]]
@@ -258,7 +260,7 @@
            (when (and (seq earlier) (not pending-prompt))
              [:details {:id "session-earlier" :class "activity-fold" :open true}
               [:summary {:class "mono tiny"} (str "Earlier exchanges (" (count earlier) ")")]
-              [:div {:class "stack-sm" :style {:margin-top "8px"}} (render-exchanges-list "hx" earlier true)]])
+              [:div {:class "stack-sm" :style {:margin-top "8px"}} (render-exchanges-list "hx" earlier true md-opts)]])
            (cond
              pending-prompt
              (let [{:keys [css-class rate reasoning text] pl :label} (canvas-live-progress live-stream)]
@@ -268,7 +270,7 @@
                 [:div {:class "canvas-pending-status"}
                  [:span {:class "dot pulsing"}] [:span {:class (str "stream-phase-badge " css-class)} pl]
                  (when rate [:span {:class "stream-rate"} rate])]
-                (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text) [:span {:class "cursor"} "▍"]])
+                (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text md-opts) [:span {:class "cursor"} "▍"]])
                 (when reasoning
                   [:details {:id "cv-live-reasoning" :class "activity-fold"}
                    [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
@@ -277,7 +279,7 @@
              prose
              [:section {:class "canvas-reply"}
               (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (str "Re: " reply-prompt)])
-              (rmd/render-markdown-blocks prose)
+              (rmd/render-markdown-blocks prose md-opts)
               (when (seq latest-actions) (rmd/render-activity-fold latest-actions "cv"))]
              work-summary
              [:section {:id "cv-work-summary" :class "card stack-sm"}
@@ -303,5 +305,5 @@
                    "Explain selection →"))]
            pin-form]
           [:div {:class "tiles-scroll"}
-           (or (render-grouped-entities entities (:avail-w slot-budget))
+           (or (render-grouped-entities entities (or (:avail-w (:rail-budget model)) (:avail-w slot-budget)))
                [:div {:id "ws-tiles-empty" :class "card muted sm-copy"} "No active context entities yet."])]])))))

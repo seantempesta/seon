@@ -131,6 +131,11 @@
         tx-num (or as-of-tx (:max-tx branch-db) (:max-tx main-db))
         exp? (boolean expert-mode?)
         ex-n (count exchanges)
+        custom-canvas? (boolean (or (qualified-symbol? (:seon.agent/canvas-fn agent))
+                                    (vector? (:seon.agent/canvas-hiccup agent))))
+        md-opts {:db main-db :branch-db branch-db :viewport (:viewport model)
+                 :slot-budget (:slot-budget model) :ui-config (:ui-config model)
+                 :expert-mode? exp? :canon-mode :canvas}
         
         live-acts (when exp?
                     (if (seq latest-actions)
@@ -145,7 +150,7 @@
                        (:seon.agent/paused? agent) (badge "muted" "paused")
                        (:seon.agent/waiting? agent) (badge "blue" "waiting")
                        :else (badge "muted" "idle"))]
-    [:div {:id "cv-canvas-stage" :class (str "root-canvas" (if exp? " is-dev-canvas" " is-user-canvas"))}
+    [:div {:id "cv-canvas-stage" :class (str "root-canvas" (if exp? " is-dev-canvas" " is-user-canvas") (when custom-canvas? " has-custom-canvas"))}
      (when exp?
        [:div {:class "ws-head work-bar dev-work-bar"}
         [:div {:class "pill-row"}
@@ -176,7 +181,7 @@
              (list [:span {:class (str "stream-phase-badge " css-class)} pl]
                    (when rate [:span {:class "stream-rate"} rate]))
              [:span {:class "muted sm-copy"} "Working…"])]
-          (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text) [:span {:class "cursor"} "▍"]])
+          (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text md-opts) [:span {:class "cursor"} "▍"]])
           (when (and exp? reasoning)
             [:details {:id "cv-live-reasoning" :class "activity-fold"}
              [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
@@ -186,7 +191,7 @@
        prose
        [:section {:id "cv-featured-reply" :class "canvas-surface canvas-reply stack-sm"}
         (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (if exp? (str "Re: " reply-prompt) reply-prompt)])
-        (rmd/render-markdown-blocks prose)
+        (rmd/render-markdown-blocks prose md-opts)
         (when (and exp? (seq latest-actions)) (rmd/render-activity-fold latest-actions "cv"))]
 
        work-summary
@@ -210,6 +215,7 @@
         (render-canvas-demo-deck main-db viewing-id signals)]
 
        :else
+       (when-not custom-canvas?
        [:div {:id "cv-user-welcome" :class "user-welcome"}
         [:header {:class "root-hero"}
          [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) "What would you like to work on?")]
@@ -218,7 +224,7 @@
          (for [prompt starter-prompts]
            [:button {:type "button" :class "starter-chip"
                      :on-click (list 'seon.web/chat-agent-form! viewing-id {:text prompt})}
-            prompt])]])
+            prompt])]]))
      (when exp?
        (list
         (render-canvas-context-grid entities pool-count viewing-id true)

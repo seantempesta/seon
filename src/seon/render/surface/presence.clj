@@ -8,7 +8,9 @@
             [seon.render.data :as rdata]
             [seon.render.links :as rlinks :refer [badge ent-link kicker]]
             [seon.store :as store :refer [db-schema]]
-            [seon.render.sanitize :as sanitize]))
+            [seon.render.sanitize :as sanitize]
+            [seon.render.fit :as fit]
+            [seon.render.wire :as rwire]))
 
 (defn sanitize-canvas-hiccup
   "Pure recursive allowlist XSS sanitizer for agent-supplied Canvas Hiccup via `seon.render.sanitize/sanitize-hiccup`
@@ -17,25 +19,6 @@
    :cost/ticks 5000000}
   [node]
   (sanitize/sanitize-hiccup node {:allow-seon-actions? true}))
-
-(defn- eval-canvas-fn [branch-db agent fn-sym]
-  (when (qualified-symbol? fn-sym)
-    (try
-      (when-let [ns-obj (find-ns (symbol (namespace fn-sym)))]
-        (when-let [v (ns-resolve ns-obj (symbol (name fn-sym)))]
-          (when (and (var? v) (bound? v))
-            (let [als (:arglists (meta v))
-                  one-arg-only? (and (seq als) (every? #(= 1 (count %)) als))
-                  raw (if one-arg-only?
-                        (@v {:seon.agent/entity agent :db branch-db})
-                        (@v branch-db agent))
-                  node (if (and (map? raw) (contains? raw :seon.ui/hiccup))
-                         (:seon.ui/hiccup raw)
-                         raw)]
-              (sanitize-canvas-hiccup node)))))
-      (catch Throwable ex
-        [:div {:class "card mono tiny muted"}
-         (str "Canvas renderer " fn-sym " error: " (or (.getMessage ex) (str ex)))]))))
 
 (defn- pull-child-agents [main-db aid]
   (if-not (and main-db aid)
@@ -124,19 +107,180 @@
     :cancelled (badge "muted" "cancelled")
     (badge "amber" "pending")))
 
+(defn- pull-fit-ref [main-db branch-db r]
+  (let [nr (rdata/normalize-inspect-ref r)
+        bdb (or branch-db main-db)
+        try-pull (fn [db]
+                   (when (and db nr (instance? datahike.db.interface.ISearch db))
+                     (try
+                       (let [m (d/pull db (quote [*]) nr)]
+                         (when (and (map? m) (> (count m) 1)) m))
+                       (catch Throwable _ nil))))]
+    (when nr
+      (when-let [ent (or (try-pull bdb) (when (and main-db (not= main-db bdb)) (try-pull main-db)))]
+        {:ref nr :ent ent}))))
+
+(defn render-fitted-spec
+  "Fits Datahike `:ref`/`:refs` and/or inline `:items` through `seon.render.fit/fit-projections`
+   for the live viewport, rendering clean distraction-free cards in Mom Mode (`expert-mode? false`)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :map [:maybe :map]] :any]
+   :cost/ticks 25000000}
+  [main-db branch-db spec opts]
+  (let [o (if (map? opts) opts {})
+        bdb (or branch-db main-db)
+        exp? (boolean (:expert-mode? o))
+        refs (cond-> []
+               (:ref spec) (conj (:ref spec))
+               (sequential? (:refs spec)) (into (:refs spec)))
+        ref-projs (vec (keep-indexed
+                        (fn [idx r]
+                          (when-let [{:keys [ref ent]} (pull-fit-ref main-db bdb r)]
+                            (cond-> {:entity (or (:db/id ent) ref) :ref ref :data ent :priority (- 100 idx)}
+                              (:schema spec) (assoc :schema (:schema spec)))))
+                        refs))
+        item-projs (vec (keep-indexed
+                         (fn [idx it]
+                           (when (and (map? it) (map? (:data it)))
+                             (cond-> {:entity (or (:entity it) (:id it) (keyword "fit-item" (str idx)))
+                                      :data (:data it)
+                                      :priority (- 100 (+ (count ref-projs) idx))}
+                               (or (:schema it) (:schema spec)) (assoc :schema (or (:schema it) (:schema spec))))))
+                         (when (sequential? (:items spec)) (:items spec))))
+        projs (into ref-projs item-projs)]
+    (if (empty? projs)
+      (when exp? [:div {:class "muted tiny mono"} "No matching entities to fit."])
+      (let [vw (long (or (get-in o [:viewport :w]) (:viewport-w o) 1280))
+            vh (long (or (get-in o [:viewport :h]) (:viewport-h o) 820))
+            sb? (boolean (get-in o [:viewport :sidebar-open?]))
+            sb-w (long (or (get-in o [:slot-budget :avail-w]) (max 240 (- vw 32))))
+            mom-canvas? (and (not exp?) (not= :session (:canon-mode o)))
+            aw (long (or (:avail-w spec) (if mom-canvas? (min sb-w 996) sb-w)))
+            ah (long (or (get-in o [:slot-budget :avail-h]) (max 240 (- vh 80))))
+            am (double (or (get-in o [:ui-config :area-multiplier]) 1.6))
+            ratio (double (or (get-in o [:ui-config :per-item-area-ratio]) 0.45))
+            ab (long (or (:area-budget spec)
+                         (min (long (or (get-in o [:slot-budget :area-budget]) Long/MAX_VALUE))
+                              (long (* am (double (* aw ah)))))))
+            pib (long (or (:per-item-budget spec) (max 1000 (long (* (double ab) ratio)))))
+            max-n (long (or (:max-items spec) (max (count projs) (long (or (get-in o [:ui-config :max-items]) 8)))))
+            fitted (fit/fit-projections bdb projs
+                     {:target :html :viewport-w vw :viewport-h vh :sidebar-open? sb?
+                      :avail-w aw :area-budget ab :per-item-budget pib :max-items max-n
+                      :strategy (or (:strategy spec) :breadth-first)
+                      :main-db main-db :fallback-renderers rwire/fallback-entity-renderers})
+            selected (vec (:selected fitted))
+            all-chips? (and (seq selected) (every? #(or (<= (long (or (:min-width %) 999)) 240) (and (pos? (long (or (:h %) 0))) (<= (long (:h %)) 64))) selected))
+            has-wide? (boolean (some #(>= (long (or (:min-width %) 0)) 520) selected))
+            layout (or (:layout spec)
+                       (cond all-chips? :chips
+                             (or has-wide? (< aw 700) (= 1 (count selected))) :stack
+                             :else :grid))
+            grid-cls (case layout
+                       :chips "mom-fit-chips pill-row"
+                       :stack "mom-fit-stack stack-sm"
+                       "mom-fit-grid")
+            meas-by (if (some #(= :browser (:measured-by %)) selected) "browser" "static")
+            title (when (string? (:title spec)) (not-empty (str/trim (:title spec))))
+            sub (when (string? (:subtitle spec)) (not-empty (str/trim (:subtitle spec))))]
+        [:div {:class "mom-fit-wrap stack-sm"
+               :data-fit-avail-w (str aw)
+               :data-fit-count (str (count selected))
+               :data-fit-layout (name layout)
+               :data-measured-by meas-by}
+         (when (or title sub exp?)
+           [:div {:class "row-between"}
+            [:div {:class "stack-xs"}
+             (when title [:h2 {:class "mom-fit-title"} title])
+             (when sub [:p {:class "muted sm-copy"} sub])]
+            (when exp?
+              [:div {:class "pill-row"}
+               (badge "blue" (str aw "px"))
+               (badge (if (= "browser" meas-by) "green" "muted") meas-by)
+               [:span {:class "mono tiny muted"} (str (count selected) " fitted")]])])
+         (into [:div {:class grid-cls}]
+               (map-indexed
+                (fn [idx item]
+                  (let [cfn (:chosen-fn item)
+                        mb (name (or (:measured-by item) :static))
+                        card (or (when (:hiccup item) (sanitize-canvas-hiccup (:hiccup item)))
+                                 [:div {:class "ent-row mono tiny"} (str (:entity item))])]
+                    [:div {:class "mom-fit-item"
+                           :style (str "view-transition-name:seon-fit-" idx)
+                           :data-chosen-fn (str cfn)
+                           :data-measured-by mb
+                           :data-tokens (str (:tokens item 0))
+                           :data-area (str (:area item 0))}
+                     (when exp?
+                       [:div {:class "ent-prov-bar"}
+                        [:div {:class "pill-row"}
+                         (when (qualified-symbol? cfn)
+                           (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny muted"))
+                         [:span {:class "mono tiny muted"} (str "· " (:tokens item 0) " tok · " mb)]]])
+                     card]))
+                selected))]))))
+
+(defn- has-fit-node? [node depth]
+  (cond
+    (> depth 24) false
+    (and (vector? node) (= :seon/fit (first node)) (map? (second node))) true
+    (vector? node) (boolean (some #(has-fit-node? % (inc depth)) (if (map? (second node)) (drop 2 node) (rest node))))
+    (seq? node) (boolean (some #(has-fit-node? % (inc depth)) node))
+    :else false))
+
+(defn- expand-canvas-node [main-db bdb node model depth]
+  (cond
+    (> depth 24) nil
+    (and (vector? node) (= :seon/fit (first node)) (map? (second node)))
+    (render-fitted-spec main-db bdb (second node) model)
+    (not (has-fit-node? node depth))
+    (sanitize-canvas-hiccup node)
+    (and (vector? node) (keyword? (first node)))
+    (let [has-a? (map? (second node))
+          shell (if has-a? [(first node) (second node)] [(first node)])
+          clean-shell (sanitize-canvas-hiccup shell)
+          kids (if has-a? (drop 2 node) (rest node))]
+      (when (vector? clean-shell)
+        (into clean-shell (keep #(expand-canvas-node main-db bdb % model (inc depth)) kids))))
+    (seq? node)
+    (vec (keep #(expand-canvas-node main-db bdb % model (inc depth)) node))
+    :else (sanitize-canvas-hiccup node)))
+
+(defn- eval-canvas-fn [model bdb agent fn-sym]
+  (when (qualified-symbol? fn-sym)
+    (try
+      (when-let [ns-obj (find-ns (symbol (namespace fn-sym)))]
+        (when-let [v (ns-resolve ns-obj (symbol (name fn-sym)))]
+          (when (and (var? v) (bound? v))
+            (let [als (:arglists (meta v))
+                  one-arg-only? (and (seq als) (every? #(= 1 (count %)) als))
+                  ctx {:seon.agent/entity agent :db bdb :main-db (:main-db model)
+                       :viewport (:viewport model) :slot-budget (:slot-budget model)
+                       :ui-config (:ui-config model) :expert-mode? (boolean (:expert-mode? model))}
+                  ag-ctx (assoc agent
+                                :seon.ui/viewport (:viewport model)
+                                :seon.ui/slot-budget (:slot-budget model)
+                                :seon.ui/main-db (:main-db model)
+                                :seon.ui/expert-mode? (boolean (:expert-mode? model)))
+                  raw (if one-arg-only? (@v ctx) (@v bdb ag-ctx))
+                  node (if (and (map? raw) (contains? raw :seon.ui/hiccup)) (:seon.ui/hiccup raw) raw)]
+              (expand-canvas-node (:main-db model) bdb node model 0)))))
+      (catch Throwable ex
+        [:div {:class "card mono tiny muted"}
+         (str "Canvas renderer " fn-sym " error: " (or (.getMessage ex) (str ex)))]))))
+
 (defn render-live-canvas-presence
   "Renders custom agent Canvas (`:seon.agent/canvas-fn` or `:seon.agent/canvas-hiccup`, sanitized)
    and auto-derived present-tense Live Presence (streaming progress, active child agents, delegated
    calls returning results, and in Dev Mode branch writes & proofs)."
   {:malli/schema [:=> [:cat :map] :any]
    :cost/ticks 15000000}
-  [{:keys [main-db branch-db viewing-id agent live-stream expert-mode? as-of-tx]}]
+  [{:keys [main-db branch-db viewing-id agent live-stream expert-mode? as-of-tx] :as model}]
   (let [bdb (or branch-db main-db)
         cfn (:seon.agent/canvas-fn agent)
         chic (:seon.agent/canvas-hiccup agent)
         custom-node (cond
                       (qualified-symbol? cfn)
-                      (when-let [rendered (eval-canvas-fn bdb agent cfn)]
+                      (when-let [rendered (eval-canvas-fn model bdb agent cfn)]
                         [:section {:id "cv-custom-canvas" :class "canvas-surface stack-sm" :data-canvas-mode "reactive"}
                          (when expert-mode?
                          [:div {:class "row-between"}
@@ -147,7 +291,7 @@
                          rendered])
 
                       (vector? chic)
-                      (when-let [clean (sanitize-canvas-hiccup chic)]
+                      (when-let [clean (expand-canvas-node main-db bdb chic model 0)]
                         [:section {:id "cv-custom-canvas" :class "canvas-surface stack-sm" :data-canvas-mode "hiccup"}
                          (when expert-mode?
                          [:div {:class "row-between"}

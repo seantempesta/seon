@@ -320,7 +320,7 @@
 
 (defn- plan-derived-previews [main-db bdb evals theme]
   (let [edited-vars (take 2 (preview/recent-edited-renderer-vars main-db bdb evals))
-        widths [360 640]]
+        widths (or (store/config-val main-db :seon.config/preview-widths) [360 640])]
     (reduce (fn [acc vsym]
               (let [ev (preview/eval-renderer-preview bdb vsym)]
                 (if-not (:ok? ev)

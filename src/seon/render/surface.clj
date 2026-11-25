@@ -57,7 +57,7 @@
         gather-fn #(ctx/gather-agent-candidates emdb ebdb aid {:agent ag :target t :semantic? true :enrich? true :rich-ns? false :situational? false})
         proj (sentity/project-entity-view
               emdb ebdb [:seon.agent/id aid]
-              (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) 8))))]
+              (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) (:max-items fopts) 8))))]
     {:wire (when (:include-wire? o)
              (rwire/build-live-wire-request
               emdb ebdb aid
@@ -112,6 +112,28 @@
 
 (defonce ^:private ^:seon.flow/edge signals-fit-cache (store/lru-cache 32))
 
+(defn read-ui-config
+  "Reads UI layout/budget config from `:seon.config/root` in 1 indexed pull with Malli schema defaults."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db]]
+                  [:map [:area-multiplier :double] [:max-items :int]
+                   [:per-item-area-ratio :double] [:sidebar-breakpoint :int]
+                   [:preview-widths [:vector :int]]]]
+   :cost/ticks 500000}
+  [db]
+  (let [root (when (and db (contains? (db-schema db) :seon.config/key))
+               (store/without-agent-eval-reads
+                #(when (first (d/datoms db :avet :seon.config/key :seon.config/root))
+                   (d/pull db (quote [:seon.config/ui-area-multiplier :seon.config/ui-max-items
+                                      :seon.config/ui-per-item-area-ratio :seon.config/ui-sidebar-breakpoint
+                                      :seon.config/preview-widths])
+                           [:seon.config/key :seon.config/root]))))
+        ws (:seon.config/preview-widths root)]
+    {:area-multiplier (double (or (:seon.config/ui-area-multiplier root) 1.6))
+     :max-items (long (or (:seon.config/ui-max-items root) 8))
+     :per-item-area-ratio (double (or (:seon.config/ui-per-item-area-ratio root) 0.45))
+     :sidebar-breakpoint (long (or (:seon.config/ui-sidebar-breakpoint root) 760))
+     :preview-widths (if (and (sequential? ws) (seq ws)) (mapv long ws) [360 640])}))
+
 (defn build-surface-model
   "Pure unified surface model builder over `main-db`, `branch-db`, and `opts`."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map]] :map]
@@ -121,6 +143,7 @@
   ([main-db branch-db opts]
    (let [t0 (System/nanoTime)
          o (if (map? opts) opts {})
+         ui-cfg (read-ui-config main-db)
          vs (rdata/user-view-state main-db)
          aid (or (:viewing-id o) (:viewing-id vs) (:entry-id vs) :agent/root)
          vm (or (:view-mode o) (:view-mode vs) :canvas)
@@ -131,16 +154,27 @@
                               (= :context (rdata/canonical-view-mode (:view-mode o)))
                               (not (contains? o :inspect-ref))))
          inspecting? (boolean (and (not explaining?) (or insp-ref (= vm :inspect))))
+         expert-mode? (if (contains? o :expert-mode?)
+                        (boolean (:expert-mode? o))
+                        (boolean (when (and ((db-schema main-db) :seon.user/expert-mode?)
+                                            (first (d/datoms main-db :aevt :seon.user/expert-mode?))
+                                            (first (d/datoms main-db :avet :seon.user/id :user/default)))
+                                   (:seon.user/expert-mode?
+                                    (d/pull main-db (quote [:seon.user/expert-mode?]) [:seon.user/id :user/default])))))
          vw (long (or (:viewport-w o) (:viewport-w vs) 1280))
          vh (long (or (:viewport-h o) (:viewport-h vs) 820))
-         sb? (and (if (boolean? (:sidebar-open? o)) (:sidebar-open? o) (boolean (:sidebar-open? vs))) (>= vw 760))
+         sb-bp (:sidebar-breakpoint ui-cfg)
+         sb? (and (if (boolean? (:sidebar-open? o)) (:sidebar-open? o) (boolean (:sidebar-open? vs))) (>= vw sb-bp))
          as-of (if (contains? o :as-of-tx) (:as-of-tx o) (:as-of-tx vs))
-         slot (or (:slot o) (if (= :wire (:target o)) :wire :main))
          target (if (= :wire (:target o)) :wire :html)
-         slot-b (fit/resolve-slot-budget {:viewport-w vw :viewport-h vh :sidebar-open? sb? :slot slot})
+         slot (or (:slot o) (if (= :wire target) :wire :main))
+         slot-b (fit/resolve-slot-budget (merge ui-cfg {:viewport-w vw :viewport-h vh :sidebar-open? sb? :slot slot}))
+         rail-b (when (and (= canon :session) expert-mode? (not= :wire target) (nil? (:slot o)))
+                  (fit/resolve-slot-budget (merge ui-cfg {:viewport-w vw :viewport-h vh :sidebar-open? sb? :slot :rail})))
+         fit-b (or rail-b slot-b)
          br0 (or (:branch o)
                  (when (and (nil? branch-db) aid ((db-schema main-db) :seon.agent/id))
-                   (:seon.agent/branch (d/pull main-db '[:seon.agent/branch] [:seon.agent/id aid])))
+                   (:seon.agent/branch (d/pull main-db (quote [:seon.agent/branch]) [:seon.agent/id aid])))
                  :main)
          hbdb (or branch-db (rdata/branch-db-for main-db (:conn o) br0))
          emdb (if as-of (safe-as-of main-db as-of) main-db)
@@ -150,9 +184,11 @@
          sigs (when (or (not inspecting?) (= :seon.system/id (first insp-ref))) (sig/all-signals emdb))
          lp (or (:lab-prefs o) (:lab-prefs vs) {})
          fopts (merge {:target target :viewport-w vw :viewport-h vh :sidebar-open? sb? :slot slot
-                       :avail-w (:avail-w slot-b) :area-budget (:area-budget slot-b) :main-db emdb
+                       :avail-w (:avail-w fit-b) :area-budget (:area-budget fit-b)
+                       :per-item-budget (:per-item-budget fit-b)
+                       :max-items (:max-items ui-cfg) :main-db emdb
                        :fallback-renderers rwire/fallback-entity-renderers}
-                      (select-keys o [:token-budget :already-shown :strategy]))
+                      (select-keys o [:token-budget :already-shown :strategy :per-item-budget]))
          sfit (when (and sigs (not= canon :system) (not inspecting?)
                      (or explaining? (not (:seon.render.surface/for-render? o))))
               (store/lru-get! signals-fit-cache 32
@@ -160,13 +196,6 @@
                                (:avail-w slot-b) (:area-budget slot-b) target
                                (:strategy fopts) (:token-budget fopts)]
                               #(first (:selected (fit/fit-projections emdb [{:entity :signals/live :schema :seon.signal/snapshot :data sigs :priority 100}] fopts)))))
-         expert-mode? (if (contains? o :expert-mode?)
-                        (boolean (:expert-mode? o))
-                        (boolean (when (and ((db-schema main-db) :seon.user/expert-mode?)
-                                            (first (d/datoms main-db :aevt :seon.user/expert-mode?))
-                                            (first (d/datoms main-db :avet :seon.user/id :user/default)))
-                                   (:seon.user/expert-mode?
-                                    (d/pull main-db '[:seon.user/expert-mode?] [:seon.user/id :user/default])))))
          skip-ctx? (and (:seon.render.surface/for-render? o) (not expert-mode?) (not (:include-wire? o))
                         (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?))
          {:keys [wire fitted ctx-trace pool-count]} (if skip-ctx?
@@ -183,15 +212,15 @@
          (rstatus/latest-agent-status emdb ebdb aid))
          conv (if (and (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?)) (ssess/extract-conversation emdb ebdb aid ag active? as-of) {})
          errs (when (and explaining? (or (nil? insp-ref) (= :seon.agent/id (first insp-ref))) ((db-schema emdb) :seon.error/status))
-                (mapv #(d/pull emdb '[:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message
-                                      :seon.error/agent :seon.error/var :seon.error/branch] (:e %))
+                (mapv #(d/pull emdb (quote [:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message
+                                      :seon.error/agent :seon.error/var :seon.error/branch]) (:e %))
                       (take 8 (d/datoms emdb :avet :seon.error/status :open))))]
      (merge conv
             {:agent ag :viewing-id aid :branch br :view-mode vm :canon-mode canon :explaining? explaining?
              :inspect-ref insp-ref :inspecting? inspecting? :pool-count (long (or pool-count 0))
              :inspect-trail (or (:inspect-trail o) (:inspect-trail vs) [])
              :inspect-forward (or (:inspect-forward o) (:inspect-forward vs) []) :lab-prefs lp
-             :viewport {:w vw :h vh :sidebar-open? sb?} :slot-budget slot-b :signals sigs :signals-fit sfit
+             :viewport {:w vw :h vh :sidebar-open? sb?} :slot-budget slot-b :rail-budget rail-b :ui-config ui-cfg :signals sigs :signals-fit sfit
              :fitted fitted :entities (:selected fitted) :history-txs htxs :step-idx sidx :as-of-tx as-of
              :ctx-trace ctx-trace :wire wire :open-errors errs :main-db emdb :branch-db ebdb :active? active?
              :expert-mode? expert-mode? :agent-status agent-status

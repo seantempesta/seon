@@ -114,38 +114,46 @@
                         :else (max 60 (min 1200 (max floor-w table-w pre-w text-w)))))
           est-h (long (if (zero? eff-lines) 0
                           (max svg-h (+ (if (or has-table? has-pre?) 24 8) (* eff-lines 20)))))]
-      {:tokens (long tokens) :chars (long chars)
-       :min-width min-w :area (* min-w est-h) :lines (long eff-lines)})))
+      (cond-> {:tokens (long tokens) :chars (long chars) :min-width min-w :area (* min-w est-h) :lines (long eff-lines)} (some? explicit-w) (assoc :explicit-min-width (long explicit-w))))))
 
 (defn resolve-slot-budget
-  "Computes `{:avail-w :avail-h :max-items :area-budget}` from `{:viewport-w :viewport-h :sidebar-open? :slot}`."
+  "Computes `{:avail-w :avail-h :max-items :area-budget :per-item-budget}` from viewport, slot, and UI config."
   {:malli/schema [:=> [:cat [:maybe :map]]
-                  [:map [:avail-w :int] [:avail-h :int] [:max-items :int] [:area-budget :int]]]
+                  [:map [:avail-w :int] [:avail-h :int] [:max-items :int] [:area-budget :int]
+                   [:per-item-budget {:optional true} :int]]]
    :cost/ticks 500000}
   [spec]
   (let [sp (if (map? spec) spec {})
         vw (max 240 (min 10000 (safe-long (:viewport-w sp) 1440)))
         vh (max 240 (min 10000 (safe-long (:viewport-h sp) 900)))
-        sb-open? (if (boolean? (:sidebar-open? sp)) (:sidebar-open? sp) (>= vw 840))
+        sb-bp (max 320 (min 1600 (safe-long (:sidebar-breakpoint sp) 760)))
+        sb-open? (if (boolean? (:sidebar-open? sp)) (:sidebar-open? sp) (>= vw sb-bp))
         sb-w (if sb-open? (min 280 (max 200 (quot vw 5))) 0)
-        slot (if (#{:header :sidebar :main :inspector :modal :wire} (:slot sp)) (:slot sp) :main)
+        am (max 0.5 (min 8.0 (finite-double (:area-multiplier sp) 1.6)))
+        ratio (max 0.1 (min 1.0 (finite-double (:per-item-area-ratio sp) 0.45)))
+        slot (if (#{:header :sidebar :main :rail :inspector :modal :wire} (:slot sp)) (:slot sp) :main)
+        main-w (max 240 (- vw (if (and sb-open? (>= vw sb-bp)) (+ sb-w 48) 32)))
+        main-h (max 240 (- vh 80))
         [aw ah mi area]
         (case slot
           :header (let [w (max 160 (- vw 32))] [w 56 (max 2 (min 8 (quot w 160))) (* w 56)])
           :sidebar (let [w (min 260 (max 180 (if sb-open? (- sb-w 24) 220))) h (max 240 (- vh 72))]
                      [w h (max 4 (min 24 (quot h 44))) (* w h)])
-          :main (let [w (max 240 (- vw (if (and sb-open? (>= vw 768)) (+ sb-w 48) 32)))
-                      h (max 240 (- vh 80))]
-                  [w h (max 4 (min 30 (quot (* w h) 28000))) (long (* 1.6 (double (* w h))))])
+          :main [main-w main-h (max 4 (min 30 (quot (* main-w main-h) 28000))) (long (* am (double (* main-w main-h))))]
+          :rail (let [rw (if (>= main-w 860) (max 260 (quot (* (- main-w 18) 44) 100)) main-w)]
+                  [rw main-h (max 4 (min 24 (quot (* rw main-h) 22000))) (long (* am (double (* rw main-h))))])
           :inspector (let [w (min 480 (max 240 (quot vw 3))) h (max 240 (- vh 96))]
                        [w h (max 3 (min 16 (quot h 64))) (* w h)])
           :modal (let [w (min 760 (max 260 (- vw 48))) h (min 720 (max 240 (- vh 96)))]
                    [w h (max 3 (min 16 (quot h 56))) (* w h)])
-          :wire [10000 10000 40 100000000])]
+          :wire [10000 10000 40 100000000])
+        final-area (max 1000 (safe-long (:area-budget sp) area))
+        per-item (max 1000 (safe-long (:per-item-budget sp) (long (* (double final-area) ratio))))]
     {:avail-w (max 80 (min 10000 (safe-long (:avail-w sp) aw)))
      :avail-h (max 40 (min 10000 (safe-long (:avail-h sp) ah)))
      :max-items (max 1 (min 500 (safe-long (:max-items sp) mi)))
-     :area-budget (max 1000 (safe-long (:area-budget sp) area))}))
+     :area-budget final-area
+     :per-item-budget per-item}))
 
 (defn normalize-candidate
   "Ensures a candidate variation map carries integer `:tokens`, `:chars`, `:min-width`, `:area`, and `:lines`."
@@ -359,13 +367,14 @@
     (if-not (map? b)
       (assoc m :measured-by :static :overflow-x? (boolean (:overflow-x? m)))
       (let [aw (max 1 (long avail-w))
-            bw (max 0 (safe-long (or (:w b) (:width b)) (safe-long (:min-width m) 0)))
-            bh (max 0 (safe-long (or (:h b) (:height b)) 0))
-            ov? (boolean (or (:overflow-x? b) (:overflowX b)))
-            ba (max 1 (safe-long (:area b) (* (max 1 bw) (max 1 bh))))
-            mw (if ov? (max bw (inc aw)) bw)]
-        (assoc m :w bw :h bh :min-width mw :area ba
-               :overflow-x? ov? :measured-by :browser)))))
+          exp-mw (max 0 (safe-long (:explicit-min-width m) 0))
+          bw (max 0 (safe-long (or (:w b) (:width b)) (safe-long (:min-width m) 0)))
+          bh (max 0 (safe-long (or (:h b) (:height b)) 0))
+          ov? (boolean (or (:overflow-x? b) (:overflowX b)))
+          ba (max 1 (safe-long (:area b) (* (max 1 bw) (max 1 bh))))
+          mw (if ov? (max exp-mw bw (inc aw)) (max exp-mw bw))]
+      (assoc m :w bw :h bh :min-width mw :area ba
+             :overflow-x? ov? :measured-by :browser)))))
 
 (defn item-candidates
   "Normalizes an item map's `:candidates` vector (or synthesizes a default candidate from `:tokens`/`:data`)."
