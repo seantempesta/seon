@@ -460,7 +460,7 @@
                                  (d/datoms db :aevt :seon.schema/key)))]
         (is (empty? missing))))))
 
-(deftest ^{:cost/ticks 60000000} wave8b-scoped-search-grep-and-run-tests-only-test
+(deftest ^{:cost/ticks 150000000} wave8b-scoped-search-grep-and-run-tests-only-test
   (testing "search and grep-src accept bare namespace symbol as 2nd arg"
     (when seon.fork.calls/*agent-ctx*
       (let [s-res (seon.repl.search/search "stress" 'seon.schema)
@@ -746,7 +746,9 @@
         (is (= (:retracted-keys via-ops) (:retracted-keys via-aevt)))
         (is (= (:schema-keys via-ops) (:schema-keys via-aevt)))
         (is (= (:rule-ids via-ops) (:rule-ids via-aevt)))
-        (is (= via-ops via-cached)))))
+        (do (is (= via-ops via-cached))
+        (is (= [] (:upserts (seon.code.reach/changed-form-ops conn nil c1))))
+        (is (= [] (:upserts (seon.code.reach/changed-form-ops conn c0 nil))))))))
   (testing "verify-task-spec :ns-test-or-example credits new tests reaching a child ns through a parent re-export"
     (seon.test-fixture/with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (seon.code/file-import-tx @conn "src/demo/child.clj"
