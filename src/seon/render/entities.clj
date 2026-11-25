@@ -5,75 +5,37 @@
    `:seon.ui/show-callers?`, `:seon.view/token-budget`)."
   (:require [clojure.string :as str]
             [seon.render.links :as rlinks :refer [badge kv-dl link-pill meta-link pill-list]]
-            [seon.render.text :refer [clip nonblank one-line]])
+            [seon.render.text :refer [clip nonblank one-line]]
+            [seon.render.entities.prim :as prim])
   (:import [java.util.regex Pattern]))
 
-(defn- fmt-pr [x n] (clip (pr-str x) n))
+(defn- fmt-pr [& args] (apply prim/fmt-pr args))
 
-(defn- kw-label [x fb] (cond (ident? x) (name x) (some? x) (str x) :else fb))
+(defn- kw-label [& args] (apply prim/kw-label args))
 
-(defn- seq-items [x] (when (and (coll? x) (not (map? x))) (seq x)))
+(defn- seq-items [& args] (apply prim/seq-items args))
 
-(defn- fmt-ms [x]
-  (when (number? x)
-    (let [d (double x)] (if (or (Double/isNaN d) (Double/isInfinite d)) "—" (str (/ (Math/round (* d 10.0)) 10.0) " ms")))))
+(defn- fmt-ms [& args] (apply prim/fmt-ms args))
 
-(defn- fmt-num [x]
-  (when (number? x)
-    (let [d (double x)]
-      (cond (or (Double/isNaN d) (Double/isInfinite d)) "—" (integer? x) (str x) :else (str (/ (Math/round (* d 10.0)) 10.0))))))
+(defn- fmt-num [& args] (apply prim/fmt-num args))
 
-(defn- bl [m n]
-  (let [tb (:seon.view/token-budget m)]
-    (if (and (integer? tb) (pos? (long tb)))
-      (long (max 80 (min (* 2 (long n)) (Math/round (* (double n) (/ (double tb) 2400.0))))))
-      (long n))))
+(defn- bl [& args] (apply prim/bl args))
 
-(defn- hl-terms [m]
-  (let [r (:seon.ui/highlight-terms m)]
-    (when (sequential? r) (->> r (filter string?) (map str/trim) (filter #(>= (count %) 2)) distinct (take 6) vec not-empty))))
+(defn- hl-terms [& args] (apply prim/hl-terms args))
 
-(defn- hl [s terms]
-  (if (or (empty? terms) (str/blank? s))
-    s
-    (let [pat (re-pattern (str "(?i)(" (str/join "|" (map #(Pattern/quote ^String %) terms)) ")"))
-          mt (re-matcher pat s)
-          out (loop [i 0 acc []]
-                (if (.find mt)
-                  (let [st (.start mt) en (.end mt)]
-                    (recur en (cond-> acc (> st i) (conj (subs s i st)) true (conj [:mark {:class "hl-term"} (subs s st en)]))))
-                  (cond-> acc (< i (count s)) (conj (subs s i)))))]
-      (if (= 1 (count out)) (first out) (into [:span] out)))))
+(defn- hl [& args] (apply prim/hl args))
 
-(defn- el
-  ([a v] (rlinks/ent-link a v (str v) "mono"))
-  ([a v lbl] (rlinks/ent-link a v lbl "mono strong"))
-  ([a v lbl cls] (rlinks/ent-link a v lbl cls)))
+(defn- el [& args] (apply prim/el args))
 
-(defn- code-block
-  ([txt] (code-block txt false))
-  ([txt exp?] (when (and (some? txt) (not (str/blank? (str txt))))
-                [:pre {:class (str "code-box ent-code tiny" (when exp? " is-expanded"))} [:code (str txt)]])))
+(defn- code-block [& args] (apply prim/code-block args))
 
-(defn- doc-box
-  ([x n] (doc-box x n nil))
-  ([x n terms] (when-let [s (nonblank x)] [:p {:class "doc-box sm-copy"} (hl (clip s n) terms)])))
+(defn- doc-box [& args] (apply prim/doc-box args))
 
-(defn- chip [min-w cls & xs]
-  {:seon.ui/hiccup (into [:span {:class (str "ent-chip " cls) :data-min-width min-w}] (remove nil? xs))})
+(defn- chip [& args] (apply prim/chip args))
 
-(defn- row [min-w cls & xs]
-  {:seon.ui/hiccup (into [:div {:class (str "ent-row " cls) :data-min-width min-w}] (remove nil? xs))})
+(defn- row [& args] (apply prim/row args))
 
-(defn- box [tag-cls min-w cls left right & body]
-  {:seon.ui/hiccup
-   (into [:div {:class (str "card " tag-cls " " cls) :data-min-width min-w}
-          [:div {:class "card-head ent-head"}
-           (into [:div {:class "pill-row"}] (remove nil? left))
-           (cond (vector? right) right
-                 (and (some? right) (not (str/blank? (str right)))) [:span {:class "muted tiny mono ent-meta"} (str right)]
-                 :else nil)]]
-         (remove nil? body))})
+(defn- box [& args] (apply prim/box args))
 
 (defn- var-badge [{:seon.code.var/keys [test? macro? flow-edge? private?]}]
   (cond test? (badge "green" "test") macro? (badge "purple" "macro")

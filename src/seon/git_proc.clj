@@ -132,7 +132,7 @@
         [st {::flow/error [{:proc :git :op :write-back :error (.getMessage ex)}]}]))))
 
 (defn git-proc
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]], :seon.flow/edge true}
   ([] {:params {:conn "Read access to store via :main conn"
                 :cfg "Pure store cfg"
                 :repo-dir "Git repository working tree"

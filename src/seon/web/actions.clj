@@ -516,7 +516,7 @@
   (boolean (or (:expert-mode? vs) (get-in vs [:lab-prefs :expert-mode?]))))
 
 (defn ^:seon/callable chat-agent-form!
-  {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map [:maybe :keyword] :map] :map]]}
+  {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map [:maybe :keyword] :map] :map]], :seon.flow/edge true}
   ([st form] (chat-agent-form! st (ui/entry-agent-id @(:conn st)) form))
   ([st agent-id form]
    (let [db (when-let [c (:conn st)] @c)

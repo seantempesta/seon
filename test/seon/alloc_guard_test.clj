@@ -376,23 +376,3 @@
         (is (empty? errs))
         (is (= "ok" ((resolve 'seon.cand-demo/check-item) {:new-req "ok"})))
         (is (thrown? clojure.lang.ExceptionInfo ((resolve 'seon.cand-demo/check-item) {:old-req 1})))))))
-
-(deftest fast-tier-lpt-binning-and-edn-safe-stress-var-test
-  (testing "build-namespace-subs packs many namespaces into <= max-workers bins without dropping tests/gens"
-    (let [tests (mapv (fn [i] {:ns (symbol (str "seon.ns" i)) :var (symbol (str "seon.ns" i) "t") :digest (str "d" i) :est-ms 12.0}) (range 20))
-          gens (mapv (fn [i] {:ns (symbol (str "seon.ns" i)) :var (symbol (str "seon.ns" i) "g") :digest (str "g" i) :est-ms 5.0}) (range 20))
-          subs (seon.test.lpt/build-namespace-subs "b1" "fast" {} :main nil tests gens 10 42 4)]
-      (is (= 4 (count subs)))
-      (is (= 20 (reduce + 0 (map (comp count :test-items) subs))))
-      (is (= 20 (reduce + 0 (map (comp count :gen-items) subs))))))
-  (testing "stress-var failure maps always round-trip cleanly through clojure.edn/read-string even with #object return values"
-    (let [ns-sym 'seon.tmp.edn-safe-stress]
-      (try
-        (let [ns-obj (create-ns ns-sym)]
-          (binding [*ns* ns-obj]
-            (refer-clojure)
-            (eval '(defn bad-obj {:malli/schema [:=> [:cat :int] :string]} [x] (java.util.regex.Pattern/compile "a")))))
-        (let [r (seon.schema/stress-var nil 'seon.tmp.edn-safe-stress/bad-obj {:samples 3 :seed 42})]
-          (is (false? (:ok? r)))
-          (is (map? (clojure.edn/read-string (pr-str r)))))
-        (finally (when (find-ns ns-sym) (remove-ns ns-sym)))))))

@@ -7,28 +7,18 @@
             [seon.schema :as schema]
             [seon.rule :as rules]
             [seon.vector :as svec]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.ctx.recall :as recall]))
 
-(defn- dh-has? [db a] (boolean (and db (contains? (:schema db) a))))
+(defn- dh-has? [& args] (apply recall/dh-has? args))
 
-(defn- eav-vals [db e a]
-  (when (and (integer? e) (dh-has? db a))
-    (mapv :v (d/datoms db :eavt e a))))
+(defn- eav-vals [& args] (apply recall/eav-vals args))
 
-(defn- eav1 [db e a]
-  (when (and (integer? e) (dh-has? db a))
-    (:v (first (d/datoms db :eavt e a)))))
+(defn- eav1 [& args] (apply recall/eav1 args))
 
-(defn- avet-eids [db a v]
-  (when (and (some? v) (dh-has? db a))
-    (mapv :e (d/datoms db :avet a v))))
+(defn- avet-eids [& args] (apply recall/avet-eids args))
 
-(defn- doc-atoms-for-eid [db eid]
-  (let [fwd-var (eav-vals db eid :seon.code.var/doc-refs)
-        fwd-sch (eav-vals db eid :seon.schema/doc-refs)
-        rev-doc (avet-eids db :seon.code.doc/references eid)]
-    (vec (distinct (filter #(and (integer? %) (some? (eav1 db % :seon.code.doc/id)))
-                           (concat fwd-var fwd-sch rev-doc))))))
+(defn- doc-atoms-for-eid [& args] (apply recall/doc-atoms-for-eid args))
 
 (defn- task-proof-var-eids
 ([db teid] (task-proof-var-eids db db teid))
@@ -52,8 +42,7 @@
                   (first (avet-eids db (first lr) (second lr)))))
               lrefs))))
 
-(def ^:private test-harness-nss
-  #{'seon.test-fixture})
+(def ^:private test-harness-nss recall/test-harness-nss)
 
 (defn- var-in-scope? [scope var-ns]
   (and (symbol? scope) (symbol? var-ns)
@@ -281,16 +270,7 @@
          (some? out-type) (assoc :output-type out-type))
        {:seon/schema :seon.graph/chain-boundary}))))
 
-(def ^:private lexical-stopwords
-  #{"the" "and" "for" "with" "that" "this" "from" "into" "when" "where" "what" "have" "has"
-    "fix" "add" "update" "make" "use" "using" "all" "any" "new" "one" "two" "not" "are" "can"})
-
-(defn- tokenize-goal [s]
-  (when (and (string? s) (not (str/blank? s)))
-    (->> (re-seq #"[a-zA-Z0-9]{3,}" (str/lower-case s))
-         (remove lexical-stopwords)
-         distinct
-         vec)))
+(defn- tokenize-goal [& args] (apply recall/tokenize-goal args))
 
 (defn- entity-max-tx [db e]
   (if (and db (integer? e))
@@ -334,37 +314,9 @@
               (add! sib 84))))
         (vec (sort-by (fn [[e _ pri _]] [(- (long pri)) (long e)]) (vals @best)))))))
 
-(defn- recall-matching-schemas!
-  "O(k log N) indexed `:avet` lookup of schemas explicitly named in `goal-txt` (plus `<scope>/entity` conventions), avoiding any O(N) `:aevt` schema scan."
-  [bdb add! scopes goal-txt]
-  (when (dh-has? bdb :seon.schema/key)
-    (let [kw-strs (re-seq #":([a-zA-Z][a-zA-Z0-9._?!*+-]*/[a-zA-Z0-9._?!*+-]+)" (or goal-txt ""))
-        explicit-ks (into [] (comp (map #(keyword (second %)))
-                                   (mapcat (fn [k]
-                                             (let [ns-s (namespace k)]
-                                               (if (and ns-s (not= "entity" (name k)))
-                                                 [k (keyword ns-s "entity")]
-                                                 [k])))))
-                          kw-strs)
-        scope-ks (map (fn [sc] (keyword (str sc) "entity")) (take 2 scopes))
-        resolved (into [] (comp (distinct)
-                                (keep (fn [k]
-                                        (when-let [se (first (avet-eids bdb :seon.schema/key k))]
-                                          [se (if (= "entity" (name k)) 86 83)]))))
-                       (concat explicit-ks scope-ks))]
-    (doseq [[se pri] (take 8 resolved)]
-      (add! se pri)))))
+(defn- recall-matching-schemas! [& args] (apply recall/recall-matching-schemas! args))
 
-(defn- add-turn0-var-neighborhood! [bdb add! ve]
-  (doseq [se (concat (eav-vals bdb ve :seon.code.var/input) (eav-vals bdb ve :seon.code.var/output))]
-    (add! se 82))
-  (doseq [de (take 2 (doc-atoms-for-eid bdb ve))] (add! de 81))
-  (let [callers (remove #(or (= % ve) (contains? test-harness-nss (eav1 bdb % :seon.code.var/ns)))
-                        (avet-eids bdb :seon.code.var/calls ve))
-        t-callers (take 3 (filter #(true? (eav1 bdb % :seon.code.var/test?)) callers))
-        p-callers (take 4 (remove #(true? (eav1 bdb % :seon.code.var/test?)) callers))]
-    (doseq [tc t-callers] (add! tc 84))
-    (doseq [pc p-callers] (add! pc 80))))
+(defn- add-turn0-var-neighborhood! [& args] (apply recall/add-turn0-var-neighborhood! args))
 
 (defn referenced-doc-rows
   "Surfaces `:seon.code.doc/entity` atoms referencing `agent-id`'s pinned entities or branch-edited vars."
@@ -427,24 +379,7 @@
                               prod))]
             (mapv (fn [p] [p :seon.rule/nil 89 (entity-max-tx bdb p)]) (sort prods))))))))
 
-(defn- semantic-recall-rows! [mdb bdb agent-id task-ents add!]
-  (when (and (dh-has? bdb :seon.vector/coarse) (dh-has? bdb :seon.vector/of))
-    (let [min-sc (double (or (store/config-val bdb agent-id :seon.config/semantic-min-score) 0.45))
-          qvec (some (fn [{:keys [tdb eid]}]
-                       (or (svec/vector-of bdb eid)
-                           (when (and tdb (not (identical? tdb bdb))) (svec/vector-of tdb eid))
-                           (when (and mdb (not (identical? mdb bdb))) (svec/vector-of mdb eid))))
-                     task-ents)]
-      (when (seq qvec)
-        (let [hit? (volatile! false)]
-          (doseq [[of-attr k pri] [[:seon.code.var/name 6 85]
-                                   [:seon.code.doc/id 4 85]
-                                   [:seon.schema/key 4 84]]
-                  [e sc] (svec/near bdb qvec k {:of of-attr})
-                  :when (>= (double sc) min-sc)]
-            (vreset! hit? true)
-            (add! e pri))
-          @hit?)))))
+(defn- semantic-recall-rows! [& args] (apply recall/semantic-recall-rows! args))
 
 (defn goal-lexical-rows
   "General Turn-0 recall: for scoped open non-template tasks (with no proofs yet), uses O(1) indexed `:avet` lookups to recall named entity schemas, lexically relevant public vars in scope (plus 1-hop I/O schemas, callers & reaching tests for top matches; falling back to top 4 public vars only on Turn 0 before any evals/pins), and sibling `-test` ns; for vague unscoped goals, recalls matching docs & vars."

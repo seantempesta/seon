@@ -334,10 +334,7 @@
 
 (defn eval-rule-query
   "Executes rule's native Datahike `:seon.rule/query` via `d/q` and returns binding env maps."
-  {:malli/schema [:function
-                  [:=> [:cat :map :map [:maybe :keyword] :map] [:vector :map]]
-                  [:=> [:cat :map :map [:maybe :keyword] :map :any [:maybe :int]] [:vector :map]]]
-   :cost/ticks 10000000}
+  {:malli/schema [:function [:=> [:cat :map :map [:maybe :keyword] :map] [:vector :map]] [:=> [:cat :map :map [:maybe :keyword] :map :any [:maybe :int]] [:vector :map]]], :cost/ticks 10000000, :seon.flow/edge true}
   ([wm dbs agent-id rule] (eval-rule-query wm dbs agent-id rule nil nil))
   ([wm dbs agent-id rule focus-ref focus-eid]
    (let [{:keys [pq req-tree focus-eq fn-syms db-fn-call? direct-fn-call eff-q eff-ins] :as qm} (rq/query-meta (:seon.rule/query rule))

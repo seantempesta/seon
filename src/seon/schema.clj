@@ -206,7 +206,9 @@
 
 (defonce ^:private ^:seon.flow/edge db-registry-anchor (atom {}))
 
-(defn- db-schema-unchanged-since? [db prev-cid cur-cid]
+(defn- db-schema-unchanged-since?
+  {:seon.flow/edge true}
+  [db prev-cid cur-cid]
   (let [anc-fn (some-> (find-ns (quote seon.ctx.diff)) (ns-resolve (quote ancestor-within?)))
         anc-ok? (if anc-fn
                   (boolean (anc-fn db prev-cid cur-cid 16))
@@ -222,7 +224,7 @@
 
 (defn registry-for-db
   "Returns `{:registry :forms :reg-sig :merge-meta :declarations :decl-by-id :entity-index}` with commit-anchored promotion."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]]}
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]], :seon.flow/edge true}
   ([db] (registry-for-db db nil))
   ([db extra-forms]
    (let [compute (fn []
@@ -341,7 +343,7 @@
 
 (defn arm-var!
   "Wraps `v` (a Clojure `Var` with `:malli/schema` `[:=> ...]` metadata) via `m/-instrument` with typed contract blame."
-  {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat [:maybe :seon.host/db] :any] :any]]}
+  {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat [:maybe :seon.host/db] :any] :any]], :seon.flow/edge true}
   ([v] (arm-var! nil v))
   ([db v]
    (when (and (var? v) (bound? v) (fn? @v))
@@ -457,16 +459,6 @@
 (defn- live-branch-db []
   (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref :conn deref))
 
-(defn- edn-safe-ipc [x]
-  (cond
-    (or (nil? x) (boolean? x) (integer? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) x
-    (float? x) (let [d (double x)] (if (or (Double/isNaN d) (Double/isInfinite d)) (str d) x))
-    (map? x) (into {} (map (fn [[k v]] [(edn-safe-ipc k) (edn-safe-ipc v)])) x)
-    (vector? x) (mapv edn-safe-ipc x)
-    (set? x) (into #{} (map edn-safe-ipc) x)
-    (sequential? x) (mapv edn-safe-ipc x)
-    :else (pr-str x)))
-
 (defn- stress-arity [fn-sym target-fn opts registry ar-sch top-examples samples seed measure-fn budgets]
   (let [[cat-s ret-s guard-s] (m/children ar-sch)
         valid-in? (m/validator cat-s opts) valid-ret? (m/validator ret-s opts)
@@ -508,7 +500,7 @@
 
 (defn stress-var
   "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets."
-  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
+  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]], :seon.flow/edge true}
   ([fn-sym] (stress-var (live-branch-db) fn-sym {}))
   ([a b] (if (qualified-symbol? a) (stress-var (live-branch-db) a (if (map? b) b {})) (stress-var a b {})))
   ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]

@@ -13,7 +13,8 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.fork.worker-support :as wsup]
             [seon.code :as code]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx]
+            [seon.store.config :as store-cfg]))
 
 (defn demo-reactive-canvas
   "Sample pure reactive canvas renderer `(fn [db agent])` used by Stage 4 test."
@@ -29,11 +30,11 @@
       (d/transact conn {:tx-data [{:seon.config/key :seon.config/root
                                    :seon.config/rank-weights {:urgency 1.0 :recency 0.7 :convergence 0.5}}]})
       (let [snap @conn
-            [_ ui-reads] (binding [store/*capturing-agent-eval-reads?* false]
+            [_ ui-reads] (binding [store-cfg/*capturing-agent-eval-reads?* false]
                            (reads/with-reads #(do (store/config-val snap nil :seon.config/eval-ticks)
                                                   (fit/read-rank-weights snap)
                                                   (sig/all-signals snap))))
-            [_ eval-reads] (binding [store/*capturing-agent-eval-reads?* true]
+            [_ eval-reads] (binding [store-cfg/*capturing-agent-eval-reads?* true]
                              (reads/with-reads #(do (store/config-val snap nil :seon.config/eval-ticks)
                                                     (fit/read-rank-weights snap)
                                                     (sig/all-signals snap))))]

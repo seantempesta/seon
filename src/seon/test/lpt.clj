@@ -44,34 +44,18 @@
     (select-keys overlay [:upserts :retracted-keys :schema-upserts :retracted-schemas :rule-upserts :retracted-rules])))
 
 (defn build-namespace-subs
-"Packs fast-tier namespaces into at most `max-workers` (default 4) LPT-balanced worker bins so repo-wide overlays compile O(max-workers) times instead of O(namespaces) times."
-{:malli/schema [:function
-                [:=> [:cat :any :any :any :any [:maybe :map] [:vector :map] [:vector :map] :int :int] [:vector :map]]
-                [:=> [:cat :any :any :any :any [:maybe :map] [:vector :map] [:vector :map] :int :int [:maybe [:int {:min 1 :max 64}]]] [:vector :map]]]
- :cost/ticks 5000000}
-([parent-id tier-tag cfg branch overlay uncached-tests uncached-gens samples seed]
- (build-namespace-subs parent-id tier-tag cfg branch overlay uncached-tests uncached-gens samples seed 4))
-([parent-id tier-tag cfg branch overlay uncached-tests uncached-gens samples seed max-workers]
- (let [ov (sub-overlay overlay)
-       tests-by-ns (group-by :ns uncached-tests)
-       gens-by-ns (group-by :ns uncached-gens)
-       all-ns (vec (sort (distinct (concat (keys tests-by-ns) (keys gens-by-ns)))))
-       ns-items (mapv (fn [nsym]
-                        (let [ts (get tests-by-ns nsym [])
-                              gs (get gens-by-ns nsym [])
-                              est (+ (reduce + 0.0 (map #(double (or (:est-ms %) 10.0)) ts))
-                                     (* 2.0 (count gs)))]
-                          {:ns nsym :var nsym :est-ms (max 1.0 est) :tests ts :gens gs}))
-                      all-ns)
-       bins (pack-lpt-bins ns-items (max 1 (long (or max-workers 4))))]
-   (vec (map-indexed
-         (fn [idx bin-nss]
-           {:sub-id (str parent-id "-" tier-tag "-" idx)
-            :parent-id parent-id :cfg cfg :branch branch :overlay ov
-            :test-items (vec (mapcat (fn [b] (map #(dissoc % :ns :est-ms) (:tests b))) bin-nss))
-            :gen-items (vec (mapcat (fn [b] (map #(dissoc % :ns :est-ms) (:gens b))) bin-nss))
-            :samples samples :seed seed})
-         bins)))))
+  {:malli/schema [:=> [:cat :any :any :any :any [:maybe :map] [:vector :map] [:vector :map] :int :int] [:vector :map]], :cost/ticks 2000000}
+  [parent-id tier-tag cfg branch overlay uncached-tests uncached-gens samples seed]
+  (let [ov (sub-overlay overlay)
+        all-ns (vec (sort (distinct (concat (map :ns uncached-tests) (map :ns uncached-gens)))))]
+    (vec (map-indexed
+          (fn [idx nsym]
+            {:sub-id (str parent-id "-" tier-tag "-" idx)
+             :parent-id parent-id :cfg cfg :branch branch :overlay ov
+             :test-items (->> uncached-tests (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns :est-ms)))
+             :gen-items (->> uncached-gens (filter #(= nsym (:ns %))) (mapv #(dissoc % :ns :est-ms)))
+             :samples samples :seed seed})
+          all-ns))))
 
 (defn build-lpt-slow-subs
   {:malli/schema [:=> [:cat :any :any :any :any [:maybe :map] [:vector :map] [:maybe [:int {:min 1, :max 64}]] :int :int] [:vector :map]], :cost/ticks 2000000}
