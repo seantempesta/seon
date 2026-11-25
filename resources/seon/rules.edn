@@ -293,6 +293,25 @@
                     $branch
                     ?agent
                     :where
+                    [(seon.ctx.graph/edited-var-neighborhood-rows $main $branch ?agent)
+                     [[?e ?rfn ?pri ?tx]]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :workspace, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "For vars edited on $branch vs $main, project their I/O schemas, callers, reaching tests, and sibling I/O vars (e.g. renderers) into :workspace.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/edited-var-neighborhood}
+ {:seon.rule/query [:find
+                    ?e
+                    ?rfn
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
                     [(seon.ctx.graph/eval-frontier-rows $main $branch ?agent) [[?e ?rfn ?pri ?tx]]]],
   :seon.rule/target :wire,
   :seon.rule/enabled? true,
@@ -301,6 +320,25 @@
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/eval-frontier-bridge}
+ {:seon.rule/query [:find
+                    ?e
+                    ?rfn
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.ctx.graph/failing-test-target-rows $main $branch ?agent)
+                     [[?e ?rfn ?pri ?tx]]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :workspace, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "When a test fails on the branch, project the production var(s) directly called by the failing test var.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/failing-test-targets}
  {:seon.rule/query [:find
                     ?tv
                     ?form
@@ -388,6 +426,24 @@
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/failing-tests}
+ {:seon.rule/query [:find
+                    ?e
+                    ?rfn
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.ctx.graph/goal-lexical-rows $main $branch ?agent) [[?e ?rfn ?pri ?tx]]]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :workspace, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "For vague goals/tasks lacking concrete scope or proofs, recall top lexically matching docs and vars into :workspace.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/goal-lexical-recall}
  {:seon.rule/query [:find
                     ?err
                     ?fix
@@ -493,6 +549,24 @@
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/proof-backward-walk}
+ {:seon.rule/query [:find
+                    ?e
+                    ?rfn
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.ctx.graph/referenced-doc-rows $main $branch ?agent) [[?e ?rfn ?pri ?tx]]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :workspace, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "Surface :seon.code.doc/entity atoms referencing pinned entities or branch-edited vars/schemas once into :workspace.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/referenced-concept-docs}
  {:seon.rule/query [:find
                     ?t
                     ?tx

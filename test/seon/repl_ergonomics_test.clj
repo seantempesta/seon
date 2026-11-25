@@ -31,7 +31,7 @@
       (is (= 'jolt.process (some-> (get ral 'proc) ns-name)))
       (is (= 'jolt.fs (some-> (get ual 'fs) ns-name)))
       (is (= 'jolt.process (some-> (get ual 'proc) ns-name)))
-      (is (true? (binding [*ns* rns] (eval '(fs/exists? "AGENTS.md")))))
+      (is (true? (binding [*ns* rns] (eval '(fs/exists? ".")))))
       (is (true? (binding [*ns* rns] (eval '(var? #'proc/process))))))))
 
 (deftest live-introspecting-help-test

@@ -56,7 +56,8 @@
          spath (str (or store-path (str wdir "/store")))]
      (when-not (fs/executable? bin) (throw (ex-info (str "Seon binary missing or not executable: " bin) {:bin-path bin})))
      (fs/create-dirs wdir)
-     (let [cmd (build-instance-cmd (assoc opts :bin-path bin :port 0 :store-path spath :repo-dir repo
+     (let [seed-s (when-let [ss (:seed-store opts)] (let [s (str ss)] (if (clojure.string/starts-with? s "/") s (str repo "/" s))))
+           cmd (build-instance-cmd (assoc opts :bin-path bin :port 0 :store-path spath :repo-dir repo :seed-store seed-s
                                           :headless? headless? :commit-git? commit-git? :auto-switch-over? auto-switch-over?))
            started-ns (System/nanoTime)
            jproc (proc/process cmd {:dir wdir :err :out :extra-env (bh/jolt-env-map repo extra-env) :shutdown proc/destroy-tree})

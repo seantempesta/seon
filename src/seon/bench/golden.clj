@@ -6,7 +6,8 @@
             [seon.git :as git]
             [seon.render.text :refer [round1]]
             [seon.store :as store :refer [db-schema]]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.bench.helpers :as helpers]))
 
 (def ^:private run-pull-pattern
   '[:seon.bench.run/id :seon.bench.run/title :seon.bench.run/status

@@ -4,7 +4,8 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.render.data :as rdata]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.rule :as rules]))
 
 (defn- dh-has? [db a] (boolean (and db (contains? (:schema db) a))))
 
@@ -270,3 +271,173 @@
          (some? in-type) (assoc :input-type in-type)
          (some? out-type) (assoc :output-type out-type))
        {:seon/schema :seon.graph/chain-boundary}))))
+
+(def ^:private lexical-stopwords
+  #{"the" "and" "for" "with" "that" "this" "from" "into" "when" "where" "what" "have" "has"
+    "fix" "add" "update" "make" "use" "using" "all" "any" "new" "one" "two" "not" "are" "can"})
+
+(defn- tokenize-goal [s]
+  (when (and (string? s) (not (str/blank? s)))
+    (->> (re-seq #"[a-zA-Z0-9]{3,}" (str/lower-case s))
+         (remove lexical-stopwords)
+         distinct
+         vec)))
+
+(defn- entity-max-tx [db e]
+  (if (and db (integer? e))
+    (reduce (fn [m dt] (max m (long (or (:tx dt) 0)))) 0 (d/datoms db :eavt e))
+    0))
+
+(defn- edited-branch-var-eids [main-db branch-db]
+  (if (or (nil? main-db) (nil? branch-db) (identical? main-db branch-db))
+    []
+    (let [fkeys (keep #(eav1 branch-db % :seon.code.form/key) (rules/edited-form-eids main-db branch-db))]
+      (vec (distinct (mapcat #(avet-eids branch-db :seon.code.var/form %) fkeys))))))
+
+(defn edited-var-neighborhood-rows
+  "For every var edited on `branch-db` vs `main-db`, surfaces its I/O schemas, callers, reaching tests, and sibling vars sharing both input and output schemas."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:tuple :int :any :int :int]]]
+   :cost/ticks 15000000}
+  [main-db branch-db _agent-id]
+  (let [ed-vars (edited-branch-var-eids main-db branch-db)]
+    (if (empty? ed-vars)
+      []
+      (let [best (volatile! {})
+            add! (fn [eid pri]
+                   (when (integer? eid)
+                     (let [cur (get @best eid)]
+                       (when (or (nil? cur) (> (long pri) (long (nth cur 2))))
+                         (vswap! best assoc eid [eid :seon.rule/nil (long pri) (entity-max-tx branch-db eid)])))))]
+        (doseq [ve ed-vars
+                :let [ins (eav-vals branch-db ve :seon.code.var/input)
+                      outs (eav-vals branch-db ve :seon.code.var/output)
+                      out-set (set outs)]]
+          (doseq [se (concat ins outs)] (add! se 87))
+          (doseq [caller (avet-eids branch-db :seon.code.var/calls ve)
+                  :when (and (not= caller ve)
+                             (not (contains? test-harness-nss (eav1 branch-db caller :seon.code.var/ns))))]
+            (add! caller (if (true? (eav1 branch-db caller :seon.code.var/test?)) 88 85)))
+          (when (and (seq ins) (seq out-set))
+            (doseq [in-e ins
+                    sib (avet-eids branch-db :seon.code.var/input in-e)
+                    :when (and (not= sib ve)
+                               (some out-set (eav-vals branch-db sib :seon.code.var/output)))]
+              (add! sib 84))))
+        (vec (sort-by (fn [[e _ pri _]] [(- (long pri)) (long e)]) (vals @best)))))))
+
+(defn goal-lexical-rows
+  "When an agent has a vague goal/task with no concrete scope and no proofs yet, recalls top matching docs (by id/heading) and vars (by name/doc) by lexical token overlap."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:tuple :int :any :int :int]]]
+   :cost/ticks 20000000}
+  [main-db branch-db agent-id]
+  (if-not (and agent-id (or main-db branch-db))
+    []
+    (let [bdb (or branch-db main-db)
+          mdb (or main-db branch-db)
+          ag (rdata/pull-agent-entity mdb bdb agent-id)
+          tids (vec (distinct (concat (rdata/agent-task-ids bdb ag) (rdata/agent-task-ids mdb ag))))
+          has-scope? (let [sc (:seon.agent/scope ag)] (and (symbol? sc) (not= 'seon sc)))
+          task-ents (vec (keep (fn [tid]
+                                 (let [tdb (if (first (avet-eids bdb :seon.task/id tid)) bdb mdb)
+                                       te (first (avet-eids tdb :seon.task/id tid))]
+                                   (when (and te (not (true? (eav1 tdb te :seon.task/done?))))
+                                     {:db tdb :eid te
+                                      :scope (eav1 tdb te :seon.task/scope)
+                                      :title (eav1 tdb te :seon.task/title)
+                                      :plan (eav1 tdb te :seon.task/plan)
+                                      :has-proofs? (boolean (seq (task-proof-var-eids bdb te)))})))
+                               tids))
+          any-scope? (or has-scope? (boolean (some #(and (symbol? (:scope %)) (not= 'seon (:scope %))) task-ents)))
+          any-proof? (boolean (some :has-proofs? task-ents))]
+      (if (or any-scope? any-proof?)
+        []
+        (let [toks (tokenize-goal (str (:seon.agent/goal ag) " "
+                                       (str/join " " (map #(str (:title %) " " (:plan %)) task-ents))))]
+          (if (empty? toks)
+            []
+            (let [score-txt (fn [s]
+                              (if (str/blank? (str s)) 0
+                                  (let [low (str/lower-case (str s))]
+                                    (reduce + 0 (map #(if (str/includes? low %) 1 0) toks)))))
+                  doc-hits (when (dh-has? bdb :seon.code.doc/id)
+                             (->> (d/datoms bdb :aevt :seon.code.doc/id)
+                                  (keep (fn [dt]
+                                          (let [e (:e dt)
+                                                id-sc (score-txt (:v dt))
+                                                hd-sc (if (pos? id-sc) (score-txt (eav1 bdb e :seon.code.doc/heading)) 0)
+                                                sc (+ (* 2 id-sc) (* 2 hd-sc))]
+                                            (when (>= sc 2) [e sc]))))
+                                  (sort-by (fn [[e sc]] [(- sc) e]))
+                                  (take 4)))
+                  var-hits (when (dh-has? bdb :seon.code.var/name)
+                             (->> (d/datoms bdb :aevt :seon.code.var/name)
+                                  (keep (fn [dt]
+                                          (let [e (:e dt)
+                                                nm-sc (score-txt (str (:v dt)))
+                                                sc (if (pos? nm-sc) (+ (* 2 nm-sc) (score-txt (eav1 bdb e :seon.code.var/doc))) 0)]
+                                            (when (>= sc 2) [e sc]))))
+                                  (sort-by (fn [[e sc]] [(- sc) e]))
+                                  (take 6)))]
+              (vec (concat (map (fn [[e _]] [e :seon.rule/nil 84 (entity-max-tx bdb e)]) doc-hits)
+                           (map (fn [[e _]] [e :seon.rule/nil 83 (entity-max-tx bdb e)]) var-hits))))))))))
+
+(defn referenced-doc-rows
+  "Surfaces `:seon.code.doc/entity` atoms referencing `agent-id`'s pinned entities or branch-edited vars."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:tuple :int :any :int :int]]]
+   :cost/ticks 10000000}
+  [main-db branch-db agent-id]
+  (let [bdb (or branch-db main-db)
+        mdb (or main-db branch-db)]
+    (if-not (and agent-id bdb (dh-has? bdb :seon.code.doc/references))
+      []
+      (let [ag (rdata/pull-agent-entity mdb bdb agent-id)
+            pinned (resolve-ordered-eids bdb (:seon.agent/pinned ag))
+            ed-vars (edited-branch-var-eids mdb bdb)
+            targets (vec (distinct (concat pinned ed-vars)))]
+        (if (empty? targets)
+          []
+          (let [docs (into #{}
+                           (mapcat (fn [t]
+                                     (concat (avet-eids bdb :seon.code.doc/references t)
+                                             (when (and mdb (not (identical? mdb bdb)) (dh-has? mdb :seon.code.doc/references))
+                                               (avet-eids mdb :seon.code.doc/references t)))))
+                           targets)]
+            (mapv (fn [d] [d :seon.rule/nil 83 (entity-max-tx bdb d)]) (sort docs))))))))
+
+(defn failing-test-target-rows
+  "When a test fails on the branch, surfaces the production var(s) directly called by the failing test var."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:tuple :int :any :int :int]]]
+   :cost/ticks 10000000}
+  [main-db branch-db agent-id]
+  (let [bdb (or branch-db main-db)
+        mdb (or main-db branch-db)]
+    (if-not (and agent-id bdb
+                 (dh-has? bdb :seon.code.var/calls)
+                 (dh-has? bdb :seon.test.run/failed-digests)
+                 (or (first (d/datoms bdb :aevt :seon.test.run/failed-digests))
+                     (and mdb (not (identical? mdb bdb)) (dh-has? mdb :seon.test.run/failed-digests)
+                          (first (d/datoms mdb :aevt :seon.test.run/failed-digests)))))
+      []
+      (let [ae (or (first (avet-eids bdb :seon.agent/id agent-id))
+                   (when (and mdb (not (identical? mdb bdb))) (first (avet-eids mdb :seon.agent/id agent-id))))
+            br (when ae (or (eav1 bdb ae :seon.agent/branch) (eav1 mdb ae :seon.agent/branch)))
+            failed-dgs (when br
+                         (let [collect (fn [db]
+                                         (when (and db (dh-has? db :seon.test.run/branch) (dh-has? db :seon.test.run/failed-digests))
+                                           (for [dt (d/datoms db :avet :seon.test.run/branch br)
+                                                 :when (false? (eav1 db (:e dt) :seon.test.run/pass?))
+                                                 dg (eav-vals db (:e dt) :seon.test.run/failed-digests)]
+                                             dg)))]
+                           (into #{} (concat (collect bdb) (when (not (identical? mdb bdb)) (collect mdb))))))]
+        (if (empty? failed-dgs)
+          []
+          (let [prods (into #{}
+                            (for [dg failed-dgs
+                                  :let [tve (or (first (avet-eids bdb :seon.test/digest dg))
+                                                (when (not (identical? mdb bdb)) (first (avet-eids mdb :seon.test/digest dg))))
+                                        var-e (when tve (or (eav1 bdb tve :seon.test/var-ref) (eav1 mdb tve :seon.test/var-ref)))]
+                                  :when var-e
+                                  prod (eav-vals bdb var-e :seon.code.var/calls)
+                                  :when (not (contains? test-harness-nss (eav1 bdb prod :seon.code.var/ns)))]
+                              prod))]
+            (mapv (fn [p] [p :seon.rule/nil 89 (entity-max-tx bdb p)]) (sort prods))))))))

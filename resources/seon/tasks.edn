@@ -515,6 +515,7 @@
   :seon.task/template? true,
   :seon.task/title "Research subsystem data, schemas, code, tests & history and report [M] findings"}
  {:seon.task/refs [{:db/id 95695352674061795}
+                   {:db/id 226620458780637305}
                    {:db/id 337780492914683973}
                    {:db/id 388075505420649235}
                    {:db/id 416025720678810693}
@@ -525,16 +526,29 @@
                    {:db/id 711514305060198597}
                    {:db/id 723425430238415824}
                    {:db/id 789127062453962289}
+                   {:db/id 865506681610449748}
                    {:db/id 870587028712646551}
+                   {:db/id 918410500643210690}
                    {:db/id 1016865847270280304}
                    {:db/id 1045822652751870938}
+                   {:db/id 1053911334449611128}
                    {:db/id 1092285936602045411}
                    {:db/id 1092427754900766283}
-                   {:db/id 1107271651566967543}],
+                   {:db/id 1107271651566967543}
+                   {:db/id 1134849665331851523}],
   :seon.task/scope seon.ctx,
   :seon.task/title "Pause-and-Fork Context Tuner: diagnose miss, edit general rules/renderers/policies, prove corpus green, finish-review!",
   :seon.task/id :template/tune-context,
-  :seon.task/ref-order [[:seon.schema/key :seon.agent/forked-from]
+  :seon.task/ref-order [[:seon.code.doc/id
+                         "docs/tuning.md#1-the-supervisor-rollback-fix-resume-cadence"]
+                        [:seon.code.doc/id
+                         "docs/tuning.md#2-recall-vs-precision-general-datalog-rules"]
+                        [:seon.code.doc/id "docs/tuning.md#3-multi-footprint-pure-hiccup-renderers"]
+                        [:seon.code.doc/id
+                         "docs/tuning.md#4-schemas-refs-core-clojure-user-ctx-data-recipes"]
+                        [:seon.code.doc/id
+                         "docs/tuning.md#context-tuning-supervisor-rollback-field-guide"]
+                        [:seon.schema/key :seon.agent/forked-from]
                         [:seon.schema/key :seon.rule/id]
                         [:seon.schema/key :seon.rule/category]
                         [:seon.schema/key :seon.rule/stratum]

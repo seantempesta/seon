@@ -16,7 +16,8 @@
             [seon.repl.search :as search]
             [seon.bench.golden :as bgolden]
             [seon.health.liveness :as hliveness]
-            [seon.render.wire]))
+            [seon.render.wire]
+            [seon.bench.helpers :as bhelpers]))
 
 (defn- intern-doc! [u sym f]
   (let [v (intern u sym (if (var? f) (fn [& args] (apply @f args)) f))
@@ -408,5 +409,5 @@
                  ['create-task! #'create-task!] ['metrics #'metrics]
                  ['simulate-context #'simulate-context] ['check-corpus #'check-corpus] ['tune-context! #'tune-context!]
                  ['friction #'hmetrics/repl-friction] ['golden-scoreboard #'bgolden/repl-golden-scoreboard]
-                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['run-ab! #'bgolden/run-ab!] ['summarize-ab #'bgolden/summarize-ab] ['liveness #'hliveness/check-liveness]]]
+                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['run-ab! #'bgolden/run-ab!] ['summarize-ab #'bgolden/summarize-ab] ['sample-random-tasks #'bhelpers/repl-sample-random-tasks] ['liveness #'hliveness/check-liveness]]]
     (intern-doc! u s v)))
