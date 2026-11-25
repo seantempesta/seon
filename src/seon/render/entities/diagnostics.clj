@@ -3,13 +3,10 @@
   (:require [clojure.string :as str]
             [seon.render.links :as rlinks]
             [seon.render.text :refer [one-line round1]]
-            [seon.render.entities.prim :as prim :refer [chip]]))
+            [seon.render.entities.prim :as prim :refer [chip ent-box]]))
 
 (defn- tone [lvl]
   (case lvl :hot "red" :warm "amber" :calm "green" "slate"))
-
-(defn- box [min-w cls left right & body]
-  (apply prim/box "ent-card" min-w cls left right body))
 
 (defn- fmt-delta [v suffix lower-better?]
   (when (number? v)
@@ -51,7 +48,7 @@
         kv (:kv-cache-hit-pct t)
         f-prev (take 10 findings)
         more-f (- (count findings) (count f-prev))]
-    (box 440 "ent-friction"
+    (ent-box 440 "ent-friction"
          [(rlinks/badge (tone level) (str "friction · " (name (or level :calm))))
           [:span {:class "strong"} (str (or agents-scanned 0) " agents")]
           (when (pos? (long (or (:ooms t) 0))) (rlinks/badge "red" (str (:ooms t) " OOM")))
@@ -131,7 +128,7 @@
                             [:span {:class "pill-row tiny"} (rlinks/mut "Δlive") (fmt-delta (:livelocks delta-vs-prev) "" true)])
                           (when (number? (:timeouts delta-vs-prev))
                             [:span {:class "pill-row tiny"} (rlinks/mut "Δtimeout") (fmt-delta (:timeouts delta-vs-prev) "" true)])]))]
-    (box 460 "ent-scoreboard"
+    (ent-box 460 "ent-scoreboard"
          [(rlinks/badge (tone level) (str "scoreboard · " (or suite-id :golden/v1)))
           (rlinks/badge (if (>= (double (or merge-rate-pct 0.0)) 80.0) "green" "amber")
                         (str (round1 (or merge-rate-pct 0.0)) "% merge"))

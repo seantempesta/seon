@@ -96,3 +96,10 @@
                  (and (some? right) (not (str/blank? (str right)))) [:span {:class "muted tiny mono ent-meta"} (str right)]
                  :else nil)]]
          (remove nil? body))})
+
+(defn ent-box
+  "Card primitive with `ent-card` class, consolidating shared card headers across `seon.render.entities.*`."
+  {:malli/schema [:=> [:cat :int :string [:sequential :any] :any [:* :any]] [:map [:seon.ui/hiccup :any]]]
+   :cost/ticks 500000}
+  [min-w cls left right & body]
+  (apply box "ent-card" min-w cls left right body))

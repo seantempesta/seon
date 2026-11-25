@@ -51,8 +51,8 @@
                                :else nil)
                      arms))
                      :else [])
-         explicit-timeout (or (when (number? (:timeout-ms o)) (long (:timeout-ms o)))
-                              (when (number? (:task-timeout-ms o)) (long (:task-timeout-ms o))))
+         explicit-timeout (when (number? (:timeout-ms o)) (long (:timeout-ms o)))
+         default-timeout  (when (number? (:task-timeout-ms o)) (long (:task-timeout-ms o)))
          inc-trace? (boolean (:include-trace? o))]
      (vec (for [[idx raw] (map-indexed vector (filter map? base-tasks))
                 :let [chat-aid (:chat-agent raw)
@@ -68,7 +68,7 @@
                      :merge? (if (contains? raw :merge?) (boolean (:merge? raw)) true)
                      :require-merge? (if (contains? raw :require-merge?) (boolean (:require-merge? raw)) true)
                      :auto-merge? (if (contains? raw :auto-merge?) (boolean (:auto-merge? raw)) true)
-                     :timeout-ms (long (or explicit-timeout (when (number? (:timeout-ms raw)) (:timeout-ms raw)) 240000))
+                     :timeout-ms (long (or explicit-timeout (when (number? (:timeout-ms raw)) (:timeout-ms raw)) default-timeout 240000))
                      :config (merge base-cfg (if (map? arm-cfg) arm-cfg {}))}
               (not chat-aid)              (assoc :task (select-keys inner [:id :scope :title :plan :description :refs :curated :tests :needs]))
               chat-aid                    (assoc :chat-agent chat-aid)

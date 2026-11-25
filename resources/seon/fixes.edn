@@ -142,6 +142,13 @@
   :seon.fix/regression-test seon.cst-metrics-test/wave26b-top-level-do-eval-persistence-dq-oom-hints-and-run-ab-test,
   :seon.fix/root-cause "seon.code/eval-single-form only checked top-level form-head against persistable-repl-heads, so form-head='do evaluated in RAM with recordable?=false and silently dropped all nested defs.",
   :seon.fix/symptom "Wave 26A v1-bench-rule wrapped (in-ns 'seon.ctx.graph) + (defn bench-run-rows ...) inside top-level (do ...); REPL tests passed in RAM, but COW test worker failed :dead-rule-fn because forms were never persisted to Datahike."}
+ {:seon.fix/before-after "Before: :task-timeout-ms 240000 clobbered 480s B+-tree timeout and 300s golden timeout. After: per-task :timeout-ms beats :task-timeout-ms while explicit :timeout-ms still overrides.",
+  :seon.fix/change-summary "Split explicit :timeout-ms (forced override) from default :task-timeout-ms (fallback below per-task :timeout-ms) in seon.bench.ab/build-ab-tasks; consolidated duplicate box wrappers into seon.render.entities.prim/ent-box; added string entity-id and String->Named hints in seon.code.errors; synced docs/bench.md.",
+  :seon.fix/error-class :ab-timeout-precedence-and-ent-box-dedup,
+  :seon.fix/id #uuid "e997890a-eed7-4837-8736-a95378c6c24e",
+  :seon.fix/regression-test seon.bench-golden-test/wave27b-ab-timeout-precedence-ent-box-and-error-hints-test,
+  :seon.fix/root-cause "build-ab-tasks collapsed :timeout-ms and :task-timeout-ms into one explicit-timeout variable checked before (:timeout-ms raw).",
+  :seon.fix/symptom "Wave 27A: build-ab-tasks let run-level :task-timeout-ms 240000 overwrite per-task :timeout-ms 480000 on 3-way B+-tree and 300000 on v1-bench-rule; duplicate private box wrappers existed across seon.render.entities.{diagnostics,system}."}
  {:seon.fix/created-ms 1795246303675,
   :seon.fix/symptom "Un-Rigged Round 3 failed :task-split-md with 'Unable to resolve symbol: activity-fold-summary' on :main tests and failed :task-eval-summary health gate with :minified-form (1896 chars on 1 line).",
   :seon.fix/change-summary "Updated seon.code.edit/add-fn! to auto-format 1-line strings (>= 200 chars, no newlines) via pp/code-dispatch and run (reorder-ns-forms! conn nsym) automatically after every persist.",
