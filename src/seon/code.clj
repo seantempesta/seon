@@ -150,6 +150,7 @@
 
 (defn- effective-eval-budgets [form-val base-ticks base-bytes]
   (let [test-ov {:ticks 2000000000 :bytes 4294967296}
+        def-ov  {:ticks 400000000 :bytes 536870912}
         nodes (tree-seq coll? seq form-val)
         alias-map (into {}
                     (keep (fn [n]
@@ -162,15 +163,22 @@
      (fn [[t b] x]
        (if-let [ov (when (symbol? x)
                      (let [nm (name x)]
-                       (if (or (= nm "run-tests") (= nm "run-all-tests") (= nm "test-vars") (= nm "test-var"))
-                         test-ov
+                       (cond
+                         (or (= nm "run-tests") (= nm "run-all-tests") (= nm "test-vars") (= nm "test-var")) test-ov
+                         (= nm "deftest") def-ov
+                         :else
                          (when-let [v (if-let [ns-s (namespace x)]
                                         (or (ns-resolve *ns* x)
                                             (when-let [nso (or (find-ns (symbol ns-s))
                                                                (when-let [full (get alias-map ns-s)] (find-ns full)))]
                                               (ns-resolve nso (symbol nm))))
                                         (ns-resolve *ns* x))]
-                           (when (var? v) (:seon.eval/budget-override (meta v)))))))]
+                           (when (var? v)
+                             (let [m (meta v)]
+                               (or (when-let [src (:seon.repl/source m)]
+                                     (when-let [sv (resolve src)]
+                                       (:seon.eval/budget-override (meta sv))))
+                                   (:seon.eval/budget-override m))))))))]
          [(max t (long (or (:ticks ov) t)))
           (max b (long (or (:bytes ov) b)))]
          [t b]))

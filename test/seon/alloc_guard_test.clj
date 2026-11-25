@@ -515,3 +515,28 @@
       (let [sch (:malli/schema (meta v))]
         (is (some? sch))
         (is (= [:cat :keyword :any [:* :any]] (second sch)))))))
+
+(deftest wave10e-live-repl-source-budget-override-test
+  (testing "effective-eval-budgets resolves live :seon.repl/source metadata and grants 512MB to deftest forms"
+    (let [eb #'seon.code/effective-eval-budgets
+          _ (intern (create-ns 'seon.tmp-budget-src) (with-meta 'heavy-fn {:seon.eval/budget-override {:ticks 999999 :bytes 2147483648}}) (fn [] :ok))
+          _ (intern (create-ns 'seon.tmp-budget-wrap) (with-meta 'heavy-fn {:seon.repl/source 'seon.tmp-budget-src/heavy-fn :seon.eval/budget-override {:ticks 10 :bytes 100}}) (fn [] :ok))]
+      (try
+        (let [[t b] (eb '(seon.tmp-budget-wrap/heavy-fn) 50 500)
+              [_ db-b] (eb '(deftest foo-test (is (= 1 1))) 50 500)]
+          (is (= 999999 t))
+          (is (= 2147483648 b))
+          (is (>= db-b 536870912)))
+        (finally
+          (remove-ns 'seon.tmp-budget-wrap)
+          (remove-ns 'seon.tmp-budget-src)))))
+  (testing "set-meta! rejects non-map batch entries and live fn objects in :malli/schema upfront"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/m.clj" "(ns demo.m)\n(defn f [x] (inc x))\n" false)})
+      (binding [fcalls/*agent-ctx* {:conn conn :agent-id :repl/t :branch :main}]
+        (let [r-bad-batch (seon.code.edit/set-meta! {:target 'demo.m/f :malli/schema [:=> [:cat :int] :int]})
+              r-bad-fn (seon.code.edit/set-meta! 'demo.m/f {:malli/schema [:=> [:cat pos-int?] :int]})]
+          (is (false? (:ok? r-bad-batch)))
+          (is (= :invalid-batch-map (:error r-bad-batch)))
+          (is (false? (:ok? r-bad-fn)))
+          (is (= :unquoted-fn-in-schema (:error r-bad-fn))))))))

@@ -202,6 +202,17 @@
     :all-unmapped all-unmapped
     :all-upserts (vec (vals (reduce (fn [m f] (assoc m (:seon.code.form/key f) f)) {} (concat unloaded-forms rebind-forms upserts))))}))
 
+(defn- refresh-warm-user-helpers!
+  {:seon.flow/edge true}
+  [upserted-keys]
+  (when (and (find-ns 'user) (ns-resolve (find-ns 'user) 'ctx))
+    (when (contains? upserted-keys "seon.repl/install-repl-helpers!")
+      (try (when-let [f (resolve 'seon.repl/install-repl-helpers!)] (f (find-ns 'user))) (catch Throwable _ nil)))
+    (when (contains? upserted-keys "seon.code.refactor/install-user-helpers!")
+      (try (when-let [f (resolve 'seon.code.refactor/install-user-helpers!)]
+             (f #(some-> (resolve 'seon.fork.calls/*agent-ctx*) deref) (resolve 'seon.ctx/refresh-active!)))
+           (catch Throwable _ nil)))))
+
 (defn apply-overlay!
   "Applies a branch/merge delta `{:upserts [...] :retracted-keys #{...}}` live into the current
    Chez/Jolt runtime. Automatically unmaps retracted vars AND rebinds forms in both retracted
@@ -273,7 +284,7 @@
                  :let [m (meta v) sch (:malli/schema m)]
                  :when (and (:seon/instrumented? m) (vector? sch) (some changed-schemas (schema/schema-refs-in-form sch)))]
            (schema/arm-var! arm-db v))))
-     @errors)))
+     (do (refresh-warm-user-helpers! (into #{} (map :seon.code.form/key) all-upserts)) @errors))))
 
 (defn ^:seon.flow/edge rebind-spliced-callers!
   "Walks forward up to 3 hops from `root-sym` via `:seon.code.var/calls` and re-evaluates
