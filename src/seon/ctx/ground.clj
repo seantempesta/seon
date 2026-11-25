@@ -9,7 +9,9 @@
             [seon.schema.index :as six]
             [seon.store :as store]
             [seon.vector :as vec]
-            [seon.render.fit :as fit]))
+            [seon.render.fit :as fit]
+            [datahike.index.interface :as di]
+            [datahike.reads :as reads]))
 
 (defn resolve-lookup-eid
   "Resolves an integer EID, `[:db/id eid]`, or `[attr val]` lookup ref against `branch-db` first, falling back to `main-db`."
@@ -306,45 +308,77 @@
                        (seq ep) (update :params merge ep)))))))
            merged))))
 
+(defonce ^:private ^:seon.flow/edge overview-anchor-cache (store/lru-cache 16))
+
 (defn system-overview-rows
-  "Indexed balanced top-K overview rows `[eid rfn pri tx]` for `[:seon.system/id :root]`: surfaces
-   recent open errors, active non-example agents (including entry agents), open non-template tasks,
-   pending calls, and matching fixes with staggered priorities so one busy category cannot starve the rest."
+  "Commit-anchored O(1) incremental balanced top-K overview rows `[eid rfn pri tx]` for `[:seon.system/id :root]`
+   with zero N+1 eavt lookups, zero truncation caps, and sound `datahike.reads` forwarding."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector [:tuple :int :any :int :int]]]
    :cost/ticks 15000000}
   [db]
-  (let [dh (or (:schema db) {})
-        eav1 (fn [e a] (when (contains? dh a) (:v (first (d/datoms db :eavt e a)))))
-        top-k (fn [k rows] (vec (take k (sort-by (fn [[_ tx]] (- (long tx))) rows))))
-        stagger (fn [base step rfn pairs]
-                  (vec (map-indexed (fn [i [e tx]] [e rfn (- (long base) (* (long step) i)) (long tx)]) pairs)))
-        errs (when (contains? dh :seon.error/status)
-               (top-k 4 (map (fn [dt] [(:e dt) (long (:tx dt 0))]) (d/datoms db :avet :seon.error/status :open))))
-        err-kinds (into #{} (keep #(eav1 (first %) :seon.error/kind)) errs)
-        fixes (when (and (seq err-kinds) (contains? dh :seon.fix/error-class))
-                (top-k 2 (for [k err-kinds dt (d/datoms db :avet :seon.fix/error-class k)]
-                           [(:e dt) (long (:tx dt 0))])))
-        calls (when (contains? dh :seon.agent.call/status)
-                (top-k 3 (map (fn [dt] [(:e dt) (long (:tx dt 0))]) (d/datoms db :avet :seon.agent.call/status :pending))))
-        agents (when (contains? dh :seon.agent/id)
-                 (let [raw (keep (fn [dt]
-                                   (let [aid (:v dt) e (:e dt)]
-                                     (when (and (qualified-keyword? aid)
-                                                (not= "example" (namespace aid))
-                                                (not (true? (eav1 e :seon.agent/archived?))))
-                                       [e (long (:tx dt 0)) (boolean (eav1 e :seon.agent/entry?))])))
-                                 (d/datoms db :aevt :seon.agent/id))]
-                   (mapv (fn [[e tx _]] [e tx])
-                         (take 5 (sort-by (fn [[_ tx entry?]] [(if entry? 0 1) (- (long tx))]) raw)))))
-        tasks (when (contains? dh :seon.task/id)
-                (top-k 4 (keep (fn [dt]
-                                 (let [e (:e dt)]
-                                   (when (and (not (true? (eav1 e :seon.task/done?)))
-                                              (not (true? (eav1 e :seon.task/template?))))
-                                     [e (long (:tx dt 0))])))
-                               (d/datoms db :aevt :seon.task/id))))]
-    (vec (concat (stagger 96 4 (quote seon.render.entities/render-error-card) (take 3 errs))
-                 (stagger 95 4 (quote seon.render.entities/render-agent-row) (take 4 agents))
-                 (stagger 94 4 (quote seon.render.entities/render-task-card) (take 4 tasks))
-                 (stagger 93 4 (quote seon.render.entities/render-call-row) (take 3 calls))
-                 (stagger 91 4 (quote seon.render.entities/render-fix-card) (take 2 fixes))))))
+  (let [watch #{:seon.error/status :seon.error/kind :seon.fix/error-class :seon.agent.call/status
+                :seon.agent/id :seon.agent/archived? :seon.agent/entry?
+                :seon.task/id :seon.task/done? :seon.task/template?}
+        compute
+        (fn []
+          (let [dh (or (:schema db) {})
+                eav1 (fn [e a] (when (contains? dh a) (:v (first (d/datoms db :eavt e a)))))
+                top-k (fn [k rows] (vec (take k (sort-by (fn [[_ tx]] (- (long tx))) rows))))
+                stagger (fn [base step rfn pairs]
+                          (vec (map-indexed (fn [i [e tx]] [e rfn (- (long base) (* (long step) i)) (long tx)]) pairs)))
+                errs (when (contains? dh :seon.error/status)
+                       (top-k 4 (map (fn [dt] [(:e dt) (long (:tx dt 0))]) (d/datoms db :avet :seon.error/status :open))))
+                err-kinds (into #{} (keep #(eav1 (first %) :seon.error/kind)) errs)
+                fixes (when (and (seq err-kinds) (contains? dh :seon.fix/error-class))
+                        (top-k 2 (for [k err-kinds dt (d/datoms db :avet :seon.fix/error-class k)] [(:e dt) (long (:tx dt 0))])))
+                calls (when (contains? dh :seon.agent.call/status)
+                        (top-k 3 (map (fn [dt] [(:e dt) (long (:tx dt 0))]) (d/datoms db :avet :seon.agent.call/status :pending))))
+                archived (if (contains? dh :seon.agent/archived?) (into #{} (map :e) (d/datoms db :avet :seon.agent/archived? true)) #{})
+                entries (if (contains? dh :seon.agent/entry?) (into #{} (map :e) (d/datoms db :avet :seon.agent/entry? true)) #{})
+                agents (when (contains? dh :seon.agent/id)
+                         (let [raw (keep (fn [dt]
+                                           (let [aid (:v dt) e (:e dt)]
+                                             (when (and (qualified-keyword? aid) (not= "example" (namespace aid)) (not (contains? archived e)))
+                                               [e (long (:tx dt 0)) (contains? entries e)])))
+                                         (d/datoms db :aevt :seon.agent/id))]
+                           (mapv (fn [[e tx _]] [e tx]) (take 5 (sort-by (fn [[_ tx entry?]] [(if entry? 0 1) (- (long tx))]) raw)))))
+                templates (if (contains? dh :seon.task/template?) (into #{} (map :e) (d/datoms db :avet :seon.task/template? true)) #{})
+                done-eids (if (contains? dh :seon.task/done?) (into #{} (keep #(when (true? (:v %)) (:e %))) (d/datoms db :aevt :seon.task/done?)) #{})
+                tasks (when (contains? dh :seon.task/id)
+                        (top-k 4 (keep (fn [dt]
+                                         (let [e (:e dt)]
+                                           (when (and (not (contains? done-eids e)) (not (contains? templates e)))
+                                             [e (long (:tx dt 0))])))
+                                       (d/datoms db :aevt :seon.task/id))))]
+            (vec (concat (stagger 96 4 (quote seon.render.entities/render-error-card) (take 3 errs))
+                         (stagger 95 4 (quote seon.render.entities/render-agent-row) (take 4 agents))
+                         (stagger 94 4 (quote seon.render.entities/render-task-card) (take 4 tasks))
+                         (stagger 93 4 (quote seon.render.entities/render-call-row) (take 3 calls))
+                         (stagger 91 4 (quote seon.render.entities/render-fix-card) (take 2 fixes))))))
+        cur-cid (live-cid db)
+        sid (store/store-id db)
+        br (get-in db [:config :branch])
+        mtx (long (or (:max-tx db) 0))
+        ak (when (and cur-cid sid br (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db))) [sid br])
+        outer di/*reads*]
+    (if-not ak
+      (compute)
+      (let [anc (get @overview-anchor-cache ak)
+            unchanged? (when (and anc (:cid anc) (not= (:cid anc) cur-cid) (diff/ancestor-within? db (:cid anc) cur-cid 16))
+                         (try (let [attrs (into watch (keep #(get-in db [:ident-ref-map %])) watch)]
+                                (not-any? #(contains? attrs (:a %)) (d/changes db (:cid anc) cur-cid)))
+                              (catch Throwable _ false)))
+            hit (cond
+                  (and anc (= cur-cid (:cid anc)) (= mtx (:max-tx anc))) anc
+                  unchanged? (let [p (assoc anc :cid cur-cid :max-tx mtx)]
+                               (swap! overview-anchor-cache assoc ak p) p)
+                  :else nil)]
+        (if hit
+          (do (when (and outer (seq (:reads hit))) (swap! outer into (:reads hit)))
+              (:rows hit))
+          (let [[rows rs] (reads/with-reads compute)
+                entry {:cid cur-cid :max-tx mtx :rows rows :reads rs}]
+            (store/lru-get! overview-anchor-cache 16 ak (fn [] entry))
+            (swap! overview-anchor-cache assoc ak entry)
+            (when (and outer (seq rs)) (swap! outer into rs))
+            rows))))))
