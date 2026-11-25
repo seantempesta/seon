@@ -48,15 +48,21 @@
                                                                    (not= nsym (:seon.code.var/ns cv)))
                                                           (:seon.code.var/name cv)))))
                                               distinct sort vec))]
+                       (let [sch (:seon.code.var/schema v)]
                        (cond-> {:sym (if vsym (symbol (name vsym)) :ns)
                                 :key k
                                 :lines lines
                                 :chars chars
                                 :tokens (quot chars 4)}
-                         (:seon.code.var/private? v) (assoc :private? true)
-                         (seq local-deps)            (assoc :local-deps local-deps)
-                         (seq ext-callers)           (assoc :callers (vec (take 6 ext-callers))
-                                                            :caller-count (count ext-callers)))))
+                         (:seon.code.var/private? v)   (assoc :private? true)
+                         (:seon.code.var/flow-edge? v) (assoc :flow-edge? true)
+                         (and vsym sch (not (:seon.code.var/private? v)) (not (:seon.code.var/test? v)))
+                         (assoc :has-schema? true)
+                         (and vsym sch (str/includes? (pr-str sch) ":examples"))
+                         (assoc :has-examples? true)
+                         (seq local-deps)              (assoc :local-deps local-deps)
+                         (seq ext-callers)             (assoc :callers (vec (take 6 ext-callers))
+                                                              :caller-count (count ext-callers))))))
                    forms)]
     {:ns nsym
      :total-tokens (reduce + 0 (map :tokens rows))

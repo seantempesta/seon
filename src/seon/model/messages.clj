@@ -216,6 +216,45 @@ Done? Reply in Markdown (NO tool calls) — Seon auto-tests & merges branches wi
       (and reasoning-effort (not= :disabled thinking))
       (assoc :reasoning_effort (name reasoning-effort)))))
 
+(defn- render-unread-blocks [agent-id unread tail-blocks]
+  (when (and (seq unread) (not (some #(or (= "unread-inbox" (:tag %)) (:contains-unread? %)) tail-blocks)))
+    (let [txt (str/join "\n\n"
+                        (keep (fn [m]
+                                (let [body (str (or (:seon.agent.message/body m) (:body m) ""))
+                                      ent {:seon.agent.message/id (or (:seon.agent.message/id m) #uuid "00000000-0000-0000-0000-000000000000")
+                                           :seon.agent.message/seq (long (or (:seon.agent.message/seq m) (:seq m) 0))
+                                           :seon.agent.message/from (or (:seon.agent.message/from m) (:from m) :user)
+                                           :seon.agent.message/to (or (:seon.agent.message/to m) (:to m) (or agent-id :agent/unknown))
+                                           :seon.agent.message/type (or (:seon.agent.message/type m) (:type m) :chat)
+                                           :seon.agent.message/body body}]
+                                  (when-let [h (:seon.ui/hiccup (rinfra/render-message-card {:seon.agent.message/entity ent}))]
+                                    (render/hiccup->text h))))
+                              unread))]
+      (when-not (str/blank? txt)
+        [(str "<unread-inbox ephemeral=\"true\">\n" txt "\n</unread-inbox>")]))))
+
+(defn- render-tail-blocks [tail-blocks activity-text viewport-screenshot]
+  (let [dom-summary (format-viewport-dom (:dom viewport-screenshot))
+        fmt-attrs (fn [m]
+                    (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))
+                                      (sort-by (comp name key) m))))]
+    (if (some? tail-blocks)
+      (mapv (fn [{:keys [tag attrs text]}]
+              (let [t (or tag "tail")]
+                (str "<" t (fmt-attrs (assoc (or attrs {}) :ephemeral "true")) ">\n"
+                     (or text "")
+                     "\n</" t ">")))
+            tail-blocks)
+      [(when (not (str/blank? (str activity-text)))
+         (str "<neighborhood-activity ephemeral=\"true\">\n" activity-text "\n</neighborhood-activity>"))
+       (when viewport-screenshot
+         (str "<live-viewport route=\"" (:route viewport-screenshot "/")
+              "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)
+              "\" ephemeral=\"true\">"
+              "Current live WKWebView screenshot of what the user sees right now (always replaced at end of context — inspect closely and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing)."
+              (when dom-summary (str "\nDOM: " dom-summary))
+              "</live-viewport>"))])))
+
 (defn build-agent-wire-messages
   "Single source of truth for BOTH live LLM requests AND Level 3 Debug View.
    Produces proper OpenAI-compat / DeepSeek wire messages with:
@@ -260,41 +299,8 @@ Done? Reply in Markdown (NO tool calls) — Seon auto-tests & merges branches wi
                                                main-db (assoc :main-db main-db)
                                                fallback-db (assoc :fallback-db fallback-db))
                                              history))
-        unread-blocks (when (and (seq unread) (not (some #(or (= "unread-inbox" (:tag %)) (:contains-unread? %)) tail-blocks)))
-                      (let [txt (str/join "\n\n"
-                                          (keep (fn [m]
-                                            (let [body (str (or (:seon.agent.message/body m) (:body m) ""))
-                                                  ent {:seon.agent.message/id (or (:seon.agent.message/id m) #uuid "00000000-0000-0000-0000-000000000000")
-                                                       :seon.agent.message/seq (long (or (:seon.agent.message/seq m) (:seq m) 0))
-                                                       :seon.agent.message/from (or (:seon.agent.message/from m) (:from m) :user)
-                                                       :seon.agent.message/to (or (:seon.agent.message/to m) (:to m) (or agent-id :agent/unknown))
-                                                       :seon.agent.message/type (or (:seon.agent.message/type m) (:type m) :chat)
-                                                       :seon.agent.message/body body}]
-                                              (when-let [h (:seon.ui/hiccup (rinfra/render-message-card {:seon.agent.message/entity ent}))]
-                                                (render/hiccup->text h))))
-                                          unread))]
-                        (when-not (str/blank? txt)
-                          [(str "<unread-inbox ephemeral=\"true\">\n" txt "\n</unread-inbox>")])))
-        dom-summary (format-viewport-dom (:dom viewport-screenshot))
-        fmt-attrs (fn [m]
-                    (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))
-                                      (sort-by (comp name key) m))))
-        rendered-tails (if (some? tail-blocks)
-                         (mapv (fn [{:keys [tag attrs text]}]
-                                 (let [t (or tag "tail")]
-                                   (str "<" t (fmt-attrs (assoc (or attrs {}) :ephemeral "true")) ">\n"
-                                        (or text "")
-                                        "\n</" t ">")))
-                               tail-blocks)
-                         [(when (not (str/blank? (str activity-text)))
-                            (str "<neighborhood-activity ephemeral=\"true\">\n" activity-text "\n</neighborhood-activity>"))
-                          (when viewport-screenshot
-                            (str "<live-viewport route=\"" (:route viewport-screenshot "/")
-                                 "\" size=\"" (:width viewport-screenshot 1280) "x" (:height viewport-screenshot 820)
-                                 "\" ephemeral=\"true\">"
-                                 "Current live WKWebView screenshot of what the user sees right now (always replaced at end of context — inspect closely and fix any clipping, overlap, contrast, or stray SVG artifacts before finishing)."
-                                 (when dom-summary (str "\nDOM: " dom-summary))
-                                 "</live-viewport>"))])
+        unread-blocks (render-unread-blocks agent-id unread tail-blocks)
+        rendered-tails (render-tail-blocks tail-blocks activity-text viewport-screenshot)
         tail-text (str/join "\n\n"
                             (remove str/blank?
                                     (concat unread-blocks

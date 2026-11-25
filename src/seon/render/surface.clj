@@ -132,6 +132,37 @@
      :sidebar-breakpoint (long (or (:seon.config/ui-sidebar-breakpoint root) 760))
      :preview-widths (if (and (sequential? ws) (seq ws)) (mapv long ws) [360 640])}))
 
+(defn- resolve-surface-view-opts [main-db ui-cfg o]
+  (let [vs (rdata/user-view-state main-db o)
+        aid (or (:viewing-id o) (:viewing-id vs) (:entry-id vs) :agent/root)
+        vm (or (:view-mode o) (:view-mode vs) :canvas)
+        canon (rdata/canonical-view-mode vm)
+        insp-ref (if (contains? o :inspect-ref) (rdata/normalize-inspect-ref (:inspect-ref o)) (:inspect-ref vs))
+        explaining? (and (= canon :context)
+                         (or (nil? insp-ref)
+                             (= :context (rdata/canonical-view-mode (:view-mode o)))
+                             (not (contains? o :inspect-ref))))
+        inspecting? (boolean (and (not explaining?) (or insp-ref (= vm :inspect))))
+        expert-mode? (if (contains? o :expert-mode?)
+                       (boolean (:expert-mode? o))
+                       (boolean (when (and ((db-schema main-db) :seon.user/expert-mode?)
+                                           (first (d/datoms main-db :aevt :seon.user/expert-mode?))
+                                           (first (d/datoms main-db :avet :seon.user/id :user/default)))
+                                  (:seon.user/expert-mode?
+                                   (d/pull main-db (quote [:seon.user/expert-mode?]) [:seon.user/id :user/default])))))
+        vw (long (or (:viewport-w o) (:viewport-w vs) 1280))
+        vh (long (or (:viewport-h o) (:viewport-h vs) 820))
+        sb? (and (if (boolean? (:sidebar-open? o)) (:sidebar-open? o) (boolean (:sidebar-open? vs))) (>= vw (:sidebar-breakpoint ui-cfg)))
+        as-of (if (contains? o :as-of-tx) (:as-of-tx o) (:as-of-tx vs))
+        target (if (= :wire (:target o)) :wire :html)
+        slot (or (:slot o) (if (= :wire target) :wire :main))
+        slot-b (fit/resolve-slot-budget (merge ui-cfg {:viewport-w vw :viewport-h vh :sidebar-open? sb? :slot slot}))
+        rail-b (when (and (= canon :session) expert-mode? (not= :wire target) (nil? (:slot o)))
+                 (fit/resolve-slot-budget (merge ui-cfg {:viewport-w vw :viewport-h vh :sidebar-open? sb? :slot :rail})))]
+    {:vs vs :aid aid :vm vm :canon canon :insp-ref insp-ref :explaining? explaining? :inspecting? inspecting?
+     :expert-mode? expert-mode? :vw vw :vh vh :sb? sb? :as-of as-of :target target :slot slot
+     :slot-b slot-b :rail-b rail-b :fit-b (or rail-b slot-b)}))
+
 (defn build-surface-model
   "Pure unified surface model builder over `main-db`, `branch-db`, and `opts`."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map]] :map]
@@ -142,34 +173,8 @@
    (let [t0 (System/nanoTime)
          o (if (map? opts) opts {})
          ui-cfg (read-ui-config main-db)
-         vs (rdata/user-view-state main-db o)
-         aid (or (:viewing-id o) (:viewing-id vs) (:entry-id vs) :agent/root)
-         vm (or (:view-mode o) (:view-mode vs) :canvas)
-         canon (rdata/canonical-view-mode vm)
-         insp-ref (if (contains? o :inspect-ref) (rdata/normalize-inspect-ref (:inspect-ref o)) (:inspect-ref vs))
-         explaining? (and (= canon :context)
-                          (or (nil? insp-ref)
-                              (= :context (rdata/canonical-view-mode (:view-mode o)))
-                              (not (contains? o :inspect-ref))))
-         inspecting? (boolean (and (not explaining?) (or insp-ref (= vm :inspect))))
-         expert-mode? (if (contains? o :expert-mode?)
-                        (boolean (:expert-mode? o))
-                        (boolean (when (and ((db-schema main-db) :seon.user/expert-mode?)
-                                            (first (d/datoms main-db :aevt :seon.user/expert-mode?))
-                                            (first (d/datoms main-db :avet :seon.user/id :user/default)))
-                                   (:seon.user/expert-mode?
-                                    (d/pull main-db (quote [:seon.user/expert-mode?]) [:seon.user/id :user/default])))))
-         vw (long (or (:viewport-w o) (:viewport-w vs) 1280))
-         vh (long (or (:viewport-h o) (:viewport-h vs) 820))
-         sb-bp (:sidebar-breakpoint ui-cfg)
-         sb? (and (if (boolean? (:sidebar-open? o)) (:sidebar-open? o) (boolean (:sidebar-open? vs))) (>= vw sb-bp))
-         as-of (if (contains? o :as-of-tx) (:as-of-tx o) (:as-of-tx vs))
-         target (if (= :wire (:target o)) :wire :html)
-         slot (or (:slot o) (if (= :wire target) :wire :main))
-         slot-b (fit/resolve-slot-budget (merge ui-cfg {:viewport-w vw :viewport-h vh :sidebar-open? sb? :slot slot}))
-         rail-b (when (and (= canon :session) expert-mode? (not= :wire target) (nil? (:slot o)))
-                  (fit/resolve-slot-budget (merge ui-cfg {:viewport-w vw :viewport-h vh :sidebar-open? sb? :slot :rail})))
-         fit-b (or rail-b slot-b)
+         {:keys [vs aid vm canon insp-ref explaining? inspecting? expert-mode? vw vh sb? as-of target slot slot-b rail-b fit-b]}
+         (resolve-surface-view-opts main-db ui-cfg o)
          br0 (or (:branch o)
                  (when (and (nil? branch-db) aid ((db-schema main-db) :seon.agent/id))
                    (:seon.agent/branch (d/pull main-db (quote [:seon.agent/branch]) [:seon.agent/id aid])))
@@ -188,12 +193,12 @@
                        :fallback-renderers rwire/fallback-entity-renderers}
                       (select-keys o [:token-budget :already-shown :strategy :per-item-budget]))
          sfit (when (and sigs (not= canon :system) (not inspecting?)
-                     (or explaining? (not (:seon.render.surface/for-render? o))))
-              (store/lru-get! signals-fit-cache 32
-                              [(get-in emdb [:config :store :id]) (dissoc sigs :ms :tx)
-                               (:avail-w slot-b) (:area-budget slot-b) target
-                               (:strategy fopts) (:token-budget fopts)]
-                              #(first (:selected (fit/fit-projections emdb [{:entity :signals/live :schema :seon.signal/snapshot :data sigs :priority 100}] fopts)))))
+                         (or explaining? (not (:seon.render.surface/for-render? o))))
+                (store/lru-get! signals-fit-cache 32
+                                [(get-in emdb [:config :store :id]) (dissoc sigs :ms :tx)
+                                 (:avail-w slot-b) (:area-budget slot-b) target
+                                 (:strategy fopts) (:token-budget fopts)]
+                                #(first (:selected (fit/fit-projections emdb [{:entity :signals/live :schema :seon.signal/snapshot :data sigs :priority 100}] fopts)))))
          skip-ctx? (and (:seon.render.surface/for-render? o) (not expert-mode?) (not (:include-wire? o))
                         (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?))
          {:keys [wire fitted ctx-trace pool-count]} (if skip-ctx?
@@ -207,11 +212,11 @@
                     (dec (count htxs))))
          active? (or (= :active (get (:agent-states o) aid)) (map? (:live-stream o)))
          agent-status (when (and (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?))
-         (rstatus/latest-agent-status emdb ebdb aid))
+                        (rstatus/latest-agent-status emdb ebdb aid))
          conv (if (and (contains? #{:canvas :session} canon) (not inspecting?) (not explaining?)) (ssess/extract-conversation emdb ebdb aid ag active? as-of) {})
          errs (when (and explaining? (or (nil? insp-ref) (= :seon.agent/id (first insp-ref))) ((db-schema emdb) :seon.error/status))
                 (mapv #(d/pull emdb (quote [:seon.error/id :seon.error/kind :seon.error/severity :seon.error/message
-                                      :seon.error/agent :seon.error/var :seon.error/branch]) (:e %))
+                                            :seon.error/agent :seon.error/var :seon.error/branch]) (:e %))
                       (take 8 (d/datoms emdb :avet :seon.error/status :open))))]
      (merge conv
             {:agent ag :viewing-id aid :branch br :view-mode vm :canon-mode canon :explaining? explaining?

@@ -446,4 +446,12 @@
   :seon.fix/error-class :stress-var-and-repl-parity,
   :seon.fix/root-cause "stress-var had no fallback branch for non-generatable :=>/:function schemas, repl/run-tests! only stressed edited vars (not same-ns callers) under 4GB cap, clojure.test/run-tests lacked budget override, format-eval-output capped plain-edn maps at 4000 chars, and docs/malli.md omitted 1-arg collection example syntax.",
   :seon.fix/regression-test seon.alloc-guard-test/wave6e-stress-var-examples-on-any-function-and-wire-12k-test,
-  :seon.fix/id #uuid "2abf5adf-7505-4a75-9143-77640d822aeb"}]
+  :seon.fix/id #uuid "2abf5adf-7505-4a75-9143-77640d822aeb"}
+ {:seon.fix/created-ms 1795626387438,
+  :seon.fix/symptom "Wave 7A/7C traces showed 12+ turn exploration in audit-* (ns-outline lacked flow-edge/schema/examples flags), 12 GB in-process run-tests! OOM on core namespaces like seon.code.parse, stress-var :malli.core/invalid-arity on keyword args, 184/391 schemas missing :seon.schema/doc, and 5 non-boot :large-function warnings.",
+  :seon.fix/change-summary "Documented all 184 missing schemas (391/391 = 100%), added :flow-edge?/:has-schema?/:has-examples? to ns-form-outline, added kwargs arities to stress-var, added direct-first ordering + 8 GB soft byte-cap guard to run-tests!, enriched docs/malli.md, and split all 5 non-boot :large-function warnings.",
+  :seon.fix/before-after "Schema doc coverage 207/391 (52.9%) -> 391/391 (100%); non-boot :large-function 5 -> 0; Wave 7C seed=106 hit 6/6 (100%) at 15.0 eff turns.",
+  :seon.fix/error-class :stress-var-kwargs-and-inproc-test-oom,
+  :seon.fix/root-cause "ns-form-outline omitted existing var metadata flags, run-tests! ran all transitive reached tests sequentially without direct-first ordering or an 8 GB soft cap, stress-var rejected kwargs, and 184 schemas lacked :seon.schema/doc.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave7d-stress-var-kwargs-and-schema-docs-test,
+  :seon.fix/id #uuid "07b48112-c538-5713-ae1e-8fa0a339e6d0"}]

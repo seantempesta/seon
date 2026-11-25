@@ -276,6 +276,38 @@
                      (remove nil? (cons self-op parent-ops))))
                  eff-tasks))))
 
+(defn- mirror-forked-agent-to-branch! [cfg b mdb ag eff-tasks eff-scope target examples fork-parent resolve-agent-eid]
+  (let [bconn (store/connect cfg b)]
+    (try
+      (wsup/sync-missing-main-schema! bconn b)
+      (let [bdb @bconn
+            seed-tasks (seed-forked-branch-tasks mdb bdb eff-tasks)
+            _ (when (seq seed-tasks) (tx! bconn seed-tasks))
+            bdb2 @bconn
+            explicit-target-id (when target
+                                 (or (when (qualified-keyword? target) target)
+                                     (when-let [te (resolve-agent-eid target)]
+                                       (:seon.agent/id (d/pull mdb '[:seon.agent/id] te)))))
+            eff-target-id (or explicit-target-id (:seon.agent/id fork-parent))
+            target-on-b? (and eff-target-id (boolean (first (d/datoms bdb2 :avet :seon.agent/id eff-target-id))))
+            ex-refs-on-b (when (seq examples)
+                           (into #{} (keep (fn [ex]
+                                             (let [aid (cond (qualified-keyword? ex) ex
+                                                             (integer? ex) (:seon.agent/id (d/pull mdb '[:seon.agent/id] ex))
+                                                             (and (vector? ex) (= :seon.agent/id (first ex))) (second ex))]
+                                               (when (and aid (first (d/datoms bdb2 :avet :seon.agent/id aid)))
+                                                 [:seon.agent/id aid]))))
+                                 examples))
+            b-ag (-> ag
+                     (dissoc :seon.agent/tasks :seon.agent/target :seon.agent/forked-from :seon.agent/example-refs :seon.agent/merge-target)
+                     (cond-> (seq eff-tasks) (assoc :seon.agent/tasks (mapv #(vector :seon.task/id %) eff-tasks))
+                             (:seon.agent/id fork-parent) (assoc :seon.agent/forked-from [:seon.agent/id (:seon.agent/id fork-parent)])
+                             target-on-b? (assoc :seon.agent/target [:seon.agent/id eff-target-id])
+                             (seq ex-refs-on-b) (assoc :seon.agent/example-refs ex-refs-on-b)))
+            b-tx (vec (concat (when eff-scope (focus-tx eff-scope)) [b-ag]))]
+        (tx! bconn b-tx))
+      (finally (d/release bconn)))))
+
 (defn handle-spawn-agent!
   "Spawns a normal or COW-forked agent entity (branch, matched/template tasks, parent, target, fork-from, prefix-mode, merge-target, examples) and commits it, replying to the caller."
   {:malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]] :seon.flow/edge true}
@@ -335,36 +367,7 @@
         r (tx! conn tx-data)
         _ (store/branch! conn fork-src-branch b)
         _ (when (not= fork-src-branch :main)
-            (let [bconn (store/connect (:cfg st) b)]
-              (try
-                (wsup/sync-missing-main-schema! bconn b)
-                (let [bdb @bconn mdb (:db-after r)
-                      seed-tasks (seed-forked-branch-tasks mdb bdb eff-tasks)
-                      _ (when (seq seed-tasks) (tx! bconn seed-tasks))
-                      bdb2 @bconn
-                      explicit-target-id (when target
-                                           (or (when (qualified-keyword? target) target)
-                                               (when-let [te (resolve-agent-eid target)]
-                                                 (:seon.agent/id (d/pull mdb '[:seon.agent/id] te)))))
-                      eff-target-id (or explicit-target-id (:seon.agent/id fork-parent))
-                      target-on-b? (and eff-target-id (boolean (first (d/datoms bdb2 :avet :seon.agent/id eff-target-id))))
-                      ex-refs-on-b (when (seq examples)
-                                     (into #{} (keep (fn [ex]
-                                                       (let [aid (cond (qualified-keyword? ex) ex
-                                                                       (integer? ex) (:seon.agent/id (d/pull mdb '[:seon.agent/id] ex))
-                                                                       (and (vector? ex) (= :seon.agent/id (first ex))) (second ex))]
-                                                         (when (and aid (first (d/datoms bdb2 :avet :seon.agent/id aid)))
-                                                           [:seon.agent/id aid]))))
-                                           examples))
-                      b-ag (-> ag
-                               (dissoc :seon.agent/tasks :seon.agent/target :seon.agent/forked-from :seon.agent/example-refs :seon.agent/merge-target)
-                               (cond-> (seq eff-tasks) (assoc :seon.agent/tasks (mapv #(vector :seon.task/id %) eff-tasks))
-                                       (:seon.agent/id fork-parent) (assoc :seon.agent/forked-from [:seon.agent/id (:seon.agent/id fork-parent)])
-                                       target-on-b? (assoc :seon.agent/target [:seon.agent/id eff-target-id])
-                                       (seq ex-refs-on-b) (assoc :seon.agent/example-refs ex-refs-on-b)))
-                      b-tx (vec (concat (when eff-scope (focus-tx eff-scope)) [b-ag]))]
-                  (tx! bconn b-tx))
-                (finally (d/release bconn)))))]
+          (mirror-forked-agent-to-branch! (:cfg st) b (:db-after r) ag eff-tasks eff-scope target examples fork-parent resolve-agent-eid))]
     (tmerge/reply! msg (cond-> {:ok? true :agent id :branch b :scope eff-scope :tx (:max-tx (:db-after r))}
                          eff-task (assoc :task eff-task)
                          (seq eff-tasks) (assoc :tasks eff-tasks)

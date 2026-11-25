@@ -466,58 +466,74 @@
 
 (defn- stress-arity [& args] (apply six/stress-arity args))
 
+(defn- stress-var* [db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
+  (let [fn-sym (cond (qualified-symbol? fn-sym) fn-sym (var? fn-sym) (symbol fn-sym) (and (string? fn-sym) (str/includes? fn-sym "/")) (symbol fn-sym) :else nil)]
+    (if-not fn-sym
+      {:ok? false :error :invalid-stress-var-sym :hint "Pass a qualified var symbol like 'ns/fn."}
+      (when-let [v (or (resolve fn-sym) (try (requiring-resolve fn-sym) (catch Throwable _ nil)))]
+        (let [m0 (meta v)
+              v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)) (not= (:seon.code/reexport m0) fn-sym))
+                  (or (resolve (:seon.code/reexport m0)) v) v)
+              m (meta v) sch-form (:malli/schema m)
+              skip-reason (stress-skip-reason db fn-sym m)
+              fn-like? (and (vector? sch-form) (contains? #{:=> :function} (first sch-form)))]
+          (cond
+            skip-reason {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
+            fn-like?
+            (let [gen? (boolean (generatable-function-schema? sch-form))
+                  {:keys [registry]} (registry-for-db db) opts {:registry registry}
+                  fn-sch (m/schema sch-form opts) target-fn (or (:seon/raw-fn m) @v)
+                  budgets {:ticks-budget (:cost/ticks m) :bytes-budget (:cost/bytes m) :ms-budget (:cost/ms m)}
+                  t0 (System/nanoTime)
+                  all-ars (if (= :function (m/type fn-sch)) (vec (m/children fn-sch)) [fn-sch])
+                  arities (if gen? (filterv #(generatable-function-schema? (m/form %)) all-ars) all-ars)
+                  top-ex (vec (or (:examples (m/properties fn-sch)) (:malli/examples m)))
+                  per (if gen? (max 1 (quot (long samples) (max 1 (count arities)))) 0)
+                  ex-for-ar (fn [i ar]
+                              (let [ar-n (let [ch (first (m/children ar))]
+                                           (when (and ch (= :cat (m/type ch)))
+                                             (let [cs (m/children ch)]
+                                               (when-not (some #(contains? #{:* :? :+} (m/type %)) cs) (count cs)))))
+                                    top-match (if (and (= :function (m/type fn-sch)) ar-n)
+                                                (filterv #(and (vector? %) (vector? (first %)) (= ar-n (count (first %)))) top-ex)
+                                                (when (zero? i) top-ex))]
+                                (vec (concat top-match (when (not= ar fn-sch) (:examples (m/properties ar)))))))
+                  out (reduce (fn [acc [i ar]]
+                                (let [r (stress-arity fn-sym target-fn opts registry ar (ex-for-ar i ar) per (+ (long seed) i) measure-fn budgets)]
+                                  (if (:ok? r)
+                                    (-> acc (update :ran + (:ran r 0)) (update :max-ticks max (:max-ticks r 0)) (update :max-bytes max (:max-bytes r 0)))
+                                    (reduced r))))
+                              {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0}
+                              (map-indexed vector arities))
+                  ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
+              (cond-> (assoc out :ms (double ms))
+                (and (:ok? out) (not gen?))
+                (assoc :skipped-gen? true
+                       :skipped? (zero? (long (:ran out 0)))
+                       :reason (if (pos? (long (:ran out 0)))
+                                 (str "Checked " (:ran out) " example(s); random seed=42 generation skipped (schema uses :seon.host/* or :any inside :function).")
+                                 "No :examples and random seed=42 generation skipped (schema uses :seon.host/* or :any inside :function — use concrete input types or single :=> for generation)."))))))))))
+
 (defn stress-var
-  "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets. Usage: `(user/stress-var 'ns/fn)` or `(user/stress-var 'ns/fn {:samples 100 :seed 42})`."
-  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :any :map] [:maybe :map]]], :seon.flow/edge true, :seon.eval/budget-override {:ticks 500000000, :bytes 1073741824}}
-  ([fn-sym] (stress-var (live-branch-db) fn-sym {}))
+  "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets. Usage: `(user/stress-var 'ns/fn)`, `(user/stress-var 'ns/fn {:samples 100 :seed 42})`, or `(user/stress-var 'ns/fn :samples 50 :seed 42)`."
+  {:malli/schema [:=> [:cat :any [:* :any]] [:maybe :map]], :seon.flow/edge true, :seon.eval/budget-override {:ticks 500000000, :bytes 1073741824}}
+  ([fn-sym] (stress-var* (live-branch-db) fn-sym {}))
   ([a b] (if (or (qualified-symbol? a) (var? a) (string? a))
-           (if (map? b) (stress-var (live-branch-db) a b)
+           (if (map? b) (stress-var* (live-branch-db) a b)
                {:ok? false :error :invalid-stress-var-args :hint "Usage: (user/stress-var 'ns/fn) or (user/stress-var 'ns/fn {:samples 50 :seed 42})"})
-           (stress-var a b {})))
-  ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
-   (let [fn-sym (cond (qualified-symbol? fn-sym) fn-sym (var? fn-sym) (symbol fn-sym) (and (string? fn-sym) (str/includes? fn-sym "/")) (symbol fn-sym) :else nil)]
-     (if-not fn-sym
-       {:ok? false :error :invalid-stress-var-sym :hint "Pass a qualified var symbol like 'ns/fn."}
-       (when-let [v (or (resolve fn-sym) (try (requiring-resolve fn-sym) (catch Throwable _ nil)))]
-         (let [m0 (meta v)
-               v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)) (not= (:seon.code/reexport m0) fn-sym))
-                   (or (resolve (:seon.code/reexport m0)) v) v)
-               m (meta v) sch-form (:malli/schema m)
-               skip-reason (stress-skip-reason db fn-sym m)
-               fn-like? (and (vector? sch-form) (contains? #{:=> :function} (first sch-form)))]
-           (cond
-             skip-reason {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
-             fn-like?
-             (let [gen? (boolean (generatable-function-schema? sch-form))
-                   {:keys [registry]} (registry-for-db db) opts {:registry registry}
-                   fn-sch (m/schema sch-form opts) target-fn (or (:seon/raw-fn m) @v)
-                   budgets {:ticks-budget (:cost/ticks m) :bytes-budget (:cost/bytes m) :ms-budget (:cost/ms m)}
-                   t0 (System/nanoTime)
-                   all-ars (if (= :function (m/type fn-sch)) (vec (m/children fn-sch)) [fn-sch])
-                   arities (if gen? (filterv #(generatable-function-schema? (m/form %)) all-ars) all-ars)
-                   top-ex (vec (or (:examples (m/properties fn-sch)) (:malli/examples m)))
-                   per (if gen? (max 1 (quot (long samples) (max 1 (count arities)))) 0)
-                   ex-for-ar (fn [i ar]
-                               (let [ar-n (let [ch (first (m/children ar))]
-                                            (when (and ch (= :cat (m/type ch)))
-                                              (let [cs (m/children ch)]
-                                                (when-not (some #(contains? #{:* :? :+} (m/type %)) cs) (count cs)))))
-                                     top-match (if (and (= :function (m/type fn-sch)) ar-n)
-                                                 (filterv #(and (vector? %) (vector? (first %)) (= ar-n (count (first %)))) top-ex)
-                                                 (when (zero? i) top-ex))]
-                                 (vec (concat top-match (when (not= ar fn-sch) (:examples (m/properties ar)))))))
-                   out (reduce (fn [acc [i ar]]
-                                 (let [r (stress-arity fn-sym target-fn opts registry ar (ex-for-ar i ar) per (+ (long seed) i) measure-fn budgets)]
-                                   (if (:ok? r)
-                                     (-> acc (update :ran + (:ran r 0)) (update :max-ticks max (:max-ticks r 0)) (update :max-bytes max (:max-bytes r 0)))
-                                     (reduced r))))
-                               {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0}
-                               (map-indexed vector arities))
-                   ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
-               (cond-> (assoc out :ms (double ms))
-                 (and (:ok? out) (not gen?))
-                 (assoc :skipped-gen? true
-                        :skipped? (zero? (long (:ran out 0)))
-                        :reason (if (pos? (long (:ran out 0)))
-                                  (str "Checked " (:ran out) " example(s); random seed=42 generation skipped (schema uses :seon.host/* or :any inside :function).")
-                                  "No :examples and random seed=42 generation skipped (schema uses :seon.host/* or :any inside :function — use concrete input types or single :=> for generation).")))))))))))
+           (stress-var* a b {})))
+  ([a b c] (if (and (or (qualified-symbol? a) (var? a) (string? a)) (keyword? b))
+             (stress-var* (live-branch-db) a {b c})
+             (if (map? c)
+               (stress-var* a b c)
+               {:ok? false :error :invalid-stress-var-args :hint "Usage: (user/stress-var 'ns/fn {:samples 50 :seed 42}) or (user/stress-var 'ns/fn :samples 50 :seed 42)"})))
+  ([a b c d & more]
+   (if (and (or (qualified-symbol? a) (var? a) (string? a)) (keyword? b))
+     (let [kvs (list* b c d more)]
+       (if (even? (count kvs))
+         (stress-var* (live-branch-db) a (apply hash-map kvs))
+         {:ok? false :error :invalid-stress-var-args :hint "Odd number of keyword arguments; pass {:samples 50 :seed 42} or :samples 50 :seed 42."}))
+     (let [kvs (list* c d more)]
+       (if (and (keyword? c) (even? (count kvs)))
+         (stress-var* a b (apply hash-map kvs))
+         {:ok? false :error :invalid-stress-var-args :hint "Usage: (user/stress-var 'ns/fn {:samples 50 :seed 42}) or (user/stress-var db 'ns/fn {:samples 50 :seed 42})"})))))
