@@ -59,7 +59,7 @@
    :seon.config/max-test-workers         4
    :seon.config/max-model-slots          4
    :seon.config/child-cache-mb           32
-   :seon.config/gc-generations           6
+   
    :seon.config/store-map-bytes          1099511627776
    :seon.config/gc-keep-merged-branches  16
    :seon.config/gc-history-hours         168
@@ -77,7 +77,7 @@
    :seon.config/ai-reasoning-effort      :low
    :seon.config/max-tool-turns           32
    :seon.config/viewport-screenshot?     true
-   :seon.config/ns-outline-tokens        6000
+   
    :seon.config/eval-out-chars           10000})
 
 (defn read-aero-config-tx
@@ -589,7 +589,7 @@
 
 (defn connect
   "Opens a Datahike connection to `branch` using `cfg`, enforcing Malli write rails and shared IDs."
-  {:malli/schema [:function [:=> [:cat :map] :seon.host/conn] [:=> [:cat :map :keyword] :seon.host/conn]]}
+  {:malli/schema [:function [:=> [:cat :map] :seon.host/conn] [:=> [:cat :map :keyword] :seon.host/conn]], :seon.flow/edge true}
   ([cfg] (connect cfg (:branch cfg :main)))
   ([cfg branch]
    (-> (d/connect (-> cfg
@@ -600,7 +600,7 @@
 (defn open!
   "Opens (or atomically creates) the LMDB store at `path`, installing the Malli-derived Datahike
    schema and seeding all co-located `:seon.schema/key` entities and `:seon.config/root`."
-  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :map] :map]]}
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :map] :map]], :seon.flow/edge true}
   ([path] (open! path {}))
   ([path opts]
    (let [_ (install-interrupt-safe-lmdb!) derived-dh (:declarations @schema/base-registry)

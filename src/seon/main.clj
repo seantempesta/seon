@@ -391,7 +391,7 @@
 
 (defn -main
   "CLI entrypoint for Seon (`--self-test`, `--port 0`, `--headless`, `--seed-store`, `--model-base-url`, `--auto-switch-over`, `--take-over`)."
-  {:malli/schema [:function [:=> [:cat [:* :string]] :any]]}
+  {:malli/schema [:function [:=> [:cat [:* :string]] :any]], :seon.flow/edge true}
   [& args]
   (let [{:keys [options errors summary]} (do (when (= "embed-worker" (first args)) ((requiring-resolve 'seon.vector/serve!)) (System/exit 0)) (parse-cli-options (vec args)))]
     (when (:help options)

@@ -38,9 +38,8 @@
    :cost/ticks 200000}
   [db teid]
   (boolean
-   (or (and (dh-has? db :seon.task/proofs) (first (d/datoms db :eavt teid :seon.task/proofs)))
-       (and (dh-has? db :seon.task/test-vars) (first (d/datoms db :eavt teid :seon.task/test-vars)))
-       (and (dh-has? db :seon.task/tests) (first (d/datoms db :eavt teid :seon.task/tests))))))
+   (or (and (dh-has? db :seon.task/test-vars) (first (d/datoms db :eavt teid :seon.task/test-vars)))
+   (and (dh-has? db :seon.task/tests) (first (d/datoms db :eavt teid :seon.task/tests))))))
 
 (defn unproven-task-rows
   "Pure indexed finder for `:rule.trigger/unproven-task`: returns `[agent-id task-id]` pairs where an active
@@ -152,7 +151,7 @@
                      (keep #(let [s (eav1 db (:v %) :seon.code.var/name)]
                               (when (qualified-symbol? s) s))
                            (d/datoms db :eavt teid a))))]
-      (into (sorted-set) (concat by-tests (by-ref :seon.task/proofs) (by-ref :seon.task/test-vars))))))
+      (into (sorted-set) (concat by-tests (by-ref :seon.task/test-vars))))))
 
 (defn passed-non-template-tasks
   "Filters `passed-tasks` to concrete (non-template) `:seon.task/id` keywords eligible to be marked `:done? true`."
@@ -246,8 +245,8 @@
   (if (nil? ds)
     true
     (let [kws [:seon.task/id :seon.task/done? :seon.task/needs :seon.task/tests :seon.task/test-vars
-               :seon.task/proofs :seon.task/template :seon.agent/tasks :seon.agent/id :seon.agent/archived?
-               :seon.agent/merged-tx :seon.config/auto-refine-tasks?]
+              :seon.task/template :seon.agent/tasks :seon.agent/id :seon.agent/archived?
+              :seon.agent/merged-tx :seon.config/auto-refine-tasks?]
           attrs (into (set kws) (keep #(get-in main-db [:ident-ref-map %])) kws)]
       (boolean (some #(contains? attrs (:a %)) ds)))))
 

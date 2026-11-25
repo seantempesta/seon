@@ -443,10 +443,7 @@
        (integer? ns-eid)
        (assoc :seon.code.var/ns-ref ns-eid)
        (seq merged-refs)
-       (assoc :seon.code.var/refs merged-refs
-              :seon.code.var/platform-test?
-              (and (:seon.code.var/test? v)
-                   (boolean (some #(contains? boot-root-keys (str %)) merged-refs))))
+       (assoc :seon.code.var/refs merged-refs)
        (seq calls) (assoc :seon.code.var/calls calls)
        (and (seq in-refs) (has-attr? :seon.code.var/input)) (assoc :seon.code.var/input in-refs)
        (and (seq opt-in-refs) (has-attr? :seon.code.var/optional-input)) (assoc :seon.code.var/optional-input opt-in-refs)

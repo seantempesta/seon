@@ -332,7 +332,7 @@
 
 (def ^:private target-session-attrs
   #{:seon.agent/pinned :seon.agent/curated :seon.agent/context-prefs :seon.agent/summary
-    :seon.task/plan :seon.task/proofs :seon.task/tests :seon.task/summary})
+    :seon.task/plan :seon.task/test-vars :seon.task/tests :seon.task/summary})
 
 (defn ^:seon.flow/edge branch-latest-edit-info
   "Returns `{:has-edits? :last-edit-tx :last-edit-inst}` for domain/rule/schema/task (and forked target-session) changes on `branch-db` since base."

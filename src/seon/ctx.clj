@@ -188,12 +188,7 @@
          tc-m (or (:counts derived-t) {}) eng-m (or (:energy derived-t) {})
          fs-m (or (:novel-frontier derived-t) {}) wr-s (or (:written derived-t) #{})
          raw-merged (ground/merge-raw-candidates (:projs ru))
-         hyd-cap (when (and (integer? (:max-items o)) (pos? (long (:max-items o))) (not (:explain? o)))
-                   (max 24 (* 2 (long (:max-items o)))))
-         raw-to-hyd (if (and hyd-cap (> (count raw-merged) hyd-cap))
-                    (into {} (take hyd-cap (sort-by (fn [[_ v]] [(- (long (or (:priority v) 0))) (- (long (or (:tx v) 0)))]) raw-merged)))
-                    raw-merged)
-         hyd0 (ground/hydrate-candidates main-db bdb tdb raw-to-hyd o)
+         hyd0 (ground/hydrate-candidates main-db bdb tdb raw-merged o)
          hyd1 (mapv (fn [c]
                       (let [e (:entity c) tc (long (get tc-m e 0)) eng (double (get eng-m e 0.0))
                             fs (double (get fs-m e 0.0))]

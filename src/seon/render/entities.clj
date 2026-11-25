@@ -270,7 +270,7 @@
   "Detail card (~460px) for `:seon.schema/entity` with `[unique]`/`[indexed]` markers & `Used by:` vars."
   {:malli/schema [:=> [:cat [:map [:seon.schema/entity :seon.schema/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
-  [{{:seon.schema/keys [key form doc render type keys optional-keys ref-targets]} :seon.schema/entity :as m}]
+  [{{:seon.schema/keys [key form doc examples render type keys optional-keys ref-targets]} :seon.schema/entity :as m}]
   (let [rsym (or (when (qualified-symbol? render) render) (schema-form-renderer form))
         ks (or (seq-items (:seon.ui/schema-keys m)) (seq-items keys))
         oks (or (seq-items (:seon.ui/schema-optional-keys m)) (seq-items optional-keys))
@@ -294,7 +294,11 @@
          (when oks (if-let [p (seq (fmt-ks oks))] (pill-list "optional-keys:" p :ref-pair 14) (pill-list "optional-keys:" oks (attr-for oks) 14)))
          (when refs (pill-list "ref-targets:" refs (attr-for refs) 10))
          (when used-by (pill-list "Used by:" used-by :seon.code.var/name 8))
-         (code-block (fmt-pr form (bl m 900))))))
+         (code-block (fmt-pr form (bl m 900)))
+         (when-let [exs (seq-items examples)]
+           [:div {:class "stack-xs"}
+            [:span {:class "kicker"} "Examples"]
+            (code-block (clip (str/join "\n" (map pr-str (take 2 exs))) (bl m 420)))]))))
 
 (defn render-doc-snippet
   "Compact snippet (~240px) for `:seon.code.doc/entity`."

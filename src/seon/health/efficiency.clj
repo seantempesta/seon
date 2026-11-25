@@ -304,15 +304,7 @@
       (store/sha256-hex (.toString sb) 16))))
 
 (defn- load-persisted-ns-unused [db]
-  (let [sm (:schema db)]
-    (if-not (and (contains? sm :seon.code.ns/forms-hash) (contains? sm :seon.code.ns/unused-requires) (contains? sm :seon.code.ns/name))
-      {}
-      (let [en (aevt-hm db :seon.code.ns/name 160)
-            eh (aevt-hm db :seon.code.ns/forms-hash 160)]
-        (reduce (fn [acc dt]
-                  (let [e (:e dt) nsym (.get en e) h (.get eh e)]
-                    (if (and nsym h) (assoc acc nsym {:hash h :unused (:v dt)}) acc)))
-                {} (d/datoms db :aevt :seon.code.ns/unused-requires))))))
+  {})
 
 (defn- compute-static-eff [db br scope form-snap]
   (let [forms-by-ns (if (and (nil? scope) form-snap) (:src-forms-by-ns form-snap) (collect-forms-by-ns db scope))

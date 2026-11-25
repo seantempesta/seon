@@ -96,7 +96,7 @@
         run-ent (when branch
                   (cond-> {:seon.test.run/branch branch :seon.test.run/pass? (boolean all-pass?)
                            :seon.test.run/ran (long (or ran (count results))) :seon.test.run/cached (long (or cached 0))}
-                    commit (assoc :seon.test.run/commit commit) agent-id (assoc :seon.test.run/agent agent-id)
+                    agent-id (assoc :seon.test.run/agent agent-id)
                     (seq failed-dgs) (assoc :seon.test.run/failed-digests failed-dgs)))
         cur-db @conn
         has-vr? (and (contains? (:schema cur-db) :seon.test/var-ref) (contains? (:schema cur-db) :seon.code.var/name))

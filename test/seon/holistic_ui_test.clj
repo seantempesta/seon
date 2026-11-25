@@ -397,7 +397,7 @@
         (apply-call! '(seon.web/toggle-lab-rule! :rule.ctx/holistic-demo))
         (is (not (contains? (:disabled-rules (rdata/normalize-lab-prefs (:lab-prefs (rdata/user-view-state @conn)))) :rule.ctx/holistic-demo)))
         (apply-call! '(seon.web/reset-lab-prefs!))
-        (is (= 2400 (:token-budget (rdata/normalize-lab-prefs (:lab-prefs (rdata/user-view-state @conn))))))
+        (is (= 16000 (:token-budget (rdata/normalize-lab-prefs (:lab-prefs (rdata/user-view-state @conn))))))
 
         ;; Semantic search & vector status callable actions
         (let [sr (apply-call! '(seon.web/semantic-search-form!) {:query "compute" :of ":seon.code.var/name"})

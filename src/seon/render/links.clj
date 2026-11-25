@@ -207,6 +207,34 @@
                                :else nil)))))
              entries)))))
 
+(defn- enrich-ns-subtree [db dh ent]
+  (when-let [nsym (and (dh :seon.code.ns/name) (:seon.code.ns/name ent))]
+    (let [ne (:e (first (d/datoms db :avet :seon.code.ns/name nsym)))
+          vc (if (dh :seon.code.var/ns) (count (d/datoms db :avet :seon.code.var/ns nsym)) 0)
+          kids (when (and ne (dh :seon.code.ns/parent))
+                 (->> (d/datoms db :avet :seon.code.ns/parent ne)
+                      (keep (fn [dt]
+                              (let [ce (:e dt)
+                                    p (d/pull db '[:seon.code.ns/name :seon.code.ns/doc] ce)
+                                    cn (:seon.code.ns/name p)]
+                                (when cn
+                                  (let [cvc (if (dh :seon.code.var/ns) (count (d/datoms db :avet :seon.code.var/ns cn)) 0)
+                                        ot (if (dh :seon.task/scope)
+                                             (count (filter (fn [tdt]
+                                                              (let [tp (d/pull db '[:seon.task/done? :seon.task/template?] (:e tdt))]
+                                                                (and (not (:seon.task/done? tp)) (not (:seon.task/template? tp)))))
+                                                            (d/datoms db :avet :seon.task/scope cn)))
+                                             0)
+                                        skw (keyword "ns" (name cn))
+                                        spec (when (and (dh :seon.agent/id) (first (d/datoms db :avet :seon.agent/id skw))) skw)]
+                                    (cond-> {:seon.code.ns/name cn :var-count cvc :open-tasks ot}
+                                      (:seon.code.ns/doc p) (assoc :seon.code.ns/doc (:seon.code.ns/doc p))
+                                      spec (assoc :specialist spec)))))))
+                      (sort-by #(str (:seon.code.ns/name %)))
+                      vec))]
+      (cond-> {:seon.ui/ns-var-count vc}
+        (seq kids) (assoc :seon.ui/ns-children kids)))))
+
 (defn enrich-entity-params
   "Tiny self-contained entity enrichment: attaches own `:seon.code.form/src` on a var from its
    `:seon.code.var/form` ref, own schema/rule direct ref labels, matching `:seon.fix/entity` for
@@ -242,6 +270,7 @@
                        (dissoc (d/pull db '[:seon.fix/id :seon.fix/error-class :seon.fix/symptom :seon.fix/root-cause
                                             :seon.fix/change-summary :seon.fix/regression-test :seon.fix/before-after] fe)
                                :db/id)))]
+       (let [ns-sub (enrich-ns-subtree db dh ent)]
        (cond-> {}
          (and (string? src) (not (str/blank? src))) (assoc :seon.code.form/src src)
          callers (assoc :seon.ui/show-callers? true :seon.ui/callers callers)
@@ -252,4 +281,5 @@
          (:dh-meta sks) (assoc :seon.ui/schema-dh-meta (:dh-meta sks))
          r-schs (assoc :seon.ui/rule-schemas r-schs)
          r-fns (assoc :seon.ui/rule-fns r-fns)
-         (and (map? err-fix) (:seon.fix/id err-fix)) (assoc :seon.fix/entity err-fix))))))
+         (and (map? err-fix) (:seon.fix/id err-fix)) (assoc :seon.fix/entity err-fix)
+         (seq ns-sub) (merge ns-sub)))))))

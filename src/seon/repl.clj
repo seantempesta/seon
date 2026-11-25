@@ -121,8 +121,7 @@
 
 (defn metrics
   "Live sliding-window task completion & tool-frustration scorecard over the latest `window` (default 10) agents."
-  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :int] [:maybe :map]]]
-   :seon.eval/budget-override {:ticks 300000000 :bytes 1073741824}}
+  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :int] [:maybe :map]]], :seon.eval/budget-override {:ticks 300000000, :bytes 1073741824}, :seon.flow/edge true}
   ([] (metrics 10))
   ([window]
    (when-let [{:keys [conn]} *agent-ctx*]
@@ -196,8 +195,7 @@
 
 (defn health
   "Scoped branch health (<15 MB) by default; pass `:all`, `:main`, or `'ns`."
-  {:malli/schema [:function [:=> [:cat] [:maybe :seon.health/report]] [:=> [:cat [:maybe [:or :keyword :symbol :map]]] [:maybe :seon.health/report]]]
-   :seon.eval/budget-override {:ticks 300000000 :bytes 536870912}}
+  {:malli/schema [:function [:=> [:cat] [:maybe :seon.health/report]] [:=> [:cat [:maybe [:or :keyword :symbol :map]]] [:maybe :seon.health/report]]], :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}, :seon.flow/edge true}
   ([] (health nil))
   ([which]
    (when-let [{:keys [conn agent-id branch]} *agent-ctx*]

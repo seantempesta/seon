@@ -44,7 +44,7 @@
        [:ul {:class "compact-list"}
         (for [c children :let [cn (:seon.code.ns/name c)]]
           [:li {:class "tiny"} (ent-link [:seon.code.ns/name cn] (str cn) "mono strong")
-           (str " (" (:var-count c 0) " vars): " (or (first-doc-line (:seon.code.ns/doc c) 110) "—"))])]])))
+           (str " (" (:var-count c 0) " vars" (when (pos? (long (:open-tasks c 0))) (str ", " (:open-tasks c) " open tasks")) "): " (or (first-doc-line (:seon.code.ns/doc c) 110) "—"))])]])))
 
 (defn- ns-pub-vars-block [pub-vars max-vars]
   (when (seq pub-vars)
