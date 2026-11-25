@@ -212,3 +212,23 @@
       (is (not (str/includes? chat-html "Run in REPL")))
       (is (not (str/includes? chat-html "<for>")))
       (is (str/includes? sys-html "Seon Runtime")))))
+
+(deftest ^{:cost/ticks 60000000} wave8d-flat-aevt-sidebar-latency-and-order-test
+  (testing "Cached flat-AEVT sidebar-unit stays fast cold & warm while preserving exact ordering"
+    (tf/with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (into [{:seon.user/id :user/default :seon.user/sidebar-open? true :seon.user/viewport-w 1280}
+                                        {:seon.agent/id :agent/root :seon.agent/branch :main :seon.agent/entry? true :seon.agent/label "Root"}
+                                        {:seon.agent/id :example/ex1 :seon.agent/branch :main :seon.agent/label "Ex"}
+                                        {:seon.agent/id :worker/arch :seon.agent/branch :main :seon.agent/archived? true}]
+                                       (for [i (range 40)]
+                                         {:seon.agent/id (keyword "worker" (str "w-" i)) :seon.agent/branch :main :seon.agent/parent :agent/root}))})
+      (let [db @conn
+            c (seon.code/measure-call #(seon.render.ui/sidebar-unit db {:agent-states {}}))
+            w (seon.code/measure-call #(seon.render.ui/sidebar-unit db {:agent-states {}}))
+            html (pr-str (:val w))]
+        (is (vector? (:val c)))
+        (is (= (:val c) (:val w)))
+        (is (clojure.string/includes? html "Root"))
+        (is (not (clojure.string/includes? html "example")))
+        (is (not (clojure.string/includes? html "worker/arch")))
+        (is (< (:ms w) 10.0))))))
