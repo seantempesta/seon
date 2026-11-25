@@ -94,7 +94,11 @@
   [["user$conn cannot be cast to class java.util.concurrent.Future"]
    "Hint: `user/conn` is a 0-arg function — use `(user/db)` directly (or `@(user/conn)`), not `@user/conn`."]
   [["datahike.db.DB cannot be cast to class clojure.lang.IFn"]
-   "Hint: A Datahike DB is not a function — pass it to `(d/pull db '[...] ref)`, `(d/datoms db :avet :attr val)`, or `(d/entity db ref)`."]])
+   "Hint: A Datahike DB is not a function — pass it to `(d/pull db '[...] ref)`, `(d/datoms db :avet :attr val)`, or `(d/entity db ref)`."]
+  [["Expected number or lookup ref for entity id, got \""]
+   "Hint: Wrap string keys in a 2-element lookup ref vector for `d/pull`, e.g. `[:seon.code.form/key \"ns/fn\"]` or `[:seon.code.doc/id \"docs/...\"]`."]
+  [["String cannot be cast to class clojure.lang.Named"]
+   "Hint: `name`/`namespace` only accept keywords or symbols, not strings — use `(str x)` or `(filter keyword? ...)`."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))

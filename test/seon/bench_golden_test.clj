@@ -14,7 +14,8 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.bench.ab]
             [seon.code.errors]
-            [seon.render.fit.measure]))
+            [seon.render.fit.measure]
+            [seon.render.entities.prim]))
 
 (def ^:private expected-golden-ids
   [:golden/v1-split-calls
@@ -337,3 +338,23 @@
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Don't know how to create ISeq from: malli.registry$composite_registry" {}) "malli.core/schema"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Wrong number of args (3) passed to: datahike.impl.entity/entity" {}) "[:attr val]"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Wrong number of args (2) passed to: malli.core/schema?" {}) "takes 1 arg"))))
+
+(deftest ^{:cost/ticks 50000000} wave27b-ab-timeout-precedence-ent-box-and-error-hints-test
+  (testing "build-ab-tasks lets per-task :timeout-ms beat run-level :task-timeout-ms while explicit :timeout-ms still overrides"
+    (let [tasks [{:id :t/fast :scope 'seon.render.text :title "Fast" :plan "x"}
+                 {:id :t/long :scope 'seon.render.text :title "Long" :plan "y" :timeout-ms 480000}]
+          by-def (seon.bench.ab/build-ab-tasks tasks [:control] {:task-timeout-ms 240000})
+          by-exp (seon.bench.ab/build-ab-tasks tasks [:control] {:timeout-ms 90000 :task-timeout-ms 240000})]
+      (is (= [240000 480000] (mapv :timeout-ms by-def)))
+      (is (= [90000 90000] (mapv :timeout-ms by-exp)))))
+  (testing "seon.render.entities.prim/ent-box renders ent-card cleanly"
+    (let [res (seon.render.entities.prim/ent-box 420 "ent-demo" ["L"] "R" [:p "body"])]
+      (is (vector? (:seon.ui/hiccup res)))
+      (is (= :div (first (:seon.ui/hiccup res))))))
+  (testing "Wave 27A error hints cover string entity-id and String->Named"
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(d/pull db '[*] \"a/b\")" "Expected number or lookup ref for entity id, got \"a/b\"" {})
+          "lookup ref vector"))
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(name \"foo\")" "class java.lang.String cannot be cast to class clojure.lang.Named" {})
+          "keywords or symbols"))))

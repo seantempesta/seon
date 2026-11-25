@@ -3,7 +3,7 @@
    runtime entities (`:seon.config/entity`, `:seon.test.run/entity`, `:seon.user/entity`, `:seon.vector/entity`)."
   (:require [seon.render.links :as rlinks]
             [seon.render.text :refer [one-line]]
-            [seon.render.entities.prim :as prim :refer [chip]]))
+            [seon.render.entities.prim :as prim :refer [chip ent-box]]))
 
 (defn- box [min-w cls left right & body]
   (apply prim/box "ent-card" min-w cls left right body))
@@ -23,7 +23,7 @@
    :cost/ticks 900000}
   [{{:seon.config/keys [key ai-model max-tool-turns max-os-procs eval-bytes auto-merge? semantic-min-score] :as cfg} :seon.config/entity}]
   (let [n (count (dissoc cfg :db/id :seon.config/key))]
-    (box 420 "ent-config"
+    (ent-box 420 "ent-config"
          [(rlinks/badge "slate" "config")
           (rlinks/ent-link :seon.config/key key (str (or key :seon.config/root)) "mono strong")]
          (str n " knobs")
@@ -50,7 +50,7 @@
    :cost/ticks 900000}
   [{{:seon.test.run/keys [branch agent pass? ran cached failed-digests]} :seon.test.run/entity}]
   (let [fails (when (coll? failed-digests) (vec (take 6 failed-digests)))]
-    (box 420 "ent-test-run"
+    (ent-box 420 "ent-test-run"
          [(rlinks/badge (if pass? "green" "red") (if pass? "PASS" "FAIL"))
           (rlinks/ent-link :seon.test.run/branch branch (str (or branch :main)) "mono strong")]
          (str (+ (long (or ran 0)) (long (or cached 0))) " total")
@@ -76,7 +76,7 @@
   {:malli/schema [:=> [:cat [:map [:seon.user/entity :seon.user/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 900000}
   [{{:seon.user/keys [id view-mode theme viewport-w viewport-h sidebar-open? expert-mode?]} :seon.user/entity}]
-  (box 420 "ent-user"
+  (ent-box 420 "ent-user"
        [(rlinks/badge "blue" "user")
         (rlinks/ent-link :seon.user/id id (str (or id :user/default)) "mono strong")]
        (when (and viewport-w viewport-h) (str viewport-w "×" viewport-h))
