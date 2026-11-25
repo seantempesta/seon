@@ -540,3 +540,18 @@
           (is (= :invalid-batch-map (:error r-bad-batch)))
           (is (false? (:ok? r-bad-fn)))
           (is (= :unquoted-fn-in-schema (:error r-bad-fn))))))))
+
+(deftest wave11b-grep-int-limit-clip-n1-and-test-worker-parity-test
+  (testing "seon.render.text/clip enforces <= n length even at n=1"
+    (is (= "…" (seon.render.text/clip "abc" 1)))
+    (is (= "a" (seon.render.text/clip "a" 1)))
+    (is (= "hello…" (seon.render.text/clip "hello world" 6))))
+  (testing "seon.repl.search/grep-src accepts integer 2nd arg as :limit instead of throwing Long->Named"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/g.clj" "(ns demo.g)\n(defn alpha [] :needle)\n(defn beta [] :needle)\n(defn gamma [] :needle)\n" false)})
+      (binding [fcalls/*agent-ctx* {:conn conn :agent-id :repl/t :branch :main}]
+        (let [hits (rsearch/grep-src "needle" 2)]
+          (is (= 2 (count hits)))))))
+  (testing "enrich-eval-error hints schema/validate and pprint"
+    (is (str/includes? (seon.code.errors/enrich-eval-error "(schema/validate s x)" "No such var: schema/validate" {}) "malli.core/validate"))
+    (is (str/includes? (seon.code.errors/enrich-eval-error "(pprint x)" "Unable to resolve symbol: pprint" {}) "clojure.pprint"))))

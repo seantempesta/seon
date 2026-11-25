@@ -506,4 +506,10 @@
   :seon.fix/error-class :warm-worker-helper-drift-and-near-cap-ns,
   :seon.fix/id #uuid "50f44c17-3ee8-4f37-b714-f39cb48cea5d",
   :seon.fix/root-cause "effective-eval-budgets checked copied wrapper metadata instead of live :seon.repl/source var; apply-overlay! did not re-run install-repl-helpers! on warm workers; seon.render.data grew to 7992 tok.",
-  :seon.fix/symptom "Long-lived warm workers missed updated user/* helpers and :seon.eval/budget-override metadata on hot-reload; seon.git.forks had the last raw-java-io finding; seon.render.data sat at 7992 tokens (8 tokens below cap)."}]
+  :seon.fix/symptom "Long-lived warm workers missed updated user/* helpers and :seon.eval/budget-override metadata on hot-reload; seon.git.forks had the last raw-java-io finding; seon.render.data sat at 7992 tokens (8 tokens below cap)."}
+ {:seon.fix/change-summary "Tagged prep-meta-edit ^:seon.flow/edge (0 :silent-catch-all); split seon.git.message (git 7980->4330), seon.merge.autofix (merge 7972->5463), and seon.code.edit.ns (edit 8004->~6000); deduplicated seon.rule/lvar? onto seon.rule.query/lvar?; fixed seon.render.text/clip n=1 length invariant with example proof.",
+  :seon.fix/created-ms 1795630465910,
+  :seon.fix/error-class :near-cap-ns-headroom-and-clip-n1-bug,
+  :seon.fix/id #uuid "ca9f1b5a-0a6c-4231-82d5-1566d4199f38",
+  :seon.fix/root-cause "prep-meta-edit lacked ^:seon.flow/edge; cohesive commit-message, merge-autofix, and edit-ns modules accumulated inside near-8k parents; clip clamped prefix length to (max 1 (dec lim)) instead of (max 0 (dec lim)).",
+  :seon.fix/symptom "seon.code.edit/prep-meta-edit triggered 1 :silent-catch-all; seon.code.edit/seon.git/seon.merge sat within 30 tokens of the 8k cap; seon.render.text/clip returned 2-char \"a…\" for n=1."}]

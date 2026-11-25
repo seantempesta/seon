@@ -51,7 +51,7 @@
   {:malli/schema [:function [:=> [:cat :any] [:maybe [:vector :map]]] [:=> [:cat :any :any] [:maybe [:vector :map]]]]}
   ([pattern] (grep-src pattern {}))
   ([pattern opts-or-ns]
-   (let [{:keys [ns limit] :or {limit 30}} (if (map? opts-or-ns) opts-or-ns {:ns opts-or-ns})]
+   (let [{:keys [ns limit] :or {limit 30}} (cond (map? opts-or-ns) opts-or-ns (integer? opts-or-ns) {:limit (max 1 (long opts-or-ns))} :else {:ns opts-or-ns})]
      (when-let [{:keys [conn]} *agent-ctx*]
        (let [bdb @conn ns-pref (when ns (if (string? ns) ns (name ns)))
              multi? (and (coll? pattern) (not (map? pattern)))
@@ -94,7 +94,7 @@
      (let [bdb @conn
            mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
            q (str/lower-case (str substr))
-           raw-ns (if (map? scope-or-opts) (:ns scope-or-opts) scope-or-opts)
+           raw-ns (cond (map? scope-or-opts) (:ns scope-or-opts) (integer? scope-or-opts) nil :else scope-or-opts)
            ns-pref (when raw-ns (if (string? raw-ns) raw-ns (name raw-ns)))
            in-ns? (fn [x]
                     (if-not ns-pref

@@ -1,7 +1,6 @@
 (ns seon.rule
   "Native Datahike `d/q` + `datahike.reads` incremental stratified rule engine over `:seon.rule/*` entities."
   (:require [clojure.set :as set]
-            [clojure.string :as str]
             [datahike.api :as d]
             [datahike.index.interface :as di]
             [datahike.query :as dq]
@@ -22,11 +21,9 @@
            [:rel/tree-overlap :rel/strong-signal]
            [:ctx.match/embedding :ctx.match/semantic] [:ctx.match/search :ctx.match/semantic]]))
 
-(defn lvar?
-  "True when `x` is a logic variable symbol starting with `?`."
-  {:malli/schema [:=> [:cat :any] :boolean] :cost/ticks 500}
-  [x]
-  (and (symbol? x) (str/starts-with? (name x) "?")))
+(defn ^{:seon.code/reexport 'seon.rule.query/lvar?} lvar?
+  "Re-exports `seon.rule.query/lvar?`."
+  [x] (rq/lvar? x))
 
 (defn empty-wm
   "Creates an empty immutable EAV working memory with optional `clojure.core/make-hierarchy`."
