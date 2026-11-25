@@ -13,7 +13,8 @@
             [seon.code.io :as cio]
             [seon.vector :as vec]
             [seon.vector.flow :as vflow]
-            [seon.fork.ui :as ui]))
+            [seon.fork.ui :as ui]
+            [seon.repl.search :as rsearch]))
 
 (defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.fork.ui/render-preview!} render-preview! [& args] (apply ui/render-preview! args))
 
@@ -227,9 +228,9 @@
   {:seon.repl/export true
    :malli/schema [:=> [:cat [:or :seon.code.var/name :string]] [:maybe :seon.code.var/callees-result]]}
   [sym]
-  (when-let [{:keys [conn]} *agent-ctx*]
-    (let [db @conn
-          s (if (string? sym) (symbol sym) sym)
+  (when-let [{:keys [conn branch]} *agent-ctx*]
+    (let [s (if (string? sym) (symbol sym) sym)
+          db (rsearch/effective-code-db conn (or branch :main) s)
           v (d/pull db (quote [:seon.code.var/name :seon.code.var/refs :seon.code.var/keywords
                                {:seon.code.var/input [:seon.schema/key]}
                                {:seon.code.var/optional-input [:seon.schema/key]}
@@ -249,7 +250,7 @@
   "Returns the reach-selected tests that cover `sym-or-ns`."
   {:seon.repl/export true, :malli/schema [:=> [:cat [:or :seon.code.var/name :seon.code.ns/name :string]] [:maybe [:vector :seon.code.var/name]]]}
   [sym-or-ns]
-  (when-let [{:keys [conn]} *agent-ctx*] (code/reaching-tests @conn sym-or-ns)))
+  (when-let [{:keys [conn branch]} *agent-ctx*] (code/reaching-tests (rsearch/effective-code-db conn (or branch :main)) sym-or-ns)))
 
 (defn ^:seon.flow/edge doc!
   "Creates or updates a documentation section entity in the branch DB and refreshes context."
@@ -421,14 +422,14 @@
                   [:=> [:cat [:or :seon.code.var/name :string] [:* [:or :seon.code.var/name :string]]]
                        [:maybe [:map-of :seon.code.var/name :seon.code.var/callers-result]]]]}
   ([sym]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [db @conn]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [db (rsearch/effective-code-db conn (or branch :main))]
        (if (and (coll? sym) (not (map? sym)))
          (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (callers-entry db s)]))) sym)
          (callers-entry db (if (string? sym) (symbol sym) sym))))))
   ([sym & more]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [db @conn]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [db (rsearch/effective-code-db conn (or branch :main))]
        (into {} (map (fn [x] (let [s (if (string? x) (symbol x) x)] [s (callers-entry db s)]))) (cons sym more))))))
 
 (defn ^:seon.flow/edge remove-var!

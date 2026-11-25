@@ -100,20 +100,26 @@
   [["String cannot be cast to class clojure.lang.Named"]
    "Hint: `name`/`namespace` only accept keywords or symbols, not strings — use `(str x)` or `(filter keyword? ...)`."]
   [["Unable to resolve symbol: display in this context"]
-   "Hint: Use Clojure's `println` / `prn` (not Scheme's `display`)."]])
+   "Hint: Use Clojure's `println` / `prn` (not Scheme's `display`)."]
+  [["emit-quoted: unsupported quoted form #uuid"]
+   "Hint: Avoid `#uuid \"...\"` inside quoted forms like `'[[...]]` — use `(java.util.UUID/fromString \"...\")` in unquoted `:examples` or write a `deftest`."]
+  [["No such var: result/e"]
+   "Hint: `result/e<n>` handles live in-memory for this worker and match the exact handle printed in prior eval results (never guess a handle number)."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
-  (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
-        toks (when bad (remove str/blank? (str/split (str/lower-case bad) #"[\-\!\?\*]+")))
-        scored (when (seq toks)
-                 (->> (keys helper-index)
-                      (map (fn [k] [(reduce + 0 (map #(if (str/includes? (str/lower-case k) %) 1 0) toks)) k]))
-                      (filter #(pos? (first %)))
-                      (sort-by (fn [[sc k]] [(- sc) (count k) k]))
-                      (take 5)
-                      (mapv #(str "user/" (second %)))))]
-    (when (seq scored)
-      (str "Did you mean: " (str/join ", " scored) " (or call `(user/help)`)."))))
+  (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))]
+    (if (and bad (contains? helper-index bad))
+      (str "Hint: `user/" bad "` exists, so the current namespace likely shadows `user` via `:as user` — switch back with `(in-ns 'user)` (or `(in-ns 'repl)`).")
+      (let [toks (when bad (remove str/blank? (str/split (str/lower-case bad) #"[\-\!\?\*]+")))
+            scored (when (seq toks)
+                     (->> (keys helper-index)
+                          (map (fn [k] [(reduce + 0 (map #(if (str/includes? (str/lower-case k) %) 1 0) toks)) k]))
+                          (filter #(pos? (first %)))
+                          (sort-by (fn [[sc k]] [(- sc) (count k) k]))
+                          (take 5)
+                          (mapv #(str "user/" (second %)))))]
+        (when (seq scored)
+          (str "Did you mean: " (str/join ", " scored) " (or call `(user/help)`)."))))))
 
 (defn enrich-eval-error
   "Appends actionable, class-eliminating recovery hints to REPL evaluation errors:
