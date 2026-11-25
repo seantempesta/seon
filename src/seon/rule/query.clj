@@ -6,7 +6,7 @@
             [seon.store :as store]))
 
 (def ^:private db-srcs #{'$ '$main '$branch '$code '$task})
-(def ^:private query-meta-cache (atom {}))
+(defonce ^:private query-meta-cache (store/lru-cache 256))
 
 (defn- dsch [db]
   (cond
@@ -102,8 +102,7 @@
 
 (defn query-meta
   "Analyzes and caches metadata, WM/DB requirements, focus constraints, and input specs for a rule query."
-  {:malli/schema [:=> [:cat :any] :map]
-   :cost/ticks 200000}
+  {:malli/schema [:=> [:cat :any] :map], :cost/ticks 200000, :seon.flow/edge nil}
   [q]
   (if-not (or (vector? q) (map? q))
     {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :wm-not-req []
