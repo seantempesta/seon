@@ -202,8 +202,9 @@
    :cost/ticks 45000000}
   ([main-db branch-db agent-id] (gather-agent-candidates main-db branch-db agent-id nil))
   ([main-db branch-db agent-id opts]
-   (let [o (if (map? opts) opts {}) bdb (or branch-db main-db)
-         ag (or (:agent o) (rdata/pull-agent-entity main-db bdb agent-id) {:seon.agent/id agent-id})
+   (let [o (if (map? opts) opts {}) raw-bdb (or branch-db main-db)
+                                    ag (or (:agent o) (rdata/pull-agent-entity main-db raw-bdb agent-id) {:seon.agent/id agent-id})
+                                    bdb (if (rdata/reads-main? ag) main-db raw-bdb)
          tdb (or (:task-db o)
                  (let [tids (rdata/agent-task-ids bdb ag)]
                    (when (and (seq tids) ((rlinks/db-schema bdb) :seon.task/id) (some #(first (d/datoms bdb :avet :seon.task/id %)) tids)) bdb))

@@ -12,7 +12,6 @@
             [seon.render.surface.entity :as sentity]
             [seon.render.surface.inspector :as sinsp]
             [seon.render.surface.session :as ssess]
-            [seon.render.surface.system :as ssys]
             [seon.render.wire :as rwire]
             [seon.signals :as sig]
             [seon.render.status :as rstatus]
@@ -55,10 +54,9 @@
 
     :else
     (let [t (case canon :context :debug :system :workspace :canvas)
-        ctx-db (if (rdata/reads-main? ag) emdb ebdb)
-        gather-fn #(ctx/gather-agent-candidates emdb ctx-db aid {:agent ag :target t :semantic? true :enrich? true :rich-ns? false :situational? false})
+        gather-fn #(ctx/gather-agent-candidates emdb ebdb aid {:agent ag :target t :semantic? true :enrich? true :rich-ns? false :situational? false})
         proj (sentity/project-entity-view
-              emdb ctx-db [:seon.agent/id aid]
+              emdb ebdb [:seon.agent/id aid]
               (assoc fopts :agent-gather-fn gather-fn :agent ag :max-items (long (or (:max-items o) 8))))]
     {:wire (when (:include-wire? o)
              (rwire/build-live-wire-request
@@ -223,7 +221,7 @@
          body (cond explaining? (clab/render-context-lab-body m)
                     (and inspecting? (= :seon.system/id (first inspect-ref))) (sentity/render-system-entity-body m)
                     inspecting? (sinsp/render-inspector-body m)
-                    (= canon-mode :system) (ssys/render-system-body m)
+                    (= canon-mode :system) (sentity/render-system-entity-body m)
                     (= canon-mode :session) (ssess/render-session-body m comp?)
                     :else (scanvas/render-canvas-body m comp?))]
      [:div (cond-> {:id "seon-view-unit" :class cls :data-agent (str viewing-id) :data-view-mode (name view-mode) :data-viewport-w (str (:w viewport)) :data-slot-avail-w (str (:avail-w slot-budget)) :data-expert-mode (str (boolean (:expert-mode? m)))}

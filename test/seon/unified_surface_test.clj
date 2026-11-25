@@ -194,8 +194,11 @@
       (let [db-mob @conn
             hdr-mob (render/hiccup->html (ui/header-unit db-mob {:boot-seq 1 :agent-states {}}))
             sb-mob  (render/hiccup->html (ui/sidebar-unit db-mob {:agent-states {}}))]
-        (is (str/includes? hdr-mob "is-narrow"))
-        (is (not (str/includes? hdr-mob "sig-strip")) "Narrow header (<900px) must omit duplicate .sig-strip")
+        (is (not (str/includes? hdr-mob "is-narrow")) "Responsive header chrome is driven by CSS @container")
+        (is (str/includes? hdr-mob "sig-strip"))
+        (is (str/includes? hdr-mob "hdr-health-compact"))
+        (is (str/includes? (styles/full-css) "@container (max-width:899px){#seon-header .sig-strip{display:none}"))
+        (is (not (str/includes? (styles/full-css) ".topbar.is-narrow")))
         (is (str/includes? hdr-mob "Canvas"))
         (is (str/includes? hdr-mob "Chat"))
         (is (str/includes? hdr-mob "Explain"))

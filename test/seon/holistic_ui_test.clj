@@ -190,7 +190,7 @@
                           "sig-pill-btn" "data-preview-ref" "interestfor=\"seon-hovercard\""
                           "seon.web%2Finspect-entity%21" "seon.web%2Fset-explain-lens%21"]]
             (is (str/includes? hdr-exp needle) (str "Developer desktop header missing " needle))))
-        (is (str/includes? hdr-mob "is-narrow"))
+        (is (not (str/includes? hdr-mob "is-narrow")) "Responsive header chrome is governed by CSS @container, not server-side .is-narrow")
         (is (not (str/includes? hdr-mob "sig-strip")))
         (is (str/includes? hdr-mob "Canvas"))
         (is (str/includes? hdr-mob "Chat"))

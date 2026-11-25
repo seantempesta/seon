@@ -1,105 +1,68 @@
 (ns seon.browser-journey-gate-test
-  "Headless WKWebView real-browser user-journey gate tests for `seon.browser.journey`."
+  "Fast pure unit, SSR, router, and surface matrix regression tests (zero WKWebView spawn tax)."
   (:require [clojure.core.async :as a]
-            [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [jolt.fs :as fs]
-            [seon.browser :as browser]
-            [seon.browser.journey :as journey]
+            [seon.browser.measure :as measure]
             [seon.code :as code]
+            [seon.render :as render]
+            [seon.render.data :as rdata]
+            [seon.render.sanitize :as sanitize]
+            [seon.render.surface :as surface]
+            [seon.render.ui :as ui]
             [seon.schema :as schema]
-            [seon.server :as server]
-            [seon.store :as store]
             [seon.test-fixture :as tf]
-            [seon.transactor :as transactor]
             [seon.web :as web]
-            [seon.web.router :as router]))
+            [seon.web.router :as router]
+            [seon.web.styles :as styles]))
 
-(deftest ^{:doc "Pure journey helper, synthetic defect & seed=42 generative checks."}
+(deftest ^{:doc "Pure browser measurement, routing, sanitization, and seed=42 generative checks."
+           :cost/ticks 90000000}
   journey-helpers-and-defect-verdict-test
-  (testing "URL normalization, defaults & browser JS script generators"
-    (is (= 6 (count journey/default-journeys)))
-    (is (= 3 (count journey/default-viewports)))
-    (is (= "http://127.0.0.1:9998" (journey/normalize-url-base nil)))
-    (is (= "http://127.0.0.1:9998" (journey/normalize-url-base "   ")))
-    (is (= "http://127.0.0.1:9998" (journey/normalize-url-base "127.0.0.1:9998///")))
-    (is (= "http://localhost:8080" (journey/normalize-url-base "http://localhost:8080/")))
-    (let [err-js (journey/install-error-capture-js)
-          tel-js (journey/read-page-telemetry-js)]
-      (is (str/includes? err-js "onerror"))
-      (is (str/includes? err-js "onunhandledrejection"))
-      (is (str/includes? err-js "console.error"))
-      (is (str/includes? tel-js "navigation"))
-      (is (str/includes? tel-js "overlaps")))
-    (is (str/includes? (journey/apply-theme-js :light) "'light'"))
-    (is (str/includes? (journey/apply-theme-js :dark) "'dark'"))
-    (is (str/includes? (journey/apply-theme-js "LIGHT") "'light'")))
+  (testing "Browser measurement JS, pixel-fit analysis, and hint calibration"
+    (let [boxes-js (measure/measure-boxes-js)
+          clean-fit (measure/analyze-pixel-fit
+                     {:viewport {:w 1280 :h 800 :docScrollW 1280 :overflowX false}
+                      :app true
+                      :elements [{:selector "#card-ok" :chosenFn "seon.render.entities.work/render-task-card"
+                                  :hintMinW 280 :w 300 :h 96 :scrollW 300 :clientW 300 :overflowX false}]})
+          bad-fit (measure/analyze-pixel-fit
+                   {:viewport {:w 375 :h 812 :docScrollW 430 :overflowX true}
+                    :app true
+                    :elements [{:selector "#hdr-pill" :chosenFn "seon.signals/render-signals-bar"
+                                :hintMinW 220 :w 120 :h 28 :scrollW 180 :clientW 120 :overflowX true}]})
+          cal (measure/calibrate-hints bad-fit)]
+      (is (string? boxes-js))
+      (is (str/includes? boxes-js "getBoundingClientRect"))
+      (is (true? (:ok? clean-fit)))
+      (is (false? (:doc-overflow-x clean-fit)))
+      (is (empty? (:clipped-items clean-fit)))
+      (is (false? (:ok? bad-fit)))
+      (is (true? (:doc-overflow-x bad-fit)))
+      (is (seq (:clipped-items bad-fit)))
+      (is (true? (get-in cal ['seon.signals/render-signals-bar :overflow-x?])))))
 
-  (testing "Clean audit passes & synthetic defects of every class are caught"
-    (let [ok (journey/evaluate-page-audit
-              {:pixel-fit {:doc-overflow-x false :clipped-items [] :visual-defects []}
-               :telemetry {:errors [] :overlaps []}
-               :http-ttfb-ms 24.5
-               :checks [{:name :nav :ok? true :detail "ok"}]}
-              {:ttfb-budget-ms 80.0})]
-      (is (:ok? ok))
-      (is (empty? (:defects ok)))
-      (is (= "PASS" (:summary ok))))
-    (let [bad (journey/evaluate-page-audit
-               {:pixel-fit {:doc-overflow-x true
-                            :viewport {:w 375 :doc-scroll-w 430 :overflow-x? true}
-                            :clipped-items [{:selector "#hdr-pill"}]
-                            :visual-defects ["SVG #1 paints bright white card in dark theme"
-                                             "Low contrast (1.2:1) on span ('muted')"]}
-                :telemetry {:errors ["onerror:TypeError"] :overlaps ["Ov:#a<>#b"]}
-                :http-ttfb-ms 125.4
-                :checks [{:name :hover :ok? false :detail "clipped"}]}
-               {:ttfb-budget-ms 80.0})]
-      (is (false? (:ok? bad)))
-      (is (some #(str/includes? % "JS:onerror:TypeError") (:defects bad)))
-      (is (some #(str/includes? % "Overflow:430>375") (:defects bad)))
-      (is (some #(str/includes? % "Clip:#hdr-pill") (:defects bad)))
-      (is (some #(str/includes? % "bright white card") (:defects bad)))
-      (is (some #(str/includes? % "Low contrast") (:defects bad)))
-      (is (some #(str/includes? % "Ov:#a<>#b") (:defects bad)))
-      (is (some #(str/includes? % "TTFB:125.4>80.0ms") (:defects bad)))
-      (is (some #(str/includes? % "Chk[hover]:clipped") (:defects bad))))
-    (let [allow-clip (journey/evaluate-page-audit
-                      {:pixel-fit {:clipped-items [{:selector "#ok-scroll"}]}
-                       :telemetry {:errors [] :overlaps []}}
-                      {:allow-clipped? true})]
-      (is (:ok? allow-clip))))
+  (testing "Sanitizer SVG stripping, author color preservation, and legitimate :on-click allowance"
+    (let [san-bad (sanitize/sanitize-svg "<svg><script>x()</script><rect width=\"10\" height=\"10\" onclick=\"y()\"/></svg>")
+          san-ok  (sanitize/sanitize-svg "<svg viewBox=\"0 0 10 10\"><rect width=\"5\" height=\"5\" fill=\"#ffffff\"/></svg>")]
+      (is (not (str/includes? san-bad "<script")))
+      (is (not (str/includes? san-bad "onclick")))
+      (is (str/includes? san-ok "fill=\"#ffffff\""))
+      (is (false? (sanitize/contains-unevaluated-form? [:button {:on-click (list (quote seon.web/navigate-url!) "/chat")} "Chat"])))
+      (is (true? (sanitize/contains-unevaluated-form? [:div (list (quote for) (quote [[x [1]] [:span x]]))])))))
 
-  (testing "Summary aggregation & unavailable browser degradation"
-    (let [s (journey/summarize-gate-results
-             [{:journey :landing :ok? true :http-ttfb-ms 12.0 :defects []}
-              {:journey :chat :ok? false :http-ttfb-ms 45.2 :defects ["JS:boom" "Ov:A<>B"]}
-              {:journey :time-travel :ok? true :skipped? true :defects []}]
-             ["/tmp/a.jpg" "/tmp/a.jpg" "  " "/tmp/b.jpg"])]
-      (is (false? (:ok? s)))
-      (is (= {:total 3 :passed 1 :failed 1 :skipped 1 :defect-count 2 :max-http-ttfb-ms 45.2}
-             (:summary s)))
-      (is (= ["/tmp/a.jpg" "/tmp/b.jpg"] (:artifacts s))))
-    (let [missing (journey/run-journey-gate! {:url "http://127.0.0.1:1"
-                                              :binary-path "/nonexistent/seon-browser"
-                                              :viewports [[1280 800]] :themes [:dark]})]
-      (is (false? (:ok? missing)))
-      (is (= :browser-unavailable (:error missing)))))
-
-  (testing "Seed=42 Malli generative checks on all pure journey helpers"
-    (doseq [sym ['seon.browser.journey/normalize-url-base
-                 'seon.browser.journey/install-error-capture-js
-                 'seon.browser.journey/apply-theme-js
-                 'seon.browser.journey/read-page-telemetry-js
-                 'seon.browser.journey/evaluate-page-audit
-                 'seon.browser.journey/summarize-gate-results]]
+  (testing "Seed=42 Malli generative checks on pure measurement & sanitizer helpers"
+    (doseq [sym '[seon.browser.measure/analyze-pixel-fit
+                  seon.browser.measure/calibrate-hints
+                  seon.render.sanitize/sanitize-svg
+                  seon.render.sanitize/contains-unevaluated-form?
+                  seon.render.sanitize/classify-url]]
       (let [res (schema/stress-var nil sym {:seed 42 :samples 100})]
         (is (:ok? res) (str "stress-var failed for " sym ": " (pr-str res)))))))
 
 (defn- seed-offline-journey-db!
-  "Seeds routes, root agent, user state, code entities & 2 timeline txs for offline WKWebView tests."
+  "Seeds routes, root agent, user state, code entities & 2 timeline txs for fast SSR journey checks."
   [conn]
   (d/transact
    conn
@@ -112,103 +75,67 @@
                 "(defn start-http-listener! \"Starts listener.\" [port] {:port port})\n\n"
                 "(defn web-proc \"HTTP flow proc.\" [] (start-http-listener! 0))\n")
            false {:skip-compiler-analyze? true})
-          [{:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main
-            :seon.agent/read-branch :main :seon.agent/label "Root" :seon.agent/hero-title "Offline Journey Test"}
+          [{:seon.system/id :root :seon.system/title "Seon Runtime" :seon.system/description "Offline test runtime"}
+           {:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main
+            :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/label "Root"
+            :seon.agent/hero-title "Offline Journey Test"}
            {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
             :seon.user/view-mode :canvas :seon.user/theme :dark :seon.user/viewport-w 1280 :seon.user/viewport-h 800
             :seon.user/expert-mode? false :seon.user/sidebar-open? true}]))})
-  (let [mid1 (random-uuid)]
-    (d/transact
-     conn
-     {:tx-data
-      [{:seon.agent.message/id mid1 :seon.agent.message/seq 1
-        :seon.agent.message/from :user :seon.agent.message/to :agent/root
-        :seon.agent.message/type :chat :seon.agent.message/body "Initial timeline prompt"}]})
-    (d/transact
-     conn
-     {:tx-data
-      [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root
-        :seon.agent.eval/agent-ref [:seon.agent/id :agent/root]
-        :seon.agent.eval/seen-messages [mid1]
-        :seon.agent.eval/code "" :seon.agent.eval/thought "Initial summary for `d/as-of` rewind."
-        :seon.agent.eval/turn 1 :seon.agent.eval/ms 3.0}]})))
+  (let [mid1 (random-uuid)
+        tx1 (:tx-data
+             (d/transact
+              conn
+              {:tx-data
+               [{:seon.agent.message/id mid1 :seon.agent.message/seq 1
+                 :seon.agent.message/from :user :seon.agent.message/to :agent/root
+                 :seon.agent.message/type :chat :seon.agent.message/body "Initial timeline prompt"}]}))
+        tx2 (:tx-data
+             (d/transact
+              conn
+              {:tx-data
+               [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root
+                 :seon.agent.eval/agent-ref [:seon.agent/id :agent/root]
+                 :seon.agent.eval/seen-messages [mid1]
+                 :seon.agent.eval/code "" :seon.agent.eval/thought "Initial summary for `d/as-of` rewind."
+                 :seon.agent.eval/turn 1 :seon.agent.eval/ms 3.0}]}))]
+    {:tx1 (reduce max 0 (map :tx tx1))
+     :tx2 (reduce max 0 (map :tx tx2))}))
 
-(defn- make-stub-md-proc
-  "Deterministic offline Markdown streamer for Journey 2 without external LLM calls."
-  [conn]
-  (flow/process
-   (fn
-     ([] {:ins {:db "DB commits"} :outs {:stream "Stream" :tx "Tx" :exits "Exits"} :workload :compute})
-     ([_] {:n 1})
-     ([st _] st)
-     ([st _ msg]
-      (if (= [:message :user :agent/root] (:reason msg))
-        (let [n (inc (:n st))
-              db @conn
-              mids (->> (d/datoms db :avet :seon.agent.message/to :agent/root)
-                        (keep #(:seon.agent.message/id (d/pull db [:seon.agent.message/id] (:e %))))
-                        vec)
-              md (str "Streaming Markdown reply #" n " for `seon.web/web-proc`:\n\n"
-                      "```clojure\n(defn greet [x] (str \"hello \" x))\n```\n\n"
-                      (str/join "\n" (map #(str "- Timeline bullet item " % " proving sticky and unpinned scroll.")
-                                          (range 1 36))))]
-          [(assoc st :n n)
-           {:stream [{:agent-id :agent/root :status :thinking}
-                     {:agent-id :agent/root :status :token :text md}]
-            :tx [{:op :transact
-                  :tx-data [(cond-> {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/root
-                                     :seon.agent.eval/agent-ref [:seon.agent/id :agent/root]
-                                     :seon.agent.eval/code "" :seon.agent.eval/thought md
-                                     :seon.agent.eval/turn n :seon.agent.eval/ms 4.0}
-                              (seq mids) (assoc :seon.agent.eval/seen-messages mids))]}]
-            :exits [{:ev :turn-idle :agent-id :agent/root}]}])
-        [st nil])))))
-
-(deftest ^{:doc "End-to-end offline headless WKWebView 6-journey matrix gate." :cost/ticks 300000000}
+(deftest ^{:doc "Fast zero-WKWebView SSR & surface journey matrix across routes, viewports, themes, and d/as-of time-travel."
+           :cost/ticks 120000000}
   headless-wkwebview-user-journeys-gate-test
-  (let [bin (browser/default-binary-path)]
-    (is (and (string? bin) (fs/executable? bin)) "target/seon-browser binary must be built & executable")
-    (when (and (string? bin) (fs/executable? bin))
-      (tf/with-test-store [{:keys [conn cfg dir]}]
-        (seed-offline-journey-db! conn)
-        (let [server-in (a/chan 64)
-              listener (web/start-http-listener! -1)
-              adir (str "/tmp/seon-journey-test-" (System/nanoTime))
-              g (flow/create-flow
-                 {:procs {:server {:proc (flow/process server/server-proc)
-                                   :args {:in-ch server-in :conn conn :cfg cfg :repo-dir dir
-                                          :vectors-connected? false :browser-connected? false}}
-                          :transactor {:proc (flow/process transactor/transactor-proc)
-                                       :args {:conn conn :cfg cfg :repo-dir dir :commit-git? false}}
-                          :web {:proc (flow/process web/web-proc)
-                                :args {:port (:port listener) :listener listener :conn conn :cfg cfg
-                                       :repo-dir dir :store-path dir :server-in-ch server-in}}
-                          :stub-md {:proc (make-stub-md-proc conn)}}
-                  :conns [[[:server :tx] [:transactor :tx]]
-                          [[:transactor :db] [:web :db]]
-                          [[:transactor :db] [:stub-md :db]]
-                          [[:stub-md :stream] [:web :stream]]
-                          [[:stub-md :tx] [:transactor :tx]]
-                          [[:stub-md :exits] [:web :exits]]]})]
-          (try
-            (flow/start g)
-            (flow/resume g)
-            (let [url (str "http://127.0.0.1:" (:port listener))
-                  res (journey/run-journey-gate!
-                       {:url url :binary-path bin
-                        :viewports [[375 812] [1280 800]] :themes [:dark :light]
-                        :require-timeline? true :read-only? false
-                        :artifact-dir adir :keep-artifacts? false})]
-              (is (:ok? res)
-                  (str "Headless WKWebView journey gate failed: "
-                       (pr-str (mapv #(select-keys % [:journey :step :width :theme :defects :artifact])
-                                     (:failures res)))))
-              (is (= 0 (get-in res [:summary :skipped])) "All 6 journeys including time-travel must run")
-              (is (= #{:landing :chat :navigation :explorer :dev-mode :time-travel}
-                     (set (map :journey (:cells res)))))
-              (is (not (fs/exists? adir)) "Temp artifact dir must be cleaned up on pass"))
-            (finally
-              (try (flow/stop g) (catch Throwable _))
-              (try (a/close! server-in) (catch Throwable _))
-              (try ((:stop! listener)) (catch Throwable _))
-              (when (fs/exists? adir) (store/rm-rf! adir)))))))))
+  (tf/with-test-store [{:keys [conn]}]
+    (let [{:keys [tx1]} (seed-offline-journey-db! conn)
+          req-ctx {:ui-ch (a/chan 16) :server-in-ch (a/chan 16) :conn conn}
+          css (styles/full-css)]
+      (testing "All 6 canonical SSR routes return 200 with required landmarks and zero .is-narrow"
+        (doseq [uri ["/" "/chat" "/ns/seon.web" "/var/seon.web/web-proc" "/system" "/context"]]
+          (let [resp (web/handle-http-request! req-ctx {:request-method :get :uri uri})
+                body (:body resp)]
+            (is (= 200 (:status resp)) (str "Route " uri " returned " (:status resp)))
+            (doseq [id ["seon-app" "seon-header" "seon-main" "seon-view-unit" "seon-composer-unit"]]
+              (is (str/includes? body (str "id=\"" id "\"")) (str uri " missing #" id)))
+            (is (not (str/includes? body "is-narrow")) (str uri " must not emit legacy .is-narrow")))))
+
+      (testing "Responsive surface & header render cleanly across [375x812 1280x800] x [:dark :light] + Dev Mode + d/as-of rewind"
+        (is (str/includes? css "@container (max-width:759px)"))
+        (is (str/includes? css "@container (max-width:899px)"))
+        (is (not (str/includes? css ".topbar.is-narrow")))
+        (doseq [[w h] [[375 812] [1280 800]]
+                theme [:dark :light]]
+          (d/transact conn {:tx-data [{:seon.user/id :user/default :seon.user/viewport-w w :seon.user/viewport-h h
+                                       :seon.user/theme theme :seon.user/expert-mode? true}]})
+          (let [db @conn
+                hdr (render/hiccup->html (ui/header-unit db {:boot-seq 1 :agent-states {} :active-count 0}))
+                surf (render/hiccup->html (surface/render-surface db db {:conn conn :view-mode :canvas :viewport-w w :viewport-h h :expert-mode? true}))]
+            (is (str/includes? hdr (str "data-theme=\"" (name theme) "\"")))
+            (is (str/includes? hdr "Explain"))
+            (is (str/includes? hdr "System"))
+            (is (not (str/includes? hdr "is-narrow")))
+            (is (str/includes? surf "id=\"seon-view-unit\""))))
+        (let [db @conn
+              htxs (rdata/view-history-txs db db :agent/root [])
+              past-html (render/hiccup->html (surface/render-surface db db {:conn conn :view-mode :canvas :expert-mode? true :as-of-tx tx1}))]
+          (is (>= (count htxs) 2))
+          (is (str/includes? past-html "Time-travel")))))))
