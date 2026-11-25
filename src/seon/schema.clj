@@ -457,6 +457,16 @@
 (defn- live-branch-db []
   (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref :conn deref))
 
+(defn- edn-safe-ipc [x]
+  (cond
+    (or (nil? x) (boolean? x) (integer? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) x
+    (float? x) (let [d (double x)] (if (or (Double/isNaN d) (Double/isInfinite d)) (str d) x))
+    (map? x) (into {} (map (fn [[k v]] [(edn-safe-ipc k) (edn-safe-ipc v)])) x)
+    (vector? x) (mapv edn-safe-ipc x)
+    (set? x) (into #{} (map edn-safe-ipc) x)
+    (sequential? x) (mapv edn-safe-ipc x)
+    :else (pr-str x)))
+
 (defn- stress-arity [fn-sym target-fn opts registry ar-sch top-examples samples seed measure-fn budgets]
   (let [[cat-s ret-s guard-s] (m/children ar-sch)
         valid-in? (m/validator cat-s opts) valid-ret? (m/validator ret-s opts)
@@ -470,8 +480,9 @@
                  (let [fail (fn [extra rfn]
                               (let [sh (when (and (= tag :sample) (sequential? sargs)) (shrink-failing-args (vec sargs) repro? 24))
                                     ea (or sh sargs)]
-                                (reduced (cond-> (merge {:ok? false :var fn-sym :args ea :reason (rfn ea)} extra)
-                                           (and sh (not= sh sargs)) (assoc :shrunk-args sh :original-args sargs)))))]
+                                (reduced (edn-safe-ipc
+                                (cond-> (merge {:ok? false :var fn-sym :args ea :reason (rfn ea)} extra)
+                                  (and sh (not= sh sargs)) (assoc :shrunk-args sh :original-args sargs))))))]
                    (try
                      (let [run1 #(if measure-fn (measure-fn (fn [] (apply target-fn sargs))) {:val (apply target-fn sargs) :ticks 0 :bytes 0 :ms 0.0})
                            r0 (run1)
