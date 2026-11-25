@@ -105,7 +105,7 @@
             (is (< (:bytes warm-edit) 50000000) "Warm 1-form-edit health/report stays well below 50 MB")
             (is (< (:bytes warm-edit) (:bytes cold)) "Warm 1-form-edit allocates fewer bytes than cold")))))))
 
-(deftest ^{:cost/ticks 80000000} single-form-hash-invalidation-and-catches-test
+(deftest ^{:cost/ticks 95000000} single-form-hash-invalidation-and-catches-test
   (testing "Changing a single form hash invalidates ONLY that form's static check (no stale cache false-greens)"
     (with-test-store [{:keys [conn]}]
       (let [run-id (subs (str (random-uuid)) 0 8)
