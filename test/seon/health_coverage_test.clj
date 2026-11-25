@@ -1,8 +1,10 @@
 (ns seon.health-coverage-test
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [hasch.core :as hasch]
             [seon.code :as code]
             [seon.health.coverage :as cov]
+            [seon.render.fit :as fit]
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
             [seon.test-fixture :refer [with-test-store]]))
@@ -65,7 +67,6 @@
                                   (= :seon.cov.demo/widget (:schema %))) holes1)]
         (is (= 1 (count w-miss)))
         (is (= :warning (:severity (first w-miss)))))
-      ;; Import 1 pure renderer for :seon.cov.demo/widget
       (let [one-src "(ns seon.cov.single-synth)
 (defn render-widget-only
   {:malli/schema [:=> [:cat [:map [:seon.cov.demo/widget :seon.cov.demo/widget]]]
@@ -86,7 +87,7 @@
           (is (= 'seon.cov.single-synth/render-widget-only (:renderer (first w-single)))))))))
 
 (deftest ambiguous-renderer-pair-and-disambiguation-test
-  (testing "Overlapping renderers trigger :ambiguous-renderer-pair; distinct tiers, distinct optional inputs, or rule :fn/:params clear it"
+  (testing "Overlapping renderers trigger :ambiguous-renderer-pair; distinct footprints, distinct optional inputs, or rule :fn/:params clear it"
     (with-test-store [{:keys [conn]}]
       (try
         (load-string synth-ns-src)
@@ -102,24 +103,21 @@
           (is (every? :measured? (:renderers w-row)) "Live renderers measured on seed=42 samples")
           (is (= 2 (:renderer-count c-row)))
           (is (= [:seon.cov.demo/widget] (mapv :schema amb1))
-              "Overlapping widget-a/b is ambiguous while distinct chip/full card tiers have 0 ambiguity")
+              "Overlapping widget-a/b is ambiguous while distinct chip/full card footprints have 0 ambiguity")
           (is (= :warning (:severity (first amb1))))
 
-          ;; Pure contract check: distinct :optional-inputs clears ambiguity even on identical footprints
           (let [distinct-opt-m [{:schema :seon.cov.demo/widget
                                  :renderer-count 2
                                  :renderers [{:fn 'a/r1 :inputs #{:seon.cov.demo/widget} :optional-inputs #{} :min-width 360 :tokens 12}
                                              {:fn 'a/r2 :inputs #{:seon.cov.demo/widget} :optional-inputs #{:seon.cov.demo/extra} :min-width 360 :tokens 12}]}]]
             (is (empty? (cov/detect-renderer-holes db1 distinct-opt-m []))))
 
-          ;; Pure unmeasured pair with identical inputs and no rule triggers ambiguity
           (let [unmeas-m [{:schema :seon.cov.demo/widget
                            :renderer-count 2
                            :renderers [{:fn 'u/r1 :inputs #{:seon.cov.demo/widget} :optional-inputs #{} :measured? false}
                                        {:fn 'u/r2 :inputs #{:seon.cov.demo/widget} :optional-inputs #{} :measured? false}]}]]
             (is (= 1 (count (cov/detect-renderer-holes db1 unmeas-m [])))))
 
-          ;; Ranking-only :params (:rank/boost) does NOT disambiguate
           (d/transact conn {:tx-data [{:seon.rule/id :rule.cov/rank-only
                                        :seon.rule/stratum 20 :seon.rule/category :context
                                        :seon.rule/target :any :seon.rule/enabled? true
@@ -133,7 +131,6 @@
                                   (cov/detect-renderer-holes db-rank m1 (cov/rule-atlas db-rank)))]
             (is (= 1 (count amb-rank)) "Ranking-only :params must not suppress ambiguity"))
 
-          ;; Explicit :fn selection clears ambiguity
           (d/transact conn {:tx-data [{:seon.rule/id :rule.cov/select-fn
                                        :seon.rule/stratum 20 :seon.rule/category :context
                                        :seon.rule/target :any :seon.rule/enabled? true
@@ -147,7 +144,6 @@
                                 (cov/detect-renderer-holes db-fn m1 (cov/rule-atlas db-fn)))]
             (is (empty? amb-fn) "Explicit rule :fn clears ambiguity"))
 
-          ;; Disable :fn rule and add UI-disambiguating :params rule -> also clears ambiguity
           (d/transact conn {:tx-data [{:seon.rule/id :rule.cov/select-fn :seon.rule/enabled? false}
                                       {:seon.rule/id :rule.cov/select-params
                                        :seon.rule/stratum 20 :seon.rule/category :context
@@ -234,7 +230,7 @@
               ms (/ (double (- (System/nanoTime) t0)) 1e6)
               slim (cov/coverage-report db {:include-atlas? false})
               atlas (:rule-atlas rep)
-              req-keys #{:id :stratum :category :target :enabled? :zones :priorities :wm-reads :wm-writes :db-sources :doc}]
+              req-keys #{:id :stratum :category :target :enabled? :zones :priorities :wm-reads :wm-writes :db-sources :doc :generality-issues}]
           (is (< ms 500.0) (str "coverage-report took " ms " ms (must be < 500 ms)"))
           (is (= :seon.health/coverage (:seon/schema (meta rep))))
           (is (string? (:summary rep)))
@@ -246,7 +242,6 @@
           (is (empty? (:rule-holes rep)) (pr-str (:rule-holes rep)))
           (is (not (contains? slim :rule-atlas)) "include-atlas? false omits atlas for compact REPL output")
           (is (= (:counts rep) (:counts slim))))))
-    ;; When executed inside an interactive Seon REPL where user/main-db is bound, verify live :main too!
     (when-let [mdb (try (when-let [v (resolve 'user/main-db)] (when (bound? v) (@v)))
                         (catch Throwable _ nil))]
       (let [t0 (System/nanoTime)
@@ -257,4 +252,145 @@
         (is (>= (get-in rep [:counts :entity-schemas]) 20))
         (is (>= (count (:rule-atlas rep)) 20))
         (is (seq (:missing-renderers rep)))
-        (is (seq (:rule-holes rep)))))))
+        (is (empty? (:rule-holes rep)))))))
+
+(deftest schema-fate-matrix-and-browser-box-test
+  (testing ":schema-matrix computes fates, sorts by measured footprint without :tier enums, and reflects cached browser boxes"
+    (with-test-store [{:keys [conn]}]
+      (try
+        (load-string synth-ns-src)
+        (let [unassigned-src "(ns seon.cov.unassigned)
+(defn render-badge
+  {:malli/schema [:=> [:cat [:map [:seon.cov.demo/badge :seon.cov.demo/badge]]]
+                      [:map [:seon.ui/hiccup :seon.ui/hiccup]]]}
+  [{b :seon.cov.demo/badge}]
+  {:seon.ui/hiccup [:span {:class \"ent-chip\" :data-min-width 140} (str (:seon.cov.demo/badge-id b))]})"]
+          (load-string unassigned-src)
+          (d/transact conn
+            {:tx-data (into demo-schemas-tx
+                            [{:seon.schema/key :seon.cov.demo/badge-id :seon.schema/form [:and {:seon.db/identity true} :keyword]}
+                             {:seon.schema/key :seon.cov.demo/badge
+                              :seon.schema/form [:map {:seon.db/attributes true} [:seon.cov.demo/badge-id :seon.cov.demo/badge-id]]}
+                             {:seon.schema/key :seon.cov.demo/orphan
+                              :seon.schema/form [:map {:seon.db/attributes true} [:seon.cov.demo/badge-id :seon.cov.demo/badge-id]]}
+                             {:seon.schema/key :seon.cov.demo/secret
+                              :seon.schema/context-policy :never
+                              :seon.schema/form [:map {:seon.db/attributes true} [:seon.cov.demo/badge-id :seon.cov.demo/badge-id]]}
+                             {:seon.rule/id :rule.cov/cover-card
+                              :seon.rule/stratum 20 :seon.rule/category :context :seon.rule/target :any :seon.rule/enabled? true
+                              :seon.rule/query '[:find ?c :in $branch :where [$branch ?c :seon.cov.demo/id _]]
+                              :seon.rule/assert '[{:entity ?c :zone :workspace :priority 80 :fn seon.cov.synth/render-card-chip}]
+                              :seon.rule/doc "Covers card schema explicitly"}])})
+          (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/cov/synth.clj" synth-ns-src false)})
+          (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/cov/unassigned.clj" unassigned-src false)})
+          (let [db @conn
+                fh (:seon.code.form/hash (d/pull db [:seon.code.form/hash] [:seon.code.form/key "seon.cov.synth/render-card-chip"]))
+                _ (fit/record-browser-box! 'seon.cov.synth/render-card-chip fh 360 {:w 188 :h 28 :overflow-x? false})
+                rep (cov/coverage-report db)
+                by-s (into {} (map (juxt :schema identity)) (:schema-matrix rep))
+                card-row (get by-s :seon.cov.demo/card)
+                chip-r (first (:renderers card-row))]
+            (is (= :complete (:status card-row)))
+            (is (= :default (:policy card-row)))
+            (is (true? (:fits-tight? card-row)))
+            (is (= [:rule.cov/cover-card] (:covering-rules card-row)))
+            (is (= 'seon.cov.synth/render-card-chip (:var chip-r)))
+            (is (= :browser (:measured-by chip-r)))
+            (is (= 188 (:w chip-r)))
+            (is (= 28 (:h chip-r)))
+            (is (= [:rule.cov/cover-card] (:explicit-rules chip-r)))
+            (is (every? #(not (contains? % :tier)) (:renderers card-row)) "ZERO rigid :tier enums")
+            (is (= :unassigned-rule (:status (get by-s :seon.cov.demo/badge))))
+            (is (= :missing-renderer (:status (get by-s :seon.cov.demo/orphan))))
+            (is (= :policy-never (:status (get by-s :seon.cov.demo/secret))))
+            (is (true? (:fits-tight? (get by-s :seon.cov.demo/secret))))))
+        (finally
+          (when (find-ns 'seon.cov.synth) (remove-ns 'seon.cov.synth))
+          (when (find-ns 'seon.cov.unassigned) (remove-ns 'seon.cov.unassigned)))))))
+
+(deftest lint-rule-generality-test
+  (testing "lint-rule-generality allows general starter rules and flags hardcoded agent, task, var, and ns literals"
+    (let [starter (or rules/*base-rules-override* (rseed/starter-rules))
+          bad-rules [{:seon.rule/id :rule.lint/bad-agent :seon.rule/category :context :seon.rule/enabled? true
+                      :seon.rule/query '[:find ?a :in $branch :where [$branch ?a :seon.agent/id :agent/only-me]]
+                      :seon.rule/assert '[{:entity ?a :zone :workspace :priority 80}]}
+                     {:seon.rule/id :rule.lint/bad-task :seon.rule/category :context :seon.rule/enabled? true
+                      :seon.rule/query '[:find ?t :in $branch :where [$branch ?t :seon.task/id :task/one-off]]
+                      :seon.rule/assert '[{:entity ?t :zone :workspace :priority 80}]}
+                     {:seon.rule/id :rule.lint/bad-var :seon.rule/category :context :seon.rule/enabled? true
+                      :seon.rule/query '[:find ?v :in $branch :where [$branch ?v :seon.code.var/name (quote seon.core/foo)]]
+                      :seon.rule/assert '[{:entity ?v :zone :workspace :priority 80}]}
+                     {:seon.rule/id :rule.lint/bad-ns :seon.rule/category :context :seon.rule/enabled? true
+                      :seon.rule/query '[:find ?n :in $branch :where [$branch ?n :seon.code.ns/name (quote seon.secret)]]
+                      :seon.rule/assert '[{:entity ?n :zone :workspace :priority 80}]}
+                     {:seon.rule/id :rule.lint/good-root :seon.rule/category :context :seon.rule/enabled? true
+                      :seon.rule/query '[:find ?t ?rfn :in $main ?focus
+                                         :where [(= ?focus [:seon.system/id :root])]
+                                                [$main ?t :seon.task/id _]
+                                                [(ground seon.render.entities/render-task-chip) ?rfn]]
+                      :seon.rule/assert '[{:entity ?t :zone :workspace :priority 80 :fn ?rfn}]}]
+          issues (cov/lint-rule-generality bad-rules)]
+      (is (empty? (cov/lint-rule-generality starter)) "All live Baseline 0 starter rules pass generality lint")
+      (is (= #{:hardcoded-agent-id :hardcoded-task-id :hardcoded-var-literal :hardcoded-ns-literal}
+             (set (map :issue issues))))
+      (is (not-any? #(= :rule.lint/good-root (:rule-id %)) issues)))))
+
+(deftest empirical-trace-misses-detection-test
+  (testing "detect-trace-misses finds manual lookup calls on unprojected 1-2 hop neighbors and deduplicates with persisted misses"
+    (with-test-store [{:keys [conn]}]
+      (let [miss-id-1 (hasch/uuid [:test-miss :persisted-dup])
+            miss-id-2 (hasch/uuid [:test-miss :persisted-other])]
+        (d/transact conn
+          {:tx-data [{:seon.rule/id :rule.miss/only-tasks :seon.rule/stratum 20 :seon.rule/category :context
+                      :seon.rule/target :any :seon.rule/enabled? true
+                      :seon.rule/query '[:find ?t :in $branch ?agent-eid :where [$branch ?agent-eid :seon.agent/tasks ?t]]
+                      :seon.rule/assert '[{:entity ?t :zone :workspace :priority 90 :pull [:seon.task/id :seon.task/title]}]
+                      :seon.rule/doc "Minimal task-only rule so test-vars stay unprojected"}
+                     {:seon.code.ns/name 'seon.miss.ns :seon.code.ns/path "src/seon/miss/ns.clj"}
+                     {:seon.code.var/name 'seon.miss.ns/hidden-fn :seon.code.var/ns 'seon.miss.ns :seon.code.var/doc "Hidden."}
+                     {:seon.task/id :task/miss-demo :seon.task/title "Miss demo" :seon.task/done? false
+                      :seon.task/test-vars [[:seon.code.var/name 'seon.miss.ns/hidden-fn]]}
+                     {:seon.agent/id :agent/miss-probe :seon.agent/branch :branch/miss-probe
+                      :seon.agent/goal "Debug hidden-fn" :seon.agent/tasks #{[:seon.task/id :task/miss-demo]}}
+                     {:seon.agent.eval/id (hasch/uuid [:miss-eval 1])
+                      :seon.agent.eval/agent :agent/miss-probe :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
+                      :seon.agent.eval/code "(user/source 'seon.miss.ns/hidden-fn)"
+                      :seon.agent.eval/value "\"(defn hidden-fn [] 1)\""}]})
+        (let [misses1 (cov/detect-trace-misses @conn)
+              hit (first (filter #(and (= :agent/miss-probe (:agent %))
+                                       (= [:seon.code.var/name 'seon.miss.ns/hidden-fn] (:missed-ref %))) misses1))]
+          (is (some? hit) (str "Expected empirical miss for hidden-fn, got: " (pr-str misses1)))
+          (is (= :seon.code.var/entity (:schema hit)))
+          (is (= 2 (:hop hit)))
+          (is (= :seon.task/test-vars (:via-attr hit)))
+          (is (= :open (:status hit))))
+        (d/transact conn
+          {:tx-data [{:seon.ctx.miss/id miss-id-1 :seon.ctx.miss/agent :agent/miss-probe :seon.ctx.miss/turn 1
+                      :seon.ctx.miss/ref [:seon.code.var/name 'seon.miss.ns/hidden-fn]
+                      :seon.ctx.miss/schema :seon.code.var/entity :seon.ctx.miss/hop 2
+                      :seon.ctx.miss/via-attr :seon.task/test-vars :seon.ctx.miss/status :open}
+                     {:seon.ctx.miss/id miss-id-2 :seon.ctx.miss/agent :agent/miss-probe :seon.ctx.miss/turn 2
+                      :seon.ctx.miss/ref [:seon.schema/key :seon.task/entity]
+                      :seon.ctx.miss/schema :seon.schema/entity :seon.ctx.miss/hop 1
+                      :seon.ctx.miss/via-attr :seon.agent/tasks :seon.ctx.miss/status :open}]})
+        (let [misses2 (cov/detect-trace-misses @conn)]
+          (is (= 2 (count misses2)) "Deduplicates by [:agent :missed-ref] while merging persisted open misses"))))))
+
+(deftest warm-coverage-report-speed-and-corpus-attach-test
+  (testing "Warm static coverage-report is strictly < 16ms and {:include-corpus? true} attaches corpus + ablation onto rule-atlas"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (or rules/*base-rules-override* (rseed/starter-rules))})
+      (let [db @conn
+            _ (cov/coverage-report db)
+            t0 (System/nanoTime)
+            warm (cov/coverage-report db)
+            warm-ms (/ (double (- (System/nanoTime) t0)) 1e6)
+            full (cov/coverage-report db {:include-corpus? true})]
+        (is (< warm-ms 16.0) (str "Warm coverage-report took " warm-ms " ms (must be < 16 ms)"))
+        (is (contains? warm :schema-matrix))
+        (is (contains? warm :empirical-misses))
+        (is (= 12 (get-in full [:counts :corpus-total])))
+        (is (= 12 (count (:corpus full))))
+        (is (seq (:ablation full)))
+        (is (some #(contains? % :ablation-needed?) (:rule-atlas full)))
+        (is (some #(seq (:contributing-situations %)) (:rule-atlas full)))))))
