@@ -454,4 +454,12 @@
   :seon.fix/error-class :stress-var-kwargs-and-inproc-test-oom,
   :seon.fix/root-cause "ns-form-outline omitted existing var metadata flags, run-tests! ran all transitive reached tests sequentially without direct-first ordering or an 8 GB soft cap, stress-var rejected kwargs, and 184 schemas lacked :seon.schema/doc.",
   :seon.fix/regression-test seon.alloc-guard-test/wave7d-stress-var-kwargs-and-schema-docs-test,
-  :seon.fix/id #uuid "07b48112-c538-5713-ae1e-8fa0a339e6d0"}]
+  :seon.fix/id #uuid "07b48112-c538-5713-ae1e-8fa0a339e6d0"}
+ {:seon.fix/created-ms 1795627103316,
+  :seon.fix/symptom "Wave 8A traces hit 3 small REPL friction classes: (user/search \"examples\" 'ns) 2-arg arity error, (user/run-tests! 'ns :only [...]) keyword passed to reaching-tests, and 2x Long->Named cast on (:schema (user/db)) keys (plus broken user/schemas typo in docs/malli.md and un-tagged stress-var* :silent-catch-all).",
+  :seon.fix/change-summary "Added 2-arg scope/opts support to seon.repl.search/{search,grep-src}, keyword-arg (:only/:vars/:tests) parsing to seon.repl/run-tests!, clarified (user/schema \"term\") and integer ident keys in default-system-prompt, fixed user/schemas->user/schema in docs/malli.md, tagged stress-var* ^:seon.flow/edge, and updated docs/{bench,plan}.md.",
+  :seon.fix/before-after "Eliminates 3 Wave 8A trace error classes and restores 0 :silent-catch-all on :main while locking in 18/18 (100%) unseen seed=105/106/107 baselines.",
+  :seon.fix/error-class :repl-helper-arity-and-schema-keys-long-cast,
+  :seon.fix/root-cause "search only took 1 arg, grep-src required an opts map instead of accepting bare ns sym, run-tests! did not split keyword args, default-system-prompt suggested (:schema (user/db)) without noting integer reverse idents, and docs/malli.md wrote user/schemas instead of user/schema.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave8b-scoped-search-grep-and-run-tests-only-test,
+  :seon.fix/id #uuid "2a0d3a9a-cbd6-56e6-ae08-40ca4bf1b4c0"}]

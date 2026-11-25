@@ -10,7 +10,7 @@ All stored Datahike attributes, runtime write checks, and `seed = 42` generative
 
 ## Registering & Evolving Schemas
 
-- Prefer simplifying or collapsing existing `:seon.schema/entity` specs before adding a new key. Check `(user/schemas "keyword")` first.
+- Prefer simplifying or collapsing existing `:seon.schema/entity` specs before adding a new key. Check `(user/schema "keyword")` first.
 - Register or update schemas via `seon.fork.helpers/register-schema!` (`(user/register-schema! :seon.foo/bar [:map ...] {:doc "..." :examples [...]})`) backed by `seon.schema/register-schema!`. Updating an existing key preserves `:seon.schema/doc`, `:seon.schema/examples`, and `:seon.schema/context-policy` when omitted.
 - Datahike derivation tags on `:seon.schema/form` props: `:seon.db/attributes true` (on `:map` entity schemas), `:seon.db/identity true`, `:seon.db/index true`, `:seon.db/to [:seon.other/entity]`, `:seon.db/storable true`.
 
@@ -28,4 +28,4 @@ All stored Datahike attributes, runtime write checks, and `seed = 42` generative
 
 - `:malli.core/invalid-input` (`:input-contract`): your call passed the wrong shape — inspect the expected `:seon.schema/entity` form and examples.
 - `:malli.core/invalid-output` (`:output-contract`): the function returned a value violating its own return schema — check `:got` and `:human` in `seon.schema/stress-var` output.
-- `:malli.core/child-error` or `:malli.core/invalid-schema`: an unknown schema ref or invalid keyword predicate (like `:number`) inside a `:map` or `:=>` form — verify all referenced keys exist in `(user/schemas ...)`.
+- `:malli.core/child-error` or `:malli.core/invalid-schema`: an unknown schema ref or invalid keyword predicate (like `:number`) inside a `:map` or `:=>` form — verify all referenced keys exist in `(user/schema ...)`.

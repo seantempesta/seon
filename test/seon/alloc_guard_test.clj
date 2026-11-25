@@ -455,3 +455,18 @@
                             (map #(d/pull db '[:seon.schema/key :seon.schema/doc] (:e %))
                                  (d/datoms db :aevt :seon.schema/key)))]
         (is (empty? missing))))))
+
+(deftest ^{:cost/ticks 60000000} wave8b-scoped-search-grep-and-run-tests-only-test
+  (testing "search and grep-src accept bare namespace symbol as 2nd arg"
+    (when seon.fork.calls/*agent-ctx*
+      (let [s-res (seon.repl.search/search "stress" 'seon.schema)
+            g-res (seon.repl.search/grep-src "stress-var" 'seon.schema)]
+        (is (some #(= 'seon.schema/stress-var %) (:vars s-res)))
+        (is (every? #(or (= "seon.schema" (namespace %)) (clojure.string/starts-with? (str (namespace %)) "seon.schema.")) (:vars s-res)))
+        (is (seq g-res))
+        (is (every? #(or (= "seon.schema" (:ns %)) (clojure.string/starts-with? (str (:ns %)) "seon.schema.")) g-res)))))
+  (testing "run-tests! accepts :only keyword arg without passing :only into reaching-tests"
+    (when seon.fork.calls/*agent-ctx*
+      (let [rt (seon.repl/run-tests! 'seon.alloc-guard-test :only '[seon.alloc-guard-test/wave7d-stress-var-kwargs-and-schema-docs-test])]
+        (is (true? (:ok? rt)))
+        (is (= 1 (:ran rt)))))))
