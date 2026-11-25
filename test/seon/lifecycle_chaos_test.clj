@@ -114,13 +114,14 @@
 (deftest chaos-alphabet-and-core-code-sync-test
   (testing "Scenario partition covers all 18 events and flow-edges derive directly from seon.main/flow-connections"
     (let [plan (generate-plan {:seed 42 :n-steps 18})
-          union-ev (into #{} (mapcat val chaos-scenarios))]
-      (is (= (set chaos/event-alphabet) (set plan)))
-      (is (= (set chaos/event-alphabet) union-ev))
-      (is (= #{[:db :reconciler :db] [:db :test :db]} (set (:transactor chaos/flow-edges))))
-      (is (= #{[:run :agents :run] [:batch :test :batch] [:tx :transactor :tx]} (set (:reconciler chaos/flow-edges))))
-      (is (= #{[:exits :reconciler :exits] [:tx :transactor :tx] [:request :model :request]} (set (:agents chaos/flow-edges))))
-      (is (= #{[:tx :transactor :tx]} (set (:test chaos/flow-edges))))))
+        union-ev (into #{} (mapcat val chaos-scenarios))
+        edges (chaos/flow-edges)]
+    (is (= (set chaos/event-alphabet) (set plan)))
+    (is (= (set chaos/event-alphabet) union-ev))
+    (is (= #{[:db :reconciler :db] [:db :test :db]} (set (:transactor edges))))
+    (is (= #{[:run :agents :run] [:batch :test :batch] [:tx :transactor :tx]} (set (:reconciler edges))))
+    (is (= #{[:exits :reconciler :exits] [:tx :transactor :tx] [:request :model :request]} (set (:agents edges))))
+    (is (= #{[:tx :transactor :tx]} (set (:test edges))))))
   (let [res (chaos/replay! {:seed 42 :steps (:core chaos-scenarios)})]
     (is (:ok? res) (pr-str (:violations res)))
     (is (= (count (:core chaos-scenarios)) (:ran res)))

@@ -6,7 +6,8 @@
             [seon.store :as store]
             [seon.rule.seed :as rseed]
             [clojure.string :as str]
-            [seon.reconciler.policy :as policy]))
+            [seon.reconciler.policy :as policy]
+            [seon.ctx.diff :as diff]))
 
 (defn- eid-of [db a v]
   (when (and db (some? v) (get-in db [:schema a]))

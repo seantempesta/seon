@@ -37,14 +37,17 @@
 (def ^:private simulated-procs #{:transactor :reconciler :agents :test})
 (def ^:private simulated-targets (conj simulated-procs :model))
 
-(def flow-edges
-  "Pure Flow routing table derived directly from `seon.main/flow-connections`."
-  (reduce (fn [acc [[src out-port] [dst in-port]]]
-            (if (and (contains? simulated-procs src) (contains? simulated-targets dst))
-              (update acc src (fnil conj []) [out-port dst in-port])
-              acc))
-          {}
-          main/flow-connections))
+(defn flow-edges
+"Pure Flow routing table derived directly from `seon.main/flow-connections`."
+{:malli/schema [:=> [:cat] [:map-of :keyword [:vector :any]]]
+ :cost/ticks 200000}
+[]
+(reduce (fn [acc [[src out-port] [dst in-port]]]
+          (if (and (contains? simulated-procs src) (contains? simulated-targets dst))
+            (update acc src (fnil conj []) [out-port dst in-port])
+            acc))
+        {}
+        main/flow-connections))
 
 (defn synthetic-sources
   "Generates isolated `seon.chaos.s<seed>.*` namespace sources for chaos trials."
@@ -81,7 +84,7 @@
    :cost/ticks 500000}
   [src out-map]
   {:errors (vec (get out-map ::flow/error))
-   :msgs (vec (for [[out-port dst in-port] (flow-edges src)
+   :msgs (vec (for [[out-port dst in-port] ((flow-edges) src)
                     msg (get out-map out-port)]
                 [dst in-port msg]))})
 
