@@ -27,20 +27,23 @@
          "(not (clojure.string/blank? (str (:seon.agent.eval/error e)))) (assoc :error (clip (:seon.agent.eval/error e) 220)) "
          "(and (clojure.string/blank? (str (:seon.agent.eval/code e))) (not (clojure.string/blank? (str (:seon.agent.eval/thought e))))) (assoc :thought (clip (:seon.agent.eval/thought e) 260)))) evs)})")))
 
-(defn- ^:seon.flow/edge probe-context-and-corpus [inst aid branch]
-  (eval-edn inst
-    (str "(let [conn (user/conn) mdb (user/main-db) bdb (or (when ((set (datahike.api/branches conn)) " (pr-str branch) ") (seon.store/head conn " (pr-str branch) ")) mdb) "
-         "sim (seon.repl/simulate-context " (pr-str aid) " {:db bdb :main-db mdb :conn conn :wire? false}) "
-         "cc (seon.repl/check-corpus {:db bdb :main-db mdb}) "
-         "misses (filterv #(= " (pr-str aid) " (:agent %)) (seon.health.coverage/detect-trace-misses mdb bdb)) "
-         "ch (try (seon.code/changed-form-ops conn (datahike.api/merge-base conn :main " (pr-str branch) ") (datahike.api/commit-id bdb)) (catch Throwable _ {})) "
-         "mr (into #{} (map :seon.rule/id) (seon.rule/load-rules mdb)) "
-         "br (into #{} (map :seon.rule/id) (seon.rule/load-rules bdb))] "
-         "{:ok? true :selected-count (count (:selected sim)) :tokens (:tokens sim) :diff-vs-main (:diff-vs-main sim) "
-         ":corpus-score (:corpus-score cc) :corpus-ok? (get-in cc [:delta-vs-main :ok?]) "
-         ":generality-issues (:generality-issues cc) :misses (vec (take 8 misses)) "
-         ":upserted-forms (vec (sort (keep :seon.code.form/key (:upserts ch)))) "
-         ":new-rules (vec (sort (remove mr br)))})")))
+(defn- ^:seon.flow/edge probe-context-and-corpus [inst aid branch check-corp?]
+  (let [sim (eval-edn inst
+              (str "(let [conn (user/conn) mdb (user/main-db) bdb (or (when ((set (datahike.api/branches conn)) " (pr-str branch) ") (seon.store/head conn " (pr-str branch) ")) mdb) "
+                   "sim (seon.repl/simulate-context " (pr-str aid) " {:db bdb :main-db mdb :conn conn :wire? false}) "
+                   "ch (try (seon.code/changed-form-ops conn (datahike.api/merge-base conn :main " (pr-str branch) ") (datahike.api/commit-id bdb)) (catch Throwable _ {})) "
+                   "mr (into #{} (map :seon.rule/id) (seon.rule/load-rules mdb)) "
+                   "br (into #{} (map :seon.rule/id) (seon.rule/load-rules bdb))] "
+                   "{:ok? true :selected-count (count (:selected sim)) :tokens (:tokens sim) :diff-vs-main (:diff-vs-main sim) "
+                   ":selected-refs (mapv :ref (take 16 (:selected sim))) "
+                   ":upserted-forms (vec (sort (keep :seon.code.form/key (:upserts ch)))) "
+                   ":new-rules (vec (sort (remove mr br)))})"))
+        corp (when check-corp?
+               (eval-edn inst
+                 (str "(let [conn (user/conn) mdb (user/main-db) bdb (or (when ((set (datahike.api/branches conn)) " (pr-str branch) ") (seon.store/head conn " (pr-str branch) ")) mdb) "
+                      "cc (seon.repl/check-corpus {:db bdb :main-db mdb})] "
+                      "{:corpus-score (:corpus-score cc) :corpus-ok? (get-in cc [:delta-vs-main :ok?]) :generality-issues (:generality-issues cc)})")))]
+    (merge sim corp)))
 
 (defn should-intervene?
   "Pure trigger predicate deciding when the Supervisor pauses a running Worker and forks `:template/tune-context`."
@@ -67,12 +70,12 @@
         _ (cluster/instance-op! inst {:op :transact :tx-data [{:seon.agent/id worker-id :seon.agent/paused? true}] :reason :lab-pause-worker})
         _ (a/<!! (a/timeout 1500))
         pre-det (probe-agent-detail inst worker-id worker-br)
-        pre-ctx (probe-context-and-corpus inst worker-id worker-br)
+        pre-ctx (probe-context-and-corpus inst worker-id worker-br false)
         err-hint (->> (:trace pre-det) (keep :error) last)
         tuner-goal (str "Supervisor Pause-and-Fork for " worker-id " (trigger: " (name (:reason watch))
                         ", turns: " (:turns pre-det) ", errors: " (:errors pre-det)
                         (when err-hint (str ", latest error: " err-hint))
-                        "). Diagnose the miss, fix the GENERAL rule/renderer/schema class, verify <target-context-preview> + (user/check-corpus) 12/12 (0 generality issues), roll back bad turns via @user/ctx, and reply concisely to merge back and resume " worker-id ".")
+                        "). DO NOT solve " worker-id "'s task yourself! Diagnose why " worker-id " struggled, improve the GENERAL context system (Lever 1 rules / Lever 2 renderers / Lever 3 schemas), verify <target-context-preview> + (user/check-corpus) 12/12 (0 generality issues), roll back bad turns via @user/ctx, and reply concisely to merge back and resume " worker-id ".")
         spawn-res (cluster/instance-op! inst {:op :spawn-agent :id tuner-id :fork-from [:seon.agent/id worker-id]
                                               :merge-target [:seon.agent/id worker-id] :tasks [:template/tune-context]
                                               :auto-merge? true :pause-parent? true
@@ -82,7 +85,7 @@
         tuner-row (some #(when (= tuner-id (:id %)) %) (get-in tuner-wait [:status :agents]))
         tuner-det (probe-agent-detail inst tuner-id tuner-br)
         post-tune-w (probe-agent-detail inst worker-id worker-br)
-        post-tune-ctx (probe-context-and-corpus inst worker-id worker-br)
+        post-tune-ctx (probe-context-and-corpus inst worker-id worker-br true)
         _ (when (:paused? post-tune-w)
             (cluster/instance-op! inst {:op :transact :tx-data [{:seon.agent/id worker-id :seon.agent/paused? false}] :reason :lab-resume-worker}))
         resume-wait (cluster/wait-for-agent! inst worker-id resume-timeout-ms)
@@ -121,7 +124,7 @@
    :seon.eval/budget-override {:ticks 2000000000 :bytes 1073741824}}
   [{:keys [task timeout-ms tuner-timeout-ms resume-timeout-ms seed-store keep-dir?
            max-tool-turns tuner-max-turns trigger-on-errors trigger-on-empty-turns force-tune-after-turns]
-    :or {timeout-ms 180000 tuner-timeout-ms 150000 resume-timeout-ms 180000 seed-store "runs/store"
+    :or {timeout-ms 180000 tuner-timeout-ms 210000 resume-timeout-ms 180000 seed-store "runs/store"
          keep-dir? false max-tool-turns 20 tuner-max-turns 14 trigger-on-errors 2 trigger-on-empty-turns 8}
     :as opts}]
   (let [inner (if (map? (:task task)) (:task task) (or task opts))

@@ -19,7 +19,7 @@
                     (or-join
                      [?t ?prereq]
                      (needs* ?t ?prereq)
-                     (and (not-join [?t] (needs* ?t ?p2)) [(ground :seon.rule/nil) ?prereq]))],
+                     (and [(identity ?t) ?t] [(ground :seon.rule/nil) ?prereq]))],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?t,

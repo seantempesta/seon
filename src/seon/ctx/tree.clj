@@ -273,3 +273,39 @@
   (let [db @conn
         tx (diff-entity-tx db eid old-val new-val)]
     (when (seq tx) (d/transact conn {:tx-data tx}))))
+
+(defn ^:seon.flow/edge commit-delta-datoms
+  "Returns `d/changes` datoms between `prev-cid` and `(d/commit-id cur-db)` when available, else nil."
+  {:malli/schema [:=> [:cat :any :seon.host/db] [:maybe [:vector :any]]]
+   :cost/ticks 5000000}
+  [prev-cid cur-db]
+  (let [cur-cid (when (instance? datahike.db.DB cur-db) (d/commit-id cur-db))]
+    (when (and prev-cid cur-cid (not= prev-cid cur-cid))
+      (vec (d/changes cur-db prev-cid cur-cid)))))
+
+(defn neighborhood-node-key
+  "Returns the stable domain identity key for a neighborhood entity map."
+  {:malli/schema [:=> [:cat :map] :any]
+   :cost/ticks 50000}
+  [ent]
+  (or (:seon.task/id ent) (:seon.code.var/name ent) (:seon.error/id ent)
+      (:seon.code.ns/name ent) (:seon.schema/key ent) (:seon.code.doc/id ent)
+      (:seon.rule/id ent) (:seon.fix/id ent) (:seon.agent/id ent) (:db/id ent)))
+
+(defn candidates->neighborhood
+  "Groups top ranked context candidate maps into the `:seon.ctx/neighborhood` buckets."
+  {:malli/schema [:=> [:cat [:sequential :map]] :map]
+   :cost/ticks 500000}
+  [candidates]
+  (reduce (fn [acc item]
+            (let [ent (:data item)
+                  grp (cond (:seon.task/id ent) :tasks
+                            (:seon.code.var/name ent) :vars
+                            (:seon.error/id ent) :errors
+                            :else :pinned)]
+              (assoc-in acc [grp (neighborhood-node-key ent)] ent)))
+          {:tasks {} :vars {} :errors {} :pinned {}}
+          (take 8 (filter #(and (integer? (:entity %))
+                                (map? (:data %))
+                                (integer? (get-in % [:data :db/id])))
+                          candidates))))

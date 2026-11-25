@@ -251,15 +251,10 @@
 (defn- build-filtered-neighborhood [db aid]
   (let [{:keys [candidates]} (project-entity db db [:seon.agent/id aid]
                                              {:target :wire :enrich? false :include-evals? false
-                                              :semantic? true :skip-fit? true :include-focal-fit? false
-                                              :include-unmatched? false})
-        ranked (take 8 (filter #(and (integer? (:entity %)) (map? (:data %)) (integer? (get-in % [:data :db/id])))
-                               candidates))]
-    (reduce (fn [acc item]
-              (let [ent (:data item)
-                    grp (cond (:seon.task/id ent) :tasks (:seon.code.var/name ent) :vars (:seon.error/id ent) :errors :else :pinned)]
-                (assoc-in acc [grp (neighborhood-node-key ent)] ent)))
-            {:tasks {} :vars {} :errors {} :pinned {}} ranked)))
+                                              :semantic? false :use-live-touches? false :include-rule-trace? false
+                                              :max-items 12 :skip-fit? true :include-focal-fit? false
+                                              :include-unmatched? false})]
+    (tree/candidates->neighborhood candidates)))
 
 (defn- pull-neighborhood-entry [db aid]
   (when (qualified-keyword? aid)
@@ -450,13 +445,13 @@
   (deref [this]
     (let [cur-db @conn]
       (when (and snap (or (not= (:commit snap) (d/commit-id cur-db)) (not= (:tx snap) (:max-tx cur-db))))
-        (-advance! this cur-db nil))
+        (-advance! this cur-db (tree/commit-delta-datoms (:commit snap) cur-db)))
       (:val snap)))
   clojure.lang.IRef
   (addWatch [this k f]
     (let [cur-db @conn]
       (when (and snap (or (not= (:commit snap) (d/commit-id cur-db)) (not= (:tx snap) (:max-tx cur-db))))
-        (-advance! this cur-db nil)))
+        (-advance! this cur-db (tree/commit-delta-datoms (:commit snap) cur-db))))
     (set! watches (assoc watches k f)) this)
   (removeWatch [this k] (set! watches (dissoc watches k)) this)
   (getWatches [_] watches)
@@ -464,10 +459,10 @@
   (setValidator [_ vf] (set! validator vf))
   ICtxAtom
   (-snapshot [_] snap)
-  (-advance! [this db' tx-datoms]
-    (let [old-val (:val snap) snap' (advance snap db' tx-datoms conn)]
-      (set! snap snap')
-      (let [new-val (:val snap')]
+  (-advance! [this db-next tx-datoms]
+    (let [old-val (:val snap) snap-next (advance snap db-next tx-datoms conn)]
+      (set! snap snap-next)
+      (let [new-val (:val snap-next)]
         (when (and (seq watches) (not= old-val new-val))
           (doseq [[k wf] watches] (wf k this old-val new-val)))
         new-val)))
