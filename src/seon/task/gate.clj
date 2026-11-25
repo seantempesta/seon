@@ -332,13 +332,13 @@
                                   :reason :review-hijacked-ready
                                   :rule :rule.gate/review-outcome
                                   :detail {:target taid
-                                           :message (str "Reviewer must not set :seon.agent/ready? true on target " taid ". Retract it and return via (user/finish-review! summary).")}})
+                                           :message (str "Reviewer must not set :seon.agent/ready? true on target " taid ". Retract it and reply concisely in Markdown to merge back.")}})
                            (empty? actions)
                            (conj {:task :template/review-and-improve
                                   :reason :review-no-op
                                   :rule :rule.gate/review-outcome
                                   :detail {:target taid
-                                           :message "Review made zero observable cleanups, error clears, context curation, system fixes, or summary. Clean up or call (user/finish-review! summary)."}}))]
+                                           :message "Review made zero observable cleanups, error clears, context curation, system fixes, or summary. Clean up or reply concisely with your summary."}}))]
             {:ok? (empty? blockers)
              :target taid
              :actions actions

@@ -183,7 +183,7 @@
           agent-id
           (assoc :tx [{:op :send-message :from :test :to agent-id :type :test-failure
                        :body (str "Test batch failed on " branch ": " emsg
-                                  "\nInspect your branch and call (user/ready!) again.")}]))]))
+                                  "\nInspect your branch and reply concisely when fixed — Seon automatically re-runs tests.")}]))]))
 
 (defn- test-batch-blocked [st b branch-cid deleted-main-tests cached-n agent-id reply-ch]
   (let [del-results (attach-var-refs @(:conn st)
@@ -456,7 +456,7 @@
           [st1 (cond-> {::flow/error [{:proc :test :batch-id sub-id :crashed-pid (:pid msg)}]}
                  (:agent-id pinfo)
                  (assoc :tx [{:op :send-message :from :test :to (:agent-id pinfo) :type :test-failure
-                              :body (str err-msg "\nInspect your branch changes and call (user/ready!) again.")}]))])
+                              :body (str err-msg "\nInspect your branch changes and reply concisely when fixed — Seon automatically re-runs tests.")}]))])
         [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil])
       [st nil])))
 
@@ -469,7 +469,7 @@
              (:agent-id pinfo)
              (assoc :tx [{:op :send-message :from :test :to (:agent-id pinfo) :type :test-failure
                           :body (str "Branch failed to load in isolated test worker: " err-msg
-                                     "\nFix the missing namespace `:require` or unresolved var on your branch, verify it, and call (user/ready!) again.")}])
+                                     "\nFix the missing namespace `:require` or unresolved var on your branch, verify it, and reply concisely when fixed — Seon automatically re-runs tests.")}])
              (not (:agent-id pinfo))
              (assoc ::flow/error [{:proc :test :batch-id sub-id :error err-msg}]))])
     [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil]))
@@ -492,7 +492,7 @@
                        (cond-> (update out ::flow/report (fnil conj []) (str "[:test] fork refused on " (:branch pinfo) ": " err-msg))
                          (:agent-id pinfo)
                          (update :tx (fnil conj []) {:op :send-message :from :test :to (:agent-id pinfo) :type :test-failure
-                                                     :body (str err-msg "\nCall (user/ready!) again to retry tests.")})
+                                                     :body (str err-msg "\nReply concisely to retry tests automatically.")})
                          (not (:agent-id pinfo))
                          (update ::flow/error (fnil conj []) {:proc :test :ev :fork-refused :batch-id (or sub-id parent-id) :code (:code msg) :error err-msg}))])
                   [s out]))

@@ -9,9 +9,10 @@
             [seon.render.data :as rdata]
             [seon.render.links :as rlinks :refer [badge btn db-schema ent-link kicker mut]]
             [seon.render.status :as rstatus]
-            [seon.store :as store :refer [live-cid]]))
+            [seon.store :as store :refer [live-cid]]
+            [seon.store.query :as sq]))
 
-(def ^:private tuner-diff-cache (atom nil))
+(defonce ^:private ^:seon.flow/edge tuner-diff-cache (store/lru-cache 16))
 
 (defn- r2 [x] (/ (Math/round (* (double (or x 0.0)) 100.0)) 100.0))
 
@@ -103,29 +104,35 @@
                       :seon.agent/target :seon.agent/paused? :seon.agent/ready?
                       :seon.agent/merged-tx :seon.agent/archived? :seon.agent/summary])
           fork-eids (when (dh :seon.agent/forked-from)
-                      (distinct (map :e (take 24 (d/datoms main-db :aevt :seon.agent/forked-from)))))
+                      (distinct (map :e (sq/slice-datoms main-db [nil :seon.agent/forked-from nil] {:limit 24 :reverse? true}))))
+          diff-n (volatile! 0)
           forks (vec (keep (fn [e]
                              (let [ag (d/pull main-db pat e)
                                    tid (:seon.agent/id ag)
                                    faid (focal-agent-id main-db (:seon.agent/forked-from ag))]
                                (when (and tid faid)
                                  (let [br (:seon.agent/branch ag)
-                                       bdb (when (and br (not= br :main)) (rdata/branch-db-for main-db conn br))
                                        merged? (pos? (long (or (:seon.agent/merged-tx ag) 0)))
                                        done? (or merged? (:seon.agent/archived? ag))
+                                       bdb (when (and (not done?) br (not= br :main)) (rdata/branch-db-for main-db conn br))
                                        focal-ag (d/pull main-db pat [:seon.agent/id faid])
-                                       levers (when (and bdb (not done?)) (classify-branch-levers main-db bdb))
-                                       diff (when (and bdb (not done?)) (compute-tuner-diff main-db bdb faid))
+                                       live-br? (and bdb (not= bdb main-db) (not done?) (not (:seon.agent/archived? focal-ag)))
+                                       levers (when live-br? (classify-branch-levers main-db bdb))
+                                       diff (when (and live-br? (< @diff-n 3))
+                                              (vswap! diff-n inc)
+                                              (compute-tuner-diff main-db bdb faid))
                                        st (when-not done? (rstatus/latest-agent-status main-db bdb tid))]
                                    {:tuner ag :focal focal-ag :focal-id faid :branch br
                                     :done? (boolean done?) :merged? merged?
                                     :levers levers :diff diff :status st}))))
                            fork-eids))
           paused (when (dh :seon.agent/paused?)
-                   (vec (keep (fn [d*]
-                                (let [ag (d/pull main-db pat (:e d*))]
-                                  (when (and (:seon.agent/id ag) (:seon.agent/paused? ag) (not (:seon.agent/archived? ag))) ag)))
-                              (take 12 (d/datoms main-db :avet :seon.agent/paused? true)))))]
+                   (let [dts (d/datoms main-db :avet :seon.agent/paused? true)
+                         raw (if (seq dts) dts (filter #(true? (:v %)) (d/datoms main-db :aevt :seon.agent/paused?)))]
+                     (vec (keep (fn [d*]
+                                  (let [ag (d/pull main-db pat (:e d*))]
+                                    (when (and (:seon.agent/id ag) (:seon.agent/paused? ag) (not (:seon.agent/archived? ag))) ag)))
+                                raw))))]
       {:active (vec (remove :done? forks))
        :recent (vec (take 6 (filter :done? forks)))
        :paused (or paused [])
@@ -382,7 +389,7 @@
   (let [dh (when main-db (db-schema main-db))]
     (if-not (and dh (dh :seon.bench.run/id))
       []
-      (->> (d/datoms main-db :aevt :seon.bench.run/id)
+      (->> (sq/slice-datoms main-db [nil :seon.bench.run/id nil] {:limit 16 :reverse? true})
            (map #(d/pull main-db (quote [:seon.bench.run/id :seon.bench.run/title :seon.bench.run/status
                                          :seon.bench.run/passed :seon.bench.run/failed :seon.bench.run/total
                                          :seon.bench.run/updated-ms]) (:e %)))

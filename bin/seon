@@ -82,7 +82,9 @@ case "$cmd" in
     ;;
   test)
     br=${1:-:main}
-    post_edn "{:op :test :branch ${br}}"
+    t_opt=""
+    [[ -n "${SEON_TIMEOUT_MS:-}" ]] && t_opt=" :timeout-ms ${SEON_TIMEOUT_MS}"
+    post_edn "{:op :test :branch ${br}${t_opt}}"
     ;;
   eval)
     br=${1:?"usage: bin/seon eval :branch/name CODE_OR_STDIN"}
@@ -120,7 +122,9 @@ case "$cmd" in
     ;;
   merge)
     br=${1:?usage: bin/seon merge :branch/name}
-    post_edn "{:op :merge :branch ${br}}"
+    t_opt=""
+    [[ -n "${SEON_TIMEOUT_MS:-}" ]] && t_opt=" :timeout-ms ${SEON_TIMEOUT_MS}"
+    post_edn "{:op :merge :branch ${br}${t_opt}}"
     ;;
   push)
     dry=false

@@ -234,13 +234,13 @@
  [:int {:seon.merge/skip true}]
 
  :seon.agent/parent
- :keyword
+ [:and {:seon.db/index true} :keyword]
 
  :seon.agent/parent-ref
  [:and {:seon.db/to [:seon.agent/entity], :seon.db/index true, :seon.schema/doc "Accretive :db.type/ref mirror of keyword :seon.agent/parent (parent agent entity), enabling O(1) reverse :avet child discovery."} :seon.store/ref]
 
  :seon.agent/paused?
- [:boolean {:seon.merge/skip true}]
+ [:boolean {:seon.db/index true, :seon.merge/skip true}]
 
  :seon.agent/pinned
  [:vector {:seon.merge/skip true, :gen/elements [[] [[:seon.health/summary :main]]]} :any]
@@ -1146,7 +1146,7 @@
  [:double {:seon.db/no-history? true}]
 
  :seon.test/pass?
- [:boolean {:seon.db/no-history? true}]
+ [:boolean {:seon.db/index true, :seon.db/no-history? true}]
 
  :seon.test/report
  [:string {:seon.db/no-history? true}]

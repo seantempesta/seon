@@ -73,24 +73,38 @@
   ([branch-db agent-id] (eff/eval-efficiency-warnings branch-db agent-id)))
 
 (defn open-faults
-  "Returns all unresolved recorded Flow/runtime faults and live performance outliers from Datahike."
+  "Returns all unresolved recorded Flow/runtime faults and live performance outliers from Datahike,
+   skipping transient `:perf` warnings belonging to archived or merged agents."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] [:vector :seon.health/problem]], :cost/ticks 5000000}
   [db]
-  (->> (serr/open-errors db)
-  (mapv (fn [e]
-          (let [data (:seon.error/data e)
-                v (:seon.error/var e)
-                ag (:seon.error/agent e)
-                subj (or (:subject data) (when v (str v)) (when ag (str ag)) (str (:seon.error/source e :system)))
-                nsym (or (:ns data) (when v (symbol (namespace v))) (infer-ns-from-subject subj))]
-            (cond-> {:class (or (:seon.error/kind e) :proc-fault)
-                     :severity (or (:seon.error/severity e) :error)
-                     :kind :live
-                     :subject subj
-                     :branch (or (:seon.error/branch e) :main)
-                     :message (or (:seon.error/message e) "")}
-              nsym (assoc :ns nsym)
-              ag (assoc :agent ag)))))))
+  (let [dh (when db (:schema db))
+        perf-kinds #{:slow-wire-build :slow-render}
+        stale-perf-agent? (fn [ag]
+                            (and ag db (contains? dh :seon.agent/id)
+                                 (let [e (:e (first (d/datoms db :avet :seon.agent/id ag)))]
+                                   (or (nil? e)
+                                       (and (contains? dh :seon.agent/archived?)
+                                            (true? (:v (first (d/datoms db :eavt e :seon.agent/archived?)))))
+                                       (and (contains? dh :seon.agent/merged-tx)
+                                            (when-let [mt (:v (first (d/datoms db :eavt e :seon.agent/merged-tx)))]
+                                              (and (integer? mt) (pos? (long mt)))))))))]
+    (->> (serr/open-errors db)
+         (remove (fn [e] (and (contains? perf-kinds (:seon.error/kind e))
+                              (stale-perf-agent? (:seon.error/agent e)))))
+         (mapv (fn [e]
+                 (let [data (:seon.error/data e)
+                       v (:seon.error/var e)
+                       ag (:seon.error/agent e)
+                       subj (or (:subject data) (when v (str v)) (when ag (str ag)) (str (:seon.error/source e :system)))
+                       nsym (or (:ns data) (when v (symbol (namespace v))) (infer-ns-from-subject subj))]
+                   (cond-> {:class (or (:seon.error/kind e) :proc-fault)
+                            :severity (or (:seon.error/severity e) :error)
+                            :kind :live
+                            :subject subj
+                            :branch (or (:seon.error/branch e) :main)
+                            :message (or (:seon.error/message e) "")}
+                     nsym (assoc :ns nsym)
+                     ag (assoc :agent ag))))))))
 
 (defn unschemed-attributes [& args] (apply static/unschemed-attributes args))
 
@@ -159,13 +173,17 @@
      (let [ag-ids (java.util.HashMap. 64)
            ag-brs (java.util.HashMap. 64)
            ag-arch (java.util.HashSet. 32)
+           ag-merged (java.util.HashSet. 32)
            _ (when (contains? (:schema db) :seon.agent/id)
                (doseq [dt (d/datoms db :aevt :seon.agent/id)] (.put ag-ids (:e dt) (:v dt)))
                (when (contains? (:schema db) :seon.agent/branch)
                  (doseq [dt (d/datoms db :aevt :seon.agent/branch)] (.put ag-brs (:e dt) (:v dt))))
                (when (contains? (:schema db) :seon.agent/archived?)
                  (doseq [dt (d/datoms db :aevt :seon.agent/archived?)]
-                   (when (:v dt) (.add ag-arch (:e dt))))))
+                   (when (:v dt) (.add ag-arch (:e dt)))))
+               (when (contains? (:schema db) :seon.agent/merged-tx)
+                 (doseq [dt (d/datoms db :aevt :seon.agent/merged-tx)]
+                   (when (and (integer? (:v dt)) (pos? (long (:v dt)))) (.add ag-merged (:e dt))))))
            agents-by-branch (let [m (java.util.HashMap. 32)
                                   it (.iterator (.entrySet ag-ids))]
                               (loop []
@@ -176,7 +194,7 @@
                                     (when br
                                       (let [arr (or (.get m br) (let [a (java.util.ArrayList. 4)] (.put m br a) a))]
                                         (.add ^java.util.ArrayList arr
-                                              {:id (.getValue entry) :archived? (.contains ag-arch e)}))))
+                                              {:id (.getValue entry) :archived? (or (.contains ag-arch e) (.contains ag-merged e))}))))
                                   (recur)))
                               m)
            archived-branch? (fn [br]
