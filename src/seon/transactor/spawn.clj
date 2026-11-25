@@ -8,7 +8,8 @@
             [seon.transactor.calls :as tcalls]
             [seon.transactor.merge :as tmerge]
             [seon.transactor.user :as user :refer [norm-ref show-user-tx]]
-            [seon.fork.worker-support :as wsup]))
+            [seon.fork.worker-support :as wsup]
+            [seon.cite :as cite]))
 
 (defn focus-tx
   {:doc "Returns the focus-namespace parent-chain tx data for `scope`, or nil.", :malli/schema [:=> [:cat [:maybe :symbol]] [:maybe [:vector :any]]], :cost/ticks 5000}
@@ -229,22 +230,54 @@
                                      (when eff-task (str " (task " eff-task ")")))]}
                 {:msg-seq mseq})))
 
+(defn- task-cite-attrs [db title plan]
+  (let [dh (:schema db)
+        txt (str (or title "") "\n" (or plan ""))]
+    (when (and (not (str/blank? txt)) (or (contains? dh :seon.task/refs) (contains? dh :seon.task/ref-order)))
+      (let [{:keys [refs ordered]} (cite/resolve-doc-refs db txt)]
+        (cond-> {}
+          (and (seq refs) (contains? dh :seon.task/refs)) (assoc :seon.task/refs refs)
+          (and (seq ordered) (contains? dh :seon.task/ref-order)) (assoc :seon.task/ref-order ordered))))))
+
+(defn- task-proof-eids [db raw-proofs]
+  (let [dh (:schema db)]
+    (when (and (seq raw-proofs) (contains? dh :seon.code.var/name))
+      (into #{}
+            (keep (fn [x]
+                    (cond
+                      (integer? x) x
+                      (and (vector? x) (= :seon.code.var/name (first x)))
+                      (:e (first (d/datoms db :avet :seon.code.var/name (second x))))
+                      (qualified-symbol? x)
+                      (:e (first (d/datoms db :avet :seon.code.var/name x)))
+                      :else nil)))
+            raw-proofs))))
+
 (defn handle-update-task!
-  {:doc "Updates an existing `:seon.task/*` entity's fields/needs/tests and commits the change.", :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]], :seon.flow/edge true}
+  {:doc "Updates an existing `:seon.task/*` entity's fields/needs/tests/proofs and auto-resolves `:seon.task/refs` from backticks/links."
+   :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]] :seon.flow/edge true}
   [st msg prev-cid]
-  (let [conn (:conn st) db0 @conn
-        {:keys [id title plan scope needs tests summary done? owner]} msg]
+  (let [conn (:conn st) db0 @conn dh (:schema db0)
+        {:keys [id title plan scope needs tests proofs test-vars summary done? owner]} msg]
     (if-not (and id (first (d/datoms db0 :avet :seon.task/id id)))
       (do (tmerge/reply! msg {:ok? false :error (str "Task not found: " id)}) [st nil])
-      (let [ext? (contains? (:schema db0) :seon.task/owner)
-            ent (cond-> {:seon.task/id id}
-                  (string? title) (assoc :seon.task/title title) (string? plan) (assoc :seon.task/plan plan)
-                  scope (assoc :seon.task/scope scope) (some? done?) (assoc :seon.task/done? (boolean done?))
+      (let [ext? (contains? dh :seon.task/owner)
+            cur (d/pull db0 '[:seon.task/title :seon.task/plan] [:seon.task/id id])
+            cites (when (or (string? title) (string? plan))
+                    (task-cite-attrs db0 (or title (:seon.task/title cur)) (or plan (:seon.task/plan cur))))
+            proof-eids (task-proof-eids db0 (concat proofs test-vars))
+            ent (cond-> (merge {:seon.task/id id} cites)
+                  (string? title) (assoc :seon.task/title title)
+                  (string? plan) (assoc :seon.task/plan plan)
+                  scope (assoc :seon.task/scope scope)
+                  (some? done?) (assoc :seon.task/done? (boolean done?))
                   (and ext? (string? summary)) (assoc :seon.task/summary summary)
                   (and ext? owner (qualified-keyword? owner)) (assoc :seon.task/owner owner))
             r (tx! conn (remove nil? [ent
-              (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
-              (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})]))
+                                      (when (seq needs) {:seon.task/id id :seon.task/needs (set needs)})
+                                      (when (seq tests) {:seon.task/id id :seon.task/tests (set tests)})
+                                      (when (and (seq proof-eids) (contains? dh :seon.task/proofs))
+                                        {:seon.task/id id :seon.task/proofs proof-eids})]))
             db (:db-after r)]
         (tmerge/reply! msg {:ok? true :task id :tx (:max-tx db)})
         (commit-res st prev-cid r [:update-task id]
@@ -252,15 +285,15 @@
                            (git-wb st (d/commit-id db) "resources/seon/tasks.edn" (str "Update task " id))))))))
 
 (defn handle-create-task!
-  {:doc "Creates a `:seon.task/*` entity (expanding optional `:from-template` and forwarding normalized `:curated` lookup refs, optionally spawning its owning agent on a new branch) and commits it.",
-   :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]], :seon.flow/edge true}
+  {:doc "Creates a `:seon.task/*` entity (expanding optional `:from-template`, resolving `:seon.task/refs` & `:seon.task/proofs`, optionally spawning its owning agent on a new branch) and commits it."
+   :malli/schema [:=> [:cat :map :map :any] [:tuple :map [:maybe :map]]] :seon.flow/edge true}
   [st msg prev-cid]
   (let [conn (:conn st) db0 @conn dh (:schema db0)
-        {:keys [id scope title plan needs tests curated from-template spawn-agent? agent-id router? auto-merge? parent template? template owner created-by summary parent-agent]} msg
+        {:keys [id scope title plan needs tests proofs test-vars curated from-template spawn-agent? agent-id router? auto-merge? parent template? template owner created-by summary parent-agent]} msg
         tpl-id (or from-template template)
         tpl (when (and from-template (qualified-keyword? from-template) (contains? dh :seon.task/id)
                        (first (d/datoms db0 :avet :seon.task/id from-template)))
-              (d/pull db0 '[:seon.task/scope :seon.task/plan :seon.task/tests :seon.task/needs :seon.task/curated]
+              (d/pull db0 '[:seon.task/scope :seon.task/plan :seon.task/tests :seon.task/needs :seon.task/curated :seon.task/refs :seon.task/ref-order]
                       [:seon.task/id from-template]))
         eff-scope (or scope (:seon.task/scope tpl))
         raw-plan (str (or plan ""))
@@ -273,6 +306,11 @@
         eff-needs (into (set (:seon.task/needs tpl)) needs)
         eff-tests (into (set (:seon.task/tests tpl)) tests)
         eff-curated (vec (distinct (concat (keep norm-ref (:seon.task/curated tpl)) (keep norm-ref curated))))
+        cites (task-cite-attrs db0 (or title (name id)) eff-plan)
+        tpl-refs (into #{} (keep #(if (map? %) (:db/id %) %)) (:seon.task/refs tpl))
+        eff-refs (into tpl-refs (:seon.task/refs cites))
+        eff-order (vec (distinct (concat (:seon.task/ref-order cites) (:seon.task/ref-order tpl))))
+        proof-eids (task-proof-eids db0 (concat proofs test-vars))
         aid (or agent-id (keyword (namespace id) (name id)))
         b (branch-for aid nil) mseq (inc (:msg-seq st))
         ext? (contains? dh :seon.task/owner)
@@ -286,9 +324,13 @@
                                         (and ext? (or owner (when spawn-agent? aid))) (assoc :seon.task/owner (or owner aid))
                                         (and ext? created-by) (assoc :seon.task/created-by created-by)
                                         (and ext? (string? summary)) (assoc :seon.task/summary summary)
-                                        (and (contains? dh :seon.task/curated) (seq eff-curated)) (assoc :seon.task/curated eff-curated))
+                                        (and (contains? dh :seon.task/curated) (seq eff-curated)) (assoc :seon.task/curated eff-curated)
+                                        (and (contains? dh :seon.task/refs) (seq eff-refs)) (assoc :seon.task/refs eff-refs)
+                                        (and (contains? dh :seon.task/ref-order) (seq eff-order)) (assoc :seon.task/ref-order eff-order))
                                       (when (seq eff-needs) {:seon.task/id id :seon.task/needs eff-needs})
                                       (when (seq eff-tests) {:seon.task/id id :seon.task/tests eff-tests})
+                                      (when (and (seq proof-eids) (contains? dh :seon.task/proofs))
+                                        {:seon.task/id id :seon.task/proofs proof-eids})
                                       (when (and parent (qualified-keyword? parent) (not= parent id)
                                                  (first (d/datoms db0 :avet :seon.task/id parent))
                                                  (not (:seon.task/template? (d/pull db0 '[:seon.task/template?] [:seon.task/id parent]))))

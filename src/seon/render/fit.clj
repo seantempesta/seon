@@ -281,8 +281,9 @@
                                     (if (= :unchanged (:status p))
                                       (assoc m eid prev)
                                       (assoc m eid {:fn cfn :fns (if (= :rewarmed (:status p)) #{cfn} (conj pfns cfn))
-                                                    :tokens (long (:measured-tokens p (:tokens p 0)))
-                                                    :hash (:hash p) :tx (max (fmeas/safe-long (:tx prev) 0) (candidate-tx p))})))
+                                      :tokens (long (:measured-tokens p (:tokens p 0)))
+                                      :turn (long (or (:turn o) (:turn prev) 0))
+                                      :hash (:hash p) :tx (max (fmeas/safe-long (:tx prev) 0) (candidate-tx p))})))
                                   m))
                               shown0 ordered)
                       shown0)]

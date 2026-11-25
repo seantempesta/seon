@@ -11,7 +11,8 @@
             [malli.registry :as mr]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [jolt.fs :as fs]))
+            [jolt.fs :as fs]
+            [seon.cite :as cite]))
 
 (defn form-props
   "Returns the Malli properties map attached to `form` (or `{}` if none)."
@@ -346,7 +347,7 @@
 
 (defn enrich-schema-entity-tx
   "Builds an enriched `:seon.schema/*` entity map preserving `:doc`, `:examples`,
-   and populating `:seon.schema/{type,keys,optional-keys,ref-targets}`."
+   and populating `:seon.schema/{type,keys,optional-keys,ref-targets,doc-refs}`."
   {:malli/schema [:function
                   [:=> [:cat [:maybe :seon.host/db] :map :any] :map]
                   [:=> [:cat [:maybe :seon.host/db] :map :any [:maybe :map]] :map]]}
@@ -376,7 +377,11 @@
          (or (get (:ast-edges batch-ctx) k) (extract-schema-ast-edges f registry))
          req-refs (into #{} (keep resolve-sk) keys)
          opt-refs (into #{} (keep resolve-sk) optional-keys)
-         tgt-refs (into #{} (keep resolve-sk) ref-targets)]
+         tgt-refs (into #{} (keep resolve-sk) ref-targets)
+         self-ref (or existing-eid (get schema->ref k))
+         doc-refs (when (and doc (not (str/blank? (str doc))) (has-attr? :seon.schema/doc-refs))
+                    (let [{:keys [refs]} (cite/resolve-doc-refs db (str doc) batch-ctx)]
+                      (into #{} (remove #(= % self-ref)) refs)))]
      (cond-> {:seon.schema/key k
               :seon.schema/form f}
        (and (nil? existing-eid) (contains? schema->ref k)) (assoc :db/id (get schema->ref k))
@@ -386,44 +391,28 @@
        (and (seq req-refs) (has-attr? :seon.schema/keys)) (assoc :seon.schema/keys req-refs)
        (and (seq opt-refs) (has-attr? :seon.schema/optional-keys)) (assoc :seon.schema/optional-keys opt-refs)
        (and (seq tgt-refs) (has-attr? :seon.schema/ref-targets)) (assoc :seon.schema/ref-targets tgt-refs)
+       (and (seq doc-refs) (has-attr? :seon.schema/doc-refs)) (assoc :seon.schema/doc-refs doc-refs)
        (and policy (has-attr? :seon.schema/context-policy)) (assoc :seon.schema/context-policy policy)))))
 
 (defn stale-schema-edge-retracts
-  "Computes `:db/retract` ops for removed `:seon.schema/{keys,optional-keys,ref-targets}` refs."
-  {:malli/schema
-   [:=>
-    [:cat [:maybe :seon.host/db] [:sequential :map]]
-    [:vector :any]]}
+  "Computes `:db/retract` ops for removed `:seon.schema/{keys,optional-keys,ref-targets,doc-refs}` refs."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:sequential :map]] [:vector :any]]}
   [db ents]
   (if-not (and db (contains? (:schema db) :seon.schema/key))
     []
-    (let [attrs (filterv
-                  #(contains? (:schema db) %)
-                  [:seon.schema/keys
-                   :seon.schema/optional-keys
-                   :seon.schema/ref-targets])]
+    (let [attrs (filterv #(contains? (:schema db) %)
+                         [:seon.schema/keys :seon.schema/optional-keys :seon.schema/ref-targets :seon.schema/doc-refs])]
       (vec
-        (mapcat
-          (fn [ent]
-            (when-let [eid (:e
-                             (first
-                               (d/datoms
-                                 db
-                                 :avet
-                                 :seon.schema/key
-                                 (:seon.schema/key ent))))]
-              (mapcat
-                (fn [a]
-                  (let [old-s (into
-                                #{}
-                                (map :v)
-                                (d/datoms db :eavt eid a))
-                        new-s (set (get ent a #{}))]
-                    (for
-                      [gone (remove new-s old-s)]
-                      [:db/retract eid a gone])))
-                attrs)))
-          ents)))))
+       (mapcat
+        (fn [ent]
+          (when-let [eid (:e (first (d/datoms db :avet :seon.schema/key (:seon.schema/key ent))))]
+            (mapcat
+             (fn [a]
+               (let [old-s (into #{} (map :v) (d/datoms db :eavt eid a))
+                     new-s (set (get ent a #{}))]
+                 (for [gone (remove new-s old-s)] [:db/retract eid a gone])))
+             attrs)))
+        ents)))))
 
 (defn enrich-schema-entities-tx
   "Enriches a `{schema-key malli-form}` map into tx-data with cross-schema ref edges and stale retractions."
@@ -487,3 +476,60 @@
                 (reduce (fn [acc p]
                           (merge acc (validate-map! (fs/file-name p) (edn/read-string (slurp (str p))))))
                         {}))))))))
+
+(defn- shrink-step [v]
+  (cond
+    (and (integer? v) (not (zero? v)))
+    (let [vl (long v)] (distinct [0 (quot vl 2) (if (pos? vl) (dec vl) (inc vl))]))
+    (and (string? v) (pos? (count v)))
+    (let [n (count v)] (distinct ["" (subs v 0 (quot n 2)) (subs v 0 (dec n))]))
+    (and (vector? v) (pos? (count v)))
+    (let [n (count v)] (distinct [[] (subvec v 0 (quot n 2)) (subvec v 0 (dec n))]))
+    (and (map? v) (pos? (count v)))
+    (into [{}] (map #(dissoc v %) (take 4 (sort-by pr-str (keys v)))))
+    :else nil))
+
+(defn shrink-failing-args
+  "Deterministically shrinks failing argument vector `args` while `(fails? cand)` remains truthy."
+  {:malli/schema [:=> [:cat [:vector :any] :seon.host/fn [:? pos-int?]] [:vector :any]]
+   :cost/ticks 15000000}
+  ([args fails?] (shrink-failing-args args fails? 24))
+  ([args fails? max-steps]
+   (loop [cur (vec args) steps 0]
+     (if (>= steps (long max-steps))
+       cur
+       (let [cands (for [i (range (count cur)) sv (shrink-step (nth cur i))] (assoc cur i sv))
+             better (some (fn [c] (when (try (boolean (fails? c)) (catch Throwable _ false)) c)) cands)]
+         (if (and better (not= better cur)) (recur better (inc steps)) cur))))))
+
+(defn schema-refs-in-form
+  "Extracts multi-segment qualified keywords referenced inside `schema-form`."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]] :cost/ticks 500000}
+  [schema-form]
+  (if (nil? schema-form)
+    #{}
+    (into #{}
+          (filter (fn [x]
+                    (and (multi-segment-schema-key? x)
+                         (not (str/starts-with? (namespace x) "seon.db"))
+                         (not (str/starts-with? (namespace x) "seon.merge")))))
+          (tree-seq coll? seq schema-form))))
+
+(defn sync-dh-decls
+  "Returns Datahike attribute declarations missing from `installed-schema` or adding `:db/index true`."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] [:vector :map]] :cost/ticks 500000}
+  [installed-schema declarations]
+  (filterv (fn [d]
+             (let [cur (get installed-schema (:db/ident d))]
+               (or (nil? cur)
+                   (and (true? (:db/index d)) (not (true? (:db/index cur)))))))
+           declarations))
+
+(defn generatable-function-schema?
+  "True when `sch` is a single-arity `[:=> [:cat ...] ret]` without `:seon.host/*` handles in args."
+  {:malli/schema [:=> [:cat :any] [:maybe :boolean]] :cost/ticks 100000}
+  [sch]
+  (when (and (vector? sch) (= :=> (first sch)))
+    (let [args-form (if (map? (second sch)) (nth sch 2 nil) (second sch))]
+      (not (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
+                 (tree-seq coll? seq args-form))))))

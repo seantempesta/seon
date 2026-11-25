@@ -23,7 +23,7 @@
                  "(deftest gamma-test (is true))")]
     (d/transact conn {:tx-data (code/file-import-tx @conn "test/demo/gate_test.clj" src false)})))
 
-(deftest ^{:cost/ticks 40000000} multi-task-ref-proofs-and-rule-provenance-test
+(deftest ^{:cost/ticks 50000000} multi-task-ref-proofs-and-rule-provenance-test
 (testing "Multi-task :seon.agent/tasks + :seon.task/test-vars (:db.type/ref) + latest-digest gating + :seon.task/needs"
   (with-test-store [{:keys [conn]}]
     (setup-demo-vars! conn)

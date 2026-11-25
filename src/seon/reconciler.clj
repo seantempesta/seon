@@ -8,7 +8,8 @@
             [datahike.api :as d]
             [seon.store :as store]
             [seon.task.gate :as gate]
-            [seon.reconciler.policy :as policy]))
+            [seon.reconciler.policy :as policy]
+            [seon.task.refine :as refine]))
 
 (defn- latest-prose-after-msg [eval-ents msg-id]
   (when msg-id
@@ -437,19 +438,11 @@
 (defn reconciler-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:conn "Read access to store via :main conn"}
-       :ins {:db "Commit notices `{:prev-commit :commit :tx}` from `:transactor`"
-             :exits "Agent fork/idle/exit events from `:agents`"}
-       :outs {:run "Autonomous turn & release dispatches to `:agents`"
-              :batch "Branch test dispatches to `:test`"
-              :tx "Verified merge dispatches to `:transactor`"}
+       :ins {:db "Commit notices from :transactor" :exits "Agent events from :agents"}
+       :outs {:run "Turns/releases to :agents" :batch "Tests to :test" :tx "Merges/triggers to :transactor"}
        :workload :compute
-       :doc "Pure O(|Delta|) reconciler: derives agent turns, test runs, merges, and warm process release."
-       :ping-map-fn (fn [st]
-                      {:main-tx (:main-tx st)
-                       :tracked-agents (count (:views st))
-                       :live (:live st)
-                       :testing (count (:testing st))
-                       :dispatched-runs (:runs-sent st)})})
+       :doc "Pure O(|Delta|) reconciler for turns, tests, merges, `:rule.trigger/*`, and warm process release."
+       :ping-map-fn (fn [st] {:main-tx (:main-tx st) :tracked-agents (count (:views st)) :live (:live st) :testing (count (:testing st)) :dispatched-runs (:runs-sent st)})})
   ([{:keys [conn]}]
    {:conn conn :last-commit nil :main-tx 0 :live {} :testing #{} :merging #{} :settling #{} :gate-notified #{} :views {} :runs-sent 0})
   ([st _] st)
@@ -457,28 +450,28 @@
    (if (nil? msg)
      [st nil]
      (let [conn (:conn st)
-           [st1 candidate-ids ds]
+           [st1 cands ds]
            (case cid
-             :db
-             (let [main-db (d/commit-as-db conn (:commit msg))
-                   tx-ds (:tx-data msg)
-                   ids (touched-agent-ids conn main-db (:prev-commit msg) (:commit msg) tx-ds)]
-               [(assoc st :last-commit (:commit msg) :main-tx (:tx msg)) ids tx-ds])
-             :exits
-             (let [aid (:agent-id msg)]
-               (case (:ev msg)
-                 :forked       [(update-in st [:live aid] merge {:pid (:pid msg) :busy? (:busy? msg true)}) #{aid} nil]
-                 :turn-busy    [(update-in st [:live aid] merge {:pid (:pid msg) :busy? true}) #{aid} nil]
-                 :turn-idle    [(update-in st [:live aid] merge {:pid (:pid msg) :busy? false}) #{aid} nil]
-                 :exited       [(if (= (:pid msg) (get-in st [:live aid :pid])) (update st :live dissoc aid) st) #{aid} nil]
-                 :branch-moved [st #{aid} nil]
-                 [st #{} nil]))
+             :db (let [mdb (d/commit-as-db conn (:commit msg)) tds (:tx-data msg)]
+                   [(assoc st :last-commit (:commit msg) :main-tx (:tx msg))
+                    (touched-agent-ids conn mdb (:prev-commit msg) (:commit msg) tds) tds])
+             :exits (let [aid (:agent-id msg)]
+                      (case (:ev msg)
+                        :forked       [(update-in st [:live aid] merge {:pid (:pid msg) :busy? (:busy? msg true)}) #{aid} nil]
+                        :turn-busy    [(update-in st [:live aid] merge {:pid (:pid msg) :busy? true}) #{aid} nil]
+                        :turn-idle    [(update-in st [:live aid] merge {:pid (:pid msg) :busy? false}) #{aid} nil]
+                        :exited       [(if (= (:pid msg) (get-in st [:live aid :pid])) (update st :live dissoc aid) st) #{aid} nil]
+                        :branch-moved [st #{aid} nil]
+                        [st #{} nil]))
              [st #{} nil])]
        (if (nil? (:last-commit st1))
          [st1 nil]
-         (let [main-db (d/commit-as-db conn (:last-commit st1))
-               store (:store main-db)
-               st1 (prune-reconciler-sets st1 main-db store ds)]
-           (if (empty? candidate-ids)
+         (let [mdb (d/commit-as-db conn (:last-commit st1))
+               st1 (prune-reconciler-sets st1 mdb (:store mdb) ds)
+               trigs (when (and (= cid :db) (refine/trigger-attrs-touched? mdb ds))
+                       (refine/compute-trigger-ops mdb))]
+           (if (and (empty? cands) (empty? trigs))
              [st1 nil]
-             (reconcile-candidates st1 main-db store candidate-ids))))))))
+             (let [[st2 outs] (if (seq cands) (reconcile-candidates st1 mdb (:store mdb) cands) [st1 {}])
+                   outs' (if (seq trigs) (update outs :tx #(vec (concat % trigs))) outs)]
+               [st2 (when (seq outs') outs')]))))))))

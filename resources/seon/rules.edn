@@ -284,6 +284,24 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/delegated-calls}
  {:seon.rule/query [:find
+                    ?e
+                    ?rfn
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.ctx.graph/eval-frontier-rows $main $branch ?agent) [[?e ?rfn ?pri ?tx]]]],
+  :seon.rule/target :wire,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :workspace, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "Connect live eval witnesses (:called-vars, :result-schemas) to unseen bridge functions, schemas, and exact doc atoms toward task proofs.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/eval-frontier-bridge}
+ {:seon.rule/query [:find
                     ?tv
                     ?form
                     ?tx
@@ -458,6 +476,24 @@
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/open-errors}
  {:seon.rule/query [:find
+                    ?e
+                    ?rfn
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.ctx.graph/proof-backward-rows $main $branch ?agent) [[?e ?rfn ?pri ?tx]]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :static-prefix, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "Walk backwards from active task :seon.task/{proofs,test-vars,tests,refs} -> called vars -> input/output schemas -> exact ordered doc atoms.",
+  :seon.rule/stratum 16,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/proof-backward-walk}
+ {:seon.rule/query [:find
                     ?t
                     ?tx
                     :in
@@ -544,6 +580,24 @@
   :seon.rule/stratum 16,
   :seon.rule/category :context,
   :seon.rule/id :rule.ctx/unread-messages}
+ {:seon.rule/query [:find
+                    ?e
+                    ?rfn
+                    ?pri
+                    ?tx
+                    :in
+                    $main
+                    $branch
+                    ?agent
+                    :where
+                    [(seon.ctx.graph/error-blame-rows $main $branch ?agent) [[?e ?rfn ?pri ?tx]]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :workspace, :priority ?pri, :tx ?tx}],
+  :seon.rule/doc "Localize contract/exception blame: :input-contract surfaces expected schema + doc atoms (skipping callee body); :output-contract/:exception zooms into cut-point var + doc atoms.",
+  :seon.rule/stratum 17,
+  :seon.rule/category :context,
+  :seon.rule/id :rule.ctx/error-blame-cut}
  {:seon.rule/query [:find
                     ?t
                     ?need
@@ -695,6 +749,35 @@
   :seon.rule/stratum 25,
   :seon.rule/category :health,
   :seon.rule/id :rule.error/rate-limit-backpressure}
+ {:seon.rule/query [:find
+                    ?ag
+                    ?tid
+                    :in
+                    $main
+                    :where
+                    [(seon.task.refine/unproven-task-rows $main) [[?ag ?tid]]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?tid :trigger/refine-task {:agent ?ag}]],
+  :seon.rule/doc "Recursive trigger (Rule A -> Data B): when an active auto-refine task lacks proofs and lacks a refinement prerequisite, assert :trigger/refine-task.",
+  :seon.rule/stratum 26,
+  :seon.rule/category :trigger,
+  :seon.rule/id :rule.trigger/unproven-task}
+ {:seon.rule/query [:find
+                    ?ag
+                    ?ptid
+                    ?rtid
+                    :in
+                    $main
+                    :where
+                    [(seon.task.refine/unassigned-prereq-rows $main) [[?ag ?ptid ?rtid]]]],
+  :seon.rule/target :any,
+  :seon.rule/enabled? true,
+  :seon.rule/assert [[?rtid :trigger/spawn-prereq {:parent-agent ?ag, :parent-task ?ptid}]],
+  :seon.rule/doc "Recursive trigger (Rule B sees Data B -> Data C): when an open :template/refine-task-proofs prerequisite blocks an active parent task with no refiner agent yet, assert :trigger/spawn-prereq.",
+  :seon.rule/stratum 27,
+  :seon.rule/category :trigger,
+  :seon.rule/id :rule.trigger/spawn-unassigned-prereq}
  {:seon.rule/query [:find
                     ?ag
                     ?b
