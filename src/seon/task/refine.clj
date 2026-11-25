@@ -153,81 +153,6 @@
                            (d/datoms db :eavt teid a))))]
       (into (sorted-set) (concat by-tests (by-ref :seon.task/proofs) (by-ref :seon.task/test-vars))))))
 
-(defn evaluate-refinement-gate
-  "Mechanical proof gate for a `:template/refine-task-proofs` prerequisite task:
-   verifies the parent task now has >= 1 existing proof `deftest` var linked AND >= 1 resolved graph reference."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :qualified-keyword] [:maybe :map]]
-   :cost/ticks 5000000}
-  [main-db branch-db refine-task-id]
-  (let [bdb (or branch-db main-db)
-        mdb (or main-db branch-db)
-        re (or (eid-of bdb :seon.task/id refine-task-id) (eid-of mdb :seon.task/id refine-task-id))
-        tpl (or (when re (eav1 bdb re :seon.task/template)) (when re (eav1 mdb re :seon.task/template)))]
-    (when (= :template/refine-task-proofs tpl)
-      (let [pe (or (when (dh-has? bdb :seon.task/needs) (:e (first (d/datoms bdb :avet :seon.task/needs refine-task-id))))
-                   (when (dh-has? mdb :seon.task/needs) (:e (first (d/datoms mdb :avet :seon.task/needs refine-task-id)))))
-            ptid (or (when pe (eav1 bdb pe :seon.task/id)) (when pe (eav1 mdb pe :seon.task/id)))
-            b-pe (when ptid (eid-of bdb :seon.task/id ptid))
-            p-db (if b-pe bdb mdb)
-            eff-pe (or b-pe pe)
-            proof-syms (or (task-proof-syms p-db eff-pe) (sorted-set))
-            existing-proofs (filterv #(boolean (or (eid-of bdb :seon.code.var/name %) (eid-of mdb :seon.code.var/name %))) proof-syms)
-            refs-count (if eff-pe
-                         (let [stored (if (dh-has? p-db :seon.task/refs) (count (d/datoms p-db :eavt eff-pe :seon.task/refs)) 0)
-                               plan (str (eav1 p-db eff-pe :seon.task/title) "\n" (eav1 p-db eff-pe :seon.task/plan))]
-                           (max stored (count (:refs (cite/resolve-doc-refs bdb plan)))))
-                         0)
-            blockers (cond-> []
-                       (nil? ptid)
-                       (conj {:task refine-task-id :reason :refinement-missing-parent :rule :rule.gate/refinement-outcome
-                              :detail {:message "No parent task links to this refinement task via :seon.task/needs."}})
-                       (and ptid (empty? existing-proofs))
-                       (conj {:task refine-task-id :reason :refinement-missing-proofs :rule :rule.gate/refinement-outcome
-                              :detail {:parent ptid :proofs (vec proof-syms)
-                                       :message (str "Parent task " ptid " still has no compiling proof deftest var linked in :seon.task/proofs or :seon.task/tests.")}})
-                       (and ptid (zero? refs-count))
-                       (conj {:task refine-task-id :reason :refinement-missing-refs :rule :rule.gate/refinement-outcome
-                              :detail {:parent ptid
-                                       :message (str "Parent task " ptid " has 0 resolved symbol/schema/doc references in :seon.task/plan or :seon.task/refs.")}}))]
-        {:ok? (empty? blockers)
-         :parent ptid
-         :proofs existing-proofs
-         :refs-count refs-count
-         :blockers blockers}))))
-
-(defn expected-red-proof-vars
-  "Returns the set of newly authored parent-task proof `deftest` symbols allowed to fail RED on a
-   `:template/refine-task-proofs` Refiner branch (never includes pre-existing `:main` test vars)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:set :qualified-symbol]]
-   :cost/ticks 5000000}
-  [main-db branch-db agent-id]
-  (if-not (and main-db branch-db agent-id)
-    #{}
-    (let [task-ids (distinct
-                    (concat
-                     (when-let [ae (eid-of main-db :seon.agent/id agent-id)]
-                       (keep #(eav1 main-db (:v %) :seon.task/id) (d/datoms main-db :eavt ae :seon.agent/tasks)))
-                     (when-let [ae (eid-of branch-db :seon.agent/id agent-id)]
-                       (keep #(eav1 branch-db (:v %) :seon.task/id) (d/datoms branch-db :eavt ae :seon.agent/tasks)))))
-          ref-tids (filter (fn [tid]
-                             (let [re (or (eid-of branch-db :seon.task/id tid) (eid-of main-db :seon.task/id tid))]
-                               (= :template/refine-task-proofs
-                                  (or (eav1 branch-db re :seon.task/template) (eav1 main-db re :seon.task/template)))))
-                           task-ids)]
-      (if (empty? ref-tids)
-        #{}
-        (into #{}
-              (for [rtid ref-tids
-                    :let [pe (or (when (dh-has? branch-db :seon.task/needs) (:e (first (d/datoms branch-db :avet :seon.task/needs rtid))))
-                                 (when (dh-has? main-db :seon.task/needs) (:e (first (d/datoms main-db :avet :seon.task/needs rtid)))))
-                          ptid (or (eav1 branch-db pe :seon.task/id) (eav1 main-db pe :seon.task/id))
-                          b-pe (when ptid (eid-of branch-db :seon.task/id ptid))]
-                    :when b-pe
-                    sym (task-proof-syms branch-db b-pe)
-                    :when (and (eid-of branch-db :seon.code.var/name sym)
-                               (nil? (eid-of main-db :seon.code.var/name sym)))]
-                sym))))))
-
 (defn passed-non-template-tasks
   "Filters `passed-tasks` to concrete (non-template) `:seon.task/id` keywords eligible to be marked `:done? true`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe [:sequential :any]]] [:vector :qualified-keyword]]
@@ -385,3 +310,90 @@
                      (cond-> {:seon.task/id tid :seon.task/done? true}
                        (dh-has? main-db :seon.task/summary)
                        (assoc :seon.task/summary (str "Refinement aborted (" reason-txt "); unblocked parent worker.")))))) tids))))
+
+(defn- new-branch-test-vars [main-db branch-db]
+  (if-not (and main-db branch-db (dh-has? branch-db :seon.code.var/test?) (dh-has? branch-db :seon.code.var/name))
+    #{}
+    (into #{} (keep (fn [dt]
+                      (let [sym (eav1 branch-db (:e dt) :seon.code.var/name)]
+                        (when (and (qualified-symbol? sym) (nil? (eid-of main-db :seon.code.var/name sym)))
+                          sym))))
+          (d/datoms branch-db :avet :seon.code.var/test? true))))
+
+(defn evaluate-refinement-gate
+  "Mechanical proof gate for a `:template/refine-task-proofs` prerequisite task:
+   verifies the parent task now has >= 1 existing proof `deftest` var linked AND >= 1 resolved graph reference."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :qualified-keyword] [:maybe :map]]
+   :cost/ticks 5000000}
+  [main-db branch-db refine-task-id]
+  (let [bdb (or branch-db main-db)
+        mdb (or main-db branch-db)
+        re (or (eid-of bdb :seon.task/id refine-task-id) (eid-of mdb :seon.task/id refine-task-id))
+        tpl (or (when re (eav1 bdb re :seon.task/template)) (when re (eav1 mdb re :seon.task/template)))]
+    (when (= :template/refine-task-proofs tpl)
+      (let [pe (or (when (dh-has? bdb :seon.task/needs) (:e (first (d/datoms bdb :avet :seon.task/needs refine-task-id))))
+                   (when (dh-has? mdb :seon.task/needs) (:e (first (d/datoms mdb :avet :seon.task/needs refine-task-id)))))
+            ptid (or (when pe (eav1 bdb pe :seon.task/id)) (when pe (eav1 mdb pe :seon.task/id)))
+            b-pe (when ptid (eid-of bdb :seon.task/id ptid))
+            p-db (if b-pe bdb mdb)
+            eff-pe (or b-pe pe)
+            proof-syms (or (task-proof-syms p-db eff-pe) (sorted-set))
+            existing-proofs (filterv #(boolean (or (eid-of bdb :seon.code.var/name %) (eid-of mdb :seon.code.var/name %))) proof-syms)
+            refs-count (if eff-pe
+                         (let [stored (if (dh-has? p-db :seon.task/refs) (count (d/datoms p-db :eavt eff-pe :seon.task/refs)) 0)
+                               plan (str (eav1 p-db eff-pe :seon.task/title) "\n" (eav1 p-db eff-pe :seon.task/plan))]
+                           (max stored (count (:refs (cite/resolve-doc-refs bdb plan)))))
+                         0)
+            blockers (cond-> []
+                       (nil? ptid)
+                       (conj {:task refine-task-id :reason :refinement-missing-parent :rule :rule.gate/refinement-outcome
+                              :detail {:message "No parent task links to this refinement task via :seon.task/needs."}})
+                       (and ptid (empty? existing-proofs))
+                       (conj {:task refine-task-id :reason :refinement-missing-proofs :rule :rule.gate/refinement-outcome
+                              :detail {:parent ptid :proofs (vec proof-syms)
+                                       :message (let [authored (vec (sort (new-branch-test-vars mdb bdb)))]
+                                                (if (seq authored)
+                                                  (str "Parent task " ptid " has no linked proof yet. Call (user/update-task! {:id " ptid " :proofs '" (pr-str authored) " :tests '" (pr-str authored) " :plan \"<plan citing your new stub & schemas>\"}) and then (user/ready!).")
+                                                  (str "Parent task " ptid " still has no compiling proof deftest var linked in :seon.task/proofs or :seon.task/tests.")))}})
+                       (and ptid (zero? refs-count))
+                       (conj {:task refine-task-id :reason :refinement-missing-refs :rule :rule.gate/refinement-outcome
+                              :detail {:parent ptid
+                                       :message (str "Parent task " ptid " has 0 resolved symbol/schema/doc references in :seon.task/plan or :seon.task/refs.")}}))]
+        {:ok? (empty? blockers)
+         :parent ptid
+         :proofs existing-proofs
+         :refs-count refs-count
+         :blockers blockers}))))
+
+(defn expected-red-proof-vars
+  "Returns the set of newly authored parent-task proof `deftest` symbols allowed to fail RED on a
+   `:template/refine-task-proofs` Refiner branch (never includes pre-existing `:main` test vars)."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:set :qualified-symbol]]
+   :cost/ticks 5000000}
+  [main-db branch-db agent-id]
+  (if-not (and main-db branch-db agent-id)
+    #{}
+    (let [task-ids (distinct
+                    (concat
+                     (when-let [ae (eid-of main-db :seon.agent/id agent-id)]
+                       (keep #(eav1 main-db (:v %) :seon.task/id) (d/datoms main-db :eavt ae :seon.agent/tasks)))
+                     (when-let [ae (eid-of branch-db :seon.agent/id agent-id)]
+                       (keep #(eav1 branch-db (:v %) :seon.task/id) (d/datoms branch-db :eavt ae :seon.agent/tasks)))))
+          ref-tids (filter (fn [tid]
+                             (let [re (or (eid-of branch-db :seon.task/id tid) (eid-of main-db :seon.task/id tid))]
+                               (= :template/refine-task-proofs
+                                  (or (eav1 branch-db re :seon.task/template) (eav1 main-db re :seon.task/template)))))
+                           task-ids)]
+      (if (empty? ref-tids)
+        #{}
+        (into (new-branch-test-vars main-db branch-db)
+        (for [rtid ref-tids
+              :let [pe (or (when (dh-has? branch-db :seon.task/needs) (:e (first (d/datoms branch-db :avet :seon.task/needs rtid))))
+                           (when (dh-has? main-db :seon.task/needs) (:e (first (d/datoms main-db :avet :seon.task/needs rtid)))))
+                    ptid (or (eav1 branch-db pe :seon.task/id) (eav1 main-db pe :seon.task/id))
+                    b-pe (when ptid (eid-of branch-db :seon.task/id ptid))]
+              :when b-pe
+              sym (task-proof-syms branch-db b-pe)
+              :when (and (eid-of branch-db :seon.code.var/name sym)
+                         (nil? (eid-of main-db :seon.code.var/name sym)))]
+          sym))))))
