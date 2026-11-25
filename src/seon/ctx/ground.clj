@@ -305,3 +305,46 @@
                        sk (assoc :schema sk)
                        (seq ep) (update :params merge ep)))))))
            merged))))
+
+(defn system-overview-rows
+  "Indexed balanced top-K overview rows `[eid rfn pri tx]` for `[:seon.system/id :root]`: surfaces
+   recent open errors, active non-example agents (including entry agents), open non-template tasks,
+   pending calls, and matching fixes with staggered priorities so one busy category cannot starve the rest."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector [:tuple :int :any :int :int]]]
+   :cost/ticks 15000000}
+  [db]
+  (let [dh (or (:schema db) {})
+        eav1 (fn [e a] (when (contains? dh a) (:v (first (d/datoms db :eavt e a)))))
+        top-k (fn [k rows] (vec (take k (sort-by (fn [[_ tx]] (- (long tx))) rows))))
+        stagger (fn [base step rfn pairs]
+                  (vec (map-indexed (fn [i [e tx]] [e rfn (- (long base) (* (long step) i)) (long tx)]) pairs)))
+        errs (when (contains? dh :seon.error/status)
+               (top-k 4 (map (fn [dt] [(:e dt) (long (:tx dt 0))]) (d/datoms db :avet :seon.error/status :open))))
+        err-kinds (into #{} (keep #(eav1 (first %) :seon.error/kind)) errs)
+        fixes (when (and (seq err-kinds) (contains? dh :seon.fix/error-class))
+                (top-k 2 (for [k err-kinds dt (d/datoms db :avet :seon.fix/error-class k)]
+                           [(:e dt) (long (:tx dt 0))])))
+        calls (when (contains? dh :seon.agent.call/status)
+                (top-k 3 (map (fn [dt] [(:e dt) (long (:tx dt 0))]) (d/datoms db :avet :seon.agent.call/status :pending))))
+        agents (when (contains? dh :seon.agent/id)
+                 (let [raw (keep (fn [dt]
+                                   (let [aid (:v dt) e (:e dt)]
+                                     (when (and (qualified-keyword? aid)
+                                                (not= "example" (namespace aid))
+                                                (not (true? (eav1 e :seon.agent/archived?))))
+                                       [e (long (:tx dt 0)) (boolean (eav1 e :seon.agent/entry?))])))
+                                 (d/datoms db :aevt :seon.agent/id))]
+                   (mapv (fn [[e tx _]] [e tx])
+                         (take 5 (sort-by (fn [[_ tx entry?]] [(if entry? 0 1) (- (long tx))]) raw)))))
+        tasks (when (contains? dh :seon.task/id)
+                (top-k 4 (keep (fn [dt]
+                                 (let [e (:e dt)]
+                                   (when (and (not (true? (eav1 e :seon.task/done?)))
+                                              (not (true? (eav1 e :seon.task/template?))))
+                                     [e (long (:tx dt 0))])))
+                               (d/datoms db :aevt :seon.task/id))))]
+    (vec (concat (stagger 96 4 (quote seon.render.entities/render-error-card) (take 3 errs))
+                 (stagger 95 4 (quote seon.render.entities/render-agent-row) (take 4 agents))
+                 (stagger 94 4 (quote seon.render.entities/render-task-card) (take 4 tasks))
+                 (stagger 93 4 (quote seon.render.entities/render-call-row) (take 3 calls))
+                 (stagger 91 4 (quote seon.render.entities/render-fix-card) (take 2 fixes))))))

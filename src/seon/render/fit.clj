@@ -444,11 +444,14 @@
   ([db projections] (fit-projections db projections nil))
   ([db projections opts]
    (let [o (if (map? opts) opts {})
-         r-opts (cond-> (select-keys o [:turn])
-                  (or (:weights o) (nil? (:turn o))) (assoc :weights (or (:weights o) (read-rank-weights db))))
-         ranked (rank-candidates projections r-opts)
-         with-cands (populate-candidates db ranked o)]
-     (upgrade-ladder with-cands o))))
+       r-opts (cond-> (select-keys o [:turn])
+                (or (:weights o) (nil? (:turn o))) (assoc :weights (or (:weights o) (read-rank-weights db))))
+       ranked (rank-candidates projections r-opts)
+       mi (when (and (integer? (:max-items o)) (pos? (long (:max-items o)))) (max 24 (* 2 (long (:max-items o)))))
+       [head tail] (if (and mi (> (count ranked) mi)) [(vec (take mi ranked)) (vec (drop mi ranked))] [ranked []])
+       with-cands (populate-candidates db head o)
+       res (upgrade-ladder with-cands o)]
+   (if (seq tail) (update res :dropped into tail) res))))
 
 (defn explain-candidates
   "Explains ranking signals, modifiers, provenance, and EVERY rendered variation + selection/skip reason."

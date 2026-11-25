@@ -510,31 +510,7 @@
                     ?focus
                     :where
                     [(= ?focus [:seon.system/id :root])]
-                    (or-join
-                     [?e ?rfn ?pri ?tx]
-                     (and
-                      [$main ?e :seon.error/status :open ?tx]
-                      [(ground seon.render.entities/render-error-card) ?rfn]
-                      [(ground 96) ?pri])
-                     (and
-                      [$main ?err :seon.error/status :open ?tx]
-                      [$main ?err :seon.error/kind ?kind]
-                      [$main ?e :seon.fix/error-class ?kind]
-                      [(ground seon.render.entities/render-fix-card) ?rfn]
-                      [(ground 94) ?pri])
-                     (and
-                      [$main ?e :seon.task/done? false ?tx]
-                      (not [$main ?e :seon.task/template? true])
-                      [(ground :seon.rule/nil) ?rfn]
-                      [(ground 88) ?pri])
-                     (and
-                      [$main ?e :seon.agent/id ?aid ?tx]
-                      [(namespace ?aid) ?ans]
-                      [(not= ?ans "example")]
-                      (not [$main ?e :seon.agent/archived? true])
-                      (not [$main ?e :seon.agent/interactive? true])
-                      [(ground seon.render.entities/render-agent-row) ?rfn]
-                      [(ground 90) ?pri]))],
+                    [(seon.ctx.ground/system-overview-rows $main) [[?e ?rfn ?pri ?tx]]]],
   :seon.rule/target :any,
   :seon.rule/enabled? true,
   :seon.rule/assert [{:entity ?e, :fn ?rfn, :zone :workspace, :priority ?pri, :tx ?tx}],
