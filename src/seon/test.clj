@@ -584,7 +584,12 @@
 
 (defn- test-fork-refused [st msg]
   (let [sub-id (:batch-id msg)
-        pids (if-let [p (and sub-id (get-in st [:active-subs sub-id]))] [p] (vec (distinct (vals (:active-subs st)))))
+        pids (if (some? sub-id)
+             (if-let [p (or (get-in st [:active-subs sub-id])
+                            (when (contains? (:parents st) sub-id) sub-id))]
+               [p]
+               [])
+             (vec (distinct (vals (:active-subs st)))))
         err-msg (str "Test fork refused (code " (:code msg) ")")]
     (if (empty? pids)
       [st {::flow/error [{:proc :test :ev :fork-refused :batch-id sub-id :code (:code msg) :error err-msg}]}]

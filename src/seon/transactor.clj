@@ -202,9 +202,12 @@
            (let [r (d/transact conn {:tx-data [{:seon.git/repo :main :seon.git/commit (:sha msg)}]}) db (:db-after r)]
              [(assoc st :last-commit (d/commit-id db) :last-tx (:max-tx db)) nil])
            :gc-store
-           (let [res (store/gc-store! conn msg)]
+           (let [res (store/gc-store! conn msg)
+               pruned (:pruned-branches res)]
            (tmerge/reply! msg res)
-           [st {::flow/report [(str "[:transactor] gc-store pruned " (get-in res [:pruned :deleted]) " branches, swept " (:swept res) " keys")]}])
+           [st (cond-> {::flow/report [(str "[:transactor] gc-store pruned " (get-in res [:pruned :deleted]) " branches, swept " (:swept res) " keys")]}
+                 (seq pruned)
+                 (assoc :git [{:op :delete-branch-ref :branches (vec pruned)}]))])
            :toggle-pause-agent
            (let [id (:agent-id msg)
                  cur (boolean (:seon.agent/paused? (d/pull @conn '[:seon.agent/paused?] [:seon.agent/id id])))

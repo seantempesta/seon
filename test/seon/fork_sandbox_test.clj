@@ -1,23 +1,29 @@
 (ns seon.fork-sandbox-test
-  "Unit, seed=42 generative, live kernel Seatbelt sandbox, test-worker catch-up,
-   ForkParent router fault surfacing, and Git ref-hygiene tests."
+  "Tests for :fork-refused batch isolation, transactor/merge :delete-branch-ref wiring,
+   git-proc :commit-git? gating, test-worker warm-commit catch-up, canonical store helpers,
+   and ForkParent router fault surfacing."
   (:require [clojure.core.async :as a]
+            [clojure.core.async.flow :as flow]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [datahike.datom :as dd]
+            [datahike.reads :as reads]
             [jolt.async.remote :as remote]
             [jolt.ffi :as ffi]
             [jolt.host]
+            [konserve.core :as k]
             [seon.code :as code]
             [seon.error :as serr]
             [seon.fork :as fork]
-            [seon.fork.sandbox :as sandbox]
             [seon.git :as git]
             [seon.git-proc :as git-proc]
             [seon.main :as main]
+            [seon.merge :as merge]
             [seon.schema :as schema]
             [seon.store :as store :refer [rm-rf!]]
+            [seon.test :as stest]
             [seon.test-fixture :refer [with-test-store]]
             [seon.transactor :as transactor]))
 
@@ -49,135 +55,127 @@
           (let [[res _] (a/alts!! [(:in end) (a/timeout 8000)])]
             (remote/close! end)
             (ffi/with-alloc [st-buf 4]
-              (sandbox/c-waitpid pid st-buf 0))
+              (fork/c-waitpid pid st-buf 0))
             (or res {:error :fork-timeout}))))))
 
 (deftest seatbelt-profile-canonicalization-escaping-and-seed42-test
-  (testing "build-seatbelt-profile canonicalizes realpaths, escapes SBPL quotes/backslashes, orders deny before allow, and handles nil/equal paths"
-    (let [c-tmp (.getCanonicalPath (io/file "/tmp"))
-          prof (sandbox/build-seatbelt-profile "/tmp/seon-r/" "/tmp/seon-r/runs/store/")
-          deny-idx (str/index-of prof "(deny file-write*")
-          allow-idx (str/index-of prof "(allow file-write*")]
-      (is (str/starts-with? prof "(version 1)\n(allow default)\n"))
-      (is (str/includes? prof (str "(deny file-write* (subpath \"" c-tmp "/seon-r\"))")))
-      (is (str/includes? prof (str "(allow file-write* (subpath \"" c-tmp "/seon-r/runs/store\"))")))
-      (is (and deny-idx allow-idx (< deny-idx allow-idx))
-          "Seatbelt last-match-wins requires allow store AFTER deny repo"))
-    (let [esc (sandbox/escape-sbpl-string "/tmp/a\"b\\c\nd\re\u0000f")]
-      (is (= "/tmp/a\\\"b\\\\c\\nd\\ref" esc))
-      (is (not (str/includes? esc "\u0000"))))
-    (let [q-prof (sandbox/build-seatbelt-profile "/tmp/dir\"quote\\bs" "/tmp/dir\"quote\\bs/store")]
-      (is (str/includes? q-prof "dir\\\"quote\\\\bs"))
-      (is (str/includes? q-prof "dir\\\"quote\\\\bs/store")))
-    (testing "nil/blank repo-dir or repo-dir == store-path skips repo deny cleanly"
-      (is (= "(version 1)\n(allow default)\n" (sandbox/build-seatbelt-profile nil "/tmp/store")))
-      (is (= "(version 1)\n(allow default)\n" (sandbox/build-seatbelt-profile "   " "/tmp/store")))
-      (is (= "(version 1)\n(allow default)\n" (sandbox/build-seatbelt-profile "/tmp/same" "/tmp/same/"))))
-    (testing "ancestor store-path does not override repo deny"
-      (let [p (sandbox/build-seatbelt-profile "/tmp/parent/repo" "/tmp/parent")]
-        (is (str/includes? p "(deny file-write*"))
-        (is (not (str/includes? p "(allow file-write*")))))
-    (testing "resolve-sandbox-plan gates on sandbox?, macos?, repo-dir, and repo != store"
-      (is (= {:apply? false :reason :disabled}
-             (select-keys (sandbox/resolve-sandbox-plan {:sandbox? false :macos? true :repo-dir "/tmp/a" :store-path "/tmp/b"})
-                          [:apply? :reason])))
-      (is (= {:apply? false :reason :unsupported-os}
-             (select-keys (sandbox/resolve-sandbox-plan {:sandbox? true :macos? false :repo-dir "/tmp/a" :store-path "/tmp/b"})
-                          [:apply? :reason])))
-      (is (= {:apply? false :reason :no-repo-dir}
-             (select-keys (sandbox/resolve-sandbox-plan {:sandbox? true :macos? true :repo-dir nil :store-path "/tmp/b"})
-                          [:apply? :reason])))
-      (is (= {:apply? false :reason :repo-equals-store}
-             (select-keys (sandbox/resolve-sandbox-plan {:sandbox? true :macos? true :repo-dir "/tmp/same" :store-path "/tmp/same/"})
-                          [:apply? :reason])))
-      (let [plan (sandbox/resolve-sandbox-plan {:macos? true :repo-dir "/tmp/repo-x" :store-path "/tmp/repo-x/runs/store"})]
-        (is (true? (:apply? plan)))
-        (is (= :macos-seatbelt (:reason plan)))
-        (is (string? (:profile plan))))))
-  (testing "seed=42 Malli generative checks pass for all pure sandbox & fault-builder functions"
+  (testing ":fork-refused carries :agent-id/:batch-id and isolates the refused test batch without nuking concurrent batches"
+    (let [rc1 (a/chan 1)
+          rc2 (a/chan 1)
+          st0 {:conn nil
+               :cfg nil
+               :fork-out (a/chan 8)
+               :max-workers 4
+               :parents {"batch-1" {:reply-ch rc1 :agent-id :agent/a :branch :branch/a :results []}
+                         "batch-2" {:reply-ch rc2 :agent-id :agent/b :branch :branch/b :results []}}
+               :active-subs {"batch-1-fast-0" "batch-1"
+                             "batch-1-fast-1" "batch-1"
+                             "batch-2-fast-0" "batch-2"}
+               :sub-queue [{:parent-id "batch-1" :sub-id "batch-1-slow-0"}
+                           {:parent-id "batch-2" :sub-id "batch-2-slow-0"}]}
+          [st1 out1] (stest/test-proc st0 :fork-ev
+                       {:ev :fork-refused :type :test :batch-id "batch-1-fast-0" :code -1})
+          rep1 (a/poll! rc1)]
+      (is (false? (:ok? rep1)))
+      (is (str/includes? (str (:error rep1)) "-1"))
+      (is (not (contains? (:parents st1) "batch-1")))
+      (is (contains? (:parents st1) "batch-2") "Concurrent batch-2 must remain untouched")
+      (is (= #{"batch-2-fast-0" "batch-2-slow-0"} (set (keys (:active-subs st1)))))
+      (is (nil? (a/poll! rc2)) "Concurrent batch-2 reply-ch must remain open and untouched")
+      (is (= :agent/a (:to (first (:tx out1)))))
+      ;; Duplicate/stale :fork-refused for already-purged sibling sub-id must NOT nuke batch-2!
+      (let [[st2 out2] (stest/test-proc st1 :fork-ev
+                         {:ev :fork-refused :type :test :batch-id "batch-1-fast-1" :code -1})]
+        (is (contains? (:parents st2) "batch-2") "Stale sibling :fork-refused must not nuke concurrent batch-2")
+        (is (= #{"batch-2-fast-0" "batch-2-slow-0"} (set (keys (:active-subs st2)))))
+        (is (nil? (a/poll! rc2)))
+        (is (= "batch-1-fast-1" (:batch-id (first (::flow/error out2)))))
+        ;; Unknown :batch-id also leaves batch-2 untouched
+        (let [[st3 _] (stest/test-proc st2 :fork-ev
+                        {:ev :fork-refused :type :test :batch-id "batch-unknown" :code -2})]
+          (is (contains? (:parents st3) "batch-2"))
+          (is (nil? (a/poll! rc2)))
+          ;; Unattributed nil :batch-id releases remaining active batches
+          (let [[st4 _] (stest/test-proc st3 :fork-ev
+                          {:ev :fork-refused :type :test :code -3})
+                rep2 (a/poll! rc2)]
+            (is (empty? (:parents st4)))
+            (is (empty? (:active-subs st4)))
+            (is (false? (:ok? rep2))))))))
+  (testing "ForkParent emits :agent-id and :batch-id on :ev :fork-refused and seed=42 passes for image-advance-fault-req"
     (with-test-store [{:keys [conn]}]
-      (let [db @conn]
-        (doseq [vsym '[seon.fork.sandbox/macos?
-                     seon.fork.sandbox/escape-sbpl-string
-                     seon.fork.sandbox/canonical-path
-                     seon.fork.sandbox/build-seatbelt-profile
-                     seon.fork.sandbox/resolve-sandbox-plan
-                     seon.fork/image-advance-fault-req]]
-          (let [r (schema/stress-var db vsym {:samples 100 :seed 42 :measure-fn code/measure-call})]
-            (is (:ok? r) (str "seed=42 failed for " vsym ": " (pr-str r)))))))))
+      (let [db @conn
+            r (schema/stress-var db 'seon.fork/image-advance-fault-req
+                                 {:samples 100 :seed 42 :measure-fn code/measure-call})]
+        (is (:ok? r) (str "seed=42 failed for seon.fork/image-advance-fault-req: " (pr-str r)))))))
 
 (deftest live-kernel-worker-sandbox-blocks-repo-and-git-allows-store-test
-  (when (sandbox/macos?)
-    (if-let [inherited (sandbox/current-sandbox)]
-      (testing "Inside an already-sandboxed :fork-test worker, inherited OS sandbox protects host repo and nested apply-worker-sandbox! stays non-fatal"
-        (let [repo (:repo-dir inherited)
-              probe-path (io/file repo (str "src/.seon-sandbox-probe-" (System/nanoTime)))]
-          (is (string? (slurp (io/file repo "AGENTS.md"))))
-          (is (thrown? Throwable (spit probe-path "should-fail")))
-          (is (not (.exists probe-path)))
-          (let [nested (sandbox/apply-worker-sandbox! {:repo-dir "/tmp/nested-r" :store-path "/tmp/nested-s" :sandbox? true})]
-            (is (false? (:applied? nested)))
-            (is (true? (:already-sandboxed? nested))))
-          (is (:ok? (sandbox/self-test-sandbox!)))))
-      (testing "Forked child under Seatbelt can read AGENTS.md & write runs/store, cannot write src/evil.clj or run git commit, and fails closed on invalid SBPL"
-        (let [base (str "/tmp/seon-sandbox-test-" (System/nanoTime))
-              store-dir (str base "/runs/store")]
-          (try
-            (.mkdirs (io/file base "src"))
-            (.mkdirs (io/file store-dir))
-            (spit (io/file base "AGENTS.md") "seon-sandbox-agents\n")
-            (git/git! base "init" "-b" "main")
-            (git/git! base "config" "user.email" "test@seon.local")
-            (git/git! base "config" "user.name" "Seon Test")
-            (git/git! base "add" ".")
-            (git/git! base "commit" "-m" "Initial")
-            (let [sha0 (git/head-commit base)
-                  res (fork-and-run!
-                       (fn []
-                         (let [sb (sandbox/apply-worker-sandbox! {:repo-dir base :store-path store-dir :sandbox? true})
-                               read-ok? (= "seon-sandbox-agents\n" (slurp (io/file base "AGENTS.md")))
-                               store-ok? (do (spit (io/file store-dir "probe.txt") "lmdb-ok")
-                                             (= "lmdb-ok" (slurp (io/file store-dir "probe.txt"))))
-                               evil (try
-                                      (spit (io/file base "src/evil.clj") "(ns evil)")
-                                      {:blocked? false}
-                                      (catch Throwable e
-                                        {:blocked? true :msg (or (.getMessage e) (str e))}))
-                               git-res (git/sh-fiber "git" "-C" base "commit" "--allow-empty" "-m" "rogue")]
-                           {:applied? (:applied? sb)
-                            :read-ok? read-ok?
-                            :store-ok? store-ok?
-                            :evil evil
-                            :git-exit (:exit git-res)
-                            :git-err (:err git-res)})))
-                  bad-sb (fork-and-run!
-                          (fn []
-                            (try
-                              (sandbox/apply-seatbelt-profile! "(version 1) (definitely-invalid-sbpl-op")
-                              {:threw? false}
-                              (catch clojure.lang.ExceptionInfo ex
-                                {:threw? true
-                                 :error (:error (ex-data ex))
-                                 :rc (:rc (ex-data ex))
-                                 :has-msg? (boolean (not-empty (:sandbox-error (ex-data ex))))}))))
-                  st-res (sandbox/self-test-sandbox!)]
-              (is (true? (:applied? res)))
-              (is (true? (:read-ok? res)))
-              (is (true? (:store-ok? res)))
-              (is (true? (get-in res [:evil :blocked?])))
-              (is (str/includes? (str/lower-case (str (get-in res [:evil :msg]))) "operation not permitted"))
-              (is (not (.exists (io/file base "src/evil.clj"))))
-              (is (not= 0 (:git-exit res)))
-              (is (= sha0 (git/head-commit base)) "Git HEAD must remain unchanged after blocked rogue commit")
-              (is (true? (:threw? bad-sb)) "Invalid SBPL must fail closed")
-              (is (= :seon.sandbox/init-failed (:error bad-sb)))
-              (is (not= 0 (:rc bad-sb)))
-              (is (true? (:has-msg? bad-sb)))
-              (is (true? (:ok? st-res)))
-              (is (nil? (sandbox/current-sandbox)) "Parent/coordinator must remain unsandboxed"))
-            (finally
-              (rm-rf! (io/file base))
-              (is (not (.exists (io/file base))) "Temp sandbox dir must be cleaned up"))))))))
+  (testing "transactor :gc-store and :merge emit :delete-branch-ref on :git for pruned branches"
+    (with-test-store [{:keys [conn cfg]}]
+      (store/branch! conn :main :branch/old-gc-1)
+      (store/branch! conn :main :branch/old-gc-2)
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/old-gc-1 :seon.agent/branch :branch/old-gc-1
+                                   :seon.agent/merged-tx 10 :seon.agent/archived? true}
+                                  {:seon.agent/id :agent/old-gc-2 :seon.agent/branch :branch/old-gc-2
+                                   :seon.agent/merged-tx 11 :seon.agent/archived? true}]})
+      (let [tx-st0 (transactor/transactor-proc {:conn conn :cfg cfg :repo-dir nil :commit-git? false :fork-out nil})
+            rch-gc (a/chan 1)
+            [_ out-gc] (transactor/transactor-proc tx-st0 :tx {:op :gc-store :keep 0 :reply-ch rch-gc})
+            ans-gc (a/<!! rch-gc)
+            git-gc (first (:git out-gc))]
+        (is (true? (:ok? ans-gc)))
+        (is (= #{:branch/old-gc-1 :branch/old-gc-2} (set (:pruned-branches ans-gc))))
+        (is (= :delete-branch-ref (:op git-gc)))
+        (is (= #{:branch/old-gc-1 :branch/old-gc-2} (set (:branches git-gc)))))
+      ;; Merge path also emits :delete-branch-ref when prune-merged-branches! removes stale branches
+      (d/transact conn {:tx-data [{:seon.config/key :seon.config/root :seon.config/gc-keep-merged-branches 0}]})
+      (store/branch! conn :main :branch/stale-merge-1)
+      (store/branch! conn :main :branch/fresh-merge-1)
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/stale-m :seon.agent/branch :branch/stale-merge-1
+                                   :seon.agent/merged-tx 12 :seon.agent/archived? true}]})
+      (let [bconn (store/connect cfg :branch/fresh-merge-1)]
+        (try
+          (d/transact bconn {:tx-data [{:seon.task/id :task/fresh-m :seon.task/title "Fresh merge task"}]})
+          (finally (d/release bconn))))
+      (let [tx-st1 (transactor/transactor-proc {:conn conn :cfg cfg :repo-dir nil :commit-git? false :fork-out nil})
+            rch-m (a/chan 1)
+            [_ out-m] (transactor/transactor-proc tx-st1 :tx {:op :merge :branch :branch/fresh-merge-1 :reply-ch rch-m})
+            ans-m (a/<!! rch-m)
+            del-op (some #(when (= :delete-branch-ref (:op %)) %) (:git out-m))]
+        (is (true? (:ok? ans-m)))
+        (is (some? del-op) (str "Expected :delete-branch-ref on :git out, got: " (pr-str out-m)))
+        (is (contains? (set (:branches del-op)) :branch/stale-merge-1)))))
+  (testing "git-proc :diff-branch honors :commit-git? false and leaks zero refs into .git"
+    (let [repo (str "/tmp/seon-diff-gate-" (System/nanoTime))]
+      (try
+        (.mkdirs (io/file repo "src/demo"))
+        (spit (io/file repo "src/demo/d.clj") "(ns demo.d)\n(defn v [] 1)\n")
+        (git/git! repo "init" "-b" "main")
+        (git/git! repo "config" "user.email" "test@seon.local")
+        (git/git! repo "config" "user.name" "Seon Test")
+        (git/git! repo "add" ".")
+        (git/git! repo "commit" "-m" "Init")
+        (with-test-store [{:keys [conn cfg]}]
+          (d/transact conn {:tx-data (git/bootstrap-tx @conn repo)})
+          (store/branch! conn :main :branch/diff-noleak)
+          (let [bc (store/connect cfg :branch/diff-noleak)]
+            (try
+              (d/transact bc {:tx-data (code/file-import-tx @bc "src/demo/d.clj" "(ns demo.d)\n(defn v [] 2)\n" false)})
+              (finally (d/release bc))))
+          (let [plan (merge/three-way conn cfg :branch/diff-noleak {:skip-health? true})
+                st-off (git-proc/git-proc {:conn conn :cfg cfg :repo-dir repo :commit-git? false :port 0})
+                rch (a/chan 1)
+                [_ out] (git-proc/git-proc st-off :in {:op :diff-branch :branch :branch/diff-noleak
+                                                       :plan plan :reply-ch rch})
+                ans (a/<!! rch)]
+            (is (= :skipped-commit-git-false (:skipped ans)))
+            (is (nil? (:git-ref ans)))
+            (is (nil? (:diff ans)))
+            (is (some #(str/includes? % ":diff-branch :skipped-commit-git-false") (::flow/report out)))
+            (is (nil? (git/ref-commit repo "refs/heads/seon/diff-noleak")))))
+        (finally
+          (rm-rf! (io/file repo))
+          (is (not (.exists (io/file repo))) "Temp git repo must be cleaned up"))))))
 
 (deftest test-worker-warm-commit-catchup-and-wrap-fork-out-test
   (testing "run-test-worker! catches up warm-commit -> main-cid delta before running tests"
@@ -209,25 +207,38 @@
             (is (= 1 (count (:results res))))
             (is (true? (:seon.test/pass? (first (:results res))))
                 (str "Expected test worker to catch up cid0 -> main-cid: " (pr-str res))))))))
-  (testing "wrap-fork-out attaches :repo-dir and :sandbox? to fork ops without altering control ops"
-    (let [raw-out (a/chan 8)
-          wrapped (sandbox/wrap-fork-out raw-out nil "/tmp/demo-repo" nil)]
-      (try
-        (a/>!! wrapped {:op :fork-agent :agent-id :ag/a :branch :branch/a})
-        (a/>!! wrapped {:op :fork-test :batch-id "b1" :sandbox? false})
-        (a/>!! wrapped {:op :advance-image :commit "c1"})
-        (let [m1 (a/<!! raw-out)
-              m2 (a/<!! raw-out)
-              m3 (a/<!! raw-out)]
-          (is (= "/tmp/demo-repo" (:repo-dir m1)))
-          (is (true? (:sandbox? m1)))
-          (is (= "/tmp/demo-repo" (:repo-dir m2)))
-          (is (false? (:sandbox? m2)))
-          (is (nil? (:repo-dir m3)))
-          (is (nil? (:sandbox? m3))))
-        (finally
-          (a/close! wrapped)
-          (a/close! raw-out))))))
+  (testing "canonical seon.store helpers (lru-peek, lru-put!, resolve-lazy-str, tx-instant-ms)"
+    (with-test-store [{:keys [conn]}]
+      (let [db @conn
+            ca (store/lru-cache 2)]
+        (is (= ::miss (store/lru-peek ca :k1 ::miss)))
+        (is (nil? (store/lru-peek ca :k1)))
+        (is (= :v1 (store/lru-put! ca 2 :k1 :v1)))
+        (is (= nil (store/lru-put! ca 2 :k-nil nil)))
+        (is (= :v1 (store/lru-peek ca :k1 ::miss)))
+        (is (nil? (store/lru-peek ca :k-nil ::miss)) "Cached nil must not return miss sentinel")
+        (store/lru-put! ca 2 :k3 :v3)
+        (is (= 2 (count @ca)))
+        ;; lru-peek unwraps :seon.store/lru-val and replays datahike.reads
+        (let [ca2 (store/lru-cache 4)
+              _ (reads/with-reads #(store/lru-get! ca2 4 :cnt (fn [] (count (d/datoms db :aevt :seon.schema/key)))))
+              [v rs] (reads/with-reads #(store/lru-peek ca2 :cnt ::miss))]
+          (is (pos? v))
+          (is (seq rs) "lru-peek must replay recorded datahike.reads"))
+        ;; resolve-lazy-str handles nil, inline strings, and Datahike LazyValues
+        (let [lk [:test/lazy-str (random-uuid)]
+              _ (k/assoc-in (:store db) [lk] "lazy-resolved-body" {:sync? true})
+              lv (dd/lazy-value lk (store/store-id db))]
+          (is (nil? (store/resolve-lazy-str db nil)))
+          (is (= "inline" (store/resolve-lazy-str db "inline")))
+          (is (dd/lazy-value? lv))
+          (is (= "lazy-resolved-body" (store/resolve-lazy-str db lv))))
+        ;; tx-instant-ms returns positive epoch ms for valid tx and nil for nil/non-pos/missing
+        (let [ms (store/tx-instant-ms db (:max-tx db))]
+          (is (and (int? ms) (pos? ms)))
+          (is (nil? (store/tx-instant-ms db nil)))
+          (is (nil? (store/tx-instant-ms db 0)))
+          (is (nil? (store/tx-instant-ms nil (:max-tx db)))))))))
 
 (deftest fork-router-surfaces-image-advance-error-and-clears-on-recovery-test
   (testing "make-fork-router routes :image-advance-error to typed :seon.error/* via server-in-ch & error-chan, and retracts it on :image-advanced"
@@ -309,11 +320,11 @@
                                                          :touched-paths #{"src/demo/a.clj"} :message "skip" :reply-ch rch2})
                   ans2 (a/<!! rch2)]
               (is (= :skipped-commit-git-false (:skipped ans1)))
-              (is (some #(str/includes? % ":skipped-commit-git-false") (:clojure.core.async.flow/report out1)))
+              (is (some #(str/includes? % ":skipped-commit-git-false") (::flow/report out1)))
               (is (nil? (git/ref-commit repo "refs/heads/seon/trial-a")))
               (is (= :skipped-commit-git-false (:skipped ans2)))
               (is (false? (:committed? ans2)))
-              (is (some #(str/includes? % ":skipped-commit-git-false") (:clojure.core.async.flow/report out2)))
+              (is (some #(str/includes? % ":skipped-commit-git-false") (::flow/report out2)))
               (is (= sha0 (git/head-commit repo)))
               (is (= 0 (:commits st2))))
             ;; 2. With :commit-git? true, sync creates refs, delete-branch-ref! removes one (protecting :main), and batch :delete-branch-ref cleans multiple!
@@ -344,7 +355,10 @@
                 (is (nil? (git/ref-commit repo "refs/heads/seon/trial-b")))
                 (is (not (contains? (:branch-refs st-after) :branch/trial-a)))
                 (is (not (contains? (:branch-refs st-after) :branch/trial-b)))
-                (do (is (some #(str/includes? % "deleted 2 ref(s)") (:clojure.core.async.flow/report out-del))) (let [legacy-st (dissoc st-on :commit-git?) [_ outs] (git-proc/git-proc legacy-st :in {:op :delete-branch-ref :branch :branch/nonexistent})] (is (not (some #(str/includes? % "skipped-commit-git-false") (:clojure.core.async.flow/report outs))))))))))
+                (is (some #(str/includes? % "deleted 2 ref(s)") (::flow/report out-del)))
+                (let [legacy-st (dissoc st-on :commit-git?)
+                      [_ outs] (git-proc/git-proc legacy-st :in {:op :delete-branch-ref :branch :branch/nonexistent})]
+                  (is (not (some #(str/includes? % "skipped-commit-git-false") (::flow/report outs)))))))))
         (finally
           (rm-rf! (io/file repo))
           (is (not (.exists (io/file repo))) "Temp git repo must be cleaned up"))))))

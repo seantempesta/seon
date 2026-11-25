@@ -149,74 +149,6 @@
     (f db branch plan {:boot-affected? boot-touched?})
     (or fallback-msg (str "Merge " branch))))
 
-(defn- handle-merge-conflict! [st msg prev-cid branch agent-id plan]
-  (let [{:keys [conn cfg]} st
-        conflicts (vec (:conflicts plan))
-        eff-aid (merge-eff-agent-id @conn branch agent-id)
-        health-only? (and (seq conflicts)
-                          (every? #(and (vector? (:entity %)) (= :seon.health/problem (first (:entity %)))) conflicts))
-        msg-type (if health-only? :health-block :merge-conflict)]
-    (if-not eff-aid
-      (do (reply! msg {:ok? false :conflicts conflicts})
-          [st {:clojure.core.async.flow/report [(str "[:transactor] merge CONFLICT on " branch ": " conflicts)]}])
-      (let [_ (clear-branch-ready! cfg branch eff-aid)
-            mseq (inc (long (or (:msg-seq st) (count (d/datoms @conn :aevt :seon.agent.message/id)))))
-            mid (random-uuid)
-            msg-ent {:seon.agent.message/id mid
-                     :seon.agent.message/seq mseq
-                     :seon.agent.message/from :transactor
-                     :seon.agent.message/to eff-aid
-                     :seon.agent.message/type msg-type
-                     :seon.agent.message/body (format-merge-failure-body branch msg-type conflicts)}
-            r (d/transact conn {:tx-data [msg-ent]})
-            db (:db-after r)
-            cid (d/commit-id db)]
-        (reply! msg {:ok? false :conflicts conflicts :notified eff-aid :type msg-type :message-id mid})
-        [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
-         {:db [(db-notice prev-cid db (:tx-data r) [msg-type branch eff-aid])]
-          :clojure.core.async.flow/report [(str "[:transactor] merge " (if health-only? "HEALTH-BLOCK" "CONFLICT")
-                                                " on " branch " (notified " eff-aid "): " conflicts)]}]))))
-
-(defn ^:seon.flow/edge handle-transactor-error!
-  "Handles an uncaught transactor op failure cleanly; for `:merge`, records a schema-validated `:seon.error/*` fault with `:agent`/`:branch`/`:agent-ref`, clears branch `:ready? false`, and notifies the agent so `:reconciler` never wedges in `:merging`."
-  {:malli/schema [:=> [:cat :map :map :any :any] [:tuple :map :map]]}
-  [st msg prev-cid ex]
-  (let [emsg (or (when (instance? Throwable ex) (.getMessage ^Throwable ex)) (str ex) "Transactor error")]
-    (reply! msg {:ok? false :error emsg})
-    (let [{:keys [conn cfg]} st
-          b (:branch msg)]
-      (if (and (= :merge (:op msg)) conn b (not= b :main))
-        (let [db0 @conn
-              eff-aid (merge-eff-agent-id db0 b (:agent-id msg))
-              _ (clear-branch-ready! cfg b eff-aid)
-              mseq (inc (long (or (:msg-seq st) (count (d/datoms db0 :aevt :seon.agent.message/id)))))
-              ag-eid (when eff-aid (:e (first (d/datoms db0 :avet :seon.agent/id eff-aid))))
-              fault (cond-> (err/error-tx (cond-> {:kind :merge-error :severity :error :source :transactor
-                                                   :status :open :message emsg :branch b
-                                                   :data (cond-> {:proc :transactor :op :merge :branch b}
-                                                           eff-aid (assoc :subject (str eff-aid)))}
-                                            eff-aid (assoc :agent eff-aid)))
-                      (and ag-eid (contains? (:schema db0) :seon.error/agent-ref))
-                      (assoc :seon.error/agent-ref ag-eid))
-              tx-data (cond-> [fault]
-                        eff-aid (conj {:seon.agent.message/id (random-uuid)
-                                       :seon.agent.message/seq mseq
-                                       :seon.agent.message/from :transactor
-                                       :seon.agent.message/to eff-aid
-                                       :seon.agent.message/type :merge-conflict
-                                       :seon.agent.message/body (str "Merge failed on " b ": " emsg)}))
-              r (try (d/transact conn {:tx-data tx-data}) (catch Throwable _ nil))
-              db (if r (:db-after r) db0)
-              cid (d/commit-id db)]
-          [(if r
-             (-> st (assoc :last-commit cid :last-tx (:max-tx db))
-                 (update :writes (fnil inc 0))
-                 (cond-> eff-aid (assoc :msg-seq mseq)))
-             st)
-           (cond-> {:clojure.core.async.flow/error [{:proc :transactor :op :merge :branch b :error emsg}]}
-             r (assoc :db [(db-notice prev-cid db (:tx-data r) [:merge-error b])]))])
-        [st {:clojure.core.async.flow/error [{:proc :transactor :op (:op msg) :error emsg}]}]))))
-
 (def ^:private sync-domain-id-attrs
   #{:seon.code.form/key :seon.code.var/name :seon.code.ns/name
     :seon.code.doc/id :seon.code.file/path :seon.schema/key
@@ -261,13 +193,45 @@
          (when err-note err-note)
          (when trim-prose (str "\n\nReviewer note:\n" trim-prose)))))
 
+(defn- ^:seon.flow/edge safe-branch-head [conn branch fallback]
+  (or (try (store/head conn branch) (catch Throwable _ nil)) fallback))
+
+(defn- ready-branch-agents-to-stamp [cur-db branch-db branch eff-aid]
+(let [pull-a (fn [db]
+               (when (and db (contains? (:schema db) :seon.agent/id))
+                 (into {} (keep (fn [dt]
+                                  (let [a (d/pull db [:seon.agent/id :seon.agent/branch
+                                                      :seon.agent/ready? :seon.agent/archived?] (:e dt))]
+                                    (when-let [id (:seon.agent/id a)] [id a]))))
+                       (d/datoms db :aevt :seon.agent/id))))
+      cm (or (pull-a cur-db) {})
+      bm (if (and branch-db (not (identical? branch-db cur-db))) (or (pull-a branch-db) {}) {})
+      ready (keep (fn [id]
+                    (let [ca (cm id) ba (bm id)]
+                      (when (and (= branch (or (:seon.agent/branch ca) (:seon.agent/branch ba)))
+                                 (or (:seon.agent/ready? ba) (:seon.agent/ready? ca))
+                                 (not (or (:seon.agent/archived? ca) (:seon.agent/archived? ba))))
+                        id)))
+                  (into (set (keys cm)) (keys bm)))]
+  (vec (distinct (keep identity (cons eff-aid ready))))))
+
+(defn- resolve-branch-merge-errors [db branch]
+  (when (contains? (:schema db) :seon.error/kind)
+    (keep (fn [dt]
+            (let [p (d/pull db [:seon.error/id :seon.error/status :seon.error/branch] (:e dt))]
+              (when (and (= :open (:seon.error/status p)) (= branch (:seon.error/branch p)))
+                {:seon.error/id (:seon.error/id p) :seon.error/status :resolved})))
+          (d/datoms db :avet :seon.error/kind :merge-error))))
+
+(defn- split-schema-ops [tx-ops]
+  (let [s-op? #(and (map? %) (contains? % :seon.schema/key))
+        schema-ops (filterv s-op? tx-ops)]
+    [schema-ops (rebind-committed-schema-tempids schema-ops (filterv (complement s-op?) tx-ops))]))
+
 (defn- apply-domain-sync-tx! [bconn plan tx-meta]
   (let [s-tx (vec (:schema-tx plan))
         d-ops (filterv sync-domain-op? (:tx-data plan))
-        schema-ops (filterv #(and (map? %) (contains? % :seon.schema/key)) d-ops)
-        rest-ops (rebind-committed-schema-tempids
-                  schema-ops
-                  (filterv #(not (and (map? %) (contains? % :seon.schema/key))) d-ops))
+        [schema-ops rest-ops] (split-schema-ops d-ops)
         tx-with (fn [ops]
                   (if tx-meta
                     (binding [store/*tx-meta* tx-meta] (d/transact bconn {:tx-data ops}))
@@ -305,46 +269,8 @@
         (finally
           (d/release bconn))))))
 
-(defn ^:seon.flow/edge handle-resume-reviewed-target!
-  "Atomically finishes a review handoff: syncs post-review `:main` into `target-branch`, unpauses `target`,
-   and sends a concise `:review-note` message (waking `target` even if 100% of evals were retracted and
-   resetting `tool-streak` to 0)."
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
-  [st msg prev-cid]
-  (let [{:keys [conn cfg]} st
-        {:keys [reviewer reviewer-branch target target-branch]} msg
-        db0 @conn
-        ta (when (and target (first (d/datoms db0 :avet :seon.agent/id target)))
-             (d/pull db0 '[:seon.agent/id :seon.agent/branch :seon.agent/paused?] [:seon.agent/id target]))]
-    (if-not (and (:seon.agent/id ta) (:seon.agent/paused? ta))
-      (do (reply! msg {:ok? true :already-resumed? true :target target})
-          [st nil])
-      (let [tb (or target-branch (:seon.agent/branch ta) :main)
-            sync-res (try (sync-main-into-branch! conn cfg tb reviewer)
-                          (catch Throwable ex {:synced? false :ops 0 :conflicts [] :error (or (.getMessage ex) (str ex))}))
-            mseq (inc (long (or (:msg-seq st) (count (d/datoms db0 :aevt :seon.agent.message/id)))))
-            mid (random-uuid)
-            note-body (extract-review-note-body conn reviewer reviewer-branch sync-res)
-            tx-data [{:seon.agent/id target :seon.agent/paused? false}
-                     {:seon.agent.message/id mid :seon.agent.message/seq mseq
-                      :seon.agent.message/from (or reviewer :reviewer)
-                      :seon.agent.message/to target
-                      :seon.agent.message/type :review-note
-                      :seon.agent.message/body note-body}]
-            r (d/transact conn {:tx-data tx-data})
-            db (:db-after r)
-            cid (d/commit-id db)]
-        (reply! msg {:ok? true :target target :reviewer reviewer :synced sync-res :message-id mid :tx (:max-tx db)})
-        [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes (fnil inc 0)))
-         (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:resume-reviewed-target target reviewer])]
-                  ::flow/report [(str "[:transactor] resumed reviewed target " target " after " reviewer
-                                      " (synced " (:ops sync-res 0) " op(s) from :main)")]}
-           (:error sync-res)
-           (assoc ::flow/error [{:proc :transactor :op :resume-reviewed-target :target target :branch tb :error (:error sync-res)}]))]))))
-
 (defn sync-coordinator-branches!
-  "Propagates newly merged code/doc/schema/rule/fix/config/task ops from `:main` onto active non-`:main`
-   `:role :coordinator` branches (e.g. `:branch/root`) without touching coordinator evals or memory."
+  "Propagates newly merged domain ops from `:main` onto active router branches without touching evals or memory."
   {:malli/schema [:=> [:cat :seon.host/conn :map :map :keyword] :int]}
   [main-conn cfg plan merged-branch]
   (let [mdb @main-conn
@@ -367,35 +293,76 @@
              (catch Throwable _ n)))
          0 coord-brs)))))
 
-(defn- ^:seon.flow/edge safe-branch-head [conn branch fallback]
-  (or (try (store/head conn branch) (catch Throwable _ nil)) fallback))
+(defn- next-msg-seq [st db]
+  (inc (long (or (:msg-seq st) (count (d/datoms db :aevt :seon.agent.message/id))))))
 
-(defn- ready-branch-agents-to-stamp [cur-db branch-db branch eff-aid]
-(let [pull-a (fn [db]
-               (when (and db (contains? (:schema db) :seon.agent/id))
-                 (into {} (keep (fn [dt]
-                                  (let [a (d/pull db [:seon.agent/id :seon.agent/branch
-                                                      :seon.agent/ready? :seon.agent/archived?] (:e dt))]
-                                    (when-let [id (:seon.agent/id a)] [id a]))))
-                       (d/datoms db :aevt :seon.agent/id))))
-      cm (or (pull-a cur-db) {})
-      bm (if (and branch-db (not (identical? branch-db cur-db))) (or (pull-a branch-db) {}) {})
-      ready (keep (fn [id]
-                    (let [ca (cm id) ba (bm id)]
-                      (when (and (= branch (or (:seon.agent/branch ca) (:seon.agent/branch ba)))
-                                 (or (:seon.agent/ready? ba) (:seon.agent/ready? ca))
-                                 (not (or (:seon.agent/archived? ca) (:seon.agent/archived? ba))))
-                        id)))
-                  (into (set (keys cm)) (keys bm)))]
-  (vec (distinct (keep identity (cons eff-aid ready))))))
+(defn ^:seon.flow/edge handle-transactor-error!
+  "Handles an uncaught transactor op failure cleanly; for `:merge`, records a schema-validated `:seon.error/*` fault with `:agent`/`:branch`/`:agent-ref`, clears branch `:ready? false`, and notifies the agent so `:reconciler` never wedges in `:merging`."
+  {:malli/schema [:=> [:cat :map :map :any :any] [:tuple :map :map]]}
+  [st msg prev-cid ex]
+  (let [emsg (or (when (instance? Throwable ex) (.getMessage ^Throwable ex)) (str ex) "Transactor error")]
+    (reply! msg {:ok? false :error emsg})
+    (let [{:keys [conn cfg]} st
+          b (:branch msg)]
+      (if (and (= :merge (:op msg)) conn b (not= b :main))
+        (let [db0 @conn
+              eff-aid (merge-eff-agent-id db0 b (:agent-id msg))
+              _ (clear-branch-ready! cfg b eff-aid)
+              mseq (next-msg-seq st db0)
+              ag-eid (when eff-aid (:e (first (d/datoms db0 :avet :seon.agent/id eff-aid))))
+              fault (cond-> (err/error-tx (cond-> {:kind :merge-error :severity :error :source :transactor
+                                                   :status :open :message emsg :branch b
+                                                   :data (cond-> {:proc :transactor :op :merge :branch b}
+                                                           eff-aid (assoc :subject (str eff-aid)))}
+                                            eff-aid (assoc :agent eff-aid)))
+                      (and ag-eid (contains? (:schema db0) :seon.error/agent-ref))
+                      (assoc :seon.error/agent-ref ag-eid))
+              tx-data (cond-> [fault]
+                        eff-aid (conj {:seon.agent.message/id (random-uuid)
+                                       :seon.agent.message/seq mseq
+                                       :seon.agent.message/from :transactor
+                                       :seon.agent.message/to eff-aid
+                                       :seon.agent.message/type :merge-conflict
+                                       :seon.agent.message/body (str "Merge failed on " b ": " emsg)}))
+              r (try (d/transact conn {:tx-data tx-data}) (catch Throwable _ nil))
+              db (if r (:db-after r) db0)
+              cid (d/commit-id db)]
+          [(if r
+             (-> st (assoc :last-commit cid :last-tx (:max-tx db))
+                 (update :writes (fnil inc 0))
+                 (cond-> eff-aid (assoc :msg-seq mseq)))
+             st)
+           (cond-> {::flow/error [{:proc :transactor :op :merge :branch b :error emsg}]}
+             r (assoc :db [(db-notice prev-cid db (:tx-data r) [:merge-error b])]))])
+        [st {::flow/error [{:proc :transactor :op (:op msg) :error emsg}]}]))))
 
-(defn- resolve-branch-merge-errors [db branch]
-  (when (contains? (:schema db) :seon.error/kind)
-    (keep (fn [dt]
-            (let [p (d/pull db [:seon.error/id :seon.error/status :seon.error/branch] (:e dt))]
-              (when (and (= :open (:seon.error/status p)) (= branch (:seon.error/branch p)))
-                {:seon.error/id (:seon.error/id p) :seon.error/status :resolved})))
-          (d/datoms db :avet :seon.error/kind :merge-error))))
+(defn- handle-merge-conflict! [st msg prev-cid branch agent-id plan]
+  (let [{:keys [conn cfg]} st
+        conflicts (vec (:conflicts plan))
+        eff-aid (merge-eff-agent-id @conn branch agent-id)
+        health-only? (and (seq conflicts)
+                          (every? #(and (vector? (:entity %)) (= :seon.health/problem (first (:entity %)))) conflicts))
+        msg-type (if health-only? :health-block :merge-conflict)]
+    (if-not eff-aid
+      (do (reply! msg {:ok? false :conflicts conflicts})
+          [st {::flow/report [(str "[:transactor] merge CONFLICT on " branch ": " conflicts)]}])
+      (let [_ (clear-branch-ready! cfg branch eff-aid)
+            mseq (next-msg-seq st @conn)
+            mid (random-uuid)
+            msg-ent {:seon.agent.message/id mid
+                     :seon.agent.message/seq mseq
+                     :seon.agent.message/from :transactor
+                     :seon.agent.message/to eff-aid
+                     :seon.agent.message/type msg-type
+                     :seon.agent.message/body (format-merge-failure-body branch msg-type conflicts)}
+            r (d/transact conn {:tx-data [msg-ent]})
+            db (:db-after r)
+            cid (d/commit-id db)]
+        (reply! msg {:ok? false :conflicts conflicts :notified eff-aid :type msg-type :message-id mid})
+        [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
+         {:db [(db-notice prev-cid db (:tx-data r) [msg-type branch eff-aid])]
+          ::flow/report [(str "[:transactor] merge " (if health-only? "HEALTH-BLOCK" "CONFLICT")
+                                                " on " branch " (notified " eff-aid "): " conflicts)]}]))))
 
 (defn- handle-fork-merge-back!
 [st msg prev-cid branch fpt]
@@ -414,9 +381,7 @@
           has-edits? (boolean (or (seq s-tx) (seq tx-ops)))
           _ (try
               (when has-edits?
-                (let [s-op? #(and (map? %) (contains? % :seon.schema/key))
-                      schema-ops (filterv s-op? tx-ops)
-                      rest-ops (rebind-committed-schema-tempids schema-ops (filterv (complement s-op?) tx-ops))
+                (let [[schema-ops rest-ops] (split-schema-ops tx-ops)
                       tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
                              :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
                   (when (seq s-tx) (d/transact tconn {:tx-data s-tx}))
@@ -433,7 +398,7 @@
                       (extract-review-note-body conn agent-id branch {:ops (count tx-ops) :conflicts []}))
           ;; Sync any edited :seon.task/* entities back to :main so task clarity/curated refs stay visible everywhere
           resolved-errs (resolve-branch-merge-errors db0 branch)
-          mseq (inc (long (or (:msg-seq st) (count (d/datoms db0 :aevt :seon.agent.message/id)))))
+          mseq (next-msg-seq st db0)
           mid (random-uuid)
           ta-paused? (true? (:seon.agent/paused? (d/pull db0 '[:seon.agent/paused?] [:seon.agent/id target-id])))
           main-tx (cond-> (vec (concat resolved-errs
@@ -448,15 +413,17 @@
           db (:db-after r)
           cid (d/commit-id db)
           _ (ctouches/clear-live-reads! (get-in cfg [:store :id]) branch agent-id)
-          _ (store/prune-merged-branches! conn)
+          pruned (:pruned-branches (meta (store/prune-merged-branches! conn)))
           _ (store/sync! cfg)
           ans {:ok? true :fork-merged? true :branch branch :target-branch target-branch :target target-id
                :commit cid :tx (:max-tx db) :boot-affected? false :touched-paths (:touched-paths plan)
                :entity-diffs (:entity-diffs plan) :message-id mid :summary summary}]
       (reply! msg ans)
       [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes inc))
-       {:db [(db-notice prev-cid db (:tx-data r) [:fork-merged branch target-branch])]
-        ::flow/report [(str "[:transactor] FORK-MERGED " branch " -> " target-branch " (" (count (:entity-diffs plan)) " entities, resumed " target-id ")")]}]))))
+       (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:fork-merged branch target-branch])]
+              ::flow/report [(str "[:transactor] FORK-MERGED " branch " -> " target-branch " (" (count (:entity-diffs plan)) " entities, resumed " target-id ")")]}
+       (seq pruned)
+       (assoc :git [{:op :delete-branch-ref :branches (vec pruned)}]))]))))
 
 (defn handle-merge-op!
 {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
@@ -477,9 +444,7 @@
         eff-btx (or branch-tx (:max-tx (safe-branch-head conn branch nil)))
         r1 (when (seq (:schema-tx plan))
              (d/transact conn {:tx-data (:schema-tx plan)}))
-        s-op? #(and (map? %) (contains? % :seon.schema/key))
-        schema-ops (filterv s-op? (:tx-data plan))
-        rest-ops (rebind-committed-schema-tempids schema-ops (filterv (complement s-op?) (:tx-data plan)))
+        [schema-ops rest-ops] (split-schema-ops (:tx-data plan))
         r2 (when (seq schema-ops)
              (d/transact conn {:tx-data schema-ops}))
         cur-db @conn
@@ -516,7 +481,7 @@
         _ (sync-coordinator-branches! conn cfg plan branch)
         _ (doseq [a (distinct (keep identity (cons eff-aid repl-aids)))]
             (ctouches/clear-live-reads! (get-in cfg [:store :id]) branch a))
-        _ (store/prune-merged-branches! conn)
+        pruned (:pruned-branches (meta (store/prune-merged-branches! conn)))
         _ (store/sync! cfg)
         ans (cond-> {:ok? true
                      :branch branch
@@ -529,17 +494,59 @@
               gate-res (assoc :gate gate-res))]
     (reply! msg ans)
     [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
+     (let [git-ops (cond-> []
+                      (and (:commit-git? st) repo-dir (seq (:touched-paths plan)))
+                      (conj {:op :write-back
+                             :branch branch
+                             :commit cid
+                             :expected-sha old-git
+                             :touched-paths (:touched-paths plan)
+                             :deleted-paths (:deleted-paths plan #{})
+                             :boot-affected? boot-touched?
+                             :message (merge-git-commit-message db branch plan boot-touched? message)})
+                      (seq pruned)
+                      (conj {:op :delete-branch-ref :branches (vec pruned)}))]
      (cond-> {:db [(db-notice prev-cid db all-ds [:merged branch])]
               ::flow/report [(str "[:transactor] MERGED " branch " -> :main @ tx " (:max-tx db)
                                   " (" (count (:entity-diffs plan)) " entities, "
                                   (count (:touched-paths plan)) " files"
                                   (when boot-touched? ", BOOT-AFFECTED") ")")]}
-       (and (:commit-git? st) repo-dir (seq (:touched-paths plan)))
-       (assoc :git [{:op :write-back
-                     :branch branch
-                     :commit cid
-                     :expected-sha old-git
-                     :touched-paths (:touched-paths plan)
-                     :deleted-paths (:deleted-paths plan #{})
-                     :boot-affected? boot-touched?
-                     :message (merge-git-commit-message db branch plan boot-touched? message)}]))])))))
+       (seq git-ops)
+       (assoc :git git-ops)))])))))
+
+(defn ^:seon.flow/edge handle-resume-reviewed-target!
+  "Atomically finishes a review handoff: syncs post-review `:main` into `target-branch`, unpauses `target`,
+   and sends a concise `:review-note` message (waking `target` even if 100% of evals were retracted and
+   resetting `tool-streak` to 0)."
+  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :map :any] [:tuple :map :any]]}
+  [st msg prev-cid]
+  (let [{:keys [conn cfg]} st
+        {:keys [reviewer reviewer-branch target target-branch]} msg
+        db0 @conn
+        ta (when (and target (first (d/datoms db0 :avet :seon.agent/id target)))
+             (d/pull db0 '[:seon.agent/id :seon.agent/branch :seon.agent/paused?] [:seon.agent/id target]))]
+    (if-not (and (:seon.agent/id ta) (:seon.agent/paused? ta))
+      (do (reply! msg {:ok? true :already-resumed? true :target target})
+          [st nil])
+      (let [tb (or target-branch (:seon.agent/branch ta) :main)
+            sync-res (try (sync-main-into-branch! conn cfg tb reviewer)
+                          (catch Throwable ex {:synced? false :ops 0 :conflicts [] :error (or (.getMessage ex) (str ex))}))
+            mseq (next-msg-seq st db0)
+            mid (random-uuid)
+            note-body (extract-review-note-body conn reviewer reviewer-branch sync-res)
+            tx-data [{:seon.agent/id target :seon.agent/paused? false}
+                     {:seon.agent.message/id mid :seon.agent.message/seq mseq
+                      :seon.agent.message/from (or reviewer :reviewer)
+                      :seon.agent.message/to target
+                      :seon.agent.message/type :review-note
+                      :seon.agent.message/body note-body}]
+            r (d/transact conn {:tx-data tx-data})
+            db (:db-after r)
+            cid (d/commit-id db)]
+        (reply! msg {:ok? true :target target :reviewer reviewer :synced sync-res :message-id mid :tx (:max-tx db)})
+        [(-> st (assoc :last-commit cid :last-tx (:max-tx db) :msg-seq mseq) (update :writes (fnil inc 0)))
+         (cond-> {:db [(db-notice prev-cid db (:tx-data r) [:resume-reviewed-target target reviewer])]
+                  ::flow/report [(str "[:transactor] resumed reviewed target " target " after " reviewer
+                                      " (synced " (:ops sync-res 0) " op(s) from :main)")]}
+           (:error sync-res)
+           (assoc ::flow/error [{:proc :transactor :op :resume-reviewed-target :target target :branch tb :error (:error sync-res)}]))]))))
