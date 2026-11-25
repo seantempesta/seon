@@ -209,7 +209,8 @@
                    [:halted-not-merged? :boolean] [:ok? :boolean]]] :cost/ticks 600}
   [{:keys [task ag-snap eval-res agent-res test-res merge-res final-trace]}]
   (let [already-merged? (= :merged (:status ag-snap))
-        merged? (boolean (or already-merged? (:ok? merge-res)))
+        empty-merge? (boolean (and (not already-merged?) (:ok? merge-res) (contains? merge-res :touched-paths) (empty? (:touched-paths merge-res))))
+        merged? (boolean (or already-merged? (and (:ok? merge-res) (not empty-merge?))))
         require-merge? (if (contains? task :require-merge?) (:require-merge? task) (boolean (or (:task task) (:merge? task))))
         halted-not-merged? (and require-merge? (not merged?))
         min-delegated (long (or (:min-delegated-calls task) 0))
@@ -339,9 +340,9 @@
             test-res (when (and (not timed-out?) (:run-tests? task) (or (not already-merged?) (:retest-main? task)))
                        (instance-op! inst-handle {:op :test :branch (if already-merged? :main branch)}))
             merge-res (when (and (not timed-out?) (:merge? task))
-                      (if already-merged?
-                        {:ok? true :already-merged? true :branch branch}
-                        (instance-op! inst-handle {:op :merge :branch branch :message (str "Bench trial " (name id))})))
+                      (cond already-merged? {:ok? true :already-merged? true :branch branch}
+                      (:auto-merge? task) {:ok? false :error "worker-did-not-auto-merge" :touched-paths #{}}
+                      :else (instance-op! inst-handle {:op :merge :branch branch :message (str "Bench trial " (name id))})))
             health-res (instance-op! inst-handle {:op :health})
             outcome (trial-outcome {:task task :ag-snap ag-snap :eval-res eval-res :agent-res agent-res
                                     :test-res test-res :merge-res merge-res :final-trace final-trace})
