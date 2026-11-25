@@ -169,85 +169,6 @@
                         (str prop ":" val-s))))
                   m)))
 
-(defn hiccup->html-with-handlers
-  "Serializes Reagent-style Hiccup into `{:html str :handlers {hkey fn}}`.
-   Expands component vectors `[fn opts & children]`, wires `:on-click`/`:on-submit`/`:on-change`,
-   and automatically attaches Datastar `data-preserve-attr=\"open\"` to `<details>` elements
-   (unless `:data-preserve-attr false`) so disclosure state survives live SSE morphing natively."
-  {:malli/schema [:function
-                  [:=> [:cat :any] [:map [:html :string] [:handlers :map]]]
-                  [:=> [:cat :any :string] [:map [:html :string] [:handlers :map]]]]
-   :cost/ticks 5000000
-   :cost/bytes 16777216}
-  ([node] (hiccup->html-with-handlers node "root"))
-  ([node unit-id]
-   (let [sb (StringBuilder. 512)
-         handlers (volatile! {})
-         counter (volatile! 0)]
-     ((fn write! [n]
-        (cond
-          (or (nil? n) (false? n)) nil
-          (and (map? n) (contains? n ::raw)) (.append sb ^String (::raw n))
-          (map? n) (.append sb (esc (pr-str n)))
-          (or (string? n) (number? n) (keyword? n) (symbol? n) (boolean? n)) (.append sb (esc (str n)))
-          (seq? n) (doseq [item n] (write! item))
-          (vector? n)
-          (let [hd (first n)]
-            (cond
-              (and (not (keyword? hd)) (not (symbol? hd)) (or (fn? hd) (var? hd)))
-              (write! (apply hd (rest n)))
-
-              ;; Vector-of-elements fragment (e.g. from `(mapv (fn [...] [:div ...]) xs)`)
-              (not (or (keyword? hd) (symbol? hd) (string? hd)))
-              (doseq [item n] (write! item))
-
-              :else
-              (let [tag (name hd)
-                    has-attrs? (and (map? (second n)) (not (contains? (second n) ::raw)))
-                    raw-attrs (when has-attrs? (second n))
-                    attrs0 (if (= tag "details")
-                             (let [pa (:data-preserve-attr raw-attrs)]
-                               (cond
-                                 (false? pa) (dissoc raw-attrs :data-preserve-attr)
-                                 (nil? pa) (assoc (or raw-attrs {}) :data-preserve-attr "open")
-                                 (and (string? pa) (not (re-find #"(?:^|\s)open(?:\s|$)" pa)))
-                                 (assoc raw-attrs :data-preserve-attr (str pa " open"))
-                                 :else raw-attrs))
-                             raw-attrs)
-                    attrs (when (seq attrs0) (expand-event-attrs tag attrs0 unit-id handlers counter))
-                    children (if has-attrs? (drop 2 n) (rest n))]
-                (.append sb "<")
-                (.append sb tag)
-                (when (seq attrs)
-                  (doseq [[k v] (sort-by (comp str key) attrs)
-                          :when (and (some? v) (not (false? v)))]
-                    (let [aname (if (namespace k) (str (namespace k) ":" (name k)) (name k))]
-                      (.append sb " ")
-                      (.append sb aname)
-                      (when-not (true? v)
-                        (.append sb "=\"")
-                        (.append sb (esc (cond
-                                         (and (= k :style) (map? v)) (style-map->css v)
-                                         (ratio? v) (str (/ (Math/round (* (double v) 1000.0)) 1000.0))
-                                         (keyword? v) (name v)
-                                         :else v)))
-                        (.append sb "\"")))))
-                (.append sb ">")
-                (when-not (contains? void-tags tag)
-                  (doseq [c children] (write! c))
-                  (.append sb "</")
-                  (.append sb tag)
-                  (.append sb ">")))))
-          :else (.append sb (esc (pr-str n)))))
-      node)
-     {:html (.toString sb)
-      :handlers @handlers})))
-
-(defn hiccup->html
-  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 200000}
-  [node]
-  (:html (hiccup->html-with-handlers node "root")))
-
 (defn hiccup->text
   "Projects any Reagent-style Hiccup tree into crisp compact Markdown for an agent's LLM context.
    Thin delegate to the single zero-dep implementation in `seon.render.text/hiccup->text` —
@@ -415,6 +336,159 @@
      :else
      (sprint/format-value-hiccup db v opts))))
 
+(defn datastar-patch-signals
+  "Formats a Datastar v1 `datastar-patch-signals` SSE event from signal map `signals-map`."
+  {:malli/schema [:=> [:cat [:map-of [:or :keyword :string] [:or :string :int :boolean :nil]]] :string]
+   :cost/ticks 500000
+   :cost/bytes 1048576}
+  [signals-map]
+  (rsse/format-event {:event "datastar-patch-signals"
+  :data (str "signals " (json/write-str (or signals-map {}) :escape-unicode false :escape-slash false))}))
+
+(defn empty-walk
+  "Initial empty incremental render walk value (held inside `:web` Flow proc state — zero atoms!)."
+  {:malli/schema [:=> [:cat] :map], :cost/ticks 1000}
+  []
+  {:units {} :handlers {} :order []})
+
+(defn render-entity-value
+  "Universal fallback renderer for any schema without a custom `:seon.render/hiccup` component.
+   Delegates directly to `render-value` -> 4-stage zero-clipping schema self-printer."
+  {:malli/schema [:=> [:cat [:map [:db {:optional true} [:maybe :seon.host/db]] [:main-db {:optional true} [:maybe :seon.host/db]]] :any] :any], :cost/ticks 10000000}
+  [opts val]
+  (render-value (or (:db opts) (:main-db opts)) val opts))
+
+(defn- details-preserve-attrs [raw-attrs]
+  (let [pa (:data-preserve-attr raw-attrs)]
+    (cond
+      (false? pa) (dissoc raw-attrs :data-preserve-attr)
+      (nil? pa) (assoc (or raw-attrs {}) :data-preserve-attr "open")
+      (and (string? pa) (not (re-find #"(?:^|\s)open(?:\s|$)" pa))) (assoc
+                                                                      raw-attrs
+                                                                      :data-preserve-attr
+                                                                      (str
+                                                                        pa
+                                                                        " open"))
+      :else raw-attrs)))
+
+(defn- write-html-attrs! [^StringBuilder sb attrs]
+  (doseq [[k v] (sort-by (comp str key) attrs)
+          :when (and (some? v) (not (false? v)))]
+    (let [aname (if (namespace k)
+                  (str (namespace k) ":" (name k))
+                  (name k))]
+      (.append sb " ")
+      (.append sb aname)
+      (when-not (true? v)
+        (.append sb "=\"")
+        (.append
+          sb
+          (esc
+            (cond
+              (and (= k :style) (map? v)) (style-map->css v)
+              (ratio? v) (str
+                           (/
+                             (Math/round (* (double v) 1000.0))
+                             1000.0))
+              (keyword? v) (name v)
+              :else v)))
+        (.append sb "\"")))))
+
+(defn hiccup->html-with-handlers
+  "Serializes Reagent-style Hiccup into `{:html str :handlers {hkey fn}}`.\n   Expands component vectors `[fn opts & children]`, wires `:on-click`/`:on-submit`/`:on-change`,\n   and automatically attaches Datastar `data-preserve-attr=\"open\"` to `<details>` elements\n   (unless `:data-preserve-attr false`) so disclosure state survives live SSE morphing natively."
+  {:malli/schema
+   [:function
+    [:=> [:cat :any] [:map [:html :string] [:handlers :map]]]
+    [:=> [:cat :any :string] [:map [:html :string] [:handlers :map]]]],
+   :cost/ticks 5000000,
+   :cost/bytes 16777216}
+  ([node] (hiccup->html-with-handlers node "root"))
+  ([node unit-id]
+    (let [sb (StringBuilder. 512)
+          handlers (volatile! {})
+          counter (volatile! 0)]
+      ((fn write! [n]
+         (cond
+           (or (nil? n) (false? n)) nil
+           (and (map? n) (contains? n :seon.render/raw)) (.append
+                                                    sb
+                                                    (:seon.render/raw n))
+           (map? n) (.append sb (esc (pr-str n)))
+           (or
+             (string? n)
+             (number? n)
+             (keyword? n)
+             (symbol? n)
+             (boolean? n)) (.append sb (esc (str n)))
+           (seq? n) (doseq [item n] (write! item))
+           (vector? n) (let [hd (first n)]
+                         (cond
+                           (and
+                             (not (keyword? hd))
+                             (not (symbol? hd))
+                             (or (fn? hd) (var? hd))) (write!
+                                                        (apply
+                                                          hd
+                                                          (rest n)))
+                           (not
+                             (or
+                               (keyword? hd)
+                               (symbol? hd)
+                               (string? hd))) (doseq 
+                                                [item n]
+                                                (write! item))
+                           :else (let 
+                                   [tag (name hd)
+                                    has-attrs?
+                                    (and
+                                      (map? (second n))
+                                      (not
+                                        (contains?
+                                          (second n)
+                                          :seon.render/raw)))
+                                    raw-attrs
+                                    (when has-attrs? (second n))
+                                    attrs0
+                                    (if
+                                      (= tag "details")
+                                      (details-preserve-attrs
+                                        raw-attrs)
+                                      raw-attrs)
+                                    attrs
+                                    (when
+                                      (seq attrs0)
+                                      (expand-event-attrs
+                                        tag
+                                        attrs0
+                                        unit-id
+                                        handlers
+                                        counter))
+                                    children
+                                    (if
+                                      has-attrs?
+                                      (drop 2 n)
+                                      (rest n))]
+                                   (.append sb "<")
+                                   (.append sb tag)
+                                   (when
+                                     (seq attrs)
+                                     (write-html-attrs! sb attrs))
+                                   (.append sb ">")
+                                   (when-not
+                                     (contains? void-tags tag)
+                                     (doseq [c children] (write! c))
+                                     (.append sb "</")
+                                     (.append sb tag)
+                                     (.append sb ">")))))
+           :else (.append sb (esc (pr-str n)))))
+        node)
+      {:html (.toString sb), :handlers @handlers})))
+
+(defn hiccup->html
+  {:malli/schema [:=> [:cat :any] :string], :cost/ticks 200000}
+  [node]
+  (:html (hiccup->html-with-handlers node "root")))
+
 (defn datastar-patch-event
   "Formats a Datastar v1 `datastar-patch-elements` SSE event with optional selector, mode, and `useViewTransition`."
   {:malli/schema [:function
@@ -435,21 +509,6 @@
                                 (str/split-lines s))))]
    (rsse/format-event {:event "datastar-patch-elements"
                        :data (str/join "\n" lines)}))))
-
-(defn datastar-patch-signals
-  "Formats a Datastar v1 `datastar-patch-signals` SSE event from signal map `signals-map`."
-  {:malli/schema [:=> [:cat [:map-of [:or :keyword :string] [:or :string :int :boolean :nil]]] :string]
-   :cost/ticks 500000
-   :cost/bytes 1048576}
-  [signals-map]
-  (rsse/format-event {:event "datastar-patch-signals"
-  :data (str "signals " (json/write-str (or signals-map {}) :escape-unicode false :escape-slash false))}))
-
-(defn empty-walk
-  "Initial empty incremental render walk value (held inside `:web` Flow proc state — zero atoms!)."
-  {:malli/schema [:=> [:cat] :map], :cost/ticks 1000}
-  []
-  {:units {} :handlers {} :order []})
 
 (defn step-walk
   "Advances kept `walk` across `unit-specs` (`[{:id \"...\" :comp f :args [...]}]`) given `db` and
@@ -522,10 +581,3 @@
       :rerendered 0
       :skipped 0}
      unit-specs))))
-
-(defn render-entity-value
-  "Universal fallback renderer for any schema without a custom `:seon.render/hiccup` component.
-   Delegates directly to `render-value` -> 4-stage zero-clipping schema self-printer."
-  {:malli/schema [:=> [:cat [:map [:db {:optional true} [:maybe :seon.host/db]] [:main-db {:optional true} [:maybe :seon.host/db]]] :any] :any], :cost/ticks 10000000}
-  [opts val]
-  (render-value (or (:db opts) (:main-db opts)) val opts))

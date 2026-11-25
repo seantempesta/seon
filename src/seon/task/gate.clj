@@ -9,7 +9,8 @@
             [seon.reconciler.policy :as policy]
             [seon.ctx.diff :as diff]
             [seon.task.refine :as refine]
-            [seon.task.review :as review]))
+            [seon.task.review :as review]
+            [seon.render.data :as rdata]))
 
 (defn- eid-of [& args] (apply review/eid-of args))
 
@@ -23,14 +24,10 @@
            (filter qualified-keyword?)
            (sort-by str)))))
 
-(defn agent-task-ids
-  "Returns vector of ALL task ids assigned to `agent-id` (`:seon.agent/task` + `:seon.agent/tasks`)."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword]] [:vector :qualified-keyword]]
-   :cost/ticks 500000}
+(defn ^{:seon.code/reexport (quote seon.render.data/agent-task-ids)} agent-task-ids
+  "Re-exports `seon.render.data/agent-task-ids`."
   [db agent-id]
-  (if-let [eid (eid-of db :seon.agent/id agent-id)]
-    (vec (distinct (agent-ref-tasks db agent-id)))
-    []))
+  (rdata/agent-task-ids db agent-id))
 
 (defn- tagged-dbs [mdb bdb]
   (cond-> [] mdb (conj [:main mdb]) (and bdb (not= bdb mdb)) (conj [:branch bdb])))

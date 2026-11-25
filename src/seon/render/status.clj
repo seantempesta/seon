@@ -197,11 +197,6 @@
   (and (str/blank? (str (:seon.agent.eval/code e)))
        (not (str/blank? (str (:seon.agent.eval/thought e))))))
 
-(defn- tx-instant-ms [db tx]
-  (when (and db (integer? tx))
-    (when-let [inst (:db/txInstant (d/pull db '[:db/txInstant] (long tx)))]
-      (.getTime ^java.util.Date inst))))
-
 (defn- ^:seon.flow/edge sync-main-tx! [tx-data reason opts]
   (let [actx fcalls/*agent-ctx*]
     (cond
@@ -350,7 +345,7 @@
   (let [aid (:seon.agent/id ag)]
     (when-let [{:keys [umsg work-evs tx]} (unanswered-user-chat-info main-db branch-db aid evals)]
       (let [ec (count work-evs)
-            msg-ms (tx-instant-ms main-db tx)
+            msg-ms (store/tx-instant-ms main-db tx)
             elapsed-s (if (and msg-ms (>= (long now-ms) (long msg-ms)))
                         (long (quot (- (long now-ms) (long msg-ms)) 1000))
                         0)

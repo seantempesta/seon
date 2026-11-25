@@ -2,8 +2,7 @@
   "Shared O(1) commit-anchored Datahike branch diff, merge-base, commit-tx lookup,
    and code/rules DB signature caches for `seon.ctx*`, `seon.rule`, `seon.render.*`,
    and `seon.health.*`."
-  (:require [clojure.core.cache :as cache]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
             [datahike.versioning :as dv]
             [seon.store :as store :refer [live-cid]]))
@@ -33,22 +32,6 @@
   (if (keyword? raw-a)
     raw-a
     (or (get-in db [:ref-ident-map raw-a]) raw-a)))
-
-(defn- ^:seon.flow/edge ensure-lru! [cache-atom cap]
-  (when-not (satisfies? cache/CacheProtocol @cache-atom)
-    (reset! cache-atom (cache/lru-cache-factory {} :threshold (long cap)))))
-
-(defn- ^:seon.flow/edge lru-peek [cache-atom cap k]
-  (ensure-lru! cache-atom cap)
-  (let [v (get @cache-atom k ::miss)]
-    (if (and (map? v) (contains? v :seon.store/lru-val))
-      (:seon.store/lru-val v)
-      v)))
-
-(defn- ^:seon.flow/edge lru-put! [cache-atom cap k v]
-  (ensure-lru! cache-atom cap)
-  (swap! cache-atom cache/miss k v)
-  v)
 
 (defn- ^:seon.flow/edge bounded-assoc! [a cap k v]
   (swap! a (fn [m] (assoc (if (>= (count m) (long cap)) {} m) k v)))
@@ -81,7 +64,7 @@
          (if (= mc bc)
            mc
            (let [ck [sid mc bc]
-                 hit (lru-peek merge-base-lru 128 ck)]
+                 hit (store/lru-peek merge-base-lru ck ::miss)]
              (if-not (identical? ::miss hit)
                (when-not (identical? ::none hit) hit)
                (let [ak [sid (get-in main-db [:config :branch] :main) (get-in branch-db [:config :branch] :main)]
@@ -102,7 +85,7 @@
                      base (or fast-b
                               (store/without-agent-eval-reads
                                #(try (d/merge-base branch-db mc bc) (catch Throwable _ nil))))]
-                 (lru-put! merge-base-lru 128 ck (if (some? base) base ::none))
+                 (store/lru-put! merge-base-lru 128 ck (if (some? base) base ::none))
                  (when base
                    (bounded-assoc! merge-base-anchors 64 ak {:mc mc :bc bc :base base}))
                  base))))))))
@@ -112,12 +95,12 @@
        mc
        (let [sid (or (store/store-id db-or-store) (System/identityHashCode db-or-store))
              ck [sid mc bc]
-             hit (lru-peek merge-base-lru 128 ck)]
+             hit (store/lru-peek merge-base-lru ck ::miss)]
          (if-not (identical? ::miss hit)
            (when-not (identical? ::none hit) hit)
            (let [base (store/without-agent-eval-reads
                        #(try (d/merge-base db-or-store mc bc) (catch Throwable _ nil)))]
-             (lru-put! merge-base-lru 128 ck (if (some? base) base ::none))
+             (store/lru-put! merge-base-lru 128 ck (if (some? base) base ::none))
              base)))))))
 
 (defn ^:seon.flow/edge commit-holding-tx-cached
@@ -132,7 +115,7 @@
       (if-not (and sid bc)
         (store/without-agent-eval-reads #(try (dv/commit-holding-tx branch-db txl) (catch Throwable _ nil)))
         (let [ck [sid bc txl]
-              hit (lru-peek commit-tx-lru 128 ck)]
+              hit (store/lru-peek commit-tx-lru ck ::miss)]
           (if-not (identical? ::miss hit)
             (when-not (identical? ::none hit) hit)
             (let [bbr (get-in branch-db [:config :branch] :main)
@@ -147,14 +130,14 @@
                 (do
                   (when (not= bc (:cid anc))
                     (bounded-assoc! commit-tx-anchors 64 ak (assoc anc :cid bc :max-tx mtx)))
-                  (lru-put! commit-tx-lru 128 ck anc-hit)
+                  (store/lru-put! commit-tx-lru 128 ck anc-hit)
                   (when-not (identical? ::none anc-hit) anc-hit))
                 (let [res (store/without-agent-eval-reads
                            #(try (dv/commit-holding-tx branch-db txl) (catch Throwable _ nil)))
                       stored (if (some? res) res ::none)
                       next-by (if same-lin? (assoc (:by-tx anc) txl stored) {txl stored})]
                   (bounded-assoc! commit-tx-anchors 64 ak {:cid bc :max-tx mtx :by-tx next-by})
-                  (lru-put! commit-tx-lru 128 ck stored)
+                  (store/lru-put! commit-tx-lru 128 ck stored)
                   res)))))))))
 
 (defn- code-or-schema-attr? [a]
@@ -172,7 +155,7 @@
   (if (and (instance? datahike.db.DB db) (= cid (live-cid db)))
     (single-parent-of db)
     (let [cache-key [sid cid]
-          hit (lru-peek commit-parent-lru 512 cache-key)]
+          hit (store/lru-peek commit-parent-lru cache-key ::miss)]
       (if-not (identical? ::miss hit)
         (when-not (identical? ::none hit) hit)
         (let [record (store/without-agent-eval-reads
@@ -180,7 +163,7 @@
               parents (:datahike/parents record)
               parent (when (and (set? parents) (= 1 (count parents)))
                        (first parents))]
-          (lru-put! commit-parent-lru 512 cache-key (if (some? parent) parent ::none))
+          (store/lru-put! commit-parent-lru 512 cache-key (if (some? parent) parent ::none))
           parent)))))
 
 (defn ^:seon.flow/edge ancestor-within?
@@ -225,14 +208,14 @@
         (store/db-cache-sig db)
         (let [scnt (count (:schema db))
               ck [sid kind bc]
-              hit (lru-peek attr-sig-lru 256 ck)]
+              hit (store/lru-peek attr-sig-lru ck ::miss)]
           (if (and (map? hit) (= scnt (:schema-cnt hit)))
             [sid kind (:sig hit)]
             (let [bbr (get-in db [:config :branch] :main)
                   mtx (long (or (:max-tx db) 0))
                   ak [sid kind bbr]
                   p1 (single-parent-of db)
-                  p-hit (when p1 (lru-peek attr-sig-lru 256 [sid kind p1]))
+                  p-hit (when p1 (store/lru-peek attr-sig-lru [sid kind p1] ::miss))
                   anc (get @attr-sig-anchors ak)
                   prev (cond
                          (and (map? p-hit) (= scnt (:schema-cnt p-hit)))
@@ -249,7 +232,7 @@
                                    (catch Throwable _ false))))
                   eff-sig (if unchanged? (:sig prev) bc)
                   entry {:sig eff-sig :schema-cnt scnt}]
-              (lru-put! attr-sig-lru 256 ck entry)
+              (store/lru-put! attr-sig-lru 256 ck entry)
               (bounded-assoc! attr-sig-anchors 64 ak (assoc entry :cid bc :max-tx mtx))
               [sid kind eff-sig])))))))
 
@@ -296,7 +279,7 @@
        []
        (let [sid (store/store-id branch-db)
              ck [sid base-cid bc]
-             hit (lru-peek branch-changes-lru 64 ck)]
+             hit (store/lru-peek branch-changes-lru ck ::miss)]
          (if-not (identical? ::miss hit)
            (when-not (identical? ::none hit) hit)
            (let [bbr (get-in branch-db [:config :branch] :main)
@@ -320,8 +303,8 @@
              (if full-res
                (let [ds (:datoms full-res)]
                  (bounded-assoc! branch-changes-anchors 64 ak (assoc full-res :cid bc))
-                 (lru-put! branch-changes-lru 64 ck ds))
-               (do (lru-put! branch-changes-lru 64 ck ::none)
+                 (store/lru-put! branch-changes-lru 64 ck ds))
+               (do (store/lru-put! branch-changes-lru 64 ck ::none)
                    nil)))))))))
 
 (def ^:private domain-edit-attrs

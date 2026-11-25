@@ -237,21 +237,16 @@
     {:live-pid live-pid :busy? busy?
      :needs-release? (boolean (and (some? live-pid) (or merged? (and (not paused?) retracted?))))}))
 
-(defn- tx-instant-ms [db tx]
-  (when (and db (integer? tx) (pos? (long tx)))
-    (when-let [i (:v (first (d/datoms db :eavt (long tx) :db/txInstant)))]
-      (cond (instance? java.util.Date i) (.getTime ^java.util.Date i) (number? i) (long i) :else nil))))
-
 (defn- pull-agent-inbox-and-evals [main-db branch-db agent-id]
   (let [seen (store/agent-seen-message-ids branch-db agent-id)
         inbox (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
                    (map #(assoc (d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq :seon.agent.message/from :seon.agent.message/type :seon.agent.message/body] (:e %))
-                                :tx (:tx %) :tx-inst (tx-instant-ms main-db (:tx %))))
+                                :tx (:tx %) :tx-inst (store/tx-instant-ms main-db (:tx %))))
                    (sort-by :seon.agent.message/seq) vec)
         unread (filterv #(not (contains? seen (:seon.agent.message/id %))) inbox)
         eval-ents (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
                        (map #(assoc (d/pull branch-db '[:seon.agent.eval/turn :seon.agent.eval/call-index :seon.agent.eval/call-id :seon.agent.eval/code :seon.agent.eval/thought :seon.agent.eval/error :seon.agent.eval/seen-messages] (:e %))
-                                    :db/id (:e %) :tx (:tx %) :tx-inst (tx-instant-ms branch-db (:tx %))))
+                                    :db/id (:e %) :tx (:tx %) :tx-inst (store/tx-instant-ms branch-db (:tx %))))
                        (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0))) vec)]
     {:seen seen :inbox inbox :unread unread :eval-ents eval-ents}))
 
@@ -274,7 +269,7 @@
     {:branch b :paused? (boolean (:seon.agent/paused? ma))
      :busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
      :awaiting-blocked? awaiting-blocked? :waiting? w? :raw-ready? rr?
-     :ready-tx rtx :ready-inst (tx-instant-ms branch-db (:tx ready-dt)) :tested-tx (:seon.agent/tested-tx ma)
+     :ready-tx rtx :ready-inst (store/tx-instant-ms branch-db (:tx ready-dt)) :tested-tx (:seon.agent/tested-tx ma)
      :merged-tx (:seon.agent/merged-tx ma) :head-tx htx :same-db? same?
      :auto-merge? (if (some? (:seon.agent/auto-merge? ma)) (boolean (:seon.agent/auto-merge? ma)) (boolean (store/config-val main-db aid :seon.config/auto-merge?)))
      :gate-ok? gate-ok? :has-merge-target? (some? (:seon.agent/merge-target ma))
