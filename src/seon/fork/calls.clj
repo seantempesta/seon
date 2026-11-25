@@ -197,11 +197,16 @@
         {:ok? true :agent-id agent-id :task task-id :scope (:seon.task/scope t)})))))
 
 (defn ^:seon.flow/edge await!
-  "Suspends until one or more outgoing call IDs resolve."
-  {:seon.repl/export true :malli/schema [:=> [:cat :any] [:maybe :map]]}
-  [call-or-calls]
+  "Suspends until one or more outgoing call IDs resolve. Accepts a single call-id, a collection `[id1 id2]`, variadic IDs `(await! id1 id2)`, or an optional trailing opts map."
+  {:seon.repl/export true :malli/schema [:=> [:cat [:* :any]] [:maybe :map]]}
+  [& args]
   (when-let [{:keys [agent-id]} *agent-ctx*]
-    (let [raw (if (or (vector? call-or-calls) (set? call-or-calls) (seq? call-or-calls)) call-or-calls [call-or-calls])
+    (let [raw (mapcat (fn [x]
+                        (cond
+                          (or (vector? x) (set? x) (seq? x)) x
+                          (and (map? x) (not (or (:call-id x) (:seon.agent.call/id x)))) nil
+                          :else [x]))
+                      args)
           ids (vec (keep coerce-call-id raw))]
       (tx-main-sync! {:op :await-calls :caller agent-id :call-ids ids}))))
 

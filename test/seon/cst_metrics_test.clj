@@ -14,7 +14,8 @@
             [clojure.string]
             [seon.bench.trial]
             [seon.code.errors]
-            [seon.repl]))
+            [seon.repl]
+            [seon.fork.calls]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -491,3 +492,18 @@
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Expected number or lookup ref for entity id, got #datahike/Datom [1 :a 2]" {}) "(:e dt)"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Alias d already exists in namespace repl, aliasing datahike.api" {}) "pre-aliased"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "No such namespace: seon.db" {}) "(d/q"))))
+
+(deftest wave21b-variadic-await-and-wave21a-error-hints-test
+  (testing "seon.fork.calls/await! accepts single, coll, variadic args, and trailing opts map"
+    (let [sent (atom [])
+          id1 (random-uuid) id2 (random-uuid)]
+      (with-redefs [seon.fork.calls/tx-main-sync! (fn [m] (swap! sent conj m) {:ok? true :settled? true})]
+        (binding [seon.fork.calls/*agent-ctx* {:agent-id :agent/root}]
+          (seon.fork.calls/await! id1)
+          (seon.fork.calls/await! [id1 id2] {:timeout-ms 60000})
+          (seon.fork.calls/await! id1 id2)))
+      (is (= [[id1] [id1 id2] [id1 id2]] (mapv :call-ids @sent)))))
+  (testing "Wave 21A static & dynamic error hints fire cleanly"
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Unable to resolve symbol: testing in this context" {}) "add-require!"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Unable to resolve symbol: doc in this context" {}) "user/help"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "class user$edit_fn_BANG_ cannot be cast to class clojure.lang.Named" {}) "Quote the symbol"))))

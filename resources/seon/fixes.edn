@@ -18,6 +18,13 @@
   :seon.fix/regression-test seon.alloc-guard-test/wave20b-o1-changed-ops-run-tests-cache-and-verify-reach-test,
   :seon.fix/root-cause "changed-form-ops unconditionally ran O(commit-history) d/changes across all 13,383 commits (>4 GB) and run-tests! overlaid all 829 forms already identical to :main on every call with zero caching; verify-task-spec only checked 0-hop :seon.code.var/refs instead of reaching-tests.",
   :seon.fix/symptom "Calling (user/run-tests!) on long-lived :branch/root (merge-base 13,383 txs behind) allocated >12.88 GB and OOM'd in Waves 14A, 18A, and 20A; verify-task-spec :ns-test-or-example missed genuine new tests calling child namespaces via parent re-exports."}
+ {:seon.fix/before-after "Before: (user/await! [id1 id2] opts) or (user/await! id1 id2) failed with :malli.core/invalid-arity. After: single, coll, variadic, and trailing opts-map calls all settle cleanly.",
+  :seon.fix/change-summary "Made seon.fork.calls/await! variadic with trailing opts-map tolerance and added 3 Wave 21A recovery hints in seon.code.errors.",
+  :seon.fix/error-class :await-variadic-arity-and-unquoted-fn-named-hints,
+  :seon.fix/id #uuid "514a9295-c925-4483-aa93-88db2a5d6311",
+  :seon.fix/regression-test seon.cst-metrics-test/wave21b-variadic-await-and-wave21a-error-hints-test,
+  :seon.fix/root-cause "seon.fork.calls/await! only accepted a fixed 1-arg signature [:=> [:cat :any] [:maybe :map]] and enrich-eval-error lacked hints for unquoted fn->Named casts, testing, and doc.",
+  :seon.fix/symptom "Calling (user/await! [id1 id2] {:timeout-ms ...}) or (user/await! id1 id2) threw :malli.core/invalid-arity on :agent/root T17 in Wave 21A; agents also hit unquoted fn passed to user/source, bare testing, and bare doc."}
  {:seon.fix/before-after "Before: 2/5 seed=115 COW test fails + 256MB autofix OOM + lost :bounce-messages. After: auto-synced requires on add-fn!/edit-fn!/persist-forms-by-ns, scoped <15MB autofix-health! + 2GB cap, persisted :bounce-messages.",
   :seon.fix/change-summary "Merge missing :as/:refer in add-require-src, always sync unquoted loaded bare qualified ns refs across sync-ns-requires-for-live-ns/persist-forms-by-ns/edit-fn!, scope autofix-health! with 2 GB budget, add mdb fallback in run-tests!, preserve :bounce-messages in result->stored-trial, and add 3 Wave 18A error hints.",
   :seon.fix/error-class :cow-test-missing-require-and-autofix-oom,
