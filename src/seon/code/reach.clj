@@ -323,42 +323,6 @@
   [:seon.rule/id :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
    :seon.rule/target :seon.rule/query :seon.rule/when :seon.rule/assert])
 
-(defn changed-form-ops
-  {:malli/schema [:=> [:cat :seon.host/conn :any :any] :map]}
-  [conn from-cid to-cid]
-  (if (= from-cid to-cid)
-    {:upserts [] :retracted-keys #{} :schema-keys #{} :retracted-schemas #{}
-     :rule-ids #{} :retracted-rules #{} :boot-affected? false}
-    (let [ds (d/changes conn from-cid to-cid)
-          db (let [cur @conn] (cond (= to-cid (d/commit-id cur)) cur (uuid? to-cid) (or (d/commit-as-db conn to-cid) cur) :else cur))
-          id-map (:ident-ref-map db)
-          aid? (fn [dt kw] (or (= (:a dt) kw) (= (:a dt) (get id-map kw))))
-          retracted-keys (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.code.form/key)) (:v %))) ds)
-          touched-eids (into #{} (keep #(when (and (:added %) (or (aid? % :seon.code.form/key) (aid? % :seon.code.form/src))) (:e %))) ds)
-          retracted-schemas (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.schema/key)) (:v %))) ds)
-          schema-eids (into #{} (keep #(when (or (aid? % :seon.schema/key) (aid? % :seon.schema/form)) (:e %))) ds)
-          schema-keys (into #{} (keep #(:seon.schema/key (d/pull db '[:seon.schema/key] %))) schema-eids)
-          retracted-rules (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.rule/id)) (:v %))) ds)
-          rule-eids (into #{} (keep #(when (some (fn [rk] (aid? % rk)) rule-hash-attrs) (:e %))) ds)
-          rule-ids (into #{} (keep #(:seon.rule/id (d/pull db '[:seon.rule/id] %))) rule-eids)
-          boot-files? (boolean (some #(when (aid? % :seon.code.file/path) (boot-file-path? (str (:v %)))) ds))
-          live-forms (->> touched-eids
-                          (keep (fn [eid]
-                                  (let [f (d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
-                                                       :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
-                                                       :seon.code.form/test?] eid)]
-                                    (when (and (:seon.code.form/src f) (:seon.code.form/ns f) (:seon.code.form/key f)) f))))
-                          sort-forms-topologically)
-          live-keys (into #{} (map :seon.code.form/key) live-forms)
-          boot-forms? (boolean (some #(contains? boot-root-keys %) (concat live-keys retracted-keys)))]
-      {:upserts live-forms
-       :retracted-keys (set/difference retracted-keys live-keys)
-       :schema-keys schema-keys
-       :retracted-schemas (set/difference retracted-schemas schema-keys)
-       :rule-ids rule-ids
-       :retracted-rules (set/difference retracted-rules rule-ids)
-       :boot-affected? (or boot-files? boot-forms?)})))
-
 (defn rule-id->node-key
   {:malli/schema [:=> [:cat :keyword] :string], :cost/ticks 500000}
   [rid]
@@ -584,6 +548,122 @@
        :tests tests2
        :contracted-vars (update-contracted-vars theirs-db (:contracted-vars graph) upserts retracted-keys)
        :platform-tests (into #{} (keep #(when (get-in nodes2 [% :test?]) (symbol %))) boot-closure)})))
+
+(defonce ^:private ^:seon.flow/edge changed-form-ops-cache (store/lru-cache 32))
+
+(defn- changed-form-ops-aevt
+  [from-db to-db]
+  (let [aevt-by-e (fn [db attr]
+                    (let [m (java.util.HashMap. 4096)]
+                      (when (contains? (:schema db) attr)
+                        (doseq [dt (d/datoms db :aevt attr)] (.put m (:e dt) (:v dt))))
+                      m))
+        fk-from (aevt-by-e from-db :seon.code.form/key)
+        fk-to   (aevt-by-e to-db :seon.code.form/key)
+        fh-from (aevt-by-e from-db :seon.code.form/hash)
+        fh-to   (aevt-by-e to-db :seon.code.form/hash)
+        fo-from (aevt-by-e from-db :seon.code.form/order)
+        fo-to   (aevt-by-e to-db :seon.code.form/order)
+        to-key-set (into #{} (vals fk-to))
+        retracted-keys (into #{} (remove to-key-set) (vals fk-from))
+        touched-eids (volatile! #{})
+        _ (doseq [[e k] fk-to]
+            (let [ok (.get fk-from e)
+                  oh (.get fh-from e) nh (.get fh-to e)
+                  oo (.get fo-from e) no (.get fo-to e)]
+              (when (or (not= ok k)
+                        (not= oh nh)
+                        (not= oo no)
+                        (and (nil? nh)
+                             (not= (:seon.code.form/src (d/pull from-db '[:seon.code.form/src] e))
+                                   (:seon.code.form/src (d/pull to-db '[:seon.code.form/src] e)))))
+                (vswap! touched-eids conj e))))
+        sk-from (aevt-by-e from-db :seon.schema/key)
+        sk-to   (aevt-by-e to-db :seon.schema/key)
+        sf-from (aevt-by-e from-db :seon.schema/form)
+        sf-to   (aevt-by-e to-db :seon.schema/form)
+        to-sk-set (into #{} (vals sk-to))
+        retracted-schemas (into #{} (remove to-sk-set) (vals sk-from))
+        schema-keys (into #{} (keep (fn [[e k]] (when (or (not= (.get sk-from e) k) (not= (.get sf-from e) (.get sf-to e))) k))) sk-to)
+        rk-from (aevt-by-e from-db :seon.rule/id)
+        rk-to   (aevt-by-e to-db :seon.rule/id)
+        to-rk-set (into #{} (vals rk-to))
+        retracted-rules (into #{} (remove to-rk-set) (vals rk-from))
+        rule-ids (into #{} (keep (fn [[e rid]]
+                                   (when (or (not= (.get rk-from e) rid)
+                                             (not= (d/pull from-db rule-hash-attrs e) (d/pull to-db rule-hash-attrs e)))
+                                     rid)))
+                       rk-to)
+        fp-from (aevt-by-e from-db :seon.code.file/path)
+        fp-to   (aevt-by-e to-db :seon.code.file/path)
+        fha-from (aevt-by-e from-db :seon.code.file/hash)
+        fha-to   (aevt-by-e to-db :seon.code.file/hash)
+        boot-files? (boolean (or (some (fn [[e p]] (and (boot-file-path? (str p)) (or (not= (.get fp-from e) p) (not= (.get fha-from e) (.get fha-to e))))) fp-to)
+                                 (some (fn [[e p]] (and (boot-file-path? (str p)) (not (.containsKey fp-to e)))) fp-from)))
+        live-forms (->> @touched-eids
+                        (keep (fn [eid]
+                                (let [f (d/pull to-db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                                        :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                                                        :seon.code.form/test?] eid)]
+                                  (when (and (:seon.code.form/src f) (:seon.code.form/ns f) (:seon.code.form/key f)) f))))
+                        sort-forms-topologically)
+        live-keys (into #{} (map :seon.code.form/key) live-forms)
+        boot-forms? (boolean (some #(contains? boot-root-keys %) (concat live-keys retracted-keys)))]
+    {:upserts live-forms
+     :retracted-keys (set/difference retracted-keys live-keys)
+     :schema-keys schema-keys
+     :retracted-schemas (set/difference retracted-schemas schema-keys)
+     :rule-ids rule-ids
+     :retracted-rules (set/difference retracted-rules rule-ids)
+     :boot-affected? (or boot-files? boot-forms?)}))
+
+(defn changed-form-ops
+  {:malli/schema [:=> [:cat :seon.host/conn :any :any] :map]}
+  [conn from-cid to-cid]
+  (if (= from-cid to-cid)
+    {:upserts [] :retracted-keys #{} :schema-keys #{} :retracted-schemas #{}
+     :rule-ids #{} :retracted-rules #{} :boot-affected? false}
+    (let [cur @conn
+          sid (get-in cur [:config :store :id])
+          ck (when (and sid (uuid? from-cid) (uuid? to-cid)) [sid from-cid to-cid])
+          compute
+          (fn []
+            (let [to-db (cond (= to-cid (d/commit-id cur)) cur (uuid? to-cid) (or (d/commit-as-db conn to-cid) cur) :else cur)
+                  from-db (when (uuid? from-cid) (d/commit-as-db conn from-cid))
+                  tx-span (when (and from-db to-db)
+                            (Math/abs (- (long (or (:max-tx to-db) 0)) (long (or (:max-tx from-db) 0)))))]
+              (if (and from-db to-db (> (long tx-span) 100))
+                (changed-form-ops-aevt from-db to-db)
+                (let [ds (d/changes conn from-cid to-cid)
+                      db to-db
+                      id-map (:ident-ref-map db)
+                      aid? (fn [dt kw] (or (= (:a dt) kw) (= (:a dt) (get id-map kw))))
+                      retracted-keys (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.code.form/key)) (:v %))) ds)
+                      touched-eids (into #{} (keep #(when (and (:added %) (or (aid? % :seon.code.form/key) (aid? % :seon.code.form/src))) (:e %))) ds)
+                      retracted-schemas (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.schema/key)) (:v %))) ds)
+                      schema-eids (into #{} (keep #(when (or (aid? % :seon.schema/key) (aid? % :seon.schema/form)) (:e %))) ds)
+                      schema-keys (into #{} (keep #(:seon.schema/key (d/pull db '[:seon.schema/key] %))) schema-eids)
+                      retracted-rules (into #{} (keep #(when (and (not (:added %)) (aid? % :seon.rule/id)) (:v %))) ds)
+                      rule-eids (into #{} (keep #(when (some (fn [rk] (aid? % rk)) rule-hash-attrs) (:e %))) ds)
+                      rule-ids (into #{} (keep #(:seon.rule/id (d/pull db '[:seon.rule/id] %))) rule-eids)
+                      boot-files? (boolean (some #(when (aid? % :seon.code.file/path) (boot-file-path? (str (:v %)))) ds))
+                      live-forms (->> touched-eids
+                                      (keep (fn [eid]
+                                              (let [f (d/pull db '[:seon.code.form/key :seon.code.form/ns :seon.code.form/order
+                                                                   :seon.code.form/src :seon.code.form/hash :seon.code.form/deps
+                                                                   :seon.code.form/test?] eid)]
+                                                (when (and (:seon.code.form/src f) (:seon.code.form/ns f) (:seon.code.form/key f)) f))))
+                                      sort-forms-topologically)
+                      live-keys (into #{} (map :seon.code.form/key) live-forms)
+                      boot-forms? (boolean (some #(contains? boot-root-keys %) (concat live-keys retracted-keys)))]
+                  {:upserts live-forms
+                   :retracted-keys (set/difference retracted-keys live-keys)
+                   :schema-keys schema-keys
+                   :retracted-schemas (set/difference retracted-schemas schema-keys)
+                   :rule-ids rule-ids
+                   :retracted-rules (set/difference retracted-rules rule-ids)
+                   :boot-affected? (or boot-files? boot-forms?)}))))]
+      (if ck (store/lru-get! changed-form-ops-cache 32 ck compute) (compute)))))
 
 (defn update-reach-graph
   {:malli/schema [:=> [:cat :map :seon.host/conn] :map]}
