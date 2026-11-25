@@ -119,6 +119,80 @@
    "Help me plan a project"
    "Show me an interactive demo"])
 
+(defn- render-canvas-dev-bar [viewing-id label status-b branch tx-num ex-n]
+  [:div {:class "ws-head work-bar dev-work-bar"}
+   [:div {:class "pill-row"}
+    (badge "amber" "DEV")
+    (ent-link [:seon.agent/id viewing-id] label "mono strong")
+    status-b
+    (ent-link [:seon.branch/name branch] (str branch (when tx-num (str " @ tx " tx-num))) "mono tiny muted")]
+   [:div {:class "pill-row"}
+    (when (pos? ex-n)
+      (btn "btn sm" '(seon.web/set-view-mode! :session) (str "Chat (" ex-n ") →")))
+    (when (not= branch :main)
+      (list (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
+            (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")))]])
+
+(defn- render-canvas-stage-body
+  [{:keys [agent viewing-id branch main-db pending-prompt reply-prompt latest-actions work-summary live-stream signals]}
+   label prose exp? custom-canvas? md-opts live-acts]
+  (cond
+    pending-prompt
+    (let [{:keys [css-class rate reasoning text] pl :label} (ssess/canvas-live-progress live-stream)]
+      [:section {:id "cv-pending" :class (str "canvas-surface ch-pending-card canvas-pending " css-class)}
+       (when exp? [:div {:class "root-kicker"} (str "In flight · " pl)])
+       [:h1 {:class "canvas-prompt-headline"} pending-prompt]
+       [:div {:class "canvas-pending-status"}
+        [:span {:class "dot pulsing"}]
+        (if exp?
+          (list [:span {:class (str "stream-phase-badge " css-class)} pl]
+                (when rate [:span {:class "stream-rate"} rate]))
+          [:span {:class "muted sm-copy"} "Working…"])]
+       (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text md-opts) [:span {:class "cursor"} "▍"]])
+       (when (and exp? reasoning)
+         [:details {:id "cv-live-reasoning" :class "activity-fold"}
+          [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
+          [:div {:class "live-reasoning"} reasoning]])
+       (when (and exp? (seq live-acts)) (rmd/render-activity-fold live-acts "cv-live"))])
+
+    prose
+    [:section {:id "cv-featured-reply" :class "canvas-surface canvas-reply stack-sm"}
+     (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (if exp? (str "Re: " reply-prompt) reply-prompt)])
+     (rmd/render-markdown-blocks prose md-opts)
+     (when (and exp? (seq latest-actions)) (rmd/render-activity-fold latest-actions "cv"))]
+
+    work-summary
+    [:section {:id "cv-work-summary" :class "canvas-surface card stack-sm"}
+     [:div {:class "row-between"}
+      [:div {:class "pill-row"}
+       (badge "green" (:status-label work-summary))
+       [:strong {:class "sm-copy"} (:latest-intent work-summary)]]
+      (when exp? [:span {:class "mono tiny muted"} (str (:eval-count work-summary) " eval(s)")])]
+     (when-let [pr (:prompt work-summary)] [:div {:class "canvas-re-prompt"} (if exp? (str "Re: " pr) pr)])
+     (when (and exp? (seq latest-actions)) (rmd/render-activity-fold latest-actions "cv-work"))]
+
+    exp?
+    [:div {:class "stack"}
+     [:header {:class "root-hero"}
+      [:div {:class "root-kicker pill-row"}
+       (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·"
+       (ent-link [:seon.branch/name branch] (str branch) "mono tiny")]
+      [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
+      (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])]
+     (render-canvas-demo-deck main-db viewing-id signals)]
+
+    :else
+    (when-not custom-canvas?
+      [:div {:id "cv-user-welcome" :class "user-welcome"}
+       [:header {:class "root-hero"}
+        [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) "What would you like to work on?")]
+        [:p {:class "root-sub"} "Ask a question, brainstorm an idea, or pick a prompt below to get started."]]
+       [:div {:class "starter-chips"}
+        (for [prompt starter-prompts]
+          [:button {:type "button" :class "starter-chip"
+                    :on-click (list 'seon.web/chat-agent-form! viewing-id {:text prompt})}
+           prompt])]])))
+
 (defn render-canvas-body
   "Renders the presentation-first Canvas (`:canvas`):
    - Normal User Mode (`expert-mode? false`): calm, viewport-fitting living stage with warm greeting,
@@ -155,80 +229,13 @@
                        (:seon.agent/waiting? agent) (badge "blue" "waiting")
                        :else (badge "muted" "idle"))]
     [:div {:id "cv-canvas-stage" :class (str "root-canvas" (if exp? " is-dev-canvas" " is-user-canvas") (when custom-canvas? " has-custom-canvas"))}
-     (when exp?
-       [:div {:class "ws-head work-bar dev-work-bar"}
-        [:div {:class "pill-row"}
-         (badge "amber" "DEV")
-         (ent-link [:seon.agent/id viewing-id] label "mono strong")
-         status-b
-         (ent-link [:seon.branch/name branch] (str branch (when tx-num (str " @ tx " tx-num))) "mono tiny muted")]
-        [:div {:class "pill-row"}
-         (when (pos? ex-n)
-           (btn "btn sm" '(seon.web/set-view-mode! :session) (str "Chat (" ex-n ") →")))
-         (when (not= branch :main)
-           (list (btn "btn sm" (list 'seon.web/run-tests! branch) "Test")
-                 (btn "btn sm success" (list 'seon.web/merge-branch! branch) "Merge → :main")))]])
+     (when exp? (render-canvas-dev-bar viewing-id label status-b branch tx-num ex-n))
      (feedback-banner branch-feedback)
      (render-presence-slot model)
      (when (and (map? agent-status) (:seon.ui.status/label agent-status) (or (not= :done (:seon.ui.status/stage agent-status)) (and (not pending-prompt) (or exp? (not prose)))))
        [:div {:id "cv-live-status" :class "session-live-status"}
         (:seon.ui/hiccup (rstatus/render-status-card {:seon.ui.status/entity agent-status}))])
-     (cond
-       pending-prompt
-       (let [{:keys [css-class rate reasoning text] pl :label} (ssess/canvas-live-progress live-stream)]
-         [:section {:id "cv-pending" :class (str "canvas-surface ch-pending-card canvas-pending " css-class)}
-          (when exp? [:div {:class "root-kicker"} (str "In flight · " pl)])
-          [:h1 {:class "canvas-prompt-headline"} pending-prompt]
-          [:div {:class "canvas-pending-status"}
-           [:span {:class "dot pulsing"}]
-           (if exp?
-             (list [:span {:class (str "stream-phase-badge " css-class)} pl]
-                   (when rate [:span {:class "stream-rate"} rate]))
-             [:span {:class "muted sm-copy"} "Working…"])]
-          (when text [:div {:id "cv-live-prose" :class "live-prose"} (rmd/render-markdown-blocks text md-opts) [:span {:class "cursor"} "▍"]])
-          (when (and exp? reasoning)
-            [:details {:id "cv-live-reasoning" :class "activity-fold"}
-             [:summary {:class "mono tiny"} (str "Live reasoning (" (count reasoning) " chars)")]
-             [:div {:class "live-reasoning"} reasoning]])
-          (when (and exp? (seq live-acts)) (rmd/render-activity-fold live-acts "cv-live"))])
-
-       prose
-       [:section {:id "cv-featured-reply" :class "canvas-surface canvas-reply stack-sm"}
-        (when (not-empty reply-prompt) [:div {:class "canvas-re-prompt"} (if exp? (str "Re: " reply-prompt) reply-prompt)])
-        (rmd/render-markdown-blocks prose md-opts)
-        (when (and exp? (seq latest-actions)) (rmd/render-activity-fold latest-actions "cv"))]
-
-       work-summary
-       [:section {:id "cv-work-summary" :class "canvas-surface card stack-sm"}
-        [:div {:class "row-between"}
-         [:div {:class "pill-row"}
-          (badge "green" (:status-label work-summary))
-          [:strong {:class "sm-copy"} (:latest-intent work-summary)]]
-         (when exp? [:span {:class "mono tiny muted"} (str (:eval-count work-summary) " eval(s)")])]
-        (when-let [pr (:prompt work-summary)] [:div {:class "canvas-re-prompt"} (if exp? (str "Re: " pr) pr)])
-        (when (and exp? (seq latest-actions)) (rmd/render-activity-fold latest-actions "cv-work"))]
-
-       exp?
-       [:div {:class "stack"}
-        [:header {:class "root-hero"}
-         [:div {:class "root-kicker pill-row"}
-          (ent-link [:seon.agent/id viewing-id] label "mono tiny") "·"
-          (ent-link [:seon.branch/name branch] (str branch) "mono tiny")]
-         [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) label)]
-         (when-let [g (not-empty (:seon.agent/goal agent))] [:p {:class "root-sub"} g])]
-        (render-canvas-demo-deck main-db viewing-id signals)]
-
-       :else
-       (when-not custom-canvas?
-       [:div {:id "cv-user-welcome" :class "user-welcome"}
-        [:header {:class "root-hero"}
-         [:h1 {:class "root-title"} (or (not-empty (:seon.agent/hero-title agent)) "What would you like to work on?")]
-         [:p {:class "root-sub"} "Ask a question, brainstorm an idea, or pick a prompt below to get started."]]
-        [:div {:class "starter-chips"}
-         (for [prompt starter-prompts]
-           [:button {:type "button" :class "starter-chip"
-                     :on-click (list 'seon.web/chat-agent-form! viewing-id {:text prompt})}
-            prompt])]]))
+     (render-canvas-stage-body model label prose exp? custom-canvas? md-opts live-acts)
      (when exp?
        (list
         (render-canvas-context-grid entities pool-count viewing-id true)

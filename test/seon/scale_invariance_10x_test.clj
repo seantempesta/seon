@@ -86,11 +86,11 @@
         m-cov  (code/measure-call #(cov/coverage-report mdb))
         m-ctx  (code/measure-call #(surface/render-surface mdb bdb {:conn conn :view-mode :context :viewing-id aid}))
         m-sys  (code/measure-call #(surface/render-surface mdb mdb {:conn conn :view-mode :system :viewing-id aid}))]
-    {:wire {:ms (:ms m-wire) :mb (/ (double (:bytes m-wire)) 1048576.0) :ok? (map? (:val m-wire))}
-     :health {:ms (:ms m-hlth) :mb (/ (double (:bytes m-hlth)) 1048576.0) :ok? (contains? (:val m-hlth) :ok?)}
-     :cov {:ms (:ms m-cov) :mb (/ (double (:bytes m-cov)) 1048576.0) :ok? (= :seon.health/coverage (:seon/schema (meta (:val m-cov))))}
-     :context {:ms (:ms m-ctx) :mb (/ (double (:bytes m-ctx)) 1048576.0) :ok? (or (map? (:val m-ctx)) (vector? (:val m-ctx)))}
-     :system {:ms (:ms m-sys) :mb (/ (double (:bytes m-sys)) 1048576.0) :ok? (or (map? (:val m-sys)) (vector? (:val m-sys)))}}))
+    {:wire {:ms (:ms m-wire) :ticks (:ticks m-wire) :mb (/ (double (:bytes m-wire)) 1048576.0) :ok? (map? (:val m-wire))}
+     :health {:ms (:ms m-hlth) :ticks (:ticks m-hlth) :mb (/ (double (:bytes m-hlth)) 1048576.0) :ok? (contains? (:val m-hlth) :ok?)}
+     :cov {:ms (:ms m-cov) :ticks (:ticks m-cov) :mb (/ (double (:bytes m-cov)) 1048576.0) :ok? (= :seon.health/coverage (:seon/schema (meta (:val m-cov))))}
+     :context {:ms (:ms m-ctx) :ticks (:ticks m-ctx) :mb (/ (double (:bytes m-ctx)) 1048576.0) :ok? (or (map? (:val m-ctx)) (vector? (:val m-ctx)))}
+     :system {:ms (:ms m-sys) :ticks (:ticks m-sys) :mb (/ (double (:bytes m-sys)) 1048576.0) :ok? (or (map? (:val m-sys)) (vector? (:val m-sys)))}}))
 
 (deftest diff-incremental-primitives-and-tail-rules-test
   (testing "seon.ctx.diff O(1) merge-base, incremental branch-changes, and code/rules sig invariance"
@@ -178,18 +178,18 @@
                                            [:context 120.0 40.0]
                                            [:system 60.0 24.0]]]
                   (let [r1 (get m1 k) r10 (get m10 k)
-                        ms-ratio (ratio-with-floor (:ms r10) (:ms r1) 8.0)
-                        mb-ratio (ratio-with-floor (:mb r10) (:mb r1) 3.0)]
-                    (is (:ok? r1) (str k " 1x failed: " (pr-str r1)))
-                    (is (:ok? r10) (str k " 10x failed: " (pr-str r10)))
-                    (is (<= (:ms r10) max-ms) (str k " 10x ms=" (:ms r10) " exceeded ceiling " max-ms " (1x=" (:ms r1) ")"))
-                    (is (<= (:mb r10) max-mb) (str k " 10x mb=" (:mb r10) " exceeded ceiling " max-mb " (1x=" (:mb r1) ")"))
-                    (is (< ms-ratio 2.0) (str k " 10x/1x ms ratio " ms-ratio " >= 2.0 (1x=" (:ms r1) "ms, 10x=" (:ms r10) "ms)"))
-                    (is (< mb-ratio 2.0) (str k " 10x/1x mb ratio " mb-ratio " >= 2.0 (1x=" (:mb r1) "MB, 10x=" (:mb r10) "MB)"))))
+                      ticks-ratio (ratio-with-floor (:ticks r10) (:ticks r1) 2000000)
+                      mb-ratio (ratio-with-floor (:mb r10) (:mb r1) 3.0)]
+                  (is (:ok? r1) (str k " 1x failed: " (pr-str r1)))
+                  (is (:ok? r10) (str k " 10x failed: " (pr-str r10)))
+                  (is (<= (:ms r10) max-ms) (str k " 10x ms=" (:ms r10) " exceeded ceiling " max-ms " (1x=" (:ms r1) ")"))
+                  (is (<= (:mb r10) max-mb) (str k " 10x mb=" (:mb r10) " exceeded ceiling " max-mb " (1x=" (:mb r1) ")"))
+                  (is (< ticks-ratio 2.0) (str k " 10x/1x ticks ratio " ticks-ratio " >= 2.0 (1x=" (:ticks r1) ", 10x=" (:ticks r10) ")"))
+                  (is (< mb-ratio 2.0) (str k " 10x/1x mb ratio " mb-ratio " >= 2.0 (1x=" (:mb r1) "MB, 10x=" (:mb r10) "MB)"))))
                 (let [ts1-mb (/ (double (:bytes ts1)) 1048576.0)
                       ts10-mb (/ (double (:bytes ts10)) 1048576.0)]
-                  (is (< (ratio-with-floor (:ms ts10) (:ms ts1) 5.0) 2.0)
-                      (str "Incremental test-snapshot ms scaled >= 2.0x: 1x=" (:ms ts1) "ms, 10x=" (:ms ts10) "ms"))
+                  (is (< (ratio-with-floor (:ticks ts10) (:ticks ts1) 1000000) 2.0)
+                  (str "Incremental test-snapshot ticks scaled >= 2.0x: 1x=" (:ticks ts1) ", 10x=" (:ticks ts10)))
                   (is (< (ratio-with-floor ts10-mb ts1-mb 2.0) 2.0)
                       (str "Incremental test-snapshot MB scaled >= 2.0x: 1x=" ts1-mb "MB, 10x=" ts10-mb "MB")))
                 (is (< probes-ms 800.0) (str "Combined 1x+10x probe window took " probes-ms " ms (must be < 800 ms)"))))

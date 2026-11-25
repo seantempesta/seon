@@ -90,7 +90,7 @@
                       (:forms outline)))
           (is (= "demo.w1-outline/alpha" (:key f-alpha)))
           (is (= 5 (:lines f-alpha)))
-          (is (> (:chars f-alpha) 80)))
+          (do (is (> (:chars f-alpha) 80)) (is (true? (:has-schema? f-alpha))) (is (not (:has-examples? f-alpha))) (is (not (:flow-edge? f-alpha)))))
         (binding [fcalls/*agent-ctx* {:conn conn :branch :main :agent-id :repl/w1}]
           (let [res (edit/edit-fn! (quote demo.w1-outline) "(inc x)" "(+ x 2)")]
             (is (false? (:ok? res)))

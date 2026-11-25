@@ -20,6 +20,10 @@ All stored Datahike attributes, runtime write checks, and `seed = 42` generative
 - Multi-arity functions use `[:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]]`. `seon.schema.stress/generatable-function-schema?` stresses single-arity `:=>` and concrete multi-arity `[:function ...]` schemas; `(user/stress-var 'ns/fn)` ALSO verifies `:examples` on non-generatable `:function`/`:any`/`:seon.host/*` schemas.
 - Mark functions that perform I/O, mutate state, or call `^:seon.flow/edge` helpers with `^:seon.flow/edge` (or accept `:seon.host/db` / `:seon.host/conn`).
 - Attach `:examples [[arg-vec expected] ...]` inside `:=>` properties (`[:=> {:examples [[[1 "a"] {:ok? true}]]} [:cat :int :string] [:map [:ok? :boolean]]]`; 0-arg: `[[] expected]`; **1-arg taking a vector/seq `[a b]`**: `[[[a b]] expected]` — outer vector is the arg list, inner vector is arg 1!) and verify via `(user/stress-var 'ns/fn)` or `(user/run-tests!)`.
+- Validate custom Malli forms in the REPL against Seon's live registry via `(malli.core/validate form val {:registry (:registry (seon.schema/registry-for-db (user/db)))})`.
+- Keep scratch `def` probes in `repl`/`user` (never inside production `seon.*` namespaces — defs inside `seon.*` persist into Datahike).
+- Quote symbol values inside `:examples` (e.g. `'foo.bar/baz`, since `(defn ...)` evaluates its attr-map); for multi-arity `:function`, attach `:examples` on each `[:=> {:examples ...} ...]` arity.
+- Creating a new test ns: `(in-ns 'seon.foo-test)` then `(ns seon.foo-test (:require [clojure.test :refer [deftest is testing]] [seon.foo :as foo]))`, define `(deftest ...)`, and prove via `(user/run-tests! 'seon.foo-test)`.
 ## Fixing Malli Errors
 
 - `:malli.core/invalid-input` (`:input-contract`): your call passed the wrong shape — inspect the expected `:seon.schema/entity` form and examples.

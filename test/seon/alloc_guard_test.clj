@@ -438,3 +438,20 @@
       (let [res (code/eval-forms @conn {:agent-id :repl/ct-ov :turn 1 :byte-budget 1048576}
                                  "(do (require 'clojure.test) (let [_ clojure.test/run-tests] (vec (range 50000))))")]
         (is (true? (:ok? res)) (pr-str res))))))
+
+(deftest ^{:cost/ticks 60000000} wave7d-stress-var-kwargs-and-schema-docs-test
+  (testing "stress-var accepts keyword args cleanly without invalid-arity errors"
+    (let [r1 (schema/stress-var 'seon.model.messages/vision-capable-model? :seed 42)
+          r2 (schema/stress-var 'seon.model.messages/vision-capable-model? :samples 12 :seed 42)
+          r3 (schema/stress-var 'seon.model.messages/vision-capable-model? :samples)]
+      (is (true? (:ok? r1)))
+      (is (true? (:ok? r2)))
+      (is (false? (:ok? r3)))
+      (is (= :invalid-stress-var-args (:error r3)))))
+  (testing "Every registered schema carries :seon.schema/doc"
+    (when-let [conn (:conn seon.fork.calls/*agent-ctx*)]
+      (let [db @conn
+            missing (remove #(some? (:seon.schema/doc %))
+                            (map #(d/pull db '[:seon.schema/key :seon.schema/doc] (:e %))
+                                 (d/datoms db :aevt :seon.schema/key)))]
+        (is (empty? missing))))))

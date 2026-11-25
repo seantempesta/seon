@@ -301,6 +301,32 @@
             [(-> st (assoc :last-commit cid :last-tx (:max-tx db)) (update :writes inc))
              {:db [(db-notice prev-cid db (:tx-data r) [:await-calls caller])]}]))))))
 
+(defn- build-spawn-callee-ent [db0 caller callee spawn-branch inferred-scope goal eff-auto fspec]
+  (let [fork-eid (:fork-eid fspec)]
+    (cond-> {:seon.agent/id callee :seon.agent/parent caller :seon.agent/branch spawn-branch
+             :seon.agent/scope inferred-scope :seon.agent/focus (str "ns/" inferred-scope)
+             :seon.agent/goal (or goal (str "Subsystem owner for namespace " inferred-scope " and its children. Research questions deeply (delegating to child :ns/<sub-ns> specialists when helpful), critique weak answers, edit/test code on your branch when asked to fix or refactor, and settle incoming calls via (user/answer! call-id val)."))
+             :seon.agent/auto-merge? eff-auto}
+      fork-eid (assoc :seon.agent/forked-from fork-eid)
+      (:fork-commit fspec) (assoc :seon.agent/fork-commit (:fork-commit fspec))
+      (some? (:merge-target fspec)) (assoc :seon.agent/merge-target (:merge-target fspec))
+      (and (nil? fork-eid) (first (d/datoms db0 :avet :seon.agent/id :example/recursive-fanout)))
+      (assoc :seon.agent/examples #{:example/recursive-fanout}))))
+
+(defn- sync-call-branch! [conn cfg db0 spawn-branch callee callee-e fspec spawn-ent subtask subtask-id]
+  (if spawn-branch
+    (let [src-br (or (:src-branch fspec) :main)
+          fork-parent (:fork-parent fspec)]
+      (store/branch! conn src-br spawn-branch)
+      (when (not= src-br :main)
+        (mirror-callee-task-to-branch! conn cfg spawn-branch
+          (vec (concat (:tx subtask) [(-> spawn-ent (dissoc :seon.agent/tasks :seon.agent/forked-from :seon.agent/merge-target)
+                                          (cond-> subtask-id (assoc :seon.agent/tasks #{[:seon.task/id subtask-id]})
+                                                  (:seon.agent/id fork-parent) (assoc :seon.agent/forked-from [:seon.agent/id (:seon.agent/id fork-parent)])))]))
+          callee subtask-id)))
+    (when (and callee-e subtask-id)
+      (mirror-callee-task-to-branch! conn cfg (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] callee-e)) (:tx subtask) callee subtask-id))))
+
 (defn- handle-create-call! [st msg prev-cid {:keys [reply! db-notice focus-tx]}]
   (let [{:keys [conn]} st
         {:keys [caller callee prompt parent-call result-schema await? scope goal]} msg
@@ -334,15 +360,7 @@
                 ns-tx (when (and (not callee-exists?) inferred-scope) (focus-tx inferred-scope))
                 eff-auto (if (some? (:auto-merge? fspec)) (:auto-merge? fspec) true)
                 spawn-ent (when-not callee-exists?
-                            (cond-> {:seon.agent/id callee :seon.agent/parent caller :seon.agent/branch spawn-branch
-                                     :seon.agent/scope inferred-scope :seon.agent/focus (str "ns/" inferred-scope)
-                                     :seon.agent/goal (or goal (str "Subsystem owner for namespace " inferred-scope " and its children. Research questions deeply (delegating to child :ns/<sub-ns> specialists when helpful), critique weak answers, edit/test code on your branch when asked to fix or refactor, and settle incoming calls via (user/answer! call-id val)."))
-                                     :seon.agent/auto-merge? eff-auto}
-                              fork-eid (assoc :seon.agent/forked-from fork-eid)
-                              (:fork-commit fspec) (assoc :seon.agent/fork-commit (:fork-commit fspec))
-                              (some? (:merge-target fspec)) (assoc :seon.agent/merge-target (:merge-target fspec))
-                              (and (nil? fork-eid) (first (d/datoms db0 :avet :seon.agent/id :example/recursive-fanout)))
-                              (assoc :seon.agent/examples #{:example/recursive-fanout})))
+                          (build-spawn-callee-ent db0 caller callee spawn-branch inferred-scope goal eff-auto fspec))
                 call-ent (cond-> {:seon.agent.call/id call-id :seon.agent.call/caller caller :seon.agent.call/callee callee
                                   :seon.agent.call/message-id mid :seon.agent.call/prompt (str (or prompt ""))
                                   :seon.agent.call/status :pending :seon.agent.call/created-tx (long (:max-tx db0))
@@ -369,17 +387,7 @@
                                 (remove nil? [spawn-ent callee-task-ent msg-ent await-ent
                                               (cond-> call-ent subtask-id (assoc :seon.agent.call/task-ref [:seon.task/id subtask-id]))])))
                 r (d/transact conn {:tx-data tx-data})
-                _ (if spawn-branch
-                    (let [src-br (or (:src-branch fspec) :main)]
-                      (store/branch! conn src-br spawn-branch)
-                      (when (not= src-br :main)
-                        (mirror-callee-task-to-branch! conn (:cfg st) spawn-branch
-                          (vec (concat (:tx subtask) [(-> spawn-ent (dissoc :seon.agent/tasks :seon.agent/forked-from :seon.agent/merge-target)
-                                                          (cond-> subtask-id (assoc :seon.agent/tasks #{[:seon.task/id subtask-id]})
-                                                                  (:seon.agent/id fork-parent) (assoc :seon.agent/forked-from [:seon.agent/id (:seon.agent/id fork-parent)])))]))
-                          callee subtask-id)))
-                    (when (and callee-exists? subtask-id)
-                      (mirror-callee-task-to-branch! conn (:cfg st) (:seon.agent/branch (d/pull db0 '[:seon.agent/branch] callee-e)) (:tx subtask) callee subtask-id)))
+                _ (sync-call-branch! conn (:cfg st) db0 spawn-branch callee callee-e fspec spawn-ent subtask subtask-id)
                 db (:db-after r)
                 cid (d/commit-id db)]
             (reply! msg (cond-> {:ok? true :call-id call-id :caller caller :callee callee :status :pending
