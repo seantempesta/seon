@@ -9,7 +9,8 @@
             [seon.store :refer [rm-rf!]]
             [seon.bench.helpers :as bh]
             [jolt.fs :as fs]
-            [jolt.process :as proc]))
+            [jolt.process :as proc]
+            [clojure.core.async.flow :as flow]))
 
 (defn parse-listening-port [& args] (apply bh/parse-listening-port args))
 
@@ -373,29 +374,73 @@
         (when-let [inst-handle @inst-ref] (stop-instance! inst-handle {:keep-dir? keep-dirs?}))))))
 
 (defn ^:seon.flow/edge run-parallel-trial!
-  "Runs `tasks` concurrently across up to `:max-parallel-instances` (default 3) isolated `target/seon` instances and cleans up every instance."
+  "Runs `tasks` through a static `clojure.core.async.flow` bounded worker pool (`:max-parallel-instances`, default 3) with pure channel backpressure and clean `flow/stop` teardown."
   {:malli/schema [:=> [:cat [:? :map]] :map]}
   ([] (run-parallel-trial! {:tasks []}))
   ([{:keys [tasks proxy? proxy-opts model-base-url boot-timeout-ms task-timeout-ms keep-dirs? max-parallel-instances]
      :as opts :or {proxy? false boot-timeout-ms 60000 task-timeout-ms 60000 keep-dirs? false max-parallel-instances 3}}]
    (let [started-ns (System/nanoTime)
-         sem (java.util.concurrent.Semaphore. (int (max 1 (long max-parallel-instances))))
-         proxy-inst (when proxy? (proxy/start! (or proxy-opts {})))
-         run-opts (assoc opts :eff-base-url (or (when proxy-inst (:base-url proxy-inst)) model-base-url)
-                         :proxy-instance proxy-inst :boot-timeout-ms boot-timeout-ms
-                         :task-timeout-ms task-timeout-ms :keep-dirs? keep-dirs?)]
-     (try
-       (let [results (->> (map-indexed vector tasks)
-                          (mapv (fn [[idx task]]
-                                  (a/thread
-                                    (.acquire sem)
-                                    (try (run-one-trial! idx task run-opts)
-                                         (finally (.release sem))))))
-                          (mapv a/<!!))]
-         {:ok? (every? :ok? results) :count (count results)
-          :elapsed-ms (/ (double (- (System/nanoTime) started-ns)) 1e6)
-          :results results :proxy-stats (when proxy-inst (proxy/stats proxy-inst))})
-       (finally (when proxy-inst (proxy/stop! proxy-inst)))))))
+         tvec (vec tasks)
+         total (count tvec)]
+     (if (zero? total)
+       {:ok? true :count 0 :elapsed-ms 0.0 :results [] :proxy-stats nil}
+       (let [n-par (int (min total (max 1 (long max-parallel-instances))))
+             proxy-inst (when proxy? (proxy/start! (or proxy-opts {})))
+             run-opts (assoc opts :eff-base-url (or (when proxy-inst (:base-url proxy-inst)) model-base-url)
+                             :proxy-instance proxy-inst :boot-timeout-ms boot-timeout-ms
+                             :task-timeout-ms task-timeout-ms :keep-dirs? keep-dirs?)
+             wkeys (mapv #(keyword (str "w" %)) (range n-par))
+             kick-ch (a/chan 1)
+             done-ch (a/chan 1)
+             disp-fn (fn
+                       ([] {:params {:kick-ch "Startup trigger" :done-ch "Result delivery"}
+                            :ins {:done "Completed `[wkey idx res]`"}
+                            :outs (zipmap wkeys (repeat "Task `[idx task]`"))
+                            :workload :mixed})
+                       ([{:keys [kick-ch done-ch]}]
+                        {:pending (vec (map-indexed vector tvec)) :free (vec wkeys) :results []
+                         :done-ch done-ch ::flow/in-ports {:kick kick-ch}})
+                       ([st _] st)
+                       ([st in-id msg]
+                        (let [st1 (if (= in-id :done)
+                                    (let [[wk idx res] msg]
+                                      (-> st (update :free conj wk) (update :results conj [idx res])))
+                                    st)
+                              disp (loop [s st1 outs {}]
+                                     (if (and (seq (:free s)) (seq (:pending s)))
+                                       (let [wk (first (:free s)) item (first (:pending s))]
+                                         (recur (-> s (update :free #(subvec % 1)) (update :pending #(subvec % 1)))
+                                                (assoc outs wk [item])))
+                                       [s outs]))
+                              [st2 outs] disp]
+                          (when (= total (count (:results st2)))
+                            (a/put! (:done-ch st2) (mapv second (sort-by first (:results st2))))
+                            (a/close! (:done-ch st2)))
+                          [st2 (when (seq outs) outs)])))
+             make-worker (fn [wk]
+                           (fn
+                             ([] {:ins {:in "`[idx task]`"} :outs {:out "`[wk idx res]`"} :workload :io})
+                             ([_] {:wk wk})
+                             ([st _] st)
+                             ([st _ [idx task]]
+                              [st {:out [[wk idx (run-one-trial! idx task run-opts)]]}])))
+             procs (into {:dispatcher {:proc (flow/process disp-fn) :args {:kick-ch kick-ch :done-ch done-ch}
+                                       :chan-opts {:done {:buf-or-n (max 4 (* 2 n-par))}}}}
+                         (map (fn [wk] [wk {:proc (flow/process (make-worker wk)) :chan-opts {:in {:buf-or-n 1}}}]) wkeys))
+             conns (vec (mapcat (fn [wk] [[[:dispatcher wk] [wk :in]] [[wk :out] [:dispatcher :done]]]) wkeys))
+             g (flow/create-flow {:procs procs :conns conns})]
+         (try
+           (flow/start g)
+           (flow/resume g)
+           (a/>!! kick-ch :start)
+           (let [results (a/<!! done-ch)]
+             {:ok? (every? :ok? results) :count (count results)
+              :elapsed-ms (/ (double (- (System/nanoTime) started-ns)) 1e6)
+              :results results :proxy-stats (when proxy-inst (proxy/stats proxy-inst))})
+           (finally
+             (try (flow/stop g) (catch Throwable _ nil))
+             (a/close! kick-ch)
+             (when proxy-inst (proxy/stop! proxy-inst)))))))))
 
 (defn- result->stored-trial [result-row]
   (let [row-status (cond (:ok? result-row) (if (:merged? result-row) :merged :passed)

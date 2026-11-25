@@ -427,3 +427,38 @@
         (is (false? (:ok? (to (assoc base :health-res {:ok? false})))) "trial-outcome must reject unhealthy main")
         (is (false? (:ok? (to (assoc base :health-res {:ok? true} :verify-res {:ok? false :reason "still loose"})))) "trial-outcome must reject failed verify-spec")
         (is (true? (:ok? (to (assoc base :health-res {:ok? true} :verify-res {:ok? true})))))))))
+
+(deftest wave3-auto-proofs-repl-multi-arity-and-flow-pool-test
+  (testing "Wave 3: <auto-proofs> renders in wire tail, multi-arity stress-var works, ns-unmap persists, in-ns hydrates clojure.core, and Flow trial pool runs bounded"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (or rules/*base-rules-override* (rseed/starter-rules))})
+      (d/transact conn {:tx-data [{:seon.agent/id :w/proofs :seon.agent/branch :main
+                                   :seon.agent/last-proofs {:tx 99 :ok? false :ran 3 :passed 2 :failed 1 :ms 12.5 :failures ["foo/bar [gen]: failed"]}}]})
+      ;; 1. <auto-proofs> tail block surfaces :seon.agent/last-proofs
+      (let [w (rwire/build-live-wire-request @conn @conn :w/proofs {:include-tail? true})
+            pb (some #(when (= "auto-proofs" (:tag %)) %) (:tail-blocks w))]
+        (is (some? pb) "<auto-proofs> tail block must render :seon.agent/last-proofs")
+        (is (.contains ^String (:text pb) "foo/bar [gen]: failed")))
+      ;; 2. Multi-arity [:function ...] with concrete types is generatable & stressed
+      (is (true? (schema/generatable-function-schema? [:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]])))
+      (is (true? (:ok? (schema/stress-var @conn 'seon.code.parse/lead-end {:samples 15 :seed 42}))))
+      ;; 3. (in-ns 'demo.fresh-test) hydrates clojure.core + clojure.test, and (ns-unmap ...) retracts from Datahike
+      (let [r1 (code/eval-forms @conn {:agent-id :w/proofs :turn 1} "(in-ns 'demo.fresh-w3-test) (defn helper [x] (+ x 1)) (deftest h-test (is (= 2 (helper 1))))")
+            _ (d/transact conn {:tx-data (:tx-data r1)})
+            r2 (code/eval-forms @conn {:agent-id :w/proofs :turn 2} "(ns-unmap 'demo.fresh-w3-test 'helper)")
+            _ (d/transact conn {:tx-data (:tx-data r2)})]
+        (is (:ok? r1) (str "in-ns auto-hydration must work: " (:error r1)))
+        (is (:ok? r2) (str "ns-unmap must succeed: " (:error r2)))
+        (is (nil? (first (d/datoms @conn :avet :seon.code.var/name 'demo.fresh-w3-test/helper))) "ns-unmap must retract var from Datahike"))
+      ;; 4. Atomic eval error does not persist earlier forms
+      (let [r3 (code/eval-forms @conn {:agent-id :w/proofs :turn 3} "(in-ns 'demo.atomic-w3) (defn partial-fn [x] x) (throw (ex-info \"boom\" {}))")
+            _ (d/transact conn {:tx-data (:tx-data r3)})]
+        (is (false? (:ok? r3)))
+        (is (nil? (first (d/datoms @conn :avet :seon.code.var/name 'demo.atomic-w3/partial-fn))) "Failed eval must not persist partial earlier forms"))
+      ;; 5. Canonical form-identity for deftype/extend-type/declare
+      (is (= ['deftype 'Box] (seon.code.parse/named-expr-sig "(deftype Box [x])")))
+      (is (= ['extend-type 'String] (seon.code.parse/named-expr-sig "(extend-type String Foo)")))
+      ;; 6. Flow trial pool handles empty tasks cleanly
+      (let [pr (seon.bench.cluster/run-parallel-trial! {:tasks []})]
+        (is (true? (:ok? pr)))
+        (is (= 0 (:count pr)))))))

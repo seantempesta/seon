@@ -392,15 +392,24 @@
          (store/config-val (store/head conn :main) agent-id k))))
 
 (defn ^:seon.flow/edge register-schema!
-  "Validates and registers a Malli schema `:seon.schema/*` entity and its derived Datahike attributes."
-  {:seon.repl/export true, :malli/schema [:function [:=> [:cat :seon.schema/key :seon.schema/form] [:maybe :map]] [:=> [:cat :seon.schema/key :seon.schema/form [:maybe :map]] [:maybe :map]]]}
+  "Validates and registers a Malli schema `:seon.schema/*` entity and its derived Datahike attributes. Accepts optional 3rd arg as map `{:doc :examples :context-policy}` or doc string."
+  {:seon.repl/export true, :malli/schema [:function [:=> [:cat :seon.schema/key :seon.schema/form] [:maybe :map]] [:=> [:cat :seon.schema/key :seon.schema/form [:maybe [:or :map :string]]] [:maybe :map]]]}
   ([key form] (register-schema! key form nil))
-  ([key form {:keys [doc examples]}]
+  ([key form opts-or-doc]
    (when-let [{:keys [conn]} *agent-ctx*]
-     (let [{:keys [sample entity dh-decls retract-ops]}
-           (schema/validate-schema-registration! @conn {:key key :form form :doc doc :examples examples})]
+     (let [db0 @conn
+           opts (cond (string? opts-or-doc) {:doc opts-or-doc} (map? opts-or-doc) opts-or-doc :else {})
+           prev (when (and (contains? (:schema db0) :seon.schema/key)
+                           (first (d/datoms db0 :avet :seon.schema/key key)))
+                  (d/pull db0 '[:seon.schema/doc :seon.schema/examples :seon.schema/context-policy] [:seon.schema/key key]))
+           doc (or (:doc opts) (:seon.schema/doc prev))
+           examples (or (:examples opts) (:seon.schema/examples prev))
+           cpol (or (:context-policy opts) (:seon.schema/context-policy prev))
+           {:keys [sample entity dh-decls retract-ops]}
+           (schema/validate-schema-registration! db0 {:key key :form form :doc doc :examples examples})
+           ent' (cond-> entity cpol (assoc :seon.schema/context-policy cpol))]
        (when (seq dh-decls) (d/transact conn {:tx-data dh-decls}))
-       (let [r (d/transact conn {:tx-data (vec (concat retract-ops [entity]))})]
+       (let [r (d/transact conn {:tx-data (vec (concat retract-ops [ent']))})]
          (ctx/refresh-active! (:db-after r) (:tx-data r)))
        {:registered key :sample sample :derived-attributes (mapv :db/ident dh-decls)}))))
 

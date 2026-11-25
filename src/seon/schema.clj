@@ -457,111 +457,75 @@
 (defn- live-branch-db []
   (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref :conn deref))
 
+(defn- stress-arity [fn-sym target-fn opts registry ar-sch top-examples samples seed measure-fn budgets]
+  (let [[cat-s ret-s guard-s] (m/children ar-sch)
+        valid-in? (m/validator cat-s opts) valid-ret? (m/validator ret-s opts)
+        valid-guard? (when guard-s (m/validator guard-s opts))
+        {:keys [ticks-budget bytes-budget ms-budget]} budgets
+        repro? (fn [ca] (and (valid-in? ca)
+                             (try (let [rv (apply target-fn ca)]
+                                    (or (not (valid-ret? rv)) (and valid-guard? (not (valid-guard? [ca rv])))))
+                                  (catch Throwable _ true))))
+        check1 (fn [a [tag sargs exp]]
+                 (let [fail (fn [extra rfn]
+                              (let [sh (when (and (= tag :sample) (sequential? sargs)) (shrink-failing-args (vec sargs) repro? 24))
+                                    ea (or sh sargs)]
+                                (reduced (cond-> (merge {:ok? false :var fn-sym :args ea :reason (rfn ea)} extra)
+                                           (and sh (not= sh sargs)) (assoc :shrunk-args sh :original-args sargs)))))]
+                   (try
+                     (let [run1 #(if measure-fn (measure-fn (fn [] (apply target-fn sargs))) {:val (apply target-fn sargs) :ticks 0 :bytes 0 :ms 0.0})
+                           r0 (run1)
+                           {:keys [val ticks bytes ms]} (if (and measure-fn (or (and ticks-budget (> (:ticks r0) ticks-budget)) (and bytes-budget (> (:bytes r0) bytes-budget)) (and ms-budget (:ms r0) (> (:ms r0) ms-budget)))) (run1) r0)]
+                       (cond
+                         (and (= tag :example) (not= exp val)) (fail {:example? true :expected exp :return val} #(str "Example failed on " fn-sym " args " (pr-str %) ": expected " (pr-str exp) ", got " (pr-str val)))
+                         (not (valid-ret? val)) (fail {:return val :blame :output-contract :human (me/humanize (m/explain ret-s val opts))} #(str "Return value failed schema " (pr-str (m/form ret-s)) " on args " (pr-str %) ": got " (pr-str val)))
+                         (and valid-guard? (not (valid-guard? [sargs val]))) (fail {:return val :blame :output-contract :relational-guard-failed? true} #(str "Relational postcondition failed on " fn-sym " args " (pr-str %) " -> " (pr-str val)))
+                         (and ticks-budget (> ticks ticks-budget)) (fail {:ticks ticks :ticks-budget ticks-budget} #(str "Cost overrun on " fn-sym ": " ticks " ticks > :cost/ticks " ticks-budget " on args " (pr-str %)))
+                         (and bytes-budget (> bytes bytes-budget)) (fail {:bytes bytes :bytes-budget bytes-budget} #(str "Allocation overrun on " fn-sym ": " bytes " bytes > :cost/bytes " bytes-budget " on args " (pr-str %)))
+                         (and ms-budget ms (> ms ms-budget)) (fail {:call-ms ms :ms-budget ms-budget} #(str "Time overrun on " fn-sym ": " ms " ms > :cost/ms " ms-budget " on args " (pr-str %)))
+                         :else (-> a (update :ran inc) (update :max-ticks max (long (or ticks 0))) (update :max-bytes max (long (or bytes 0))))))
+                     (catch Throwable ex
+                       (fail {:exception (.getMessage ex) :blame :exception} #(str "Threw exception on " (if (= tag :example) "example" (str "seed=" seed)) " args " (pr-str %) ": " (.getMessage ex)))))))
+        ex-out (reduce check1 {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} (map (fn [[a e]] [:example a e]) top-examples))]
+    (if-not (:ok? ex-out)
+      ex-out
+      (let [batches (try (mg/generate [:vector {:min samples :max samples} cat-s] {:registry registry :seed seed :size 8})
+                         (catch Throwable t {:gen-error (.getMessage t)}))]
+        (if (map? batches)
+          {:ok? false :var fn-sym :reason (str "Generator failed for " fn-sym ": " (:gen-error batches))}
+          (reduce check1 ex-out (map (fn [a] [:sample a nil]) batches)))))))
+
 (defn stress-var
-  "Deterministically exercises `fn-sym` with concrete `:examples`, relational `:=>` guard, `seed = 42` generated inputs,
-   deterministic counterexample shrinking, and `:cost/*` budgets."
+  "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets."
   {:malli/schema [:function [:=> [:cat :qualified-symbol] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
   ([fn-sym] (stress-var (live-branch-db) fn-sym {}))
   ([a b] (if (qualified-symbol? a) (stress-var (live-branch-db) a (if (map? b) b {})) (stress-var a b {})))
   ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
-   (when-let [v (resolve fn-sym)]
+   (when-let [v (or (resolve fn-sym) (try (requiring-resolve fn-sym) (catch Throwable _ nil)))]
      (let [m0 (meta v)
            v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)) (not= (:seon.code/reexport m0) fn-sym))
-               (or (resolve (:seon.code/reexport m0)) v)
-               v)
-           m (meta v)
-           sch-form (:malli/schema m)
+               (or (resolve (:seon.code/reexport m0)) v) v)
+           m (meta v) sch-form (:malli/schema m)
            skip-reason (stress-skip-reason db fn-sym m)]
        (cond
-         skip-reason
-         {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
-
+         skip-reason {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
          (generatable-function-schema? sch-form)
-         (let [{:keys [registry]} (registry-for-db db)
-               opts {:registry registry}
-               fn-sch (m/schema sch-form opts)
-               [cat-s ret-s guard-s] (m/children fn-sch)
-               valid-in? (m/validator cat-s opts)
-               valid-ret? (m/validator ret-s opts)
-               valid-guard? (when guard-s (m/validator guard-s opts))
-               target-fn (or (:seon/raw-fn m) @v)
-               ticks-budget (:cost/ticks m)
-               bytes-budget (:cost/bytes m)
-               ms-budget (:cost/ms m)
-               examples (:examples (m/properties fn-sch))
+         (let [{:keys [registry]} (registry-for-db db) opts {:registry registry}
+               fn-sch (m/schema sch-form opts) target-fn (or (:seon/raw-fn m) @v)
+               budgets {:ticks-budget (:cost/ticks m) :bytes-budget (:cost/bytes m) :ms-budget (:cost/ms m)}
                t0 (System/nanoTime)
-               arg-batches (try
-                             (mg/generate [:vector {:min samples :max samples} cat-s]
-                                          {:registry registry :seed seed :size 8})
-                             (catch Throwable t {:gen-error (.getMessage t)}))]
-           (if (map? arg-batches)
-             {:ok? false :var fn-sym :reason (str "Generator failed for " fn-sym ": " (:gen-error arg-batches))}
-             (let [repro-fail? (fn [cand-args]
-                                 (and (valid-in? cand-args)
-                                      (try
-                                        (let [rv (apply target-fn cand-args)]
-                                          (or (not (valid-ret? rv))
-                                              (and valid-guard? (not (valid-guard? [cand-args rv])))))
-                                        (catch Throwable _ true))))
-                   check-one
-                   (fn [acc [tag sample-args expected]]
-                     (let [fail (fn [extra reason]
-                                  (let [shrunk (when (and (= tag :sample) (sequential? sample-args))
-                                               (shrink-failing-args (vec sample-args) repro-fail? 24))]
-                                    (reduced (cond-> (merge {:ok? false :var fn-sym :args (or shrunk sample-args) :reason reason} extra)
-                                               (and shrunk (not= shrunk sample-args))
-                                               (assoc :shrunk-args shrunk :original-args sample-args)))))]
-                       (try
-                         (let [run1 #(if measure-fn (measure-fn (fn [] (apply target-fn sample-args)))
-                                        {:val (apply target-fn sample-args) :ticks 0 :bytes 0 :ms 0.0})
-                               r0 (run1)
-                               {:keys [val ticks bytes ms]}
-                               (if (and measure-fn
-                                        (or (and ticks-budget (> (:ticks r0) ticks-budget))
-                                            (and bytes-budget (> (:bytes r0) bytes-budget))
-                                            (and ms-budget (:ms r0) (> (:ms r0) ms-budget))))
-                                 (run1) r0)]
-                           (cond
-                             (and (= tag :example) (not= expected val))
-                             (fail {:example? true :expected expected :return val}
-                                   (str "Example failed on " fn-sym " args " (pr-str sample-args)
-                                        ": expected " (pr-str expected) ", got " (pr-str val)))
-
-                             (not (valid-ret? val))
-                             (fail {:return val :blame :output-contract :human (me/humanize (m/explain ret-s val opts))}
-                                   (str "Return value failed schema " (pr-str (m/form ret-s))
-                                        " on args " (pr-str sample-args) ": got " (pr-str val)))
-
-                             (and valid-guard? (not (valid-guard? [sample-args val])))
-                             (fail {:return val :blame :output-contract :relational-guard-failed? true}
-                                   (str "Relational postcondition failed on " fn-sym
-                                        " args " (pr-str sample-args) " -> " (pr-str val)))
-
-                             (and ticks-budget (> ticks ticks-budget))
-                             (fail {:ticks ticks :ticks-budget ticks-budget}
-                                   (str "Cost overrun on " fn-sym ": " ticks " ticks > :cost/ticks " ticks-budget
-                                        " on args " (pr-str sample-args)))
-
-                             (and bytes-budget (> bytes bytes-budget))
-                             (fail {:bytes bytes :bytes-budget bytes-budget}
-                                   (str "Allocation overrun on " fn-sym ": " bytes " bytes > :cost/bytes " bytes-budget
-                                        " on args " (pr-str sample-args)))
-
-                             (and ms-budget ms (> ms ms-budget))
-                             (fail {:call-ms ms :ms-budget ms-budget}
-                                   (str "Time overrun on " fn-sym ": " ms " ms > :cost/ms " ms-budget
-                                        " on args " (pr-str sample-args)))
-
-                             :else
-                             (-> acc (update :ran inc)
-                                 (update :max-ticks max (long (or ticks 0)))
-                                 (update :max-bytes max (long (or bytes 0))))))
-                         (catch Throwable ex
-                           (fail {:exception (.getMessage ex) :blame :exception}
-                                 (str "Threw exception on " (if (= tag :example) "example" (str "seed=" seed))
-                                      " args " (pr-str sample-args) ": " (.getMessage ex)))))))
-                   items (concat (map (fn [[a exp]] [:example a exp]) examples)
-                                 (map (fn [a] [:sample a nil]) arg-batches))
-                   outcome (reduce check-one {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} items)
-                   ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
-               (assoc outcome :ms (double ms))))))))))
+               arities (if (= :function (m/type fn-sch))
+                         (filterv #(generatable-function-schema? (m/form %)) (m/children fn-sch))
+                         [fn-sch])
+               top-ex (vec (or (:examples (m/properties fn-sch)) (:malli/examples m)))
+               per (max 1 (quot (long samples) (max 1 (count arities))))
+               out (reduce (fn [acc [i ar]]
+                             (let [exs (vec (concat (when (zero? i) top-ex) (when (not= ar fn-sch) (:examples (m/properties ar)))))
+                                   r (stress-arity fn-sym target-fn opts registry ar exs per (+ (long seed) i) measure-fn budgets)]
+                               (if (:ok? r)
+                                 (-> acc (update :ran + (:ran r 0)) (update :max-ticks max (:max-ticks r 0)) (update :max-bytes max (:max-bytes r 0)))
+                                 (reduced r))))
+                           {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0}
+                           (map-indexed vector arities))
+               ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
+           (assoc out :ms (double ms))))))))

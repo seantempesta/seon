@@ -55,19 +55,15 @@
 (defn lead-end
   {:malli/schema [:function [:=> [:cat :string [:int {:min 0}] [:int {:min 0}]] :int]]}
   [^String text i end]
-  (loop [i (int i)]
-    (if (>= i end)
-      end
-      (let [c (.charAt text i)]
-        (cond
-          (or (Character/isWhitespace c) (= c \,))
-          (recur (inc i))
-
-          (= c \;)
-          (let [nl (.indexOf text "\n" i)]
-            (recur (int (if (or (neg? nl) (> nl end)) end (inc nl)))))
-
-          :else i)))))
+  (let [lim (min (int end) (.length text))]
+    (loop [i (max 0 (min (int i) lim))]
+      (if (>= i lim)
+        lim
+        (let [c (.charAt text i)]
+          (cond
+            (or (Character/isWhitespace c) (= c \,)) (recur (inc i))
+            (= c \;) (let [nl (.indexOf text (int \newline) i)] (if (or (neg? nl) (>= nl lim)) lim (recur (inc nl))))
+            :else i))))))
 
 (defn parse-ns-decl
   {:malli/schema [:=> [:cat :any] [:maybe :map]], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -229,32 +225,19 @@
   (sha256-hex16 (pr-str [nsym (clean-edn-for-hash (strip-docstring form))])))
 
 (defn form-identity
-{:malli/schema [:=> [:cat :symbol :any :string] :map], :cost/ticks 3000000, :cost/bytes 3000000}
-[nsym form src]
-(if (and (seq? form) (symbol? (first form)))
-  (let [hd (symbol (name (first form)))
-        arg1 (second form)]
-    (cond
-      (= 'ns hd)
-      {:key (str nsym "#ns") :def-sym nil :test? false}
-
-      (and (contains? def-heads hd) (symbol? arg1))
-      {:key (str nsym "/" (name arg1))
-       :def-sym arg1
-       :test? (= 'deftest hd)}
-
-      (and (= 'defmethod hd) (symbol? arg1))
-      {:key (str nsym "/" (name arg1) "#method#" (pr-str (nth form 2 nil)))
-       :def-sym nil
-       :test? false}
-
-      :else
-      {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10))
-       :def-sym nil
-       :test? false}))
-  {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10))
-   :def-sym nil
-   :test? false}))
+  {:malli/schema [:=> [:cat :symbol :any :string] :map], :cost/ticks 3000000, :cost/bytes 3000000}
+  [nsym form src]
+  (if (and (seq? form) (symbol? (first form)))
+    (let [hd (symbol (name (first form)))
+          arg1 (second form)]
+      (cond
+        (= 'ns hd) {:key (str nsym "#ns") :def-sym nil :test? false}
+        (and (contains? def-heads hd) (symbol? arg1)) {:key (str nsym "/" (name arg1)) :def-sym arg1 :test? (= 'deftest hd)}
+        
+        (and (= 'defmethod hd) (symbol? arg1))
+        {:key (str nsym "/" (name arg1) "#method#" (pr-str (nth form 2 nil))) :def-sym nil :test? false}
+        :else {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10)) :def-sym nil :test? false}))
+    {:key (str nsym "#expr#" (subs (sha256-hex16 src) 0 10)) :def-sym nil :test? false}))
 
 (defn collect-symbols
   {:malli/schema [:=> [:cat [:set :symbol] :any] [:set :symbol]], :cost/ticks 3000000, :cost/bytes 3000000}
@@ -490,6 +473,12 @@
       (vswap! hints conj "Hint: `(user/db)` and `(user/main-db)` ALREADY return immutable Datahike DB values — do NOT deref with `@`. Use `(user/db)` directly (or `@(user/conn)` for the connection).")) 
     (when (str/includes? e "No such var: seon.ctx/")
       (vswap! hints conj "Hint: Do not reach into `seon.ctx/*` internals; use `(user/db)` for your branch db, `(user/main-db)` for `:main`, and `@ctx` for your live context snapshot."))
+    (when (or (str/includes? e "child-error") (str/includes? e "invalid-schema"))
+      (vswap! hints conj "Hint: In Malli use predicate symbols (`number?`, `pos-int?`, `nat-int?`), NEVER `:number`/`:pos-int`."))
+    (when (str/includes? e "validate-against")
+      (vswap! hints conj "Hint: Validate values with `(malli.core/validate sch val {:registry (:registry (seon.schema/registry-for-db (user/db)))})`."))
+    (when (and (str/includes? e "Cannot find entity") (re-find #"\((?:d|datahike\.api)/pull\b" c))
+      (vswap! hints conj "Hint: `d/pull` requires a lookup ref vector `[:attr val]` or integer EID, not a bare keyword."))
     (if (seq @hints)
       (str e "\n" (str/join "\n" (distinct @hints)))
       e)))
@@ -628,5 +617,5 @@
   (when (and (string? src) (not (str/blank? src)))
     (let [s (str/triml src)]
       (when (str/starts-with? s "(")
-        (when-let [[_ hd nm] (re-find #"^\(\s*(?:clojure\.core/)?(deftype|defrecord|definterface)\s+(?:\^\{[^}]*\}\s*|\^\S+\s*)*([A-Za-z_][A-Za-z0-9_.*+!\-?$]*)" s)]
-          [(symbol hd) (symbol nm)])))))
+        (when-let [[_ hd nm] (re-find #"^\(\s*(?:clojure\.core/)?(deftype|defrecord|definterface|extend-type|extend-protocol|declare)\s+(?:\^\{[^}]*\}\s*|\^\S+\s*)*([A-Za-z_][A-Za-z0-9_.*+!\-?$]*)" s)]
+        [(symbol hd) (symbol nm)])))))

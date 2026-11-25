@@ -131,13 +131,17 @@
   (let [vis? (or (boolean (:vision? st))
                  (and (:browser-enabled? st)
                       (model/vision-capable-model? (store/config-val main-db aid :seon.config/ai-model))))
+        prev-shown (get-in st [:live aid :shown])
         {:keys [wire st tx]} (build-wire-monitored st main-db bdb aid
                                                    (cond-> {:vision? vis?}
+                                                     (seq prev-shown) (assoc :delta-already-shown prev-shown)
                                                      snap (assoc :viewport-screenshot snap)))
         final-msgs (preview/attach-preview-frames-to-messages (:messages wire) preview-frames vis?)
         router? (boolean (or (:router? frame)
                              (:seon.agent/router? (datahike.api/pull main-db (quote [:seon.agent/router?]) [:seon.agent/id aid]))))]
-    [(assoc-in st [:model-reqs (:req-id frame)] {:pid pid :prefix-hash (:prefix-hash wire)})
+    [(cond-> (assoc-in st [:model-reqs (:req-id frame)] {:pid pid :prefix-hash (:prefix-hash wire)})
+       (and (contains? (:live st) aid) (map? (:shown wire)))
+       (assoc-in [:live aid :shown] (merge prev-shown (:shown wire))))
      (cond-> {:request [(assoc frame :router? router? :wire-messages final-msgs)]}
        (seq tx) (assoc :tx tx))]))
 
@@ -373,45 +377,47 @@
 (defn- handle-eval
   [st tick msg]
   (let [{:keys [branch agent-id agent code tool-calls ns keep-warm? reply-ch]} msg
-        raw-b (or branch :branch/repl)
-        b (if (= raw-b :main) :branch/repl raw-b)
-        aid (or agent-id agent (keyword "repl" (name b)))
-        _ (store/branch! (:conn st) :main b)
-        rseq (inc (:req-seq st))
-        req-id (str "eval-" rseq)
-        existing (get-in st [:live aid])
-        keep? (if (some? keep-warm?) (boolean keep-warm?) true)]
-    (cond
-      (and existing (number? (:pid existing)) (not (:busy? existing)))
-      (do
-        (a/put! (:fork-out st)
-                {:op :to-child :pid (:pid existing)
-                 :msg {:op :eval :req-id req-id :code code :tool-calls tool-calls :ns ns}})
+      raw-b (or branch :branch/repl)]
+  (if-not (keyword? raw-b)
+    (do (reply! reply-ch {:ok? false :error (str ":branch must be a keyword, got " (pr-str raw-b))}) [st nil])
+    (let [b (if (= raw-b :main) :branch/repl raw-b)
+          aid (or agent-id agent (keyword "repl" (name b)))
+          _ (store/branch! (:conn st) :main b)
+          rseq (inc (:req-seq st))
+          req-id (str "eval-" rseq)
+          existing (get-in st [:live aid])
+          keep? (if (some? keep-warm?) (boolean keep-warm?) true)]
+      (cond
+        (and existing (number? (:pid existing)) (not (:busy? existing)))
+        (do
+          (a/put! (:fork-out st)
+                  {:op :to-child :pid (:pid existing)
+                   :msg {:op :eval :req-id req-id :code code :tool-calls tool-calls :ns ns}})
+          [(-> st (assoc :req-seq rseq)
+               (assoc-in [:live aid :busy?] true)
+               (assoc-in [:live aid :last-active] tick)
+               (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
+               sync-agents-filter)
+           nil])
+
+        (and existing (:busy? existing))
         [(-> st (assoc :req-seq rseq)
-             (assoc-in [:live aid :busy?] true)
-             (assoc-in [:live aid :last-active] tick)
+             (update-in [:live aid :pending-evals] (fnil conj [])
+                        {:req-id req-id :code code :tool-calls tool-calls :ns ns})
              (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
              sync-agents-filter)
-         nil])
+         nil]
 
-      (and existing (:busy? existing))
-      [(-> st (assoc :req-seq rseq)
-           (update-in [:live aid :pending-evals] (fnil conj [])
-                      {:req-id req-id :code code :tool-calls tool-calls :ns ns})
-           (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
-           sync-agents-filter)
-       nil]
-
-      :else
-      (let [st1 (maybe-evict-lru-idle! st)]
-        (a/put! (:fork-out st1)
-                {:op :fork-agent :mode :repl :agent-id aid :branch b :cfg (:cfg st1)
-                 :initial-eval {:req-id req-id :code code :tool-calls tool-calls :ns ns}})
-        [(-> st1 (assoc :req-seq rseq)
-             (assoc-in [:live aid] {:pid :forking :branch b :mode :repl :busy? true :turns 0 :last-active tick})
-             (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
-             sync-agents-filter)
-         nil]))))
+        :else
+        (let [st1 (maybe-evict-lru-idle! st)]
+          (a/put! (:fork-out st1)
+                  {:op :fork-agent :mode :repl :agent-id aid :branch b :cfg (:cfg st1)
+                   :initial-eval {:req-id req-id :code code :tool-calls tool-calls :ns ns}})
+          [(-> st1 (assoc :req-seq rseq)
+               (assoc-in [:live aid] {:pid :forking :branch b :mode :repl :busy? true :turns 0 :last-active tick})
+               (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
+               sync-agents-filter)
+           nil]))))))
 
 (defn- handle-child-exited
   [st msg]

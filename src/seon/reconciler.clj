@@ -315,7 +315,7 @@
                                (or (nil? store) (nil? br) (= br :main) (store/branch? store br))))
                     eid))]
      (let [ma (d/pull main-db (quote [:seon.agent/id :seon.agent/parent :seon.agent/scope :seon.agent/branch
-                                      {:seon.agent/tasks [:seon.task/id]} :seon.agent/target :seon.agent/forked-from
+                                      {:seon.agent/tasks [:seon.task/id]} :seon.agent/target :seon.agent/forked-from :seon.agent/fork-commit
                                       :seon.agent/merge-target :seon.agent/router? :seon.agent/interactive? :seon.agent/goal
                                       :seon.agent/paused? :seon.agent/auto-merge? :seon.agent/tested-tx :seon.agent/merged-tx
                                       :seon.agent/awaiting]) e)
