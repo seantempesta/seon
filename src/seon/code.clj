@@ -149,7 +149,15 @@
     (symbol "result" (str "e" n))))
 
 (defn- effective-eval-budgets [form-val base-ticks base-bytes]
-  (let [test-ov {:ticks 2000000000 :bytes 4294967296}]
+  (let [test-ov {:ticks 2000000000 :bytes 4294967296}
+        nodes (tree-seq coll? seq form-val)
+        alias-map (into {}
+                    (keep (fn [n]
+                            (when (and (vector? n) (symbol? (first n)))
+                              (let [i (.indexOf ^java.util.List n :as)]
+                                (when (and (>= i 0) (< (inc i) (count n)) (symbol? (nth n (inc i))))
+                                  [(name (nth n (inc i))) (first n)])))))
+                    nodes)]
     (reduce
      (fn [[t b] x]
        (if-let [ov (when (symbol? x)
@@ -157,14 +165,17 @@
                        (if (or (= nm "run-tests") (= nm "run-all-tests") (= nm "test-vars") (= nm "test-var"))
                          test-ov
                          (when-let [v (if-let [ns-s (namespace x)]
-                                        (when-let [nso (find-ns (symbol ns-s))] (ns-resolve nso (symbol nm)))
+                                        (or (ns-resolve *ns* x)
+                                            (when-let [nso (or (find-ns (symbol ns-s))
+                                                               (when-let [full (get alias-map ns-s)] (find-ns full)))]
+                                              (ns-resolve nso (symbol nm))))
                                         (ns-resolve *ns* x))]
                            (when (var? v) (:seon.eval/budget-override (meta v)))))))]
          [(max t (long (or (:ticks ov) t)))
           (max b (long (or (:bytes ov) b)))]
          [t b]))
      [(long base-ticks) (long base-bytes)]
-     (tree-seq coll? seq form-val))))
+     nodes)))
 
 (defn task-file-path?
   {:malli/schema [:=> [:cat :string] :boolean]}

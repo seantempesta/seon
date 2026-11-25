@@ -412,7 +412,7 @@
 
 (defn ^:seon.flow/edge coverage-report
   "NASA coverage report (`:seon.health/coverage`, <16ms warm); `{:include-corpus? true}` adds 12-scenario corpus."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]] :cost/ticks 60000000}
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db]] :map] [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]], :cost/ticks 60000000, :seon.eval/budget-override {:ticks 600000000, :bytes 1073741824}}
   ([db] (coverage-report db nil))
   ([db opts]
    (let [inc-a? (not (false? (:include-atlas? opts))) inc-c? (boolean (:include-corpus? opts))

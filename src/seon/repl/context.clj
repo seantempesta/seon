@@ -89,7 +89,7 @@
 
 (defn ^:seon.flow/edge check-corpus
   "Runs the 12-scenario Situation Corpus & generality lint on branch vs `:main`."
-  {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]] :cost/ticks 80000000 :seon.eval/budget-override {:ticks 300000000 :bytes 536870912}}
+  {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]], :cost/ticks 80000000, :seon.eval/budget-override {:ticks 600000000, :bytes 1073741824}}
   ([] (check-corpus nil))
   ([opts]
    (let [{:keys [bdb mdb]} (repl-dbs (if (map? opts) opts {})) rr requiring-resolve]

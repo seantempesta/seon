@@ -18,7 +18,8 @@
             [seon.code.reach :as reach]
             [seon.fork.calls :as fcalls]
             [seon.ctx.touches :as ctouches]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [seon.repl.search :as rsearch]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -492,3 +493,25 @@
           (is (has-form? db2 "demo.w9e-unmap/keep-const"))
           (is (not (has-form? db2 "demo.w9e-unmap/tmp-a")) "doseq ns-unmap must retract form from Datahike")
           (is (not (has-form? db2 "demo.w9e-unmap/tmp-b")) "doseq ns-unmap must retract form from Datahike"))))))
+
+(deftest wave10c-aliased-budget-ns-size-summary-and-ask-kwargs-test
+  (testing "effective-eval-budgets resolves aliased vars (both in-form :as and required aliases)"
+    (let [eb #'seon.code/effective-eval-budgets
+          [_ b-in-form] (eb '(do (require '[seon.code.mine :as mn]) (mn/mine-hygiene-findings db)) 100 1000)
+          [_ b-fq] (eb '(seon.code.mine/mine-hygiene-findings db) 100 1000)]
+      (is (>= b-in-form 1073741824))
+      (is (= b-fq b-in-form))))
+  (testing "ns-size-summary ranks namespaces by token count in O(N) without loading form source"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (concat
+                                  (code/file-import-tx @conn "src/demo/small.clj" "(ns demo.small)\n(defn a [] 1)\n" false)
+                                  (code/file-import-tx @conn "src/demo/big.clj" "(ns demo.big)\n(defn f [x] (+ x 1))\n(defn g [y] (* y 2))\n(defn h [z] (str z \"-extra-padding-text\"))\n" false))})
+      (let [rows (rsearch/ns-size-summary @conn {:prefix "demo."})]
+        (is (= ['demo.big 'demo.small] (mapv :ns rows)))
+        (is (> (:tokens (first rows)) (:tokens (second rows))))
+        (is (= 3 (:vars (first rows)))))))
+  (testing "ask! and call! Malli schemas accept both opts maps and variadic keyword args"
+    (doseq [v [#'fcalls/ask! #'fcalls/call!]]
+      (let [sch (:malli/schema (meta v))]
+        (is (some? sch))
+        (is (= [:cat :keyword :any [:* :any]] (second sch)))))))

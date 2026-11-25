@@ -493,4 +493,11 @@
   :seon.fix/id #uuid "ced5c874-3930-4552-a123-f2ce04e5679e",
   :seon.fix/regression-test seon.cst-metrics-test/wave10b-schema-lookup-ref-and-ns-quote-error-hints-test,
   :seon.fix/root-cause "enrich-eval-error lacked hints for those 3 recurring REPL error classes, and canonical helpers (lru-peek/put!, tx-instant-ms, normalize-inspect-ref, agent-task-ids) remained duplicated across 7 namespaces.",
-  :seon.fix/symptom "Agents retried on Long reverse idents in (:schema db), [:db/id eid] lookup refs, and quoted (ns 'foo); 7 namespaces duplicated canonical store/render helpers."}]
+  :seon.fix/symptom "Agents retried on Long reverse idents in (:schema db), [:db/id eid] lookup refs, and quoted (ns 'foo); 7 namespaces duplicated canonical store/render helpers."}
+ {:seon.fix/change-summary "Fixed effective-eval-budgets to resolve aliased vars (ns-resolve + in-form :as); added O(N) seon.repl.search/ns-size-summary wired to user/ns-list and 0-arg user/ns-outline; added variadic kwargs to ask!/call!; tightened specialist goal; returned explicit {:ok? false :reason \"skipped-due-to-timeout\"} on timeout; added deftest with-test-store note in docs/malli.md; restored 0 non-boot :large-function warnings.",
+  :seon.fix/created-ms 1795629554813,
+  :seon.fix/error-class :aliased-budget-ns-list-and-delegation-ergonomics,
+  :seon.fix/id #uuid "d6f1697c-000a-4251-be62-dfa42b85ef72",
+  :seon.fix/regression-test seon.alloc-guard-test/wave10c-aliased-budget-ns-size-summary-and-ask-kwargs-test,
+  :seon.fix/root-cause "effective-eval-budgets called (find-ns (symbol ns-s)) which returns nil on namespace aliases; no O(N) zero-source namespace size helper existed; ask!/call! only accepted 2-3 args; run-one-trial! left verify-res nil on timeout.",
+  :seon.fix/symptom "Aliased calls like (mine/mine-hygiene-findings db) silently dropped :seon.eval/budget-override; agents lacked user/ns-list and 0-arg user/ns-outline (causing 24-turn/4-OOM ns-size scans); user/ask! rejected kwargs; timed-out trials with :verify-spec displayed :verify-ok? true."}]

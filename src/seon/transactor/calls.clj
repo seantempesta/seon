@@ -305,7 +305,7 @@
   (let [fork-eid (:fork-eid fspec)]
     (cond-> {:seon.agent/id callee :seon.agent/parent caller :seon.agent/branch spawn-branch
              :seon.agent/scope inferred-scope :seon.agent/focus (str "ns/" inferred-scope)
-             :seon.agent/goal (or goal (str "Subsystem owner for namespace " inferred-scope " and its children. Research questions deeply (delegating to child :ns/<sub-ns> specialists when helpful), critique weak answers, edit/test code on your branch when asked to fix or refactor, and settle incoming calls via (user/answer! call-id val)."))
+             :seon.agent/goal (or goal (str "Subsystem owner for " inferred-scope ". Answer incoming calls concisely using canonical Seon helpers (`user/health`, `user/ns-list`, `seon.health.coverage/coverage-report`), edit/test on your branch when asked to modify code, and promptly settle via `(user/answer! call-id val)` once verified."))
              :seon.agent/auto-merge? eff-auto}
       fork-eid (assoc :seon.agent/forked-from fork-eid)
       (:fork-commit fspec) (assoc :seon.agent/fork-commit (:fork-commit fspec))
