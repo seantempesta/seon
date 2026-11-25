@@ -259,7 +259,7 @@
   (let [rch (a/chan 1)]
     (a/put! server-in-ch {:req req :reply-ch rch})
     (a/go
-      (let [[ans _] (a/alts! [rch (a/timeout 30000)])]
+      (let [[ans _] (a/alts! [rch (a/timeout (router/op-timeout-ms req))])]
         (when slot
           (let [val (if format-fn (format-fn (or ans {:ok? false :error :timeout})) (or ans {:ok? false :error :timeout}))]
             (a/put! ui-ch {:ev :action-done :slot slot :val val})))))))
@@ -290,10 +290,14 @@
   {:status 200 :headers {"Content-Type" "text/javascript; charset=utf-8" "Cache-Control" "public, max-age=3600"}
    :body @datastar-js-text})
 
-(defn- handle-op-route [{:keys [server-in-ch]} req]
-  (let [op-req (edn/read-string (req-body-str req))
-        ans (call-server-edge! server-in-ch op-req (router/op-timeout-ms op-req))]
-    {:status 200 :headers {"Content-Type" "application/edn; charset=utf-8"} :body (pr-str ans)}))
+(defn- ^:seon.flow/edge handle-op-route [{:keys [server-in-ch]} req]
+  (let [raw (req-body-str req)
+        op-req (try (binding [*read-eval* false] (edn/read-string raw)) (catch Throwable _ ::bad-edn))]
+    (if (or (= ::bad-edn op-req) (not (map? op-req)))
+      {:status 400 :headers {"Content-Type" "application/edn; charset=utf-8"}
+       :body (pr-str {:ok? false :error :invalid-edn})}
+      {:status 200 :headers {"Content-Type" "application/edn; charset=utf-8"}
+       :body (pr-str (call-server-edge! server-in-ch op-req (router/op-timeout-ms op-req)))})))
 
 (defn- handle-mcp-route [{:keys [server-in-ch conn]} req]
   (handle-mcp-jsonrpc! server-in-ch (req-body-str req) (when conn @conn)))

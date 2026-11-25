@@ -60,13 +60,6 @@
 (defn- busy-count [live-map]
   (count (filter (fn [[_ v]] (:busy? v)) live-map)))
 
-(defn- sync-agents-filter [st]
-  ;; Only backpressure `:run` when ALL `max-os-procs` slots are actively `:busy?`!
-  ;; If some slots are warm `:idle`, `:run` can LRU-evict an idle slot on demand!
-  (if (>= (busy-count (:live st)) (:max-os-procs st))
-    (assoc st ::flow/input-filter #{:fork-ev :response :browser-res :preview-res :eval :tx-reply})
-    (dissoc st ::flow/input-filter)))
-
 (defn- maybe-evict-lru-idle! [st]
   (if (< (count (:live st)) (:max-os-procs st))
     st
@@ -109,96 +102,6 @@
                  :retry-after-ms (long (or (:retry-after-ms resp) 0))
                  :seon.error/id (:seon.error/id err-ent)}]})]))
 
-(defn- handle-run
-  [st tick msg]
-  (if (= :release-agent (:op msg))
-    (let [aid (:agent-id msg)
-          existing (get-in st [:live aid])]
-      (when (and existing (number? (:pid existing)))
-        (a/put! (:fork-out st) {:op :to-child :pid (:pid existing) :msg {:op :stop}}))
-      [(sync-agents-filter (update st :live dissoc aid)) nil])
-    (let [{:keys [agent-id branch]} msg
-          existing (get-in st [:live agent-id])]
-      (cond
-        (:busy? existing)
-        [st nil]
-
-        (and existing (number? (:pid existing)))
-        (do
-          (a/put! (:fork-out st)
-                  {:op :to-child
-                   :pid (:pid existing)
-                   :msg {:op :run-turn}})
-          [(-> st
-               (assoc-in [:live agent-id :busy?] true)
-               (assoc-in [:live agent-id :last-active] tick)
-               sync-agents-filter)
-           {:exits [{:ev :turn-busy :agent-id agent-id :pid (:pid existing)}]}])
-
-        :else
-        (let [st1 (maybe-evict-lru-idle! st)]
-          (a/put! (:fork-out st1)
-                  {:op :fork-agent
-                   :mode :turn
-                   :agent-id agent-id
-                   :branch branch
-                   :cfg (:cfg st1)})
-          [(-> st1
-               (assoc-in [:live agent-id] {:pid :forking
-                                           :branch branch
-                                           :mode :turn
-                                           :busy? true
-                                           :turns 0
-                                           :last-active tick})
-               sync-agents-filter)
-           nil])))))
-
-(defn- handle-eval
-  [st tick msg]
-  (let [{:keys [branch agent-id agent code tool-calls ns keep-warm? reply-ch]} msg
-       raw-b (or branch :branch/repl)
-       b (if (= raw-b :main) :branch/repl raw-b)
-       aid (or agent-id agent (keyword "repl" (name b)))
-       _ (store/branch! (:conn st) :main b)
-       rseq (inc (:req-seq st))
-       req-id (str "eval-" rseq)
-       existing (get-in st [:live aid])
-       keep? (if (some? keep-warm?) (boolean keep-warm?) true)]
-    (cond
-      (and existing (number? (:pid existing)) (not (:busy? existing)))
-      (do
-        (a/put! (:fork-out st)
-                {:op :to-child
-                 :pid (:pid existing)
-                 :msg {:op :eval :req-id req-id :code code :tool-calls tool-calls :ns ns}})
-        [(-> st
-             (assoc :req-seq rseq)
-             (assoc-in [:live aid :busy?] true)
-             (assoc-in [:live aid :last-active] tick)
-             (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid}))
-         nil])
-
-      :else
-      (let [st1 (maybe-evict-lru-idle! st)]
-        (a/put! (:fork-out st1)
-                {:op :fork-agent
-                 :mode :repl
-                 :agent-id aid
-                 :branch b
-                 :cfg (:cfg st1)
-                 :initial-eval {:req-id req-id :code code :tool-calls tool-calls :ns ns}})
-        [(-> st1
-             (assoc :req-seq rseq)
-             (assoc-in [:live aid] {:pid :forking
-                                    :branch b
-                                    :mode :repl
-                                    :busy? true
-                                    :turns 0
-                                    :last-active tick})
-             (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
-             sync-agents-filter)
-         nil]))))
-
 (defn- handle-forked
   [st msg]
   (let [aid (:agent-id msg)
@@ -211,86 +114,6 @@
                    :busy? (get-in st' [:live aid :busy?] true)
                    :fork-ms (:fork-ms msg)}]
           :clojure.core.async.flow/report [(str "[:agents] COW forked " aid " -> PID " (:pid msg) " in " (:fork-ms msg) " ms")]}]))
-
-(defn- handle-child-exited
-  [st msg]
-  (let [aid (:agent-id msg)
-        cur-pid (get-in st [:live aid :pid])
-        st' (if (= cur-pid (:pid msg))
-              (sync-agents-filter (update st :live dissoc aid))
-              st)]
-    [st' {:exits [{:ev :exited :agent-id aid :pid (:pid msg) :raw-status (:raw-status msg)}]
-          :clojure.core.async.flow/report [(str "[:agents] " aid " (PID " (:pid msg) ") exited -> 0 OS resources held")]}]))
-
-(defn- handle-turn-committed
-  [st tick msg]
-  (let [f (:frame msg)
-        aid (:agent-id msg)
-        pid (:pid msg)
-        _ (doseq [tr (:tool-results f)
-                :let [eids (:touched-eids tr)]
-                :when (seq eids)]
-          (ctouches/record-live-reads-by-key! (get-in st [:cfg :store :id]) (:branch f) aid (long (or (:turn f) 1)) eids))
-        st' (-> st
-                (update :turns-done inc)
-                (cond-> (contains? (:live st) aid)
-                  (-> (assoc-in [:live aid :busy?] false)
-                      (assoc-in [:live aid :last-active] tick)
-                      (update-in [:live aid :turns] (fnil inc 0))))
-                sync-agents-filter)]
-    [st' {:exits [{:ev :turn-idle
-                   :agent-id aid
-                   :pid pid
-                   :branch (:branch f)
-                   :branch-tx (:branch-tx f)}]
-          :git (if (not= :main (:branch f)) [{:op :sync-branch :branch (:branch f)}] [])
-          :clojure.core.async.flow/report [(str "[" aid "] committed turn #" (:turn f) " on " (:branch f)
-                                               " @ tx " (:branch-tx f) " (PID " pid " kept warm)")]}]))
-
-(defn- handle-eval-done
-  [st tick msg]
-  (let [f (:frame msg)
-        aid (:agent-id msg)
-        pid (:pid msg)
-        req-id (:req-id f)
-        waiter (get-in st [:eval-waiters req-id])]
-    (reply! (:reply-ch waiter) (dissoc f :ev :req-id))
-    (when-not (:keep-warm? waiter)
-      (a/put! (:fork-out st) {:op :to-child :pid pid :msg {:op :stop}}))
-    [(-> st
-         (update :eval-waiters dissoc req-id)
-         (cond-> (and (:keep-warm? waiter) (contains? (:live st) aid))
-           (-> (assoc-in [:live aid :busy?] false)
-               (assoc-in [:live aid :last-active] tick)))
-         sync-agents-filter)
-     {:exits (cond-> [{:ev :branch-moved :agent-id aid :branch (:branch f) :branch-tx (:branch-tx f)}]
-               (:keep-warm? waiter)
-               (conj {:ev :turn-idle :agent-id aid :pid pid :branch (:branch f) :branch-tx (:branch-tx f)}))
-      :git (if (not= :main (:branch f)) [{:op :sync-branch :branch (:branch f)}] [])}]))
-
-(defn- handle-child-exception
-  [st msg]
-  (let [f (:frame msg)
-        aid (:agent-id msg)
-        pid (:pid msg)
-        err-str (str (or (:error f) "Child worker exception"))
-        matching-w (filter (fn [[_ w]] (= aid (:agent-id w))) (:eval-waiters st))
-        _ (doseq [[_ w] matching-w]
-            (reply! (:reply-ch w) {:ok? false :agent-id aid :error err-str}))
-        st' (-> st
-                (update :eval-waiters #(apply dissoc % (map first matching-w)))
-                (cond-> (contains? (:live st) aid)
-                  (assoc-in [:live aid :busy?] false))
-                sync-agents-filter)]
-    [st' {:tx [{:op :record-fault
-                :proc :agents
-                :class :child-exception
-                :severity :error
-                :agent aid
-                :subject (str aid)
-                :message err-str}]
-          :exits [{:ev :turn-idle :agent-id aid :pid pid}]
-          :clojure.core.async.flow/report [(str "[:agents] child exception on " aid ": " err-str)]}]))
 
 (defn- user-viewport-dims [main-db]
   (let [dh (store/db-schema main-db)
@@ -394,34 +217,6 @@
                     (and (some? viewing-agent) (= viewing-agent agent-id))
                     has-ui-previews?)))))
 
-(defn- handle-fork-refused [st msg]
-  (let [explicit-aid (:agent-id msg)
-        code (:code msg)
-        forking-aids (if explicit-aid
-                       [explicit-aid]
-                       (vec (keep (fn [[aid v]] (when (= :forking (:pid v)) aid)) (:live st))))
-        err-str (str "COW fork refused (code " code ")"
-                     (when (seq forking-aids) (str " for " (pr-str forking-aids))))
-        aid-set (set forking-aids)
-        matching-w (filter (fn [[_ w]] (contains? aid-set (:agent-id w))) (:eval-waiters st))
-        _ (doseq [[_ w] matching-w]
-            (reply! (:reply-ch w) {:ok? false :agent-id (:agent-id w) :error err-str :class :fork-refused}))
-        st' (-> st
-                (update :live #(apply dissoc % forking-aids))
-                (update :eval-waiters #(apply dissoc % (map first matching-w)))
-                sync-agents-filter)
-        faults (if (seq forking-aids)
-                 (mapv (fn [aid]
-                         {:op :record-fault :proc :agents :class :fork-refused :severity :error
-                          :agent aid :subject (str aid) :message err-str})
-                       forking-aids)
-                 [{:op :record-fault :proc :agents :class :fork-refused :severity :error
-                   :subject "seon.agent/fork" :message err-str}])
-        exits (mapv (fn [aid] {:ev :exited :agent-id aid :pid :forking :raw-status code}) forking-aids)]
-    [st' (cond-> {:tx faults
-                  :clojure.core.async.flow/report [(str "[:agents] " err-str)]}
-           (seq exits) (assoc :exits exits))]))
-
 (defn- latest-turn-painted-ui? [main-db bdb evals]
   (let [evs (if (sequential? evals) (filterv map? evals) [])
         max-t (reduce max 0 (map #(long (or (:seon.agent.eval/turn %) 0)) evs))
@@ -520,6 +315,223 @@
        {:exits [{:ev :branch-moved :agent-id aid :branch (:branch f)}]
         :browser-req browser-reqs}]
       (finish-model-request st main-db bdb aid pid f nil cached-frames))))
+
+(defonce ^:seon.flow/edge live-status-snap (atom {}))
+
+(defn- sync-agents-filter [st]
+  ;; Only backpressure `:run` when ALL `max-os-procs` slots are actively `:busy?`!
+  ;; If some slots are warm `:idle`, `:run` can LRU-evict an idle slot on demand!
+  (reset! live-status-snap (:live st))
+  (if (>= (busy-count (:live st)) (:max-os-procs st))
+    (assoc st ::flow/input-filter #{:fork-ev :response :browser-res :preview-res :eval :tx-reply})
+    (dissoc st ::flow/input-filter)))
+
+(defn- handle-run
+  [st tick msg]
+  (if (= :release-agent (:op msg))
+    (let [aid (:agent-id msg)
+          existing (get-in st [:live aid])]
+      (when (and existing (number? (:pid existing)))
+        (a/put! (:fork-out st) {:op :to-child :pid (:pid existing) :msg {:op :stop}}))
+      [(sync-agents-filter (update st :live dissoc aid)) nil])
+    (let [{:keys [agent-id branch]} msg
+          existing (get-in st [:live agent-id])]
+      (cond
+        (:busy? existing)
+        [st nil]
+
+        (and existing (number? (:pid existing)))
+        (do
+          (a/put! (:fork-out st)
+                  {:op :to-child
+                   :pid (:pid existing)
+                   :msg {:op :run-turn}})
+          [(-> st
+               (assoc-in [:live agent-id :busy?] true)
+               (assoc-in [:live agent-id :last-active] tick)
+               sync-agents-filter)
+           {:exits [{:ev :turn-busy :agent-id agent-id :pid (:pid existing)}]}])
+
+        :else
+        (let [st1 (maybe-evict-lru-idle! st)]
+          (a/put! (:fork-out st1)
+                  {:op :fork-agent
+                   :mode :turn
+                   :agent-id agent-id
+                   :branch branch
+                   :cfg (:cfg st1)})
+          [(-> st1
+               (assoc-in [:live agent-id] {:pid :forking
+                                           :branch branch
+                                           :mode :turn
+                                           :busy? true
+                                           :turns 0
+                                           :last-active tick})
+               sync-agents-filter)
+           nil])))))
+
+(defn- handle-eval
+  [st tick msg]
+  (let [{:keys [branch agent-id agent code tool-calls ns keep-warm? reply-ch]} msg
+        raw-b (or branch :branch/repl)
+        b (if (= raw-b :main) :branch/repl raw-b)
+        aid (or agent-id agent (keyword "repl" (name b)))
+        _ (store/branch! (:conn st) :main b)
+        rseq (inc (:req-seq st))
+        req-id (str "eval-" rseq)
+        existing (get-in st [:live aid])
+        keep? (if (some? keep-warm?) (boolean keep-warm?) true)]
+    (cond
+      (and existing (number? (:pid existing)) (not (:busy? existing)))
+      (do
+        (a/put! (:fork-out st)
+                {:op :to-child :pid (:pid existing)
+                 :msg {:op :eval :req-id req-id :code code :tool-calls tool-calls :ns ns}})
+        [(-> st (assoc :req-seq rseq)
+             (assoc-in [:live aid :busy?] true)
+             (assoc-in [:live aid :last-active] tick)
+             (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
+             sync-agents-filter)
+         nil])
+
+      (and existing (:busy? existing))
+      [(-> st (assoc :req-seq rseq)
+           (update-in [:live aid :pending-evals] (fnil conj [])
+                      {:req-id req-id :code code :tool-calls tool-calls :ns ns})
+           (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
+           sync-agents-filter)
+       nil]
+
+      :else
+      (let [st1 (maybe-evict-lru-idle! st)]
+        (a/put! (:fork-out st1)
+                {:op :fork-agent :mode :repl :agent-id aid :branch b :cfg (:cfg st1)
+                 :initial-eval {:req-id req-id :code code :tool-calls tool-calls :ns ns}})
+        [(-> st1 (assoc :req-seq rseq)
+             (assoc-in [:live aid] {:pid :forking :branch b :mode :repl :busy? true :turns 0 :last-active tick})
+             (assoc-in [:eval-waiters req-id] {:reply-ch reply-ch :keep-warm? keep? :agent-id aid})
+             sync-agents-filter)
+         nil]))))
+
+(defn- handle-child-exited
+  [st msg]
+  (let [aid (:agent-id msg)
+        cur-pid (get-in st [:live aid :pid])
+        st' (if (= cur-pid (:pid msg))
+              (sync-agents-filter (update st :live dissoc aid))
+              st)]
+    [st' {:exits [{:ev :exited :agent-id aid :pid (:pid msg) :raw-status (:raw-status msg)}]
+          :clojure.core.async.flow/report [(str "[:agents] " aid " (PID " (:pid msg) ") exited -> 0 OS resources held")]}]))
+
+(defn- handle-turn-committed
+  [st tick msg]
+  (let [f (:frame msg)
+        aid (:agent-id msg)
+        pid (:pid msg)
+        _ (doseq [tr (:tool-results f)
+                :let [eids (:touched-eids tr)]
+                :when (seq eids)]
+          (ctouches/record-live-reads-by-key! (get-in st [:cfg :store :id]) (:branch f) aid (long (or (:turn f) 1)) eids))
+        st' (-> st
+                (update :turns-done inc)
+                (cond-> (contains? (:live st) aid)
+                  (-> (assoc-in [:live aid :busy?] false)
+                      (assoc-in [:live aid :last-active] tick)
+                      (update-in [:live aid :turns] (fnil inc 0))))
+                sync-agents-filter)]
+    [st' {:exits [{:ev :turn-idle
+                   :agent-id aid
+                   :pid pid
+                   :branch (:branch f)
+                   :branch-tx (:branch-tx f)}]
+          :git (if (not= :main (:branch f)) [{:op :sync-branch :branch (:branch f)}] [])
+          :clojure.core.async.flow/report [(str "[" aid "] committed turn #" (:turn f) " on " (:branch f)
+                                               " @ tx " (:branch-tx f) " (PID " pid " kept warm)")]}]))
+
+(defn- handle-eval-done
+  [st tick msg]
+  (let [f (:frame msg) aid (:agent-id msg) pid (:pid msg) req-id (:req-id f)
+        waiter (get-in st [:eval-waiters req-id])
+        pending (get-in st [:live aid :pending-evals])
+        nxt (first pending)]
+    (reply! (:reply-ch waiter) (dissoc f :ev :req-id))
+    (cond
+      (and nxt (number? pid))
+      (do
+        (a/put! (:fork-out st) {:op :to-child :pid pid :msg (assoc nxt :op :eval)})
+        [(-> st (update :eval-waiters dissoc req-id)
+             (assoc-in [:live aid :pending-evals] (vec (rest pending)))
+             (assoc-in [:live aid :busy?] true)
+             (assoc-in [:live aid :last-active] tick)
+             sync-agents-filter)
+         {:exits [{:ev :branch-moved :agent-id aid :branch (:branch f) :branch-tx (:branch-tx f)}]
+          :git (if (not= :main (:branch f)) [{:op :sync-branch :branch (:branch f)}] [])}])
+
+      :else
+      (do
+        (when-not (:keep-warm? waiter)
+          (a/put! (:fork-out st) {:op :to-child :pid pid :msg {:op :stop}}))
+        [(-> st (update :eval-waiters dissoc req-id)
+             (cond-> (and (:keep-warm? waiter) (contains? (:live st) aid))
+               (-> (assoc-in [:live aid :busy?] false)
+                   (assoc-in [:live aid :last-active] tick)))
+             sync-agents-filter)
+         {:exits (cond-> [{:ev :branch-moved :agent-id aid :branch (:branch f) :branch-tx (:branch-tx f)}]
+                   (:keep-warm? waiter)
+                   (conj {:ev :turn-idle :agent-id aid :pid pid :branch (:branch f) :branch-tx (:branch-tx f)}))
+          :git (if (not= :main (:branch f)) [{:op :sync-branch :branch (:branch f)}] [])}]))))
+
+(defn- handle-child-exception
+  [st msg]
+  (let [f (:frame msg)
+        aid (:agent-id msg)
+        pid (:pid msg)
+        err-str (str (or (:error f) "Child worker exception"))
+        matching-w (filter (fn [[_ w]] (= aid (:agent-id w))) (:eval-waiters st))
+        _ (doseq [[_ w] matching-w]
+            (reply! (:reply-ch w) {:ok? false :agent-id aid :error err-str}))
+        st' (-> st
+                (update :eval-waiters #(apply dissoc % (map first matching-w)))
+                (cond-> (contains? (:live st) aid)
+                  (assoc-in [:live aid :busy?] false))
+                sync-agents-filter)]
+    [st' {:tx [{:op :record-fault
+                :proc :agents
+                :class :child-exception
+                :severity :error
+                :agent aid
+                :subject (str aid)
+                :message err-str}]
+          :exits [{:ev :turn-idle :agent-id aid :pid pid}]
+          :clojure.core.async.flow/report [(str "[:agents] child exception on " aid ": " err-str)]}]))
+
+(defn- handle-fork-refused [st msg]
+  (let [explicit-aid (:agent-id msg)
+        code (:code msg)
+        forking-aids (if explicit-aid
+                       [explicit-aid]
+                       (vec (keep (fn [[aid v]] (when (= :forking (:pid v)) aid)) (:live st))))
+        err-str (str "COW fork refused (code " code ")"
+                     (when (seq forking-aids) (str " for " (pr-str forking-aids))))
+        aid-set (set forking-aids)
+        matching-w (filter (fn [[_ w]] (contains? aid-set (:agent-id w))) (:eval-waiters st))
+        _ (doseq [[_ w] matching-w]
+            (reply! (:reply-ch w) {:ok? false :agent-id (:agent-id w) :error err-str :class :fork-refused}))
+        st' (-> st
+                (update :live #(apply dissoc % forking-aids))
+                (update :eval-waiters #(apply dissoc % (map first matching-w)))
+                sync-agents-filter)
+        faults (if (seq forking-aids)
+                 (mapv (fn [aid]
+                         {:op :record-fault :proc :agents :class :fork-refused :severity :error
+                          :agent aid :subject (str aid) :message err-str})
+                       forking-aids)
+                 [{:op :record-fault :proc :agents :class :fork-refused :severity :error
+                   :subject "seon.agent/fork" :message err-str}])
+        exits (mapv (fn [aid] {:ev :exited :agent-id aid :pid :forking :raw-status code}) forking-aids)]
+    [st' (cond-> {:tx faults
+                  :clojure.core.async.flow/report [(str "[:agents] " err-str)]}
+           (seq exits) (assoc :exits exits))]))
 
 (defn- handle-child-frame
   [st tick msg]

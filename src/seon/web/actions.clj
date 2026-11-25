@@ -164,7 +164,7 @@
         (let [ask! (fn [req]
                      (let [rc (a/chan 1)]
                        (a/>! srv {:req req :reply-ch rc})
-                       (or (first (a/alts! [rc (a/timeout 30000)])) {:ok? false :error :timeout})))
+                       (or (first (a/alts! [rc (a/timeout (router/op-timeout-ms req))])) {:ok? false :error :timeout})))
               t-ans (ask! {:op :test :branch branch})
               fb (if-not (:ok? t-ans)
                    {:ok? false :text (str "Merge blocked on " branch ": tests failed ("
@@ -282,10 +282,10 @@
          (if-not req
            (jresp 200 {:jsonrpc "2.0" :id id :error {:code -32601 :message (str "Unknown tool: " tname)}})
            (let [ans (if (= tname "seon_merge")
-                       (let [mbr (:branch req) t-ans (call-server-edge! server-in-ch {:op :test :branch mbr} 30000)]
+                       (let [mbr (:branch req) t-ans (call-server-edge! server-in-ch {:op :test :branch mbr} (router/op-timeout-ms {:op :test}))]
                          (if-not (:ok? t-ans) {:ok? false :branch mbr :error "Reach tests failed; merge blocked" :test-result t-ans}
-                             (call-server-edge! server-in-ch req 30000)))
-                       (call-server-edge! server-in-ch req 30000))
+                             (call-server-edge! server-in-ch req (router/op-timeout-ms req))))
+                       (call-server-edge! server-in-ch req (router/op-timeout-ms req)))
                  text (if (= tname "seon_repl")
                         (let [task-kw (when (not (str/blank? (str (:task args)))) (parse-kw-input (:task args) nil))
                               scope-sym (when (and (string? (:scope args)) (not (str/blank? (:scope args))))

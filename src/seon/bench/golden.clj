@@ -432,7 +432,7 @@
                        (:seon.git/commit (d/pull main-db '[:seon.git/commit] [:seon.git/repo :main]))))
          main-tx (or (:main-tx o) (when main-db (:max-tx main-db)))
          model-name (or (:model o) (when main-db (store/config-val main-db nil :seon.config/ai-model)))
-         base-run-opts (cond-> (merge {:proxy? (if (contains? o :proxy?) (boolean (:proxy? o)) false)
+         base-run-opts (cond-> (merge {:proxy? (if (contains? o :proxy?) (boolean (:proxy? o)) true)
                                        :seed-store "runs/store" :suite-id suite-id
                                        :title (or (:title o) (str "Paired A/B (" (count base-tasks) " tasks × " (count arms) " arms)"))
                                        :max-os-procs 3 :max-test-workers 2}

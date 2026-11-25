@@ -202,13 +202,15 @@
     (long (or (:delegated-calls final-trace) 0))))
 
 (defn trial-outcome
-  "Computes a trial's merge/ok flags from its per-op responses, task options, and optional trace."
+  "Computes a trial's merge/ok flags from its per-op responses, task options, health, verification, and trace."
   {:malli/schema [:=> [:cat [:map [:task :map] [:ag-snap [:maybe :map]] [:eval-res [:maybe :map]]
                              [:agent-res [:maybe :map]] [:test-res [:maybe :map]] [:merge-res [:maybe :map]]
-                             [:final-trace {:optional true} [:maybe :map]]]]
+                             [:final-trace {:optional true} [:maybe :map]]
+                             [:health-res {:optional true} [:maybe :map]]
+                             [:verify-res {:optional true} [:maybe :map]]]]
                   [:map [:already-merged? :boolean] [:merged? :boolean] [:require-merge? :boolean]
                    [:halted-not-merged? :boolean] [:ok? :boolean]]] :cost/ticks 600}
-  [{:keys [task ag-snap eval-res agent-res test-res merge-res final-trace]}]
+  [{:keys [task ag-snap eval-res agent-res test-res merge-res final-trace health-res verify-res]}]
   (let [already-merged? (= :merged (:status ag-snap))
         empty-merge? (boolean (and (not already-merged?) (:ok? merge-res) (contains? merge-res :touched-paths) (empty? (:touched-paths merge-res))))
         merged? (boolean (or already-merged? (and (:ok? merge-res) (not empty-merge?))))
@@ -216,20 +218,22 @@
         halted-not-merged? (and require-merge? (not merged?))
         min-delegated (long (or (:min-delegated-calls task) 0))
         delegated-ok? (or (not (pos? min-delegated)) (>= (settled-call-count final-trace) min-delegated))
-        reply-ok? (or (not (:chat-agent task)) (not (str/blank? (str (or (:last-reply final-trace) "")))))]
+        reply-ok? (or (not (:chat-agent task)) (not (str/blank? (str (or (:last-reply final-trace) "")))))
+        health-ok? (if (map? health-res) (boolean (:ok? health-res)) true)
+        verify-ok? (if (map? verify-res) (boolean (:ok? verify-res)) true)]
     {:already-merged? already-merged? :merged? merged? :require-merge? require-merge?
      :halted-not-merged? halted-not-merged?
      :ok? (boolean (and (if eval-res (:ok? eval-res) true)
                         (if agent-res (get-in agent-res [:wait :ok?]) true)
                         (if test-res (:ok? test-res) true)
                         (if merge-res (:ok? merge-res) true)
-                        (not halted-not-merged?) delegated-ok? reply-ok?))}))
+                        (not halted-not-merged?) delegated-ok? reply-ok? health-ok? verify-ok?))}))
 
 (defn trial-failure
   {:malli/schema [:=> [:cat [:map [:timeout-ms :int] [:agent-res [:maybe :map]] [:test-res [:maybe :map]]
                              [:merge-res [:maybe :map]] [:ag-snap [:maybe :map]] [:final-trace [:maybe :map]]
                              [:health-res [:maybe :map]] [:halted-not-merged? :boolean]
-                             [:task {:optional true} [:maybe :map]]]] [:maybe :string]] :cost/ticks 15000000}
+                             [:task {:optional true} [:maybe :map]] [:verify-res {:optional true} [:maybe :map]]]] [:maybe :string]] :cost/ticks 15000000}
   [m] (bh/trial-failure m))
 
 (defn- ^:seon.flow/edge eval-probe-edn [inst code]
@@ -241,7 +245,7 @@
     (catch Throwable _ {})))
 
 (defn ^:seon.flow/edge probe-trial-trace
-  "Queries the isolated trial instance via `seon.bench.helpers/trial-audit-summary` before teardown."
+  "Queries the isolated trial instance via zero-fork `/op :agent-trace` (with eval fallback for older binaries)."
   {:malli/schema [:=> [:cat :map :keyword :keyword [:? [:maybe :map]]] :map]}
   ([inst agent-id branch] (probe-trial-trace inst agent-id branch nil))
   ([inst agent-id branch probe-opts]
@@ -251,11 +255,15 @@
                     (pos? after-tx) (assoc :after-tx after-tx)
                     (pos? after-main-tx) (assoc :after-main-tx after-main-tx)
                     (:scope probe-opts) (assoc :scope (:scope probe-opts))
-                    (:include-trace? probe-opts) (assoc :include-trace? true))]
-     (eval-probe-edn inst
-       (str "(if-let [f (or (requiring-resolve (quote seon.bench.helpers/trial-audit-summary)) "
-            "(requiring-resolve (quote seon.health.metrics/agent-friction-summary)))] "
-            "(f (user/conn) (user/main-db) " (pr-str agent-id) " (quote " (pr-str opts-map) ")) {})")))))
+                    (:include-trace? probe-opts) (assoc :include-trace? true))
+         fast (try (instance-op! inst {:op :agent-trace :agent-id agent-id :branch branch :audit? true :opts opts-map})
+                   (catch Throwable _ nil))]
+     (if (and (map? fast) (not (and (false? (:ok? fast)) (str/includes? (str (:error fast)) "Unknown server op"))))
+       fast
+       (eval-probe-edn inst
+         (str "(if-let [f (or (requiring-resolve (quote seon.bench.helpers/trial-audit-summary)) "
+              "(requiring-resolve (quote seon.health.metrics/agent-friction-summary)))] "
+              "(f (user/conn) (user/main-db) " (pr-str agent-id) " (quote " (pr-str opts-map) ")) {})"))))))
 
 (defn- ^:seon.flow/edge probe-agent-baseline [inst agent-id branch]
   (let [status-snap (instance-op! inst {:op :status})
@@ -276,13 +284,13 @@
   "Assembles one trial result map from its op responses and friction trace."
   {:malli/schema [:=> [:cat :map] :map] :cost/ticks 400}
   [{:keys [id category arm pair-id port boot-ms elapsed-ms outcome ag-snap eval-res agent-res test-res merge-res
-           health-res final-trace failure]}]
+           health-res verify-res final-trace failure]}]
   (let [timed-out? (boolean (= :timeout (get-in agent-res [:wait :error])))
         status (cond (:ok? outcome) (if (:merged? outcome) :merged :passed) timed-out? :timeout :else :failed)]
     (merge (cond-> {:id id :status status :timed-out? timed-out? :port port :boot-ms boot-ms :elapsed-ms elapsed-ms
                     :ok? (boolean (:ok? outcome)) :merged? (boolean (:merged? outcome)) :agent-status (:status ag-snap)
                     :evals (long (or (:evals final-trace) (:evals ag-snap) 0)) :eval eval-res :agent agent-res
-                    :test test-res :merge merge-res :health-ok? (boolean (:ok? health-res))
+                    :test test-res :merge merge-res :health-ok? (boolean (:ok? health-res)) :verify-ok? (if verify-res (boolean (:ok? verify-res)) true) :verify-reason (:reason verify-res)
                     :last-snippet (:last-snippet final-trace) :last-error failure}
              arm (assoc :arm arm)
              pair-id (assoc :pair-id pair-id))
@@ -345,12 +353,19 @@
                       (:auto-merge? task) {:ok? false :error "worker-did-not-auto-merge" :touched-paths #{}}
                       :else (instance-op! inst-handle {:op :merge :branch branch :message (str "Bench trial " (name id))})))
             health-res (instance-op! inst-handle {:op :health})
+            verify-res (when (and (not timed-out?) (:verify-spec task))
+                         (let [sp (assoc (:verify-spec task) :after-main-tx (long (or (:after-main-tx baseline) 0)))
+                               vr (instance-op! inst-handle {:op :verify-task :spec sp})]
+                           (if (and (false? (:ok? vr)) (str/includes? (str (:error vr)) "Unknown server op"))
+                             (eval-probe-edn inst-handle (str "(seon.bench.helpers/verify-task-spec (user/main-db) '" (pr-str sp) ")"))
+                             vr)))
             outcome (trial-outcome {:task task :ag-snap ag-snap :eval-res eval-res :agent-res agent-res
-                                    :test-res test-res :merge-res merge-res :final-trace final-trace})
+                                    :test-res test-res :merge-res merge-res :final-trace final-trace
+                                    :health-res health-res :verify-res verify-res})
             failure (trial-failure {:timeout-ms timeout-ms :agent-res agent-res :test-res test-res :merge-res merge-res
                                     :ag-snap ag-snap :task task :final-trace (when-not (:ok? outcome) final-trace)
-                                    :health-res health-res :halted-not-merged? (:halted-not-merged? outcome)})]
-        (trial-result {:id id :category (:category task) :arm (:arm task) :pair-id (:pair-id task) :port (:port inst-handle) :boot-ms (:boot-ms inst-handle) :elapsed-ms (elapsed-ms!) :outcome outcome :ag-snap ag-snap :eval-res eval-res :agent-res agent-res :test-res test-res :merge-res merge-res :health-res health-res :final-trace final-trace :failure failure}))
+                                    :health-res health-res :verify-res verify-res :halted-not-merged? (:halted-not-merged? outcome)})]
+        (trial-result {:id id :category (:category task) :arm (:arm task) :pair-id (:pair-id task) :port (:port inst-handle) :boot-ms (:boot-ms inst-handle) :elapsed-ms (elapsed-ms!) :outcome outcome :ag-snap ag-snap :eval-res eval-res :agent-res agent-res :test-res test-res :merge-res merge-res :health-res health-res :final-trace final-trace :verify-res verify-res :failure failure}))
       (catch Throwable ex
         {:id id :status :error :timed-out? false :ok? false :elapsed-ms (elapsed-ms!)
          :error (or (.getMessage ex) (str ex)) :data (ex-data ex)})
@@ -358,19 +373,24 @@
         (when-let [inst-handle @inst-ref] (stop-instance! inst-handle {:keep-dir? keep-dirs?}))))))
 
 (defn ^:seon.flow/edge run-parallel-trial!
-  "Runs `tasks` concurrently across N isolated `target/seon` instances and cleans up every instance."
+  "Runs `tasks` concurrently across up to `:max-parallel-instances` (default 3) isolated `target/seon` instances and cleans up every instance."
   {:malli/schema [:=> [:cat [:? :map]] :map]}
   ([] (run-parallel-trial! {:tasks []}))
-  ([{:keys [tasks proxy? proxy-opts model-base-url boot-timeout-ms task-timeout-ms keep-dirs?]
-     :as opts :or {proxy? false boot-timeout-ms 60000 task-timeout-ms 60000 keep-dirs? false}}]
+  ([{:keys [tasks proxy? proxy-opts model-base-url boot-timeout-ms task-timeout-ms keep-dirs? max-parallel-instances]
+     :as opts :or {proxy? false boot-timeout-ms 60000 task-timeout-ms 60000 keep-dirs? false max-parallel-instances 3}}]
    (let [started-ns (System/nanoTime)
+         sem (java.util.concurrent.Semaphore. (int (max 1 (long max-parallel-instances))))
          proxy-inst (when proxy? (proxy/start! (or proxy-opts {})))
          run-opts (assoc opts :eff-base-url (or (when proxy-inst (:base-url proxy-inst)) model-base-url)
                          :proxy-instance proxy-inst :boot-timeout-ms boot-timeout-ms
                          :task-timeout-ms task-timeout-ms :keep-dirs? keep-dirs?)]
      (try
        (let [results (->> (map-indexed vector tasks)
-                          (mapv (fn [[idx task]] (a/thread (run-one-trial! idx task run-opts))))
+                          (mapv (fn [[idx task]]
+                                  (a/thread
+                                    (.acquire sem)
+                                    (try (run-one-trial! idx task run-opts)
+                                         (finally (.release sem))))))
                           (mapv a/<!!))]
          {:ok? (every? :ok? results) :count (count results)
           :elapsed-ms (/ (double (- (System/nanoTime) started-ns)) 1e6)
@@ -383,7 +403,7 @@
                          :else :failed)
         err-text (or (:last-error result-row) (:error result-row))
         telemetry-keys (into [:category :arm :pair-id :turn-overrun? :child-merged? :total-kv-hit-pct
-                              :error-samples :failing-tests :eval-trace]
+                              :error-samples :failing-tests :eval-trace :verify-ok? :verify-reason]
                              (map second bh/telemetry-numeric-pairs))]
     (merge
       (cond-> {:id (:id result-row) :status row-status :port (:port result-row)
