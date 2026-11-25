@@ -219,75 +219,6 @@
 
 (defn ^{:seon.code/reexport 'seon.code.persist/persist-forms-by-ns} persist-forms-by-ns [& args] (apply persist/persist-forms-by-ns args))
 
-(defn- eval-single-form
-  {:seon.flow/edge true}
-  [db code-str f ir-by-var touched-all called-all ticks-cap bytes-cap acc]
-  (let [src (:seon.code.form/src f) ns-before (ns-name *ns*)
-        aborts0 (store/aborted-lmdb-write-txns) eff-caps (volatile! [ticks-cap bytes-cap])
-        tap-acc (volatile! {:nodes [] :before {}})]
-    (try
-      (let [form-val (read-string src)
-            form-head (when (and (seq? form-val) (symbol? (first form-val))) (symbol (name (first form-val))))
-            unmap-target (when (= 'ns-unmap form-head)
-                           (let [n-arg (second form-val) s-arg (nth form-val 2 nil)
-                                 ns-v (cond (and (seq? n-arg) (= 'quote (first n-arg))) (second n-arg) (= '*ns* n-arg) ns-before :else nil)
-                                 sv (when (and (seq? s-arg) (= 'quote (first s-arg))) (second s-arg))]
-                             (when (and (symbol? ns-v) (symbol? sv) (not (contains? '#{user repl} ns-v)))
-                               (symbol (name ns-v) (name sv)))))
-            v (let [[eff-ticks eff-bytes] (vreset! eff-caps (effective-eval-budgets form-val ticks-cap bytes-cap))
-                    [val rset] (reads/with-reads
-                                 #(jolt.host/run-interruptible
-                                   (jolt.host/make-interrupt)
-                                   (fn [] (binding [jolt.analyzer/*unit-tap* (analyze/make-tap tap-acc)
-                                                    store-cfg/*capturing-agent-eval-reads?* true]
-                                            (eval form-val)))
-                                   eff-ticks eff-bytes))]
-                (let [seen-e (volatile! #{})
-                      deduped (persistent!
-                               (reduce (fn [a pair]
-                                         (let [lo (when (vector? pair) (nth pair 0 nil)) hi (when (vector? pair) (nth pair 1 nil))
-                                               e1 (when lo (:e lo)) e2 (when hi (:e hi))]
-                                           (if (and (integer? e1) (pos? (long e1)) (= e1 e2))
-                                             (if (contains? @seen-e e1) a (do (vswap! seen-e conj e1) (conj! a pair)))
-                                             (if (or (when lo (:a lo)) (when hi (:a hi))) (conj! a pair) a))))
-                                       (transient []) rset))]
-                  (vswap! touched-all into deduped))
-                val)
-            nodes (:nodes @tap-acc)
-            _ (when (seq nodes) (vswap! called-all into (analyze/called-seon-vars nodes)))
-            ns-after (ns-name *ns*) is-ns? (= 'ns form-head)
-            _ (when (= 'in-ns form-head)
-                (when (empty? (ns-refers *ns*)) (clojure.core/refer-clojure))
-                (when (and (str/ends-with? (name ns-after) "-test")
-                         (or (nil? (ns-resolve *ns* 'deftest)) (nil? (ns-resolve *ns* 'testing))))
-                (try (clojure.core/require '[clojure.test :refer [deftest is testing]]) (catch Throwable _ nil))))
-            _ (when is-ns? (register-loaded-ns! ns-after))
-            target-ns (if is-ns? ns-after ns-before)
-            _ (when-not (contains? '#{user repl} target-ns)
-                (register-loaded-ns! target-ns)
-                (when (and (seq nodes) (seq? form-val) (symbol? (second form-val))
-                           (contains? persistable-repl-heads form-head) (not= 'ns form-head))
-                  (vswap! ir-by-var assoc (symbol (name target-ns) (name (second form-val)))
-                          (analyze/merge-accounts (map analyze/unit-account nodes))))
-                (arm-defined-vars-in-ns! db target-ns))
-            scratch-def? (and (= 'def form-head) (some #(and (symbol? %) (= "user" (namespace %))) (tree-seq coll? seq form-val)))
-            recordable? (and (not (contains? '#{user repl} target-ns)) (contains? persistable-repl-heads form-head) (not scratch-def?))]
-        (cond-> {:ok? true :value v :final-ns ns-after
-                 :by-ns (if recordable? (update (:by-ns acc) target-ns (fnil conj []) src) (:by-ns acc))
-                 :retracts (:retracts acc)}
-          unmap-target (update :retracts (fnil conj []) unmap-target)))
-      (catch Throwable t
-        (let [[et eb] @eff-caps base-err (format-eval-throwable t et eb)
-              _ (when (seq (:nodes @tap-acc)) (vswap! called-all into (analyze/called-seon-vars (:nodes @tap-acc))))
-              blame-info (serr/classify-eval-blame {:ex-data (ex-data t) :called-vars (vec @called-all)} code-str)
-              hidx (into {} (map (fn [[k v]] (let [m (meta v)] [(name k) {:arglists (some-> (:arglists m) pr-str) :doc (:doc m)}])))
-                         (when-let [uns (find-ns 'user)] (ns-publics uns)))]
-          (reduced {:ok? false :interrupted? (boolean (:jolt/interrupted (ex-data t)))
-                    :lmdb-txn-aborted? (> (store/aborted-lmdb-write-txns) aborts0)
-                    :poisoned-worker? (pos? (store/active-lmdb-write-txns))
-                    :error (parse/enrich-eval-error code-str base-err hidx)
-                    :blame-info blame-info :final-ns (ns-name *ns*) :by-ns (array-map) :retracts []}))))))
-
 (defn- register-result-var!
   "Interns the eval result on the `result` namespace as `result/<handle>` with metadata."
   [res-handle value eid res-schema dms dk out-sw code-str]
@@ -346,6 +277,108 @@
           (assoc outcome :ok? false :value nil :value-str nil :by-ns (array-map) :retracts []
                  :interrupted? (boolean (:jolt/interrupted (ex-data t)))
                  :error (format-eval-throwable t r-ticks r-bytes)))))))
+
+(defn- snapshot-seon-interns []
+  (into {}
+        (for [n (all-ns)
+              :let [nm (ns-name n)]
+              :when (and (not (contains? '#{user repl} nm))
+                         (not (str/starts-with? (name nm) "clojure."))
+                         (not (str/starts-with? (name nm) "java.")))]
+          [nm (set (keys (ns-interns n)))])))
+
+(defn- diff-unmapped-vars [before]
+  (vec (for [[nm syms] before
+             :let [nobj (find-ns nm)
+                   after (if nobj (set (keys (ns-interns nobj))) #{})]
+             s syms
+             :when (not (contains? after s))]
+         (symbol (name nm) (name s)))))
+
+(defn- runtime-scratch-def? [form-head form-val]
+  (and (= 'def form-head)
+       (boolean
+         (some (fn [x]
+                 (when (symbol? x)
+                   (let [ns-p (namespace x) nm (name x)]
+                     (or (= "user" ns-p)
+                         (= "measure-call" nm)
+                         (and (contains? #{"d" "datahike.api"} ns-p)
+                              (contains? #{"pull" "datoms" "q" "transact" "connect" "entity" "seek-datoms"} nm))))))
+               (tree-seq coll? seq form-val)))))
+
+(defn- eval-single-form
+  {:seon.flow/edge true}
+  [db code-str f ir-by-var touched-all called-all ticks-cap bytes-cap acc]
+  (let [src (:seon.code.form/src f) ns-before (ns-name *ns*)
+        aborts0 (store/aborted-lmdb-write-txns) eff-caps (volatile! [ticks-cap bytes-cap])
+        tap-acc (volatile! {:nodes [] :before {}})
+        track-unmap? (str/includes? (str src) "ns-unmap")
+        interns-before (when track-unmap? (snapshot-seon-interns))]
+    (try
+      (let [form-val (read-string src)
+            form-head (when (and (seq? form-val) (symbol? (first form-val))) (symbol (name (first form-val))))
+            unmap-target (when (= 'ns-unmap form-head)
+                           (let [n-arg (second form-val) s-arg (nth form-val 2 nil)
+                                 ns-v (cond (and (seq? n-arg) (= 'quote (first n-arg))) (second n-arg) (= '*ns* n-arg) ns-before :else nil)
+                                 sv (when (and (seq? s-arg) (= 'quote (first s-arg))) (second s-arg))]
+                             (when (and (symbol? ns-v) (symbol? sv) (not (contains? '#{user repl} ns-v)))
+                               (symbol (name ns-v) (name sv)))))
+            v (let [[eff-ticks eff-bytes] (vreset! eff-caps (effective-eval-budgets form-val ticks-cap bytes-cap))
+                    [val rset] (reads/with-reads
+                                 #(jolt.host/run-interruptible
+                                   (jolt.host/make-interrupt)
+                                   (fn [] (binding [jolt.analyzer/*unit-tap* (analyze/make-tap tap-acc)
+                                                    store-cfg/*capturing-agent-eval-reads?* true]
+                                            (eval form-val)))
+                                   eff-ticks eff-bytes))]
+                (let [seen-e (volatile! #{})
+                      deduped (persistent!
+                               (reduce (fn [a pair]
+                                         (let [lo (when (vector? pair) (nth pair 0 nil)) hi (when (vector? pair) (nth pair 1 nil))
+                                               e1 (when lo (:e lo)) e2 (when hi (:e hi))]
+                                           (if (and (integer? e1) (pos? (long e1)) (= e1 e2))
+                                             (if (contains? @seen-e e1) a (do (vswap! seen-e conj e1) (conj! a pair)))
+                                             (if (or (when lo (:a lo)) (when hi (:a hi))) (conj! a pair) a))))
+                                       (transient []) rset))]
+                  (vswap! touched-all into deduped))
+                val)
+            nodes (:nodes @tap-acc)
+            _ (when (seq nodes) (vswap! called-all into (analyze/called-seon-vars nodes)))
+            ns-after (ns-name *ns*) is-ns? (= 'ns form-head)
+            _ (when (= 'in-ns form-head)
+                (when (empty? (ns-refers *ns*)) (clojure.core/refer-clojure))
+                (when (and (str/ends-with? (name ns-after) "-test")
+                         (or (nil? (ns-resolve *ns* 'deftest)) (nil? (ns-resolve *ns* 'testing))))
+                (try (clojure.core/require '[clojure.test :refer [deftest is testing]]) (catch Throwable _ nil))))
+            _ (when is-ns? (register-loaded-ns! ns-after))
+            target-ns (if is-ns? ns-after ns-before)
+            _ (when-not (contains? '#{user repl} target-ns)
+                (register-loaded-ns! target-ns)
+                (when (and (seq nodes) (seq? form-val) (symbol? (second form-val))
+                           (contains? persistable-repl-heads form-head) (not= 'ns form-head))
+                  (vswap! ir-by-var assoc (symbol (name target-ns) (name (second form-val)))
+                          (analyze/merge-accounts (map analyze/unit-account nodes))))
+                (arm-defined-vars-in-ns! db target-ns))
+            scratch-def? (runtime-scratch-def? form-head form-val)
+            recordable? (and (not (contains? '#{user repl} target-ns)) (contains? persistable-repl-heads form-head) (not scratch-def?))
+            all-unmapped (vec (distinct (concat (when unmap-target [unmap-target])
+                                                (when interns-before (diff-unmapped-vars interns-before)))))]
+        (cond-> {:ok? true :value v :final-ns ns-after
+                 :by-ns (if recordable? (update (:by-ns acc) target-ns (fnil conj []) src) (:by-ns acc))
+                 :retracts (:retracts acc)}
+          (seq all-unmapped) (update :retracts (fnil into []) all-unmapped)))
+      (catch Throwable t
+        (let [[et eb] @eff-caps base-err (format-eval-throwable t et eb)
+              _ (when (seq (:nodes @tap-acc)) (vswap! called-all into (analyze/called-seon-vars (:nodes @tap-acc))))
+              blame-info (serr/classify-eval-blame {:ex-data (ex-data t) :called-vars (vec @called-all)} code-str)
+              hidx (into {} (map (fn [[k v]] (let [m (meta v)] [(name k) {:arglists (some-> (:arglists m) pr-str) :doc (:doc m)}])))
+                         (when-let [uns (find-ns 'user)] (ns-publics uns)))]
+          (reduced {:ok? false :interrupted? (boolean (:jolt/interrupted (ex-data t)))
+                    :lmdb-txn-aborted? (> (store/aborted-lmdb-write-txns) aborts0)
+                    :poisoned-worker? (pos? (store/active-lmdb-write-txns))
+                    :error (parse/enrich-eval-error code-str base-err hidx)
+                    :blame-info blame-info :final-ns (ns-name *ns*) :by-ns (array-map) :retracts []}))))))
 
 (defn eval-forms
   {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
