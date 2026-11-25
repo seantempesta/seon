@@ -13,7 +13,8 @@
             [seon.signals.scoreboard :as scoreboard]
             [seon.signals.touches :as touches]
             [seon.store :as store]
-            [seon.render.surface.cockpit :as cockpit]))
+            [seon.render.surface.cockpit :as cockpit]
+            [seon.ctx.project :as cproj]))
 
 (defonce ^:private ^:seon.flow/edge context-lab-cache (store/lru-cache 32))
 
@@ -118,7 +119,9 @@
                      {:level :calm :precision 0.0 :token-precision 0.0 :recall 0.0 :f1 0.0
                       :recall-gap-count 0 :recall-gap-items [] :by-rule {} :eval-count 0 :reasoning-mentions 0})
                 all-rules (ctx/load-context-rules emdb ebdb nil)
-                proj-unm (vec (or (:unmatched (ctx/project-entity emdb ebdb [:seon.agent/id aid] {:target target :agent ag :include-unmatched? true :disabled-rules dis-rules})) []))
+                proj-unm (let [w (cproj/entity-world-datoms emdb ebdb [:seon.agent/id aid] false)
+                             ms (into #{} (keep :entity) cands)]
+                         (cproj/build-unmatched-neighbors emdb ebdb w ms false))
                 eval-by-turn (into {} (map (fn [e] [(long (or (:seon.agent.eval/turn e) 0)) (:seon.agent.eval/id e)])) evs)]
             (assoc wire :explained explained :ent-by-id ent-by-id :kv-cache kv-an
                    :scoreboard sb :all-rules all-rules :eval-by-turn eval-by-turn
