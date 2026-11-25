@@ -464,46 +464,7 @@
 
 (defn- edn-safe-ipc [& args] (apply six/edn-safe-ipc args))
 
-(defn- stress-arity
-  {:seon.flow/edge true}
-  [fn-sym target-fn opts registry ar-sch top-examples samples seed measure-fn budgets]
-  (let [[cat-s ret-s guard-s] (m/children ar-sch)
-        valid-in? (m/validator cat-s opts) valid-ret? (m/validator ret-s opts)
-        valid-guard? (when guard-s (m/validator guard-s opts))
-        {:keys [ticks-budget bytes-budget ms-budget]} budgets
-        repro? (fn [ca] (and (valid-in? ca)
-                             (try (let [rv (apply target-fn ca)]
-                                    (or (not (valid-ret? rv)) (and valid-guard? (not (valid-guard? [ca rv])))))
-                                  (catch Throwable _ true))))
-        check1 (fn [a [tag sargs exp]]
-                 (let [fail (fn [extra rfn]
-                              (let [sh (when (and (= tag :sample) (sequential? sargs)) (shrink-failing-args (vec sargs) repro? 24))
-                                    ea (or sh sargs)]
-                                (reduced (edn-safe-ipc
-                                (cond-> (merge {:ok? false :var fn-sym :args ea :reason (rfn ea)} extra)
-                                  (and sh (not= sh sargs)) (assoc :shrunk-args sh :original-args sargs))))))]
-                   (try
-                     (let [run1 #(if measure-fn (measure-fn (fn [] (apply target-fn sargs))) {:val (apply target-fn sargs) :ticks 0 :bytes 0 :ms 0.0})
-                           r0 (run1)
-                           {:keys [val ticks bytes ms]} (if (and measure-fn (or (and ticks-budget (> (:ticks r0) ticks-budget)) (and bytes-budget (> (:bytes r0) bytes-budget)) (and ms-budget (:ms r0) (> (:ms r0) ms-budget)))) (run1) r0)]
-                       (cond
-                         (and (= tag :example) (not= exp val)) (fail {:example? true :expected exp :return val} #(str "Example failed on " fn-sym " args " (pr-str %) ": expected " (pr-str exp) ", got " (pr-str val)))
-                         (not (valid-ret? val)) (fail {:return val :blame :output-contract :human (me/humanize (m/explain ret-s val opts))} #(str "Return value failed schema " (pr-str (m/form ret-s)) " on args " (pr-str %) ": got " (pr-str val)))
-                         (and valid-guard? (not (valid-guard? [sargs val]))) (fail {:return val :blame :output-contract :relational-guard-failed? true} #(str "Relational postcondition failed on " fn-sym " args " (pr-str %) " -> " (pr-str val)))
-                         (and ticks-budget (> ticks ticks-budget)) (fail {:ticks ticks :ticks-budget ticks-budget} #(str "Cost overrun on " fn-sym ": " ticks " ticks > :cost/ticks " ticks-budget " on args " (pr-str %)))
-                         (and bytes-budget (> bytes bytes-budget)) (fail {:bytes bytes :bytes-budget bytes-budget} #(str "Allocation overrun on " fn-sym ": " bytes " bytes > :cost/bytes " bytes-budget " on args " (pr-str %)))
-                         (and ms-budget ms (> ms ms-budget)) (fail {:call-ms ms :ms-budget ms-budget} #(str "Time overrun on " fn-sym ": " ms " ms > :cost/ms " ms-budget " on args " (pr-str %)))
-                         :else (-> a (update :ran inc) (update :max-ticks max (long (or ticks 0))) (update :max-bytes max (long (or bytes 0))))))
-                     (catch Throwable ex
-                       (fail {:exception (.getMessage ex) :blame :exception} #(str "Threw exception on " (if (= tag :example) "example" (str "seed=" seed)) " args " (pr-str %) ": " (.getMessage ex)))))))
-        ex-out (reduce check1 {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} (map (fn [[a e]] [:example a e]) top-examples))]
-    (if-not (:ok? ex-out)
-      ex-out
-      (let [batches (try (mg/generate [:vector {:min samples :max samples} cat-s] {:registry registry :seed seed :size 8})
-                         (catch Throwable t {:gen-error (.getMessage t)}))]
-        (if (map? batches)
-          {:ok? false :var fn-sym :reason (str "Generator failed for " fn-sym ": " (:gen-error batches))}
-          (reduce check1 ex-out (map (fn [a] [:sample a nil]) batches)))))))
+(defn- stress-arity [& args] (apply six/stress-arity args))
 
 (defn stress-var
   "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets. Usage: `(user/stress-var 'ns/fn)` or `(user/stress-var 'ns/fn {:samples 100 :seed 42})`."

@@ -13,7 +13,7 @@
             [clojure.string :as str]
             [jolt.fs :as fs]
             [seon.cite :as cite]
-            [malli.generator :as mg]))
+            [seon.schema.stress :as stress]))
 
 (defn form-props
   "Returns the Malli properties map attached to `form` (or `{}` if none)."
@@ -478,29 +478,7 @@
                           (merge acc (validate-map! (fs/file-name p) (edn/read-string (slurp (str p))))))
                         {}))))))))
 
-(defn- shrink-step [v]
-  (cond
-    (and (integer? v) (not (zero? v)))
-    (let [vl (long v)] (distinct [0 (quot vl 2) (if (pos? vl) (dec vl) (inc vl))]))
-    (and (string? v) (pos? (count v)))
-    (let [n (count v)] (distinct ["" (subs v 0 (quot n 2)) (subs v 0 (dec n))]))
-    (and (vector? v) (pos? (count v)))
-    (let [n (count v)] (distinct [[] (subvec v 0 (quot n 2)) (subvec v 0 (dec n))]))
-    (and (map? v) (pos? (count v)))
-    (into [{}] (map #(dissoc v %) (take 4 (sort-by pr-str (keys v)))))
-    :else nil))
-
-(defn shrink-failing-args
-  "Deterministically shrinks failing argument vector `args` while `(fails? cand)` remains truthy."
-  {:malli/schema [:=> [:cat [:vector :any] :seon.host/fn [:? pos-int?]] [:vector :any]], :cost/ticks 15000000, :seon.flow/edge true}
-  ([args fails?] (shrink-failing-args args fails? 24))
-  ([args fails? max-steps]
-   (loop [cur (vec args) steps 0]
-     (if (>= steps (long max-steps))
-       cur
-       (let [cands (for [i (range (count cur)) sv (shrink-step (nth cur i))] (assoc cur i sv))
-             better (some (fn [c] (when (try (boolean (fails? c)) (catch Throwable _ false)) c)) cands)]
-         (if (and better (not= better cur)) (recur better (inc steps)) cur))))))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.schema.stress/shrink-failing-args} shrink-failing-args [& args] (apply stress/shrink-failing-args args))
 
 (defn schema-refs-in-form
   "Extracts multi-segment qualified keywords referenced inside `schema-form`."
@@ -525,22 +503,7 @@
                    (and (true? (:db/index d)) (not (true? (:db/index cur)))))))
            declarations))
 
-(defn generatable-function-schema?
-  "True when `sch` is a single `[:=> [:cat ...] ret]` without `:seon.host/*` args, OR a multi-arity `[:function [:=> ...] ...]` whose `:=>` clauses have concrete non-`:seon.host/*`, non-`:any` args."
-  {:malli/schema [:=> [:cat :any] [:maybe :boolean]] :cost/ticks 150000}
-  [sch]
-  (let [no-host? (fn [args-form] (not (some #(and (qualified-keyword? %) (= "seon.host" (namespace %))) (tree-seq coll? seq args-form))))
-        no-any? (fn [args-form] (not (some #(= :any %) (tree-seq coll? seq args-form))))
-        arity-ok? (fn [strict-any? s]
-                    (when (and (vector? s) (= :=> (first s)))
-                      (let [af (if (map? (second s)) (nth s 2 nil) (second s))]
-                        (and (no-host? af) (or (not strict-any?) (no-any? af))))))]
-    (cond
-      (and (vector? sch) (= :=> (first sch))) (boolean (arity-ok? false sch))
-      (and (vector? sch) (= :function (first sch)))
-      (let [ars (filterv vector? (rest sch))]
-        (boolean (and (seq ars) (every? #(arity-ok? true %) ars))))
-      :else nil)))
+(defn ^{:seon.code/reexport 'seon.schema.stress/generatable-function-schema?} generatable-function-schema? [& args] (apply stress/generatable-function-schema? args))
 
 (defn lookup-schemas
   "Pure schema inspector: `(lookup-schemas db)` lists all sorted `:seon.schema/key` keywords; `(lookup-schemas db :k)` pulls full schema entity; `(lookup-schemas db \"substr\" | #\"re\")` searches keys & docs."
@@ -571,21 +534,8 @@
              all-ks))
      :else {:error :invalid-schema-query :query query})))
 
-(defn safe-example
-  {:malli/schema [:=> [:cat :any :map] :any], :cost/ticks 500000, :seon.flow/edge true}
-  [input-sch opts]
-  (try
-    (mg/generate input-sch (assoc opts :seed 42 :size 4))
-    (catch Throwable _ nil)))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.schema.stress/safe-example} safe-example [& args] (apply stress/safe-example args))
 
-(defn edn-safe-ipc
-  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 500000}
-  [x]
-  (cond
-    (or (nil? x) (boolean? x) (integer? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) x
-    (float? x) (let [d (double x)] (if (or (Double/isNaN d) (Double/isInfinite d)) (str d) x))
-    (map? x) (into {} (map (fn [[k v]] [(edn-safe-ipc k) (edn-safe-ipc v)])) x)
-    (vector? x) (mapv edn-safe-ipc x)
-    (set? x) (into #{} (map edn-safe-ipc) x)
-    (sequential? x) (mapv edn-safe-ipc x)
-    :else (pr-str x)))
+(defn ^{:seon.code/reexport 'seon.schema.stress/edn-safe-ipc} edn-safe-ipc [& args] (apply stress/edn-safe-ipc args))
+
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.schema.stress/stress-arity} stress-arity [& args] (apply stress/stress-arity args))
