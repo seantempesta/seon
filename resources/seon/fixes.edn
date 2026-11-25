@@ -25,6 +25,13 @@
   :seon.fix/regression-test seon.cst-metrics-test/wave21b-variadic-await-and-wave21a-error-hints-test,
   :seon.fix/root-cause "seon.fork.calls/await! only accepted a fixed 1-arg signature [:=> [:cat :any] [:maybe :map]] and enrich-eval-error lacked hints for unquoted fn->Named casts, testing, and doc.",
   :seon.fix/symptom "Calling (user/await! [id1 id2] {:timeout-ms ...}) or (user/await! id1 id2) threw :malli.core/invalid-arity on :agent/root T17 in Wave 21A; agents also hit unquoted fn passed to user/source, bare testing, and bare doc."}
+ {:seon.fix/before-after "Before: Broken pipe killed worker turns immediately with 0 retries; ct/run-test-var OOM gave no hint. After: transient IOExceptions retry up to 2x on fresh sockets with Connection: close; run-test-var OOM guides straight to user/run-tests!.",
+  :seon.fix/change-summary "Added transient-network-error? and 2-attempt Connection: close retry in seon.model/openai-stream-chat!; broadened allocation-budget test hint to run-tests/run-test-var/test-var and added u/ -> user/ hint.",
+  :seon.fix/error-class :transient-broken-pipe-and-run-test-var-oom,
+  :seon.fix/id #uuid "6cd6e62f-a32f-4abe-97ce-927893c3bb5a",
+  :seon.fix/regression-test seon.cst-metrics-test/wave22b-transient-network-retry-and-test-var-oom-hint-test,
+  :seon.fix/root-cause "seon.model/openai-stream-chat! had zero transient IOException retry on text requests (only retried multimodal payloads) and kept stale pooled connections; enrich-eval-error only matched literal clojure.test/run-tests.",
+  :seon.fix/symptom "Wave 22A contract-schema-index-build-entity-index failed on 3 consecutive Broken pipe IOExceptions without retry; signals-scoreboard hit 256MB OOM twice calling ct/run-test-var without a user/run-tests! hint."}
  {:seon.fix/before-after "Before: 2/5 seed=115 COW test fails + 256MB autofix OOM + lost :bounce-messages. After: auto-synced requires on add-fn!/edit-fn!/persist-forms-by-ns, scoped <15MB autofix-health! + 2GB cap, persisted :bounce-messages.",
   :seon.fix/change-summary "Merge missing :as/:refer in add-require-src, always sync unquoted loaded bare qualified ns refs across sync-ns-requires-for-live-ns/persist-forms-by-ns/edit-fn!, scope autofix-health! with 2 GB budget, add mdb fallback in run-tests!, preserve :bounce-messages in result->stored-trial, and add 3 Wave 18A error hints.",
   :seon.fix/error-class :cow-test-missing-require-and-autofix-oom,
@@ -39,6 +46,13 @@
   :seon.fix/regression-test seon.ctx-tree-and-review-test/pure-two-index-ctx-swap-and-custom-data-test,
   :seon.fix/root-cause "seon.store/store-cfg hardcoded 4 GB map-bytes and neither post-merge branch pruning nor safe d/gc-storage ever ran, pinning ~954k obsolete konserve blocks.",
   :seon.fix/symptom "LMDB failed with MDB_MAP_FULL after runs/store/data.mdb reached 4.0 GB across 170 unpruned branches."}
+ {:seon.fix/before-after "Before: Broken pipe killed worker turns immediately with 0 retries; ct/run-test-var OOM gave no hint. After: transient IOExceptions retry up to 2x on fresh sockets with Connection: close; run-test-var OOM guides straight to user/run-tests!.",
+  :seon.fix/change-summary "Added transient-network-error? and 2-attempt Connection: close retry in seon.model/openai-stream-chat!; broadened allocation-budget test hint to run-tests/run-test-var/test-var and added u/ -> user/ hint.",
+  :seon.fix/error-class :transient-broken-pipe-and-run-test-var-oom,
+  :seon.fix/id #uuid "9913d15f-e31f-42e5-b7f1-f4f38fbdbf4d",
+  :seon.fix/regression-test seon.cst-metrics-test/wave22b-transient-network-retry-and-test-var-oom-hint-test,
+  :seon.fix/root-cause "seon.model/openai-stream-chat! had zero transient IOException retry on text requests (only retried multimodal payloads) and kept stale pooled connections; enrich-eval-error only matched literal clojure.test/run-tests.",
+  :seon.fix/symptom "Wave 22A contract-schema-index-build-entity-index failed on 3 consecutive Broken pipe IOExceptions without retry; signals-scoreboard hit 256MB OOM twice calling ct/run-test-var without a user/run-tests! hint."}
  {:seon.fix/before-after "Before: runs/store pinned at 4,294,967,296 B (MDB_MAP_FULL at 4 GiB). After: live runs/store upgraded seamlessly to 1,099,511,627,776 B (1 TB sparse, APFS disk-limited).",
   :seon.fix/change-summary "Monotonically grow existing writable LMDB stores in open-env when requested :map-size exceeds recorded size (never shrinking or remapping RDONLY), drain active txns under :rw-lock writeLock in close-env & adopt-mapsize!, and wrap LMDB txns with masked tryLock/dynamic-wind unwind in seon.store/install-interrupt-safe-lmdb!.",
   :seon.fix/error-class :lmdb-map-full,

@@ -15,7 +15,8 @@
             [seon.bench.trial]
             [seon.code.errors]
             [seon.repl]
-            [seon.fork.calls]))
+            [seon.fork.calls]
+            [seon.model]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -507,3 +508,13 @@
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Unable to resolve symbol: testing in this context" {}) "add-require!"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Unable to resolve symbol: doc in this context" {}) "user/help"))
     (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "class user$edit_fn_BANG_ cannot be cast to class clojure.lang.Named" {}) "Quote the symbol"))))
+
+(deftest wave22b-transient-network-retry-and-test-var-oom-hint-test
+  (testing "seon.model/transient-network-error? identifies IOException/Broken pipe and rejects non-network errors"
+    (is (true? (seon.model/transient-network-error? (java.io.IOException. "Broken pipe"))))
+    (is (true? (seon.model/transient-network-error? (RuntimeException. "HTTP/1.1 header parser received no bytes"))))
+    (is (false? (seon.model/transient-network-error? (ex-info "Model HTTP 400" {:status 400}))))
+    (is (false? (seon.model/transient-network-error? nil))))
+  (testing "Wave 22A error hints cover ct/run-test-var OOM and u/ namespace typo"
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "(ct/run-test-var #'foo/bar)" "Eval exceeded allocation budget (limit 268435456 bytes)." {}) "user/run-tests!"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "(u/source 'a/b)" "No such namespace: u" {}) "user/"))))
