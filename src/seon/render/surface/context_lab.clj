@@ -35,8 +35,6 @@
 
 (defn- trunc [s n] (if (> (count s) n) (str (subs s 0 n) "…") s))
 
-(defn- r2 [x] (round2 x))
-
 (defn- pct1 [x] (if (number? x) (/ (Math/round (* (double x) 1000.0)) 10.0) 0.0))
 
 (defn- el ([ref lbl] (rlinks/ent-link ref lbl "mono")) ([ref lbl cls] (rlinks/ent-link ref lbl cls)))

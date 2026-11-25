@@ -15,8 +15,6 @@
 
 (defonce ^:private ^:seon.flow/edge tuner-diff-cache (store/lru-cache 16))
 
-(defn- r2 [x] (round2 x))
-
 (defn- focal-agent-id [main-db v]
   (cond
     (qualified-keyword? v) v
@@ -320,7 +318,7 @@
                     [:div {:class "pill-row"}
                      (for [rk (take 2 rules)]
                        (ent-link [:seon.rule/id rk] (name rk) "badge blue tiny mono"))]
-                    (mut (str "rank " (r2 (:rank/score it)) " (U" (r2 (:urgency s)) " R" (r2 (:recency s)) " C" (r2 (:convergence s)) ")"))]]
+                    (mut (str "rank " (round2 (:rank/score it)) " (U" (round2 (:urgency s)) " R" (round2 (:recency s)) " C" (round2 (:convergence s)) ")"))]]
               [:td [:div {:class "stack-xs"}
                     [:div {:class "pill-row"}
                      (when (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny strong"))

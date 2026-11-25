@@ -393,7 +393,12 @@
            :tokens tok :chars (* 4 tok)
            :min-width (safe-long (:min-width item) 240) :lines (max 1 (quot tok 16))})]))))
 
-(defn- clamp01 [x]
+(defn clamp01
+  "Clamps a numeric value into `[0.0, 1.0]` (non-finite/nil -> `0.0`)."
+  {:malli/schema [:=> {:examples [[[-0.5] 0.0] [[0.42] 0.42] [[1.7] 1.0] [[nil] 0.0]]}
+                  [:cat :any] :double]
+   :cost/ticks 50000}
+  [x]
   (max 0.0 (min 1.0 (finite-double x 0.0))))
 
 (defn- to-set [x]
