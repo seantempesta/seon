@@ -3,8 +3,7 @@
    derives sample inputs strictly from (1) live Datahike DB entities, (2) Malli `:examples`,
    or (3) deterministic `seed=42` Malli generation; evaluates and renders multi-width frames
    into a bounded in-memory LRU cache (`preview-lru`, 0 bytes written to LMDB)."
-  (:require [clojure.core.cache :as cache]
-            [clojure.edn :as edn]
+  (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
             [malli.core :as m]
@@ -24,37 +23,21 @@
   {:malli/schema [:=> [:cat] :boolean]
    :cost/ticks 50000}
   []
-  (reset! preview-lru (cache/lru-cache-factory {} :threshold 64))
+  (reset! preview-lru @(store/lru-cache 64))
   true)
-
-(defn- ^:seon.flow/edge ensure-lru! []
-  (when-not (satisfies? cache/CacheProtocol @preview-lru)
-    (reset! preview-lru (cache/lru-cache-factory {} :threshold 64))))
-
-(defn- ^:seon.flow/edge lru-peek [k]
-  (ensure-lru!)
-  (let [raw (get @preview-lru k ::miss)]
-    (if (identical? ::miss raw) ::miss
-        (do (swap! preview-lru cache/hit k)
-            (if (and (map? raw) (contains? raw :seon.store/lru-val)) (:seon.store/lru-val raw) raw)))))
-
-(defn- ^:seon.flow/edge lru-store! [k v]
-  (ensure-lru!)
-  (swap! preview-lru cache/miss k v)
-  v)
 
 (defn ^:seon.flow/edge cached-preview-frames
   "Looks up cached ephemeral frames in `preview-lru` (0 DB reads/writes)."
   {:malli/schema [:=> [:cat :qualified-symbol :any :any [:sequential :int] :any] [:maybe [:vector :map]]] :cost/ticks 100000}
   [var-sym form-hash input-hash widths theme]
-  (let [hit (lru-peek [var-sym form-hash input-hash (vec widths) theme])]
+  (let [hit (store/lru-peek preview-lru [var-sym form-hash input-hash (vec widths) theme] ::miss)]
     (when-not (identical? ::miss hit) hit)))
 
 (defn ^:seon.flow/edge cache-preview-frames!
   "Stores ephemeral rendered frames in bounded `preview-lru` (0 DB writes)."
   {:malli/schema [:=> [:cat :qualified-symbol :any :any [:sequential :int] :any [:vector :map]] [:vector :map]] :cost/ticks 100000}
   [var-sym form-hash input-hash widths theme frames]
-  (lru-store! [var-sym form-hash input-hash (vec widths) theme] (vec frames)))
+  (store/lru-put! preview-lru 64 [var-sym form-hash input-hash (vec widths) theme] (vec frames)))
 
 (defn- fn-schema-arities [sch]
   (cond (and (vector? sch) (= :=> (first sch))) [sch]
@@ -306,7 +289,7 @@
        (let [ck [var-sym fh (:input-hash smp) :eval nil]
              base {:var var-sym :form-hash fh :source (:source smp) :args (:args smp) :input-hash (:input-hash smp)
                    :has-examples? (if (boolean? (:has-examples? smp)) (:has-examples? smp) has-ex?) :input-schemas in-sks}
-             hit (when-not (:no-cache? o) (lru-peek ck))]
+             hit (when-not (:no-cache? o) (store/lru-peek preview-lru ck ::miss))]
          (if (and (not (:no-cache? o)) (not (identical? ::miss hit)))
            (assoc hit :cached? true)
            (let [r (try
@@ -316,7 +299,7 @@
                            (assoc base :ok? true :hiccup h :html (str (render/hiccup->html h)) :tokens tok :siblings (collect-siblings db var-sym tok fh in-sks (:args smp))))
                          (assoc base :ok? false :error (if (nil? h) :empty-hiccup :invalid-hiccup) :message (str var-sym " did not return Hiccup"))))
                      (catch Throwable ex (assoc base :ok? false :error :eval-failed :message (or (.getMessage ex) (str ex)))))]
-             (when-not (:no-cache? o) (lru-store! ck r)) (assoc r :cached? false))))))))
+             (when-not (:no-cache? o) (store/lru-put! preview-lru 64 ck r)) (assoc r :cached? false))))))))
 
 (defn ^:seon.flow/edge render-derived-preview-card
   "Renders a safe Live Derived Preview card for a `:seon.ui/hiccup` renderer var entity."
@@ -438,7 +421,7 @@ Rendered edited `:seon.ui/hiccup` component(s) in WKWebView (0 DB writes) — in
          rec! (fn [fs] (mapv #(fit/record-browser-box! var-sym fh (long (:width %)) (if (map? (:dom %)) (:dom %) {:w (:width %) :h (:height %)})) fs))]
      (if-not (:ok? ev)
        (assoc ev :frames [] :boxes [] :widths ws :theme th :cached? false)
-       (let [ck [var-sym fh (:input-hash ev) ws th] hit (when-not (:no-cache? o) (lru-peek ck))]
+       (let [ck [var-sym fh (:input-hash ev) ws th] hit (when-not (:no-cache? o) (store/lru-peek preview-lru ck ::miss))]
          (if (and (not (:no-cache? o)) (not (identical? ::miss hit)))
            (assoc mm :ok? true :frames hit :boxes (rec! hit) :cached? true)
            (let [co (merge {:widths ws :theme th :label-prefix (name var-sym) :var-sym var-sym :form-hash fh} (select-keys o [:height :quality :max-width :label-prefix :timeout-ms :settle-ms :binary-path]))
@@ -446,7 +429,7 @@ Rendered edited `:seon.ui/hiccup` component(s) in WKWebView (0 DB writes) — in
                  fs (if (and (map? cap) (:ok? cap) (seq (:frames cap))) (mapv #(normalize-ephemeral-frame var-sym (:source ev) % ev) (:frames cap)) [])]
              (if (seq fs)
                (let [boxes (rec! fs)]
-                 (when-not (:no-cache? o) (lru-store! ck fs))
+                 (when-not (:no-cache? o) (store/lru-put! preview-lru 64 ck fs))
                  (assoc mm :ok? true :frames fs :boxes boxes :cached? false))
                (assoc mm :ok? false :frames [] :boxes [] :cached? false :error (or (:error cap) :render-preview-frames-failed))))))))))
 

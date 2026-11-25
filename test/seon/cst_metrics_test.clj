@@ -417,3 +417,23 @@
         (is (= 900 (:max-bytes s))))
       (is (= 1 (:evals (m/eval-summary-by-agent @conn :ag/b)))
           "other agents' evals are excluded"))))
+
+(deftest
+  wave10b-schema-lookup-ref-and-ns-quote-error-hints-test
+  (testing
+    "enrich-eval-error guides recovery for Long reverse idents, :db/id lookup refs, and quoted ns names"
+    (let [h1 (parse/enrich-eval-error
+               "(filter #(namespace %) (keys (:schema (user/db))))"
+               "class java.lang.Long cannot be cast to class clojure.lang.Named"
+               {})
+          h2 (parse/enrich-eval-error
+               "(d/pull (user/db) '[*] [:db/id 123])"
+               "Lookup ref attribute should be marked as :db/unique: [:db/id 123]"
+               {})
+          h3 (parse/enrich-eval-error
+               "(ns 'seon.foo-test)"
+               "ns: the namespace name must be a symbol, got: (quote seon.foo-test)"
+               {})]
+      (is (clojure.string/includes? h1 "(user/schema \"term\")"))
+      (is (clojure.string/includes? h2 "bare integer entity ID"))
+      (is (clojure.string/includes? h3 "unquoted symbol")))))

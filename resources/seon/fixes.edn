@@ -486,4 +486,11 @@
   :seon.fix/error-class :doseq-ns-unmap-orphaned-db-forms,
   :seon.fix/root-cause "seon.code/eval-single-form only recognized top-level (ns-unmap 'ns 'sym) and scratch-def? only checked user/* symbols, missing measure-call and d/pull/datoms/q runtime probes and missing ns-unmap inside doseq/do.",
   :seon.fix/regression-test seon.alloc-guard-test/wave9e-doseq-ns-unmap-and-scratch-def-guard-test,
-  :seon.fix/id #uuid "06ac8b7a-4b6a-57c8-947a-b5e7791a94c0"}]
+  :seon.fix/id #uuid "06ac8b7a-4b6a-57c8-947a-b5e7791a94c0"}
+ {:seon.fix/change-summary "Refactored enrich-eval-error onto declarative static-error-hints with 3 new recovery hints; deduplicated LRU/tx-instant-ms/norm-ref/agent-task-ids across 7 namespaces; decomposed hiccup->html-with-handlers; closed all 5 open backlog tasks.",
+  :seon.fix/created-ms 1795629006902,
+  :seon.fix/error-class :trace-error-hints-and-helper-duplication,
+  :seon.fix/id #uuid "ced5c874-3930-4552-a123-f2ce04e5679e",
+  :seon.fix/regression-test seon.cst-metrics-test/wave10b-schema-lookup-ref-and-ns-quote-error-hints-test,
+  :seon.fix/root-cause "enrich-eval-error lacked hints for those 3 recurring REPL error classes, and canonical helpers (lru-peek/put!, tx-instant-ms, normalize-inspect-ref, agent-task-ids) remained duplicated across 7 namespaces.",
+  :seon.fix/symptom "Agents retried on Long reverse idents in (:schema db), [:db/id eid] lookup refs, and quoted (ns 'foo); 7 namespaces duplicated canonical store/render helpers."}]

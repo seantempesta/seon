@@ -1,13 +1,12 @@
 (ns seon.transactor.user
   "Extracted child namespace of `seon.transactor`."
-  (:require [datahike.api :as d]))
+  (:require [datahike.api :as d]
+            [seon.render.data :as rdata]))
 
-(defn norm-ref
-  {:doc "Normalizes a 2-element `[attr value]` ref (unwrapping `(quote x)` values), or nil when malformed.", :malli/schema [:=> [:cat :any] [:maybe [:tuple :keyword :any]]], :cost/ticks 5000}
+(defn ^{:seon.code/reexport (quote seon.render.data/normalize-inspect-ref)} norm-ref
+  "Re-exports `seon.render.data/normalize-inspect-ref`."
   [r]
-  (when (and (vector? r) (= 2 (count r)) (qualified-keyword? (first r)) (some? (second r)))
-    (let [v (second r)]
-      [(first r) (if (and (seq? v) (= 'quote (first v))) (second v) v)])))
+  (rdata/normalize-inspect-ref r))
 
 (defn- cap16 [xs]
   (let [v (vec (remove nil? xs))]

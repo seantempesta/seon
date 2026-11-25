@@ -4,7 +4,8 @@
             [datahike.api :as d]
             [hasch.core :as hasch]
             [seon.health :as health]
-            [seon.health.metrics :as hmetrics]))
+            [seon.health.metrics :as hmetrics]
+            [seon.store :as store]))
 
 (defn- int-or [v d] (if (integer? v) (long v) (long d)))
 
@@ -175,14 +176,10 @@
                                         :agent (when (keyword? aid) aid) :refs (vec (remove nil? [aid (:scope %)]))})))) recent-merges)]
     (vec (sort-by #(vector (- (int-or (:to-tx %) 0)) (- (int-or (:ms %) 0)) (if (= :summary (:source %)) 0 1)) (concat se me)))))
 
-(defn tx-instant-ms
-  "Returns epoch milliseconds for Datahike transaction id `tx` via `:db/txInstant`, or `nil`."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] [:maybe :int]]}
+(defn ^{:seon.code/reexport (quote seon.store.gc/tx-instant-ms)} tx-instant-ms
+  "Re-exports `seon.store.gc/tx-instant-ms`."
   [db tx]
-  (when (and db (integer? tx) (pos? (long tx)))
-    (when-let [inst (:db/txInstant (try (d/pull db '[:db/txInstant] (long tx)) (catch Throwable _ nil)))]
-      (when (instance? java.util.Date inst)
-        (.getTime ^java.util.Date inst)))))
+  (store/tx-instant-ms db tx))
 
 (defn latest-summaries
   "Recorded `:seon.summary/*` entities newest-first (`to-tx` desc). Opts: `:limit :kind :agent :since-tx :until-tx`."
