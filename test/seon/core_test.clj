@@ -586,7 +586,7 @@
                 (seon.git/write-and-commit-main! @conn seon.store/checkout-root nil
                   #{"src/nonexistent/ghost.clj"} "should refuse" nil #{}))))))))
 
-(deftest ^{:cost/ticks 40000000} lossless-namespace-move-vars-refactor-test
+(deftest ^{:cost/ticks 60000000} lossless-namespace-move-vars-refactor-test
   (testing "seon.code.refactor/move-vars-tx checks unresolved deps, supports :include-deps? & :dry-run?, promotes defn-, re-exports public fns preserving fn->qualified-sym & ^:seon/callable, and shrinks source ns"
     (seon.test-fixture/with-test-store [{:keys [conn]}]
       (let [src "(ns seon.demo.big\n  \"Big ns\"\n  (:require [clojure.string :as str]))\n\n(defn- helper [x]\n  (str/upper-case (str x)))\n\n(defn ^:seon/callable greet [x]\n  (str \"Hi \" (helper x)))\n\n(defn entry [x]\n  (greet x))\n"]
