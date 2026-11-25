@@ -7,7 +7,8 @@
             [seon.rule.seed :as rseed]
             [clojure.string :as str]
             [seon.reconciler.policy :as policy]
-            [seon.ctx.diff :as diff]))
+            [seon.ctx.diff :as diff]
+            [seon.task.refine :as refine]))
 
 (defn- eid-of [db a v]
   (when (and db (some? v) (get-in db [:schema a]))
@@ -64,18 +65,19 @@
   (try (requiring-resolve sym) (catch Throwable _ nil)))
 
 (defn task-required-test-syms
-  "Returns sorted set of required test var symbols (`:seon.task/tests` + `:seon.task/test-vars`)."
+  "Returns sorted set of required test var symbols (`:seon.task/tests` + `:seon.task/test-vars` + `:seon.task/proofs`)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :qualified-keyword]] [:set :symbol]]
    :cost/ticks 500000}
   [db task-id]
   (if-let [teid (eid-of db :seon.task/id task-id)]
     (let [leg (when (get-in db [:schema :seon.task/tests])
                 (keep #(when (symbol? (:v %)) (:v %)) (d/datoms db :eavt teid :seon.task/tests)))
-          refs (when (get-in db [:schema :seon.task/test-vars])
-                 (keep #(let [ve (:v %) vn (eavt-val db ve :seon.code.var/name)]
-                          (cond (symbol? vn) vn (integer? ve) (symbol "dangling-ref" (str "eid-" ve))))
-                       (d/datoms db :eavt teid :seon.task/test-vars)))]
-      (into (sorted-set) (concat leg refs)))
+          pull-var-refs (fn [attr]
+                          (when (get-in db [:schema attr])
+                            (keep #(let [ve (:v %) vn (eavt-val db ve :seon.code.var/name)]
+                                     (cond (symbol? vn) vn (integer? ve) (symbol "dangling-ref" (str "eid-" ve))))
+                                  (d/datoms db :eavt teid attr))))]
+      (into (sorted-set) (concat leg (pull-var-refs :seon.task/test-vars) (pull-var-refs :seon.task/proofs))))
     (sorted-set)))
 
 (defn- seed-gate-wm [tdbs aid tids opts]
@@ -110,18 +112,22 @@
       :test-failing (str "- " task ": required test " (:var detail) " FAILED"
                          (when (and (string? (:report detail)) (not (str/blank? (:report detail))))
                            (str " — " (first (str/split-lines (:report detail))))))
-      (:review-hijacked-ready :review-no-op) (str "- " task ": " (or (:message detail) (name reason)))
+      (:review-hijacked-ready :review-no-op
+       :refinement-missing-parent :refinement-missing-proofs :refinement-missing-refs)
+      (str "- " task ": " (or (:message detail) (name reason)))
       (str "- " task ": " (name (or reason :blocked)) " " (pr-str detail)))))
 
 (defn gate-blocked-notify-op
-  "Returns a `:gate-blocked` message op when `status` is `:gate-blocked` with fixable test blockers not yet notified."
+  "Returns a `:gate-blocked` message op when `status` is `:gate-blocked` with fixable test/refinement blockers not yet notified."
   {:malli/schema [:=> [:cat :keyword :map :keyword :any [:set :any]] [:maybe :map]]
    :cost/ticks 500000}
   [status gate agent-id head-tx gate-notified-set]
   (when (and (= status :gate-blocked)
              (not (contains? gate-notified-set [agent-id head-tx])))
-    (let [fixable (filterv #(contains? #{:test-missing :test-failing :review-hijacked-ready :review-no-op} (:reason %))
-                  (:blockers gate))]
+    (let [fixable (filterv #(contains? #{:test-missing :test-failing :review-hijacked-ready :review-no-op
+                                         :refinement-missing-parent :refinement-missing-proofs :refinement-missing-refs}
+                                       (:reason %))
+                           (:blockers gate))]
       (when (seq fixable)
         {:op :send-message :from :reconciler :to agent-id :type :gate-blocked
          :body (str "Merge gate blocked at branch tx " head-tx
@@ -379,7 +385,7 @@
             (rules/load-rules db (gate-starter-rules)))))
 
 (defn evaluate-agent-gate
-  "Evaluates `:rule.gate/*` via `seon.rule/step-rules` over all assigned tasks."
+  "Evaluates `:rule.gate/*`, review outcome, and refinement proof gates over all assigned tasks."
   {:malli/schema [:function
                   [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] :map]
                   [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword] [:maybe :map]] :map]]
@@ -405,9 +411,11 @@
              ab (rules/wm-vals wm aid :gate/blocker)
              rev-out (when (some #{:template/review-and-improve} tids)
                        (evaluate-review-outcome main-db branch-db agent-id))
+             ref-outs (vec (keep #(refine/evaluate-refinement-gate main-db branch-db %) tids))
              all-bs (concat
                      (mapv #(if-let [rid (:rule (first (get prov [(:task %) :gate/blocker %])))] (assoc % :rule rid) %) ab)
-                     (:blockers rev-out))
+                     (:blockers rev-out)
+                     (mapcat :blockers ref-outs))
              bset (into #{} (keep :task) all-bs)
              blockers (->> all-bs
                            (sort-by #(vector (str (:task %)) (str (:reason %)) (pr-str (:detail %))))
@@ -416,7 +424,8 @@
                   :passed-tasks (filterv #(not (contains? bset %)) tids)
                   :blocked-tasks (filterv #(contains? bset %) tids)
                   :blockers blockers}
-           rev-out (assoc :review-outcome rev-out)))))))
+           rev-out (assoc :review-outcome rev-out)
+           (seq ref-outs) (assoc :refinement-outcomes ref-outs)))))))
 
 (defn- gate-status-impl [get-ctx target-aid opts]
   (when-let [{:keys [conn branch agent-id]} (get-ctx)]

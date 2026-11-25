@@ -34,14 +34,7 @@
    :seon.host/throwable (m/-simple-schema {:type :seon.host/throwable :pred #(instance? Throwable %) :type-properties {:error/message "must be a Throwable"}})
    :char                (m/-simple-schema {:type :char :pred char? :type-properties {:error/message "must be a Character"}})})
 
-(defn generatable-function-schema?
-  "True when `sch` is a single-arity `[:=> [:cat ...] ret]` without `:seon.host/*` handles in args."
-  {:malli/schema [:=> [:cat :any] [:maybe :boolean]] :cost/ticks 100000}
-  [sch]
-  (when (and (vector? sch) (= :=> (first sch)))
-    (let [args-form (if (map? (second sch)) (nth sch 2 nil) (second sch))]
-      (not (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
-                 (tree-seq coll? seq args-form))))))
+(defn generatable-function-schema? [& args] (apply six/generatable-function-schema? args))
 
 (defn multi-segment-schema-key?
   "Enforces multi-segment schema namespaces."
@@ -147,18 +140,7 @@
                   res)))
       (compute))))
 
-(defn schema-refs-in-form
-  "Extracts multi-segment qualified keywords referenced inside `schema-form`."
-  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]] :cost/ticks 500000}
-  [schema-form]
-  (if (nil? schema-form)
-    #{}
-    (into #{}
-          (filter (fn [x]
-                    (and (multi-segment-schema-key? x)
-                         (not (str/starts-with? (namespace x) "seon.db"))
-                         (not (str/starts-with? (namespace x) "seon.merge")))))
-          (tree-seq coll? seq schema-form))))
+(defn schema-refs-in-form [& args] (apply six/schema-refs-in-form args))
 
 (defn- safe-example [input-sch opts]
   (try
@@ -220,15 +202,7 @@
     (:seon.gen/skip m)
     :gen-skip))
 
-(defn sync-dh-decls
-  "Returns Datahike attribute declarations missing from `installed-schema` or adding `:db/index true`."
-  {:malli/schema [:=> [:cat :map [:sequential :map]] [:vector :map]] :cost/ticks 500000}
-  [installed-schema declarations]
-  (filterv (fn [d]
-             (let [cur (get installed-schema (:db/ident d))]
-               (or (nil? cur)
-                   (and (true? (:db/index d)) (not (true? (:db/index cur)))))))
-           declarations))
+(defn sync-dh-decls [& args] (apply six/sync-dh-decls args))
 
 (defonce ^:private ^:seon.flow/edge db-registry-anchor (atom {}))
 
@@ -366,7 +340,7 @@
              (vec (take n exs)))))))))
 
 (defn arm-var!
-  "Wraps `v` (a Clojure `Var` with `:malli/schema` `[:=> ...]` metadata) via `m/-instrument`."
+  "Wraps `v` (a Clojure `Var` with `:malli/schema` `[:=> ...]` metadata) via `m/-instrument` with typed contract blame."
   {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat [:maybe :seon.host/db] :any] :any]]}
   ([v] (arm-var! nil v))
   ([db v]
@@ -387,8 +361,10 @@
                      (fn [phase data]
                        (when-not *bypass-contracts*
                          (let [is-input? (= :malli.core/invalid-input phase)
+                               blame (if is-input? :input-contract :output-contract)
                                target-sch (if is-input? (:input data) (:output data))
                                bad-val (if is-input? (:args data) (:value data))
+                               vsch (first (sort-by str (schema-refs-in-form (when target-sch (m/form target-sch)))))
                                exp (when target-sch (m/explain target-sch bad-val opts))
                                human (if exp (me/humanize exp) (str phase))
                                example (when (and is-input? target-sch) (safe-example target-sch opts))]
@@ -399,8 +375,9 @@
                                         " | Got: " (pr-str bad-val)
                                         " | Contract: " (pr-str sch-form)
                                         (when example (str " | Valid example args: " (pr-str example))))
-                                   {:error :seon.schema/contract-violation :var var-sym :phase phase
-                                    :contract sch-form :human human :got bad-val :example-args example})))))}
+                                   (cond-> {:error :seon.schema/contract-violation :blame blame :var var-sym :phase phase
+                                            :contract sch-form :human human :got bad-val :example-args example}
+                                     vsch (assoc :violated-schema vsch)))))))}
                     raw-fn)]
                (alter-meta! v assoc :seon/raw-fn raw-fn :seon/instrumented? true)
                (alter-var-root v (constantly wrapped))
@@ -412,8 +389,11 @@
   ([db] (:entity-index (if db (registry-for-db db) @base-registry)))
   ([db extra-forms] (:entity-index (if db (registry-for-db db extra-forms) (cached-compiled-registry (merge (:forms @base-registry) extra-forms))))))
 
+(defn shrink-failing-args [& args] (apply six/shrink-failing-args args))
+
 (defn stress-var
-  "Deterministically exercises `fn-sym` with `samples` generated inputs (`seed = 42`) and checks `:cost/*` budgets."
+  "Deterministically exercises `fn-sym` with concrete `:examples`, relational `:=>` guard, `seed = 42` generated inputs,
+   deterministic counterexample shrinking, and `:cost/*` budgets."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :qualified-symbol] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
   ([db fn-sym] (stress-var db fn-sym {}))
   ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
@@ -433,8 +413,10 @@
          (let [{:keys [registry]} (registry-for-db db)
                opts {:registry registry}
                fn-sch (m/schema sch-form opts)
-               [cat-s ret-s] (m/children fn-sch)
+               [cat-s ret-s guard-s] (m/children fn-sch)
+               valid-in? (m/validator cat-s opts)
                valid-ret? (m/validator ret-s opts)
+               valid-guard? (when guard-s (m/validator guard-s opts))
                target-fn (or (:seon/raw-fn m) @v)
                ticks-budget (:cost/ticks m)
                bytes-budget (:cost/bytes m)
@@ -447,10 +429,21 @@
                              (catch Throwable t {:gen-error (.getMessage t)}))]
            (if (map? arg-batches)
              {:ok? false :var fn-sym :reason (str "Generator failed for " fn-sym ": " (:gen-error arg-batches))}
-             (let [check-one
+             (let [repro-fail? (fn [cand-args]
+                                 (and (valid-in? cand-args)
+                                      (try
+                                        (let [rv (apply target-fn cand-args)]
+                                          (or (not (valid-ret? rv))
+                                              (and valid-guard? (not (valid-guard? [cand-args rv])))))
+                                        (catch Throwable _ true))))
+                   check-one
                    (fn [acc [tag sample-args expected]]
                      (let [fail (fn [extra reason]
-                                  (reduced (merge {:ok? false :var fn-sym :args sample-args :reason reason} extra)))]
+                                  (let [shrunk (when (and (= tag :sample) (sequential? sample-args))
+                                               (shrink-failing-args (vec sample-args) repro-fail? 24))]
+                                    (reduced (cond-> (merge {:ok? false :var fn-sym :args (or shrunk sample-args) :reason reason} extra)
+                                               (and shrunk (not= shrunk sample-args))
+                                               (assoc :shrunk-args shrunk :original-args sample-args)))))]
                        (try
                          (let [run1 #(if measure-fn (measure-fn (fn [] (apply target-fn sample-args)))
                                         {:val (apply target-fn sample-args) :ticks 0 :bytes 0 :ms 0.0})
@@ -468,9 +461,14 @@
                                         ": expected " (pr-str expected) ", got " (pr-str val)))
 
                              (not (valid-ret? val))
-                             (fail {:return val :human (me/humanize (m/explain ret-s val opts))}
+                             (fail {:return val :blame :output-contract :human (me/humanize (m/explain ret-s val opts))}
                                    (str "Return value failed schema " (pr-str (m/form ret-s))
                                         " on args " (pr-str sample-args) ": got " (pr-str val)))
+
+                             (and valid-guard? (not (valid-guard? [sample-args val])))
+                             (fail {:return val :blame :output-contract :relational-guard-failed? true}
+                                   (str "Relational postcondition failed on " fn-sym
+                                        " args " (pr-str sample-args) " -> " (pr-str val)))
 
                              (and ticks-budget (> ticks ticks-budget))
                              (fail {:ticks ticks :ticks-budget ticks-budget}
@@ -492,7 +490,7 @@
                                  (update :max-ticks max (long (or ticks 0)))
                                  (update :max-bytes max (long (or bytes 0))))))
                          (catch Throwable ex
-                           (fail {:exception (.getMessage ex)}
+                           (fail {:exception (.getMessage ex) :blame :exception}
                                  (str "Threw exception on " (if (= tag :example) "example" (str "seed=" seed))
                                       " args " (pr-str sample-args) ": " (.getMessage ex)))))))
                    items (concat (map (fn [[a exp]] [:example a exp]) examples)

@@ -117,7 +117,13 @@
    :seon.error/severity [#{:error :warning :fatal} :error] :seon.error/source [keyword? :system]
    :seon.error/status [#{:open :resolved :suppressed} :open] :seon.error/id [uuid?]
    :seon.error/at [integer?] :seon.error/agent [keyword?] :seon.error/branch [keyword?]
-   :seon.error/data [map?] :seon.error/eval [uuid?] :seon.error/var [qualified-symbol?] :seon.error/agent-ref [store-ref?]})
+   :seon.error/data [map?] :seon.error/eval [uuid?] :seon.error/var [qualified-symbol?]
+   :seon.error/agent-ref [store-ref?]
+   :seon.error/blame [#{:input-contract :output-contract :exception :test-assertion}]
+   :seon.error/var-ref [store-ref?]
+   :seon.error/schema-ref [store-ref?]
+   :seon.error/call-chain [#(and (vector? %) (every? qualified-symbol? %))]
+   :seon.error/input-sample [string?]})
 
 (defn error-tx
   "Validated `:seon.error/*` entity constructor."
@@ -195,3 +201,65 @@
   ([db]
    (filterv #(= "rule.error" (namespace (:seon.rule/id %)))
             (rules/load-rules db (error-starter-rules)))))
+
+(defn classify-eval-blame
+  "Pure fault localizer: maps structured exception data (`:ex-data`, `:message`, `:called-vars`, `:stack-vars`)
+   into `{:blame :var :schema :call-chain :input-sample}` without throwing."
+  {:malli/schema [:=> {:examples [[[{:ex-data {:error :seon.schema/contract-violation :blame :input-contract
+                                               :var 'seon.ctx/project-entity :violated-schema :seon.agent/entity
+                                               :example-args [[:seon.agent/id :agent/root]]}}
+                                    "(seon.ctx/project-entity nil)"]
+                                   {:blame :input-contract :var 'seon.ctx/project-entity
+                                    :schema :seon.agent/entity :call-chain ['seon.ctx/project-entity]
+                                    :input-sample "[[:seon.agent/id :agent/root]]"}]]}
+                  [:cat [:maybe :map] [:maybe :string]]
+                  [:map [:blame [:enum :input-contract :output-contract :exception :test-assertion]]
+                   [:var {:optional true} [:maybe :qualified-symbol]]
+                   [:schema {:optional true} [:maybe :qualified-keyword]]
+                   [:call-chain [:vector :qualified-symbol]]
+                   [:input-sample {:optional true} [:maybe :string]]]]
+   :cost/ticks 2000000}
+  [ex-info-map _code-str]
+  (let [em (if (map? ex-info-map) ex-info-map {})
+        exd (if (map? (:ex-data em)) (:ex-data em) {})
+        cv? (= :seon.schema/contract-violation (:error exd))
+        blame (cond
+                (contains? #{:input-contract :output-contract :exception :test-assertion} (:blame exd)) (:blame exd)
+                (and cv? (= :malli.core/invalid-input (:phase exd))) :input-contract
+                cv? :output-contract
+                (:test-assertion? em) :test-assertion
+                :else :exception)
+        called (vec (distinct (filter qualified-symbol? (concat (:stack-vars em) (:called-vars em)))))
+        target-var (or (when (qualified-symbol? (:var exd)) (:var exd))
+                       (when (qualified-symbol? (:var em)) (:var em))
+                       (last called))
+        chain (vec (distinct (cond-> called (and target-var (not (some #{target-var} called))) (conj target-var))))
+        vsch (when (qualified-keyword? (:violated-schema exd)) (:violated-schema exd))
+        raw-sample (cond
+                     (and (= :input-contract blame) (some? (:example-args exd))) (pr-str (:example-args exd))
+                     (some? (:got exd)) (pr-str (:got exd))
+                     (string? (:input-sample em)) (:input-sample em)
+                     :else nil)
+        sample (when (string? raw-sample)
+                 (if (> (count raw-sample) 260) (str (subs raw-sample 0 257) "...") raw-sample))]
+    (cond-> {:blame blame :call-chain chain}
+      target-var (assoc :var target-var)
+      vsch (assoc :schema vsch)
+      sample (assoc :input-sample sample))))
+
+(defn attach-blame-refs
+  "Resolves `:seon.error/var` -> `:seon.error/var-ref` and `:schema` -> `:seon.error/schema-ref` on `err-ent` via indexed `:avet`."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :map] :cost/ticks 500000}
+  [db err-ent]
+  (let [dh (when db (:schema db))
+        vsym (:seon.error/var err-ent)
+        vsch (or (:schema err-ent) (get-in err-ent [:seon.error/data :violated-schema]))
+        ve (when (and dh vsym (qualified-symbol? vsym) (not (:seon.error/var-ref err-ent))
+                      (contains? dh :seon.error/var-ref) (contains? dh :seon.code.var/name))
+             (:e (first (d/datoms db :avet :seon.code.var/name vsym))))
+        se (when (and dh vsch (qualified-keyword? vsch) (not (:seon.error/schema-ref err-ent))
+                      (contains? dh :seon.error/schema-ref) (contains? dh :seon.schema/key))
+             (:e (first (d/datoms db :avet :seon.schema/key vsch))))]
+    (cond-> (dissoc err-ent :schema)
+      ve (assoc :seon.error/var-ref ve)
+      se (assoc :seon.error/schema-ref se))))

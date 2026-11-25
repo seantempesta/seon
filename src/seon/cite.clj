@@ -140,50 +140,98 @@
      {:vars #{} :nss #{} :schemas #{} :docs (extract-md-links masked)}
      spans))))
 
+(defn ordered-citations
+  "Extracts backticked spans and Markdown links from `text` in exact appearance order as `[:doc|:var|:schema|:ns val]`."
+  {:malli/schema [:=> {:examples [[["Read [render](docs/render.md#sec), `seon.ctx/project-entity`, and `:seon.task/id`."]
+                                   [[:doc "docs/render.md#sec"] [:var 'seon.ctx/project-entity] [:schema :seon.task/id]]]]}
+                  [:cat :string]
+                  [:vector [:tuple [:enum :doc :var :schema :ns] :any]]]
+   :cost/ticks 5000000}
+  [text]
+  (if (str/blank? text)
+    []
+    (let [clean (strip-fenced-blocks text)
+          md-re #"(?<!!)\[[^\]\n]+\]\(\s*(?:<([^>\n]+)>|([^\s()\n]+))(?:\s+\"[^\"\n]*\")?\s*\)"
+          seen (volatile! #{})
+          out (volatile! [])
+          emit! (fn [k v]
+                  (let [pair [k v]]
+                    (when-not (contains? @seen pair)
+                      (vswap! seen conj pair)
+                      (vswap! out conj pair))))
+          {:keys [spans]} (scan-inline-spans clean)
+          md-hits (let [m (re-matcher md-re clean)
+                        acc (volatile! [])]
+                    (while (.find m)
+                      (when-let [t (normalize-doc-target (or (.group m 1) (.group m 2)) true)]
+                        (vswap! acc conj [(.start m) [:doc t]])))
+                    @acc)
+          span-hits (let [pos (volatile! 0)
+                          acc (volatile! [])]
+                      (doseq [sp spans]
+                        (let [idx (.indexOf ^String clean (str "`" sp "`") (int @pos))
+                              at (if (neg? idx) @pos idx)]
+                          (when-not (neg? idx) (vreset! pos (+ idx (count sp) 2)))
+                          (when-not (str/blank? sp)
+                            (doseq [raw (str/split sp #"[ \t\n\r()\[\]{}\",;]+")]
+                              (let [tok (-> raw (str/replace #"^(?:#'|['@^~])+" "") (str/replace #"[.,;:]+$" ""))]
+                                (when-let [[ck v] (when (seq tok) (classify-token tok))]
+                                  (let [k (case ck :docs :doc :vars :var :schemas :schema :nss :ns)]
+                                    (vswap! acc conj [at [k v]]))))))))
+                      @acc)]
+      (doseq [[_ [k v]] (sort-by first (concat md-hits span-hits))]
+        (emit! k v))
+      @out)))
+
 (defn resolve-doc-refs
-  "Resolves parsed citations in `text` via indexed `:avet` lookups (plus optional `batch-ctx`\n        for same-batch cold-boot refs) into `{:refs :unresolved}`."
+  "Resolves parsed citations in `text` (vars, nss, schemas, AND exact `:seon.code.doc/id` atoms)
+   via indexed `:avet` lookups into `{:refs #{eid...} :ordered [[attr val] ...] :unresolved #{...}}`."
   {:malli/schema
    [:function
-    [:=>
-     [:cat [:maybe :seon.host/db] :string]
-     [:map [:refs [:set :any]] [:unresolved [:set :any]]]]
-    [:=>
-     [:cat [:maybe :seon.host/db] :string [:maybe :map]]
-     [:map [:refs [:set :any]] [:unresolved [:set :any]]]]],
-   :cost/ticks 5000000}
+    [:=> [:cat [:maybe :seon.host/db] :string] [:map [:refs [:set :any]] [:ordered [:vector :any]] [:unresolved [:set :any]]]]
+    [:=> [:cat [:maybe :seon.host/db] :string [:maybe :map]] [:map [:refs [:set :any]] [:ordered [:vector :any]] [:unresolved [:set :any]]]]]
+   :cost/ticks 6000000}
   ([db text] (resolve-doc-refs db text nil))
   ([db text batch-ctx]
-    (let [{:keys [vars nss schemas]} (parse-citations (or text ""))]
-      (if (and (nil? db) (nil? batch-ctx))
-        {:refs #{}, :unresolved (into #{} (concat vars nss schemas))}
-        (let [sch (when db (:schema db))
-              step (fn [acc attr bmap xs]
-                     (let [ok? (and db (contains? sch attr))]
-                       (reduce
-                         (fn [m x]
-                           (if-let [e
-                                    (or
-                                      (when
-                                        ok?
-                                        (:e
-                                          (first
-                                            (d/datoms
-                                              db
-                                              :avet
-                                              attr
-                                              x))))
-                                      (get bmap x))]
-                             (update m :refs conj e)
-                             (update m :unresolved conj x)))
-                         acc
-                         xs)))]
-          (-> {:refs #{}, :unresolved #{}}
-           (step :seon.code.var/name (:var->ref batch-ctx) vars)
-           (step :seon.code.ns/name (:ns->ref batch-ctx) nss)
-           (step
-             :seon.schema/key
-             (:schema->ref batch-ctx)
-             schemas)))))))
+   (let [ord (ordered-citations (or text ""))]
+     (if (and (nil? db) (nil? batch-ctx))
+       {:refs #{} :ordered [] :unresolved (into #{} (map second) ord)}
+       (let [sch (when db (:schema db))
+             ok? (fn [a] (and db (contains? sch a)))
+             doc-by-path (delay
+                           (when (and (ok? :seon.code.doc/path) (ok? :seon.code.doc/order))
+                             (group-by :path
+                                       (for [dt (d/datoms db :aevt :seon.code.doc/path)]
+                                         {:e (:e dt)
+                                          :path (:v dt)
+                                          :id (:v (first (d/datoms db :eavt (:e dt) :seon.code.doc/id)))
+                                          :order (long (or (:v (first (d/datoms db :eavt (:e dt) :seon.code.doc/order))) 0))}))))
+             resolve-one
+             (fn [[k v]]
+               (case k
+                 :var (when-let [e (or (when (ok? :seon.code.var/name) (:e (first (d/datoms db :avet :seon.code.var/name v))))
+                                       (get (:var->ref batch-ctx) v))]
+                        [[e [:seon.code.var/name v]]])
+                 :ns (when-let [e (or (when (ok? :seon.code.ns/name) (:e (first (d/datoms db :avet :seon.code.ns/name v))))
+                                      (get (:ns->ref batch-ctx) v))]
+                       [[e [:seon.code.ns/name v]]])
+                 :schema (when-let [e (or (when (ok? :seon.schema/key) (:e (first (d/datoms db :avet :seon.schema/key v))))
+                                          (get (:schema->ref batch-ctx) v))]
+                           [[e [:seon.schema/key v]]])
+                 :doc (if-let [e (or (when (ok? :seon.code.doc/id) (:e (first (d/datoms db :avet :seon.code.doc/id v))))
+                                     (get (:doc->ref batch-ctx) v))]
+                        [[e [:seon.code.doc/id v]]]
+                        (when-not (str/includes? (str v) "#")
+                          (when-let [secs (seq (sort-by :order (get @doc-by-path v)))]
+                            (mapv (fn [s] [(:e s) [:seon.code.doc/id (:id s)]]) (take 3 secs)))))))]
+         (reduce (fn [acc [k v :as item]]
+                   (if-let [hits (seq (resolve-one item))]
+                     (reduce (fn [m [e lref]]
+                               (-> m (update :refs conj e) (update :ordered conj lref)))
+                             acc hits)
+                     (update acc :unresolved conj v)))
+                 {:refs #{} :ordered [] :unresolved #{}}
+                 ord))))))
 
 (defn enrich-doc-sections
   "Attaches resolved `:seon.code.doc/references` to parsed `:seon.code.doc/*` section maps."
