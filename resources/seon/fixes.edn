@@ -121,6 +121,13 @@
   :seon.fix/regression-test seon.cycle4-perf-test/transactor-commit-res-explicit-nil-optional-args-test,
   :seon.fix/root-cause "Hand-written intern closures bypassed var metadata, batch set-meta! looped per-item d/transact, and Malli [:? :map] requires [:? [:maybe :map]] for explicit nil args.",
   :seon.fix/symptom "278L install-agent-helpers! and 257L install-call-and-ui-helpers! dropped :doc/:arglists on user/* helpers; batched set-meta! ran N transactions; armed commit-res [:? :map] rejected explicit nil."}
+ {:seon.fix/before-after "Before: invalid :malli/schema bypassed branch health & merge gate; invalid-arity blamed output nil; #'var crashed run-tests!; bounce messages dropped. After: pre-merge blocked, arity blamed cleanly, #'var coerced, bounces & live supervisor phases recorded.",
+  :seon.fix/change-summary "Added indexed {:target-nss ...} invalid-contract-violations and wired into caused-by-branch-impl + static-problems-for-scope; distinguished :malli.core/invalid-arity in arm-var!; added coerce-target-sym for #'var/Namespace in seon.repl + Var->Named hint; hardened summarize-ab as-l; preserved :bounce-messages in trial-telemetry + child :bounces in trial-audit-summary; added live :on-phase! updates in seon.bench.lab.",
+  :seon.fix/error-class :invalid-contract-bypass-and-arity-blame,
+  :seon.fix/id #uuid "d17323ac-9c4c-4f6a-9ca1-cd9055f3ab67",
+  :seon.fix/regression-test seon.cst-metrics-test/wave25b-invalid-contract-gate-arity-blame-var-run-tests-and-bounces-test,
+  :seon.fix/root-cause "seon.health.branch/caused-by-branch-impl omitted invalid-contract-violations; seon.schema/arm-var! lumped :malli.core/invalid-arity into :output-contract; seon.repl/resolve-run-tests-targets only coerced strings; seon.bench.ab/summarize-ab cast non-numbers with long; seon.bench.helpers/trial-telemetry dropped :bounce-messages and child bounces.",
+  :seon.fix/symptom "Wave 25A: contract-rule-step-rules merged local-def-symbol :malli/schema onto :main; arm-var! reported :invalid-arity as (invalid return value): Got: nil; user/run-tests! threw Var->Named on #'var; trial-telemetry dropped :bounce-messages."}
  {:seon.fix/before-after "Before: :arms [:control] stored 0/0 :passed run; seon.bench.golden at 7,904 tok; 4 duplicate private helpers. After: bare keyword arms expand cleanly, empty trials fail fast, seon.bench.golden ~5.0k tok, 4 duplicates removed.",
   :seon.fix/change-summary "Normalized bare keyword arms in build-ab-tasks, added :no-trials guard in run-ab!, extracted seon.bench.ab from seon.bench.golden, consolidated clamp01 & deleted 3 redundant r2 wrappers, and added 3 Wave 19A error recovery hints.",
   :seon.fix/error-class :ab-empty-arms-and-wave19a-error-hints,

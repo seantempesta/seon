@@ -88,7 +88,9 @@
   [["Alias d already exists in namespace repl" "Alias str already exists in namespace repl"]
    "Hint: `d` (`datahike.api`), `str` (`clojure.string`), `fs` (`jolt.fs`), and `proc` (`jolt.process`) are pre-aliased in `user`/`repl` — pick a distinct alias (e.g. `:as diag`)."]
   [["No such namespace: seon.db"]
-   "Hint: There is no `seon.db` namespace — query Datahike with `(d/q ... (user/db))` or `(d/datoms (user/db) :avet :attr val)` (`datahike.api` is pre-aliased as `d`)."]])
+   "Hint: There is no `seon.db` namespace — query Datahike with `(d/q ... (user/db))` or `(d/datoms (user/db) :avet :attr val)` (`datahike.api` is pre-aliased as `d`)."]
+  [["Var cannot be cast to class clojure.lang.Named"]
+   "Hint: Pass a quoted symbol `'ns/var` (not a Var `#'ns/var`) to helpers expecting a symbol."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
@@ -149,8 +151,6 @@
       (vswap! hints conj "Hint: `d/pull` requires a lookup ref vector `[:attr val]` or integer EID, not a bare keyword."))
     (when (and (str/includes? e "cannot be cast to class clojure.lang.Named") (re-find #"class [a-zA-Z0-9_.]+\$" e))
       (vswap! hints conj "Hint: Quote the symbol argument (e.g. `'seon.ns/fn` or `'user/edit-fn!`), not the unquoted function value."))
-    (when (re-find #"No such namespace: u(?:\s|$)" e)
-      (vswap! hints conj "Hint: REPL helpers live in `user/` (e.g. `(user/source ...)`, `(user/grep-src ...)`), not `u/`."))
     (when (re-find #"No such namespace: u(?:\s|$)" e)
       (vswap! hints conj "Hint: REPL helpers live in `user/` (e.g. `(user/source ...)`, `(user/grep-src ...)`), not `u/`."))
     (doseq [[needles hint] static-error-hints]

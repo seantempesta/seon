@@ -275,6 +275,7 @@
                                   (contracts/broken-symbol-refs db vsnap)
                                   (contracts/broken-doc-refs db scope vsnap)
                                   (contracts/impure-generatable-fns db scope vsnap)
+                                  (contracts/invalid-contract-violations db vsnap {:target-nss scope-nss})
                                   (static-efficiency-warnings db scope))]
                   (filterv (fn [p]
                              (and (= :static (:kind p))

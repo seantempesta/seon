@@ -347,11 +347,11 @@
   ([db v]
    (when (and (var? v) (bound? v) (fn? @v))
      (let [m0 (meta v)
-          v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)))
-              (or (resolve (:seon.code/reexport m0)) v)
-              v)
-          m (meta v)
-          sch-form (:malli/schema m)]
+           v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)))
+               (or (resolve (:seon.code/reexport m0)) v)
+               v)
+           m (meta v)
+           sch-form (:malli/schema m)]
        (when (and (vector? sch-form) (contains? #{:=> :function} (first sch-form)))
          (let [raw-fn (or (:seon/raw-fn m) @v)
                var-sym (symbol v)
@@ -365,17 +365,18 @@
                      :report
                      (fn [phase data]
                        (when-not *bypass-contracts*
-                         (let [is-input? (= :malli.core/invalid-input phase)
-                               blame (if is-input? :input-contract :output-contract)
-                               target-sch (if is-input? (:input data) (:output data))
-                               bad-val (if is-input? (:args data) (:value data))
+                         (let [in? (= :malli.core/invalid-input phase)
+                               ar? (= :malli.core/invalid-arity phase)
+                               blame (cond in? :input-contract ar? :arity-contract :else :output-contract)
+                               target-sch (cond in? (:input data) ar? nil :else (:output data))
+                               bad-val (if (or in? ar?) (:args data) (:value data))
                                vsch (first (sort-by str (schema-refs-in-form (when target-sch (m/form target-sch)))))
                                exp (when target-sch (m/explain target-sch bad-val opts))
-                               human (if exp (me/humanize exp) (str phase))
-                               example (when (and is-input? target-sch) (safe-example target-sch opts))]
+                               human (cond exp (me/humanize exp) ar? (str "wrong arity (" (count (:args data)) " arg(s))") :else (str phase))
+                               example (when (and in? target-sch) (safe-example target-sch opts))]
                            (throw (ex-info
                                    (str "Schema contract violation in " var-sym
-                                        " (" (if is-input? "invalid arguments" "invalid return value") "): "
+                                        " (" (cond in? "invalid arguments" ar? "invalid arity" :else "invalid return value") "): "
                                         (pr-str human)
                                         " | Got: " (pr-str bad-val)
                                         " | Contract: " (pr-str sch-form)

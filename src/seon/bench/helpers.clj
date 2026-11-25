@@ -249,10 +249,15 @@
          diag (pull-failure-diagnostics conn main-db brs agent-id br after-mtx (as-l (:after-tx o)))
          compact-evs (when (:include-trace? o)
                        {:worker (pull-compact-evals conn main-db brs agent-id br)
-                        :children (mapv (fn [cid cr] {:id cid :merged? (boolean (:merged? cr))
-                                                      :turns (as-l (:turns cr)) :kv (:kv-cache-hit-pct cr)
-                                                      :evals (pull-compact-evals conn main-db brs cid (:branch cr))})
-                                        child-ids child-rows)})]
+                        :children (mapv (fn [cid cr]
+                                    (let [cdiag (pull-failure-diagnostics conn main-db brs cid (:branch cr) after-mtx 0)]
+                                      (cond-> {:id cid :merged? (boolean (:merged? cr))
+                                               :turns (as-l (:turns cr)) :kv (:kv-cache-hit-pct cr)
+                                               :ooms (as-l (:ooms cr))
+                                               :evals (pull-compact-evals conn main-db brs cid (:branch cr))}
+                                        (seq (:bounce-messages cdiag)) (assoc :bounces (:bounce-messages cdiag))
+                                        (seq (:failing-tests cdiag)) (assoc :failing-tests (:failing-tests cdiag)))))
+                                  child-ids child-rows)})]
      (cond-> (assoc base
                   :child-count (long (count child-rows))
                   :child-merged? (boolean (some :merged? child-rows))
@@ -297,6 +302,7 @@
               (number? (:total-kv-hit-pct trace-map)) (assoc :total-kv-hit-pct (double (:total-kv-hit-pct trace-map)))
               (seq (:error-samples trace-map)) (assoc :error-samples (:error-samples trace-map))
               (seq (:failing-tests trace-map)) (assoc :failing-tests (:failing-tests trace-map))
+              (seq (:bounce-messages trace-map)) (assoc :bounce-messages (:bounce-messages trace-map))
               (map? (:eval-trace trace-map)) (assoc :eval-trace (:eval-trace trace-map)))
             telemetry-numeric-pairs)))
 
