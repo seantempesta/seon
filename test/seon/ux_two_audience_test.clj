@@ -356,3 +356,50 @@
           (is (= :browser (:measured-by applied)))
           (is (= 560 (:min-width applied)) "Explicit :data-min-width floor preserved over 360px wrap width"))
         (fit/clear-browser-box-cache!)))))
+
+(deftest ^{:cost/ticks 120000000} ground-up-entity-browser-and-tuning-cockpit-test
+  (with-test-store [{:keys [conn]}]
+    (do (seed-ux-world! conn)
+    (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/ux_caller.clj" "(ns demo.ux-caller (:require [demo.ux :as u]))\n(defn use-twice [x] (u/twice x))\n" false)})
+    (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn {:analyze-compiler? true})}))
+    (d/transact conn
+      {:tx-data [{:seon.agent/id :agent/root :seon.agent/paused? true}
+                 {:seon.agent/id :agent/tuner-demo
+                  :seon.agent/label "Context Tuner"
+                  :seon.agent/forked-from [:seon.agent/id :agent/root]
+                  :seon.agent/branch :branch/tuner-demo
+                  :seon.agent/ready? false}]})
+    (let [db @conn]
+      (testing "Perspective-aware General Entity Browser runs on project-entity with structural provenance and 1-2 hop neighbors"
+        (let [h (render/hiccup->html
+                 (surface/render-surface db db {:view-mode :inspect :viewing-id :agent/root :expert-mode? true
+                                                :inspect-ref [:seon.code.var/name (quote demo.ux/twice)]
+                                                :viewport-w 1280 :viewport-h 820}))]
+          (is (str/includes? h "id=\"seon-inspector-unit\""))
+          (is (str/includes? h "Perspective: Root"))
+          (is (str/includes? h "id=\"insp-neighborhood-unit\""))
+          (is (str/includes? h "id=\"insp-unmatched-unit\""))
+          (is (str/includes? h "demo.ux") "1-hop namespace neighbor surfaced via project-entity unmatched")))
+
+      (testing "Context Lab renders Live Pause-and-Fork Tuning Cockpit, 3-Bucket Universe, and NASA Completeness Matrix"
+        (let [h (render/hiccup->html
+                 (surface/render-surface db db {:view-mode :context :viewing-id :agent/root :expert-mode? true
+                                                :viewport-w 1280 :viewport-h 820}))]
+          (is (str/includes? h "id=\"cockpit-tuning-unit\""))
+          (is (str/includes? h "Tuner Fork"))
+          (is (str/includes? h "Context Tuner"))
+          (is (str/includes? h "Data Model"))
+          (is (str/includes? h "id=\"ctx-candidates-unit\""))
+          (is (str/includes? h "1–2 Hop Candidate Universe"))
+          (is (str/includes? h "Unmatched in 1–2 Hop Neighborhood"))
+          (is (str/includes? h "id=\"cockpit-nasa-unit\""))
+          (is (str/includes? h "NASA Completeness Matrix"))
+          (is (str/includes? h "Schema → Renderers &amp; Rules Matrix"))))
+
+      (testing "Mom Mode remains serene with zero Cockpit or Dev provenance chrome"
+        (let [h (render/hiccup->html
+                 (surface/render-surface db db {:view-mode :canvas :viewing-id :agent/root :expert-mode? false
+                                                :viewport-w 1280 :viewport-h 820}))]
+          (is (not (str/includes? h "cockpit-tuning-unit")))
+          (is (not (str/includes? h "cockpit-nasa-unit")))
+          (is (not (str/includes? h "ent-prov-bar"))))))))

@@ -31,7 +31,8 @@
             [seon.fork :as fork]
             [seon.fork.calls :as fcalls]
             [seon.fork.helpers :as fhelpers]
-            [seon.web.css :as wcss]))
+            [seon.web.css :as wcss]
+            [seon.rule.seed :as rseed]))
 
 (defn- unit-vec [dims idx]
   (vec (for [i (range dims)] (if (= i idx) 1.0 (if (= i (mod (inc idx) dims)) 0.1 0.0)))))
@@ -139,7 +140,8 @@
                [(unit-vec 16 0) (unit-vec 16 0) (unit-vec 16 1) (unit-vec 16 2)]
                [12 24 18 15]
                "test-embed+v1")]
-      (d/transact conn {:tx-data vtx}))
+      (do (d/transact conn {:tx-data vtx})
+      (d/transact conn {:tx-data (filterv #(= :rule.ctx/system-overview (:seon.rule/id %)) (rseed/starter-rules))})))
     {:fix-id fix-id :err-id err-id :ev1-id ev1-id :ev2-id ev2-id}))
 
 (deftest ^{:cost/ticks 90000000} holistic-views-header-honest-session-and-frame-budget-test
@@ -248,7 +250,7 @@
         (is (not (str/includes? (:html insp-d) "← Back")) "Inspector must not duplicate Back button")
         (doseq [needle ["entity-actions" "Close ×" "insp-variations-unit" "WINNER"
                         "Browser HTML" "Model Text" "insp-neighborhood-unit"
-                        "Outbound &amp; Direct Refs" "Inbound &amp; Referencers" "Open →"]]
+                        "Perspective:" "Rule-Matched Context" "Open →"]]
           (is (str/includes? (:html insp-d) needle) (str ":inspect missing " needle)))))))
 
 (deftest ^{:cost/ticks 90000000} entities-hyperlinks-plain-text-params-and-all-types-inspector-test

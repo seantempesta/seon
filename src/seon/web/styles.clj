@@ -261,17 +261,17 @@
   {:malli/schema [:=> [:cat] :string] :cost/ticks 3000000 :cost/bytes 4194304}
   []
   (str (str/join "\n" (into [css/app-css] (map compile-css [activity-rules stability-rules surface-layout-rules ambient-rules markdown-rules]))) "\n"
-       "@keyframes seon-ring{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
-       "@keyframes sig-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 45%,transparent)}70%{box-shadow:0 0 0 6px transparent}100%{box-shadow:0 0 0 0 transparent}}\n"
-       "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:translateY(0)}}\n"
+       "@keyframes seon-ring{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}70%{box-shadow:0 0 0 6px transparent}}\n"
+       "@keyframes sig-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 45%,transparent)}70%{box-shadow:0 0 0 6px transparent}}\n"
+       "@keyframes seon-sheet-up{from{transform:translateY(100%)}to{transform:none}}\n"
        "@media(prefers-reduced-motion:reduce){.stream-dot,.sig-dot,.status-sidebar{animation:none}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}\n"
        "@media(max-width:960px){.status-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:40;width:100%;max-width:100%;height:auto;max-height:42vh;border-left:none;border-top:1px solid var(--base-800);border-radius:14px 14px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.48);animation:seon-sheet-up .18s ease-out}.live-thinking-panel{padding:10px 16px}}\n"
        "@media(max-width:759px){.sidebar.open{display:none}.surface-entity-grid,.mom-fit-grid{grid-template-columns:1fr}.surface-entity-item,.mom-fit-item{min-width:0;max-width:100%;overflow-wrap:anywhere}.kv-grid{grid-template-columns:110px 1fr}.session-split,.view-scroll{padding-bottom:96px}}\n"
        ".root-canvas.is-user-canvas.has-custom-canvas{max-width:1040px}.mom-fit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}.mom-fit-chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mom-fit-title{margin:0;font-size:18px;font-weight:600;letter-spacing:-0.01em}.mom-fit-item{min-width:0;max-width:100%}.md-seon-view-clean{margin:10px 0}\n"
-       ".hovercard{max-width:min(360px,calc(100vw - 24px));padding:10px 12px;border-radius:9px;border:1px solid var(--base-700);background:var(--base-900);color:var(--text-200);box-shadow:0 14px 36px rgba(0,0,0,.48);pointer-events:auto;z-index:80;font-size:12.5px}\n"
+       ".hovercard{max-width:min(360px,calc(100vw - 24px));padding:10px 12px;border-radius:9px;border:1px solid var(--base-700);background:var(--base-900);color:var(--text-200);box-shadow:0 14px 36px rgba(0,0,0,.48);z-index:80;font-size:12.5px}\n"
        ".hovercard-body{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:100%}\n"
        ".hovercard-body .card{background:transparent;border:none;padding:0}\n"
        ".hovercard-foot{padding-top:6px;border-top:1px solid var(--base-800);display:flex;justify-content:space-between;align-items:center}\n"
        "@supports (position-area: block-end){.hovercard{inset:auto;margin:0;position-area:block-end span-inline-end;position-try-fallbacks:flip-block,flip-inline,flip-block flip-inline;margin-block-start:6px}}\n"
-       "@media (prefers-reduced-motion: no-preference){.hovercard{opacity:0;transform:translateY(4px);transition:opacity .15s ease,transform .15s ease,display .15s allow-discrete,overlay .15s allow-discrete;transition-behavior:allow-discrete}.hovercard:popover-open{opacity:1;transform:translateY(0)}@starting-style{.hovercard:popover-open{opacity:0;transform:translateY(4px)}}}\n"
-       ".hdr-nav{display:inline-flex;align-items:center;gap:4px;flex-shrink:0}.hdr-nav .icon-btn:disabled{opacity:.35;cursor:default}"))
+       "@media(prefers-reduced-motion:no-preference){.hovercard{opacity:0;transform:translateY(4px);transition:opacity .15s,transform .15s,display .15s allow-discrete,overlay .15s allow-discrete;transition-behavior:allow-discrete}.hovercard:popover-open{opacity:1;transform:none}@starting-style{.hovercard:popover-open{opacity:0;transform:translateY(4px)}}}\n"
+       ".hdr-nav{display:inline-flex;align-items:center;gap:4px;flex-shrink:0}.hdr-nav .icon-btn:disabled{opacity:.35;cursor:default}.cockpit-tuner-card{background:var(--base-950);border:1px solid var(--base-700);border-radius:9px;padding:12px 14px}.cockpit-diff{background:var(--base-900);border:1px solid var(--base-800);border-radius:8px;padding:10px 12px}.insp-perspective-bar{flex-wrap:wrap;gap:8px}"))

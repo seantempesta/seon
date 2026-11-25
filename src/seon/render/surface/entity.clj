@@ -48,8 +48,7 @@
     (str/join "\n\n" parts)))
 
 (defn project-entity-view
-  "ONE general entity-surface engine for BOTH humans (`:target :html`) and agents (`:target :wire`).
-   Works identically for `[:seon.agent/id aid]`, `[:seon.system/id :root]`, and ANY entity lookup ref."
+  "ONE unified rule-projected view over `seon.ctx/project-entity` for `:seon.agent/id`, `:seon.system/id`, and ANY entity ref."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map]
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any [:maybe :map]] :map]]
@@ -57,64 +56,59 @@
   ([main-db branch-db focus-ref] (project-entity-view main-db branch-db focus-ref nil))
   ([main-db branch-db focus-ref opts]
    (let [o (if (map? opts) opts {})
-         bdb (or branch-db main-db)
          ref (or (if (integer? focus-ref) [:db/id focus-ref] (rdata/normalize-inspect-ref focus-ref))
                  [:seon.system/id :root])
-         [ra rv] ref
+         [ra _] ref
+         bdb (if (= :seon.system/id ra) main-db (or branch-db main-db))
          target (if (= :wire (:target o)) :wire :html)
-         world (cond
-                 (= ra :seon.agent/id)
-                 (let [res (if (fn? (:agent-gather-fn o))
-                             ((:agent-gather-fn o))
-                             (ctx/gather-agent-candidates main-db bdb rv {:agent (:agent o) :target target :semantic? true :enrich? true :situational? false}))
-                       ag (or (:agent res) (:agent o) (rdata/pull-agent-entity main-db bdb rv))
-                       aeid (or (get-in res [:world :agent-eid]) (sinsp/resolve-eid bdb main-db ref))]
-                   {:ref ref :eid aeid :entity ag :kind :agent :virtual? (nil? aeid)
-                    :focal-item (when (map? ag) {:entity (or aeid ref) :schema :seon.agent/entity :data ag :priority 100})
-                    :candidates (:candidates res)
-                    :ctx-trace (:ctx-trace res)})
-
-                 :else
-                 (sinsp/entity-world-candidates main-db bdb ref))
-         default-max (case (:kind world) :agent 8 :system 12 10)
+         default-max (case ra :seon.agent/id 8 :seon.system/id 12 10)
          budget (long (or (:token-budget o) 2400))
          focal-budget (max 240 (long (quot budget 3)))
-         fopts (merge {:target target :main-db main-db :fallback-renderers rwire/fallback-entity-renderers}
+         popts (merge {:target target :include-unmatched? (not= ra :seon.system/id)
+                      :include-rule-trace? (not= ra :seon.system/id)
+                      :use-live-touches? (not= ra :seon.system/id)
+                      :semantic? (if (contains? o :semantic?) (boolean (:semantic? o)) (not= ra :seon.system/id))
+                      :perspective-agent (:perspective-agent o)
+                      :agent (:agent o)}
                       (if (= target :html)
-                        {:avail-w (long (or (:avail-w o) 960))
-                         :area-budget (long (or (:area-budget o) 800000))
-                         :max-items (long (or (:max-items o) default-max))}
+                        (cond-> {:avail-w (long (or (:avail-w o) 960))
+                                 :area-budget (long (or (:area-budget o) 800000))
+                                 :max-items (long (or (:max-items o) default-max))}
+                          (:per-item-budget o) (assoc :per-item-budget (:per-item-budget o)))
                         {:token-budget (max 160 (- budget focal-budget))
                          :max-items (long (or (:max-items o) 16))
                          :already-shown (:already-shown o)})
-                      (select-keys o [:strategy :weights :viewport-w :viewport-h :sidebar-open? :slot]))
-         focal-fit (when-let [fi (:focal-item world)]
-                     (first (:selected
-                             (fit/fit-projections
-                              bdb [fi]
-                              (merge {:target target :main-db main-db :max-items 1
-                                      :fallback-renderers rwire/fallback-entity-renderers}
-                                     (if (= target :html)
-                                       {:avail-w (long (or (:avail-w o) 960)) :area-budget 600000}
-                                       {:token-budget focal-budget}))))))
-         cands (vec (or (:candidates world) []))
-         fitted (if (seq cands)
-                  (fit/fit-projections bdb cands fopts)
-                  {:selected [] :dropped [] :tokens 0 :area 0 :budget (or (:token-budget fopts) (:area-budget fopts) 0)
-                   :target target :strategy (or (:strategy fopts) :breadth-first) :shown (or (:already-shown o) {})})
-         wire-txt (when (= target :wire) (format-wire-projection (:ref world) world focal-fit fitted))]
-     {:focus-ref (or (:ref world) ref)
-      :focus-kind (or (:kind world) :entity)
+                      (select-keys o [:strategy :weights :viewport-w :viewport-h :sidebar-open? :slot :disabled-rules]))
+         proj (ctx/project-entity main-db bdb ref popts)
+         sigs (when (contains? #{:seon.system/id :seon.signal/kind} ra) (sig/all-signals main-db))
+         world {:ref (:focus-ref proj) :eid (:focus-eid proj) :entity (:focus-data proj)
+                :kind (:focus-kind proj) :virtual? (nil? (:focus-eid proj))
+                :focal-item (when (map? (:focus-data proj))
+                              {:entity (or (:focus-eid proj) (:focus-ref proj))
+                               :schema (:focus-schema proj) :data (:focus-data proj) :priority 100})
+                :candidates (:candidates proj) :unmatched (:unmatched proj)
+                :signals sigs :ctx-trace (:ctx-trace proj) :rule-trace (:rule-trace proj)
+                :world (:world proj)}
+         focal-fit (:focal-fit proj)
+         cands (vec (or (:candidates proj) []))
+         fitted (or (:fitted proj)
+                    {:selected [] :dropped [] :tokens 0 :area 0 :budget (or (:token-budget popts) (:area-budget popts) 0)
+                     :target target :strategy (or (:strategy popts) :breadth-first) :shown (or (:already-shown o) {})})
+         wire-txt (when (= target :wire) (format-wire-projection (:focus-ref proj) world focal-fit fitted))]
+     {:focus-ref (or (:focus-ref proj) ref)
+      :focus-kind (or (:focus-kind proj) :entity)
       :target target
       :world world
       :focal-fit focal-fit
       :candidates cands
+      :unmatched (vec (or (:unmatched proj) []))
       :pool-count (count cands)
       :fitted fitted
       :selected (:selected fitted)
       :dropped (:dropped fitted)
-      :signals (:signals world)
-      :ctx-trace (:ctx-trace world)
+      :signals sigs
+      :rule-trace (:rule-trace proj)
+      :ctx-trace (:ctx-trace proj)
       :shown (:shown fitted)
       :tokens (+ (long (:tokens focal-fit 0)) (long (:tokens fitted 0)))
       :text wire-txt})))
@@ -254,16 +248,20 @@
                [:span {:class "mono tiny muted"} (str (/ (Math/round (* sc 1000.0)) 1000.0))]])])))]))
 
 (defn- sys-group-key [it]
-  (case (:relation it)
-    (:system/open-error :system/failing-test) :alerts
-    (:system/agent :system/pending-call) :agents
-    :tasks))
+  (let [sk (or (:schema it) (first (:schemas it)))
+        d (:data it)]
+    (cond
+      (or (contains? #{:seon.error/entity :seon.fix/entity :seon.test/verdict} sk)
+          (:seon.error/id d) (:seon.fix/id d) (:seon.test/digest d)) :alerts
+      (or (contains? #{:seon.agent/entity :seon.agent.call/entity} sk)
+          (:seon.agent/id d) (:seon.agent.call/id d)) :agents
+      :else :tasks)))
 
 (defn render-system-entity-body
   "Renders `[:seon.system/id :root]` through the EXACT SAME `project-entity-view` Upgrade Ladder
    (focal `:seon.system/entity` card + live 5 signals + compact semantic search + ranked high-signal live entities)."
   {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
-  [{:keys [main-db branch-db signals branch-feedback vector-status semantic-search slot-budget]}]
+  [{:keys [main-db branch-db viewing-id signals branch-feedback vector-status semantic-search slot-budget]}]
   (if-not (or (instance? datahike.db.interface.ISearch main-db) (instance? datahike.db.interface.ISearch branch-db))
     [:div {:id "seon-system-unit" :class "card muted"} "No database connected."]
     (let [main-db (if (instance? datahike.db.interface.ISearch main-db) main-db branch-db)
@@ -271,9 +269,10 @@
           aw (long (:avail-w slot-budget 1000))
           stack? (< aw 760)
           proj (project-entity-view main-db branch-db [:seon.system/id :root]
-                                    {:target :html :avail-w aw :area-budget (max 420000 (long (:area-budget slot-budget 900000)))
-                                     :max-items 12})
-          sel (:selected proj)
+               (cond-> {:target :html :avail-w aw :area-budget (max 420000 (long (:area-budget slot-budget 900000)))
+                        :max-items 12}
+                 (:per-item-budget slot-budget) (assoc :per-item-budget (:per-item-budget slot-budget))))
+          sel (vec (:selected proj))
           by-g (group-by sys-group-key sel)
           sigs (or signals (:signals proj) (sig/all-signals main-db))]
       [:div {:id "seon-system-unit" :class "stack" :data-focus-ref "[:seon.system/id :root]"}
@@ -281,14 +280,30 @@
        [:section {:id "sys-focal-unit" :class "stack-xs"}
         (or (get-in proj [:focal-fit :hiccup])
             [:div {:class "card ent-card"} (ent-link [:seon.system/id :root] "Seon Runtime" "strong")])]
-       (render-signals-cards sigs)
+       (list (render-signals-cards sigs)
+       (when-let [fails (let [dh (db-schema main-db)
+                           dgs (when (dh :seon.test.run/failed-digests)
+                                 (vec (distinct (take 3 (map :v (d/datoms main-db :aevt :seon.test.run/failed-digests))))))]
+                       (if (seq dgs)
+                         (mapv #(hash-map :seon.test/digest %) dgs)
+                         (when (dh :seon.test/digest)
+                           (vec (take 3 (keep (fn [dt]
+                                                (let [tv (d/pull main-db (quote [:seon.test/digest :seon.test/var :seon.test/pass?]) (:e dt))]
+                                                  (when (false? (:seon.test/pass? tv)) tv)))
+                                              (take 24 (d/datoms main-db :aevt :seon.test/digest))))))))]
+       (when (seq fails)
+         [:div {:class "pill-row"}
+          (kicker "Failing Verdicts:")
+          (for [tv fails :let [dg (:seon.test/digest tv)] :when dg]
+            (ent-link [:seon.test/digest dg] (str (or (:seon.test/var tv) dg)) "pill mono tiny red-text"))])))
        (render-semantic-search-bar main-db vector-status semantic-search)
        [:section {:id "sys-entities-unit" :class "stack"}
         [:div {:class "row-between"}
          [:h2 (str "Active System Focus (" (count sel) ")")]
          [:div {:class "pill-row"}
           (mut (str (count sel) " of " (:pool-count proj 0) " · Upgrade Ladder"))
-          (btn "nav-pill tiny" '(seon.web/set-explain-lens! true [:seon.system/id :root]) "Explain selection →")]]
+          (list (ent-link [:seon.schema/key :seon.system/entity] ":seon.system/entity" "pill mono tiny")
+          (btn "nav-pill tiny" '(seon.web/set-explain-lens! true [:seon.system/id :root]) "Explain / Tuning Cockpit →"))]]
         (if (empty? sel)
           [:div {:class "card muted sm-copy"} "System idle — no open errors, active agents, or open tasks."]
           [:div {:class (if stack? "stack" "insp-neighbors")}
@@ -302,8 +317,12 @@
                 [:div {:class "surface-entity-item" :data-entity (str (:entity it)) :data-chosen-fn (str cfn)}
                  [:div {:class "ent-prov-bar"}
                   [:div {:class "pill-row"}
-                   (when (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny muted"))
-                   (mut (str "· " (:tokens it 0) " tok"))]
+                  (when-let [r0 (first (filter qualified-keyword? (:rules it)))]
+                    (ent-link [:seon.rule/id r0] (name r0) "badge blue tiny mono"))
+                  (when (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny strong"))
+                  (badge (if (and (qualified-symbol? (:fn it)) (= (:fn it) cfn)) "amber" "muted")
+                         (if (and (qualified-symbol? (:fn it)) (= (:fn it) cfn)) "rule pinned :fn" "auto-fit"))
+                  (mut (str (:tokens it 0) " tok · " (name (or (:measured-by it) :static))))]
                   (when (= :seon.agent/id (first r))
                     (btn "btn sm" (list 'seon.web/view-agent! (second r) :session) "Session →"))]
                  (or (:hiccup it)
@@ -313,7 +332,7 @@
   "Explain Current Screen lens for ANY non-agent focal entity (`[:seon.system/id :root]`, var, task, rule, etc.):
    ALL renderer variations + Selected vs Dropped neighborhood ranking + live budget/width/strategy/weight controls + UI walk cache."
   {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 40000000}
-  [{:keys [main-db branch-db inspect-ref lab-prefs slot-budget walk-summary branch-feedback]}]
+  [{:keys [main-db branch-db viewing-id inspect-ref lab-prefs slot-budget walk-summary branch-feedback]}]
   (if-not (or (instance? datahike.db.interface.ISearch main-db) (instance? datahike.db.interface.ISearch branch-db))
     [:div {:id "seon-entity-explain-unit" :class "card muted"} "No database connected."]
     (let [main-db (if (instance? datahike.db.interface.ISearch main-db) main-db branch-db)
@@ -321,7 +340,7 @@
           ref (or inspect-ref [:seon.system/id :root])
           lp (rdata/normalize-lab-prefs lab-prefs)
           aw (long (:avail-w slot-budget 1000)) stack? (< aw 720)
-          world (sinsp/entity-world-candidates main-db bdb ref)
+          world (sinsp/entity-world-candidates main-db bdb ref {:perspective-agent viewing-id :include-unmatched? true})
           focal-ex (when-let [fi (:focal-item world)]
                      (fit/explain-entity-fit bdb fi {:target (:inspect-target lp) :token-budget (:inspect-budget lp)
                                                      :avail-w (:inspect-width lp) :main-db main-db
@@ -355,7 +374,7 @@
           [:p {:class "muted sm-copy"} "No related neighborhood candidates for this entity."]
           [:div {:class "table-scroll"}
            [:table {:class "data-table"}
-            [:thead [:tr [:th "Entity"] [:th "Score"] [:th "Chosen / Reason"] [:th "Cost"]]]
+            [:thead [:tr [:th "Entity"] [:th "Rule / Structural Path"] [:th "Renderer & Fit"] [:th "Cost"]]]
             [:tbody
              (for [it (take 16 (:items nb-ex))
                    :let [ent (get ent-by-id (:entity it))
@@ -368,12 +387,16 @@
                       (ent-link r (rdata/entity-short-label (or ent r)) "mono tiny strong")
                       (badge (if (:selected? it) "green" "muted") (name (or (:status it) :dropped)))]]
                 [:td {:class "mono tiny"}
-                 [:div {:class "strong"} (str (r2 (:rank/score it)))]
-                 (mut (str "U" (r2 (:urgency s)) " R" (r2 (:recency s)) " C" (r2 (:convergence s))
-                           (when (contains? s :semantic) (str " S" (r2 (:semantic s))))))]
+                 [:div {:class "pill-row"}
+                  (for [rk (take 2 (filter qualified-keyword? (:rules it)))]
+                    (ent-link [:seon.rule/id rk] (name rk) "badge blue tiny mono"))]
+                 (mut (str "score " (r2 (:rank/score it)) " · U" (r2 (:urgency s)) " R" (r2 (:recency s)) " C" (r2 (:convergence s))))]
                 [:td [:div {:class "stack-xs"}
-                      (when (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny strong"))
-                      (mut (or (:reason win) (if (:selected? it) "Selected" "Dropped")))]]
+                      [:div {:class "pill-row"}
+                       (when (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny strong"))
+                       (badge (if (and (qualified-symbol? (:fn it)) (= (:fn it) cfn)) "amber" "muted")
+                              (if (and (qualified-symbol? (:fn it)) (= (:fn it) cfn)) "rule pinned :fn" "auto-fit"))]
+                      (mut (or (:reason win) (if (:selected? it) "Selected" "Trimmed by budget")))]]
                 [:td {:class "mono tiny muted"} (str (:tokens it 0) " tok")]])]]])]
        (when (seq (:units walk-c))
          [:section {:class "card stack-xs"}
