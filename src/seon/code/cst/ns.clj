@@ -219,58 +219,6 @@
             {:ok? true :changed? true :src (z/root-string z')
              :added (mapv (comp str first) norm-specs)}))))))
 
-(defn set-defn-meta-src
-  "Structurally inserts or merges `meta-map` into a `(defn ...)` / `(defn- ...)` attr-map,
-   ALWAYS placed right after `name` + optional `docstring` (valid Clojure syntax) while preserving
-   100% of original indentation, comments, `^Type` hints, and multi-arity formatting."
-  {:malli/schema [:function [:=> [:cat :string :map] :map]]}
-  [form-src meta-map]
-  (if-not (and (map? meta-map) (seq meta-map))
-    {:ok? false :error :invalid-meta-map :hint "Pass a non-empty map, e.g. {:malli/schema [...] :cost/ticks 500000}."}
-    (let [root (p/parse-string-all (str form-src))
-          z0 (z/edn root)
-          fn-loc (loop [loc z0]
-                   (cond
-                     (z/end? loc) nil
-                     (= :list (n/tag (z/node loc))) loc
-                     :else (recur (z/next loc))))]
-      (if-not fn-loc
-        {:ok? false :error :not-a-defn-form}
-        (let [fn-nd (z/node fn-loc)
-              raw (vec (n/children fn-nd))
-              non-ws (vec (keep-indexed (fn [i ch]
-                                          (when-not (n/whitespace-or-comment? ch)
-                                            {:i i :node ch :tag (n/tag ch)}))
-                                        raw))
-              op-s (some-> (first non-ws) :node n/string)]
-          (if-not (#{"defn" "defn-"} op-s)
-            {:ok? false :error :not-a-defn-form :op op-s}
-            (let [str-node? (fn [{:keys [tag node]}]
-                              (or (= tag :multi-line)
-                                  (and (= tag :token) (str/starts-with? (n/string node) "\""))))
-                  has-doc? (and (> (count non-ws) 3) (str-node? (nth non-ws 2)))
-                  attr-slot (if has-doc? 3 2)
-                  existing-attr (when (and (< attr-slot (count non-ws))
-                                           (= :map (:tag (nth non-ws attr-slot))))
-                                  (nth non-ws attr-slot))]
-              (if existing-attr
-                (let [old-map (try (read-string (n/string (:node existing-attr))) (catch Throwable _ {}))
-                      merged (merge old-map meta-map)
-                      new-map-nd (p/parse-string (binding [*print-namespace-maps* false] (pr-str merged)))
-                      updated (assoc raw (:i existing-attr) new-map-nd)
-                      z' (z/replace fn-loc (n/replace-children fn-nd updated))]
-                  {:ok? true :action :merged :src (z/root-string z')})
-                (let [anchor-idx (:i (nth non-ws (dec attr-slot)))
-                      next-raw (subvec raw (inc anchor-idx))
-                      starts-nl? (and (seq next-raw) (= :newline (n/tag (first next-raw))))
-                      trimmed-rest (if starts-nl? next-raw (vec (drop-while n/whitespace? next-raw)))
-                      map-str (binding [*print-namespace-maps* false] (pr-str meta-map))
-                      ins (cond-> [(n/newline-node "\n") (n/spaces 2) (p/parse-string map-str)]
-                            (not starts-nl?) (into [(n/newline-node "\n") (n/spaces 2)]))
-                      updated (vec (concat (subvec raw 0 (inc anchor-idx)) ins trimmed-rest))
-                      z' (z/replace fn-loc (n/replace-children fn-nd updated))]
-                  {:ok? true :action :inserted :src (z/root-string z')})))))))))
-
 (defn parse-ns-requires
   "Parses the `(:require ...)` specs directly from an `(ns ...)` form string."
   {:malli/schema [:function [:=> [:cat :string] [:vector :map]]]}
@@ -514,3 +462,76 @@
                        (into #{} (keep (fn [q] (when (and (string? q) (str/includes? q ".")) (some-> (find-ns (symbol q)) ns-name)))) (:qual-ns (collect-body-refs srcs)))
                        #{})]
             (sync-ns-requires-for-srcs nsym existing-ns-src srcs aliases refers bare)))))))
+
+(defn- quote-examples-for-src [x]
+  (letfn [(has-sym? [v] (boolean (some symbol? (tree-seq coll? seq v))))
+          (quoted? [v] (and (seq? v) (= 2 (count v)) (= 'quote (first v))))
+          (walk [node]
+            (cond
+              (map? node)
+              (reduce-kv (fn [a k v]
+                           (assoc a k
+                                  (if (and (contains? #{:examples :malli/examples} k)
+                                           (coll? v) (not (quoted? v)) (has-sym? v))
+                                    (list 'quote v)
+                                    (walk v))))
+                         {} node)
+              (vector? node) (mapv walk node)
+              :else node))]
+    (if (map? x)
+      (reduce-kv (fn [a k v]
+                   (assoc a k (if (contains? #{:malli/schema :malli/examples} k) (walk v) v)))
+                 {} x)
+      x)))
+
+(defn set-defn-meta-src
+  "Structurally inserts or merges `meta-map` into a `(defn ...)` / `(defn- ...)` attr-map,
+   ALWAYS placed right after `name` + optional `docstring` (valid Clojure syntax) while preserving
+   100% of original indentation, comments, `^Type` hints, and multi-arity formatting."
+  {:malli/schema [:function [:=> [:cat :string :map] :map]]}
+  [form-src meta-map]
+  (if-not (and (map? meta-map) (seq meta-map))
+    {:ok? false :error :invalid-meta-map :hint "Pass a non-empty map, e.g. {:malli/schema [...] :cost/ticks 500000}."}
+    (let [root (p/parse-string-all (str form-src))
+          z0 (z/edn root)
+          fn-loc (loop [loc z0]
+                   (cond
+                     (z/end? loc) nil
+                     (= :list (n/tag (z/node loc))) loc
+                     :else (recur (z/next loc))))]
+      (if-not fn-loc
+        {:ok? false :error :not-a-defn-form}
+        (let [fn-nd (z/node fn-loc)
+              raw (vec (n/children fn-nd))
+              non-ws (vec (keep-indexed (fn [i ch]
+                                          (when-not (n/whitespace-or-comment? ch)
+                                            {:i i :node ch :tag (n/tag ch)}))
+                                        raw))
+              op-s (some-> (first non-ws) :node n/string)]
+          (if-not (#{"defn" "defn-"} op-s)
+            {:ok? false :error :not-a-defn-form :op op-s}
+            (let [str-node? (fn [{:keys [tag node]}]
+                              (or (= tag :multi-line)
+                                  (and (= tag :token) (str/starts-with? (n/string node) "\""))))
+                  has-doc? (and (> (count non-ws) 3) (str-node? (nth non-ws 2)))
+                  attr-slot (if has-doc? 3 2)
+                  existing-attr (when (and (< attr-slot (count non-ws))
+                                           (= :map (:tag (nth non-ws attr-slot))))
+                                  (nth non-ws attr-slot))]
+              (if existing-attr
+                (let [old-map (try (read-string (n/string (:node existing-attr))) (catch Throwable _ {}))
+                      merged (quote-examples-for-src (merge old-map meta-map))
+                      new-map-nd (p/parse-string (binding [*print-namespace-maps* false] (pr-str merged)))
+                      updated (assoc raw (:i existing-attr) new-map-nd)
+                      z' (z/replace fn-loc (n/replace-children fn-nd updated))]
+                  {:ok? true :action :merged :src (z/root-string z')})
+                (let [anchor-idx (:i (nth non-ws (dec attr-slot)))
+                      next-raw (subvec raw (inc anchor-idx))
+                      starts-nl? (and (seq next-raw) (= :newline (n/tag (first next-raw))))
+                      trimmed-rest (if starts-nl? next-raw (vec (drop-while n/whitespace? next-raw)))
+                      map-str (binding [*print-namespace-maps* false] (pr-str (quote-examples-for-src meta-map)))
+                      ins (cond-> [(n/newline-node "\n") (n/spaces 2) (p/parse-string map-str)]
+                            (not starts-nl?) (into [(n/newline-node "\n") (n/spaces 2)]))
+                      updated (vec (concat (subvec raw 0 (inc anchor-idx)) ins trimmed-rest))
+                      z' (z/replace fn-loc (n/replace-children fn-nd updated))]
+                  {:ok? true :action :inserted :src (z/root-string z')})))))))))
