@@ -358,3 +358,16 @@
     (is (clojure.string/includes?
           (seon.code.errors/enrich-eval-error "(name \"foo\")" "class java.lang.String cannot be cast to class clojure.lang.Named" {})
           "keywords or symbols"))))
+
+(deftest ^{:cost/ticks 40000000} wave28b-ab-proc-forwarding-and-multi-run-tests-hint-test
+  (testing "build-ab-tasks forwards :max-os-procs and :max-test-workers from per-task specs"
+    (let [out (seon.bench.ab/build-ab-tasks [{:id :t/bplus :scope 'seon.bench.ab :title "B+" :plan "x" :max-os-procs 5 :max-test-workers 3}] [:control] {})]
+      (is (= 5 (:max-os-procs (first out))))
+      (is (= 3 (:max-test-workers (first out))))))
+  (testing "multi user/run-tests! OOM hint and Scheme display hint fire cleanly"
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(do (user/run-tests! 'a-test) (user/run-tests! 'b-test))" "Eval exceeded allocation budget (limit 12884901888 bytes)." {})
+          "ONE `(user/run-tests!"))
+    (is (clojure.string/includes?
+          (seon.code.errors/enrich-eval-error "(display 1)" "Unable to resolve symbol: display in this context" {})
+          "println"))))

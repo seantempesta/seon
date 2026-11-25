@@ -79,6 +79,8 @@
               (:eval-code raw)            (assoc :eval-code (:eval-code raw))
               (:retest-main? raw)         (assoc :retest-main? (:retest-main? raw))
               (:category raw)             (assoc :category (:category raw))
+              (:max-os-procs raw)         (assoc :max-os-procs (:max-os-procs raw))
+              (:max-test-workers raw)     (assoc :max-test-workers (:max-test-workers raw))
               inc-trace?                  (assoc :include-trace? true)))))))
 
 (defn summarize-ab

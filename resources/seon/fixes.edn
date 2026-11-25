@@ -11,6 +11,13 @@
   :seon.fix/id #uuid "269efac2-ee2d-4d95-b1b2-3a761e17daca",
   :seon.fix/root-cause "file-import-and-transact-allocation-budget-test and rule-audit-single-source-and-tail-eviction-test called CWD-relative (slurp \"...\") instead of (io/file store/checkout-root \"...\").",
   :seon.fix/symptom "Isolated benchmark trials running with cwd=/tmp/seon-bench-* failed with FileNotFoundException on src/seon/vector.clj and docs/primers.md."}
+ {:seon.fix/before-after "Before: 3-way B+-tree LRU-evicted warm child COW procs under :max-os-procs 3. After: per-task :max-os-procs 5 keeps root + 3 parallel specialists warm with zero eviction.",
+  :seon.fix/change-summary "Forwarded :max-os-procs and :max-test-workers in seon.bench.ab/build-ab-tasks; added multi-user/run-tests! OOM hint and display->println hint in seon.code.errors.",
+  :seon.fix/error-class :bplus-proc-eviction-and-multi-run-tests-oom,
+  :seon.fix/id #uuid "407ffcac-a16a-4d77-96f7-ecdcda8cbdea",
+  :seon.fix/regression-test seon.bench-golden-test/wave28b-ab-proc-forwarding-and-multi-run-tests-hint-test,
+  :seon.fix/root-cause "seon.bench.ab/build-ab-tasks omitted :max-os-procs and :max-test-workers forwarding from per-task specs; seon.code.errors lacked multi-user/run-tests! OOM hint.",
+  :seon.fix/symptom "Wave 28A 3-way B+-tree (3/3 children merged, :agent/root verified all 3 test suites green on T16-T19) missed T20 prose reply by ~3s because build-ab-tasks dropped :max-os-procs 5 (LRU-thrashing 4 agents in 3 slots) and T15 called user/run-tests! 3x in one eval (12.88 GB OOM)."}
  {:seon.fix/before-after "Before: :branch/root run-tests! OOM'd 12.88 GB; 3-way B+-tree :ns/seon.code.cst.meta falsely failed verify despite merging a valid test. After: 13,383-tx changed-form-ops runs in ~30 MB cold / 0 MB warm, 0 redundant overlays, re-export tests credited strictly.",
   :seon.fix/change-summary "Added O(live-forms) AEVT diff path (>100 tx span) + LRU cache in seon.code.reach/changed-form-ops, cached branch-merge-base-cid, filtered already-main-identical upserts & skipped repeat overlays in seon.repl/run-tests!, extended verify-task-spec :ns-test-or-example with reaching-tests, and added 3 Wave 20A hints.",
   :seon.fix/error-class :long-lived-branch-changed-form-ops-oom-and-verify-reexport,

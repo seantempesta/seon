@@ -98,7 +98,9 @@
   [["Expected number or lookup ref for entity id, got \""]
    "Hint: Wrap string keys in a 2-element lookup ref vector for `d/pull`, e.g. `[:seon.code.form/key \"ns/fn\"]` or `[:seon.code.doc/id \"docs/...\"]`."]
   [["String cannot be cast to class clojure.lang.Named"]
-   "Hint: `name`/`namespace` only accept keywords or symbols, not strings — use `(str x)` or `(filter keyword? ...)`."]])
+   "Hint: `name`/`namespace` only accept keywords or symbols, not strings — use `(str x)` or `(filter keyword? ...)`."]
+  [["Unable to resolve symbol: display in this context"]
+   "Hint: Use Clojure's `println` / `prn` (not Scheme's `display`)."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
@@ -132,7 +134,9 @@
       (when (and (re-find #"(?:run-tests|run-test-var|test-var)\b" c) (not (str/includes? c "user/run-tests!")))
         (vswap! hints conj "Hint: Run tests with `(user/run-tests! 'ns-test)` or `(user/run-tests! 'ns-test/test-var)` (12 GB budget override) instead of `clojure.test/run-tests`/`run-test-var`."))
       (when (re-find #"\((?:d|datahike\.api)/q\b" c)
-        (vswap! hints conj "Hint: Full-DB `d/q` joins can exceed the 256 MB eval cap — use indexed `(d/datoms db :avet/:aevt :attr val)` + `(d/pull db '[...] (:e dt))` or `(user/search ...)` / `(user/grep-src ...)`.")))
+        (vswap! hints conj "Hint: Full-DB `d/q` joins can exceed the 256 MB eval cap — use indexed `(d/datoms db :avet/:aevt :attr val)` + `(d/pull db '[...] (:e dt))` or `(user/search ...)` / `(user/grep-src ...)`."))
+      (when (> (count (re-seq #"\(user/run-tests!(?:\s|$)" c)) 1)
+        (vswap! hints conj "Hint: Pass multiple targets to ONE `(user/run-tests! 'ns1-test 'ns2-test)` call (or run each in a separate eval) instead of calling `user/run-tests!` multiple times in one eval.")))
     (when (and (re-find #"\((?:d|datahike\.api)/datoms\b[^()]*?(?:\([^()]*\))?\s+:(?:aevt|avet)\s*\)" c)
                (or (str/includes? e "allocation budget") (str/includes? e "tick budget")
                    (str/includes? e "Wrong number of args") (str/includes? e "datoms")))
