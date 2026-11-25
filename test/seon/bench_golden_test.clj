@@ -238,3 +238,37 @@
                      'seon.render.entities.diagnostics/render-golden-scoreboard-card]]
           (let [res (schema/stress-var @conn sym)]
             (is (:ok? res) (str "seed=42 stress-var failed for " sym ": " (pr-str res)))))))))
+
+(deftest ^{:cost/ticks 60000000} native-ab-tasks-summary-child-settled-and-config-forwarding-test
+  (testing "agent-settled? waits for active forked children, trial-spawn-op forwards :config/:auto-merge?, and build-ab-tasks + summarize-ab compose cleanly"
+    (let [bh-settled (requiring-resolve 'seon.bench.helpers/agent-settled?)
+          c-plan (requiring-resolve 'seon.bench.cluster/trial-task-plan)
+          c-spawn (requiring-resolve 'seon.bench.cluster/trial-spawn-op)
+          b-ab (requiring-resolve 'seon.bench.golden/build-ab-tasks)
+          s-ab (requiring-resolve 'seon.bench.golden/summarize-ab)]
+      (is (false? (bh-settled {:agents [{:id :w/a :evals 1 :paused? true :busy? false :unread-count 0 :awaiting-count 0 :needs-turn? false :needs-test? false :needs-merge? false :status :paused}
+                                        {:id :refine/a :forked-from :w/a :evals 2 :paused? false :busy? true :status :working}]}
+                              :w/a)))
+      (is (true? (bh-settled {:agents [{:id :w/a :evals 3 :paused? false :busy? false :unread-count 0 :awaiting-count 0 :needs-turn? false :needs-test? false :needs-merge? false :status :merged}
+                                       {:id :refine/a :forked-from :w/a :evals 2 :paused? true :busy? false :status :merged}]}
+                             :w/a)))
+      (let [plan (c-plan {:task {:id :t/x :scope 'seon.render.text :title "T"}
+                          :auto-merge? true
+                          :config {:seon.config/auto-refine-tasks? true :seon.config/max-tool-turns 24}})
+            op (c-spawn :worker/x :branch/x plan)]
+        (is (= {:seon.config/auto-refine-tasks? true :seon.config/max-tool-turns 24} (:config op)))
+        (is (true? (:auto-merge? op))))
+      (let [trials (b-ab [{:id :t/h1 :scope 'seon.signals.cache :title "H1" :plan "Do H1."}
+                          {:id :t/h2 :scope 'seon.render.text :title "H2" :plan "Do H2."}]
+                         [[:control {:seon.config/auto-refine-tasks? false}]
+                          [:treatment {:seon.config/auto-refine-tasks? true}]]
+                         {:timeout-ms 180000 :include-trace? true})
+            ab (s-ab [{:id :ab/h1-control :pair-id :t/h1 :arm :control :status :merged :merged? true :turns 12 :total-turns 12 :total-prompt-tokens 90000 :total-kv-hit-pct 88.0 :elapsed-ms 45000 :new-scope-vars 1 :new-test-vars 1}
+                      {:id :ab/h1-treatment :pair-id :t/h1 :arm :treatment :status :merged :merged? true :turns 6 :child-turns 5 :child-merged? true :total-turns 11 :total-prompt-tokens 95000 :total-kv-hit-pct 86.0 :backward-walk-rows 3 :elapsed-ms 50000 :new-scope-vars 1 :new-test-vars 1}])]
+        (is (= 4 (count trials)))
+        (is (= [:control :treatment :control :treatment] (mapv :arm trials)))
+        (is (every? :include-trace? trials))
+        (is (= [:control :treatment] (:arms ab)))
+        (is (= 1 (get-in ab [:by-arm :treatment :child-merged])))
+        (is (= 6.0 (get-in ab [:by-arm :treatment :median-worker-turns])))
+        (is (= 11.0 (get-in ab [:by-arm :treatment :median-total-turns])))))))

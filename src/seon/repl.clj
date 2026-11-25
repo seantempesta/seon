@@ -406,5 +406,5 @@
                  ['create-task! #'create-task!] ['metrics #'metrics]
                  ['simulate-context #'simulate-context] ['check-corpus #'check-corpus] ['tune-context! #'tune-context!]
                  ['friction #'hmetrics/repl-friction] ['golden-scoreboard #'bgolden/repl-golden-scoreboard]
-                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['liveness #'hliveness/check-liveness]]]
+                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['run-ab! #'bgolden/run-ab!] ['summarize-ab #'bgolden/summarize-ab] ['liveness #'hliveness/check-liveness]]]
     (intern-doc! u s v)))

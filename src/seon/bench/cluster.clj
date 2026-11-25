@@ -136,18 +136,22 @@
   [task]
   (let [task-map (when (map? (:task task)) (:task task))
         task-id (or (:id task-map) (when (keyword? (:task task)) (:task task)))]
-    {:task-map task-map :task-id task-id :scope (or (:scope task) (:scope task-map))
-     :goal (str (or (:goal task) (:title task-map) "Complete assigned task."))
-     :body (or (:body task) (when task-id "Work your assigned task, prove it green, and call (user/ready!)."))}))
+    (cond-> {:task-map task-map :task-id task-id :scope (or (:scope task) (:scope task-map))
+           :goal (str (or (:goal task) (:title task-map) "Complete assigned task."))
+           :body (or (:body task) (when task-id "Work your assigned task, prove it green, and call (user/ready!)."))}
+    (map? (:config task)) (assoc :config (:config task))
+    (some? (:auto-merge? task)) (assoc :auto-merge? (boolean (:auto-merge? task))))))
 
 (defn trial-spawn-op
   "Builds the `/op {:op :spawn-agent}` payload for a trial worker."
   {:malli/schema [:=> [:cat :keyword :keyword [:map [:goal :string]]] :map]
    :cost/ticks 200}
-  [agent-id branch {:keys [goal scope task-id]}]
+  [agent-id branch {:keys [goal scope task-id config auto-merge?]}]
   (cond-> {:op :spawn-agent :id agent-id :branch branch :goal goal}
     scope (assoc :scope scope)
-    task-id (assoc :task task-id)))
+    task-id (assoc :task task-id)
+    (map? config) (assoc :config config)
+    (some? auto-merge?) (assoc :auto-merge? (boolean auto-merge?))))
 
 (defn trial-message-op
   "Builds the `/op {:op :send-message}` payload carrying the trial body, or nil."
@@ -220,35 +224,11 @@
                         (not halted-not-merged?) delegated-ok? reply-ok?))}))
 
 (defn trial-failure
-  "Renders the first human-readable failure reason for a trial, or nil when green."
   {:malli/schema [:=> [:cat [:map [:timeout-ms :int] [:agent-res [:maybe :map]] [:test-res [:maybe :map]]
                              [:merge-res [:maybe :map]] [:ag-snap [:maybe :map]] [:final-trace [:maybe :map]]
                              [:health-res [:maybe :map]] [:halted-not-merged? :boolean]
                              [:task {:optional true} [:maybe :map]]]] [:maybe :string]] :cost/ticks 15000000}
-  [{:keys [timeout-ms agent-res test-res merge-res ag-snap final-trace health-res halted-not-merged? task]}]
-  (let [min-delegated (long (or (:min-delegated-calls task) 0))
-        settled-calls (settled-call-count final-trace)]
-    (or (when (= :timeout (get-in agent-res [:wait :error]))
-          (str "Timed out after " (long timeout-ms) " ms"))
-        (when (and test-res (not (:ok? test-res)))
-          (let [first-fail (first (remove :seon.test/pass? (:results test-res)))
-                first-conflict (first (:conflicts test-res))]
-            (str "test-failed: "
-                 (or (:seon.test/var first-fail)
-                     (when first-conflict (str (:reason first-conflict) " " (or (:message first-conflict) (:entity first-conflict))))
-                     (:error test-res) "red"))))
-        (when (and merge-res (not (:ok? merge-res)))
-          (str "merge-failed: " (or (:error merge-res) (:message merge-res) "blocked")))
-        (when halted-not-merged?
-          (or (:last-error final-trace)
-              (str "not-merged (status " (:status ag-snap) ", last " (:last-snippet final-trace) ")")))
-        (when (and (pos? min-delegated) (< settled-calls min-delegated))
-          (str "delegated-calls-short: " settled-calls "/" min-delegated " settled"))
-        (when (and (:chat-agent task) (str/blank? (str (or (:last-reply final-trace) ""))))
-          "chat-agent produced empty reply")
-        (when (not (:ok? health-res))
-          (str "health-err: " (or (:error health-res) (pr-str (take 2 (filter #(= :error (:severity %)) (:problems health-res)))))))
-        (:last-error final-trace))))
+  [m] (bh/trial-failure m))
 
 (defn- ^:seon.flow/edge eval-probe-edn [inst code]
   (try
@@ -259,7 +239,7 @@
     (catch Throwable _ {})))
 
 (defn ^:seon.flow/edge probe-trial-trace
-  "Queries the isolated trial instance via `seon.health.metrics/agent-friction-summary` before teardown."
+  "Queries the isolated trial instance via `seon.bench.helpers/trial-audit-summary` before teardown."
   {:malli/schema [:=> [:cat :map :keyword :keyword [:? [:maybe :map]]] :map]}
   ([inst agent-id branch] (probe-trial-trace inst agent-id branch nil))
   ([inst agent-id branch probe-opts]
@@ -267,9 +247,12 @@
          after-main-tx (long (or (:after-main-tx probe-opts) 0))
          opts-map (cond-> {:branch branch}
                     (pos? after-tx) (assoc :after-tx after-tx)
-                    (pos? after-main-tx) (assoc :after-main-tx after-main-tx))]
+                    (pos? after-main-tx) (assoc :after-main-tx after-main-tx)
+                    (:scope probe-opts) (assoc :scope (:scope probe-opts))
+                    (:include-trace? probe-opts) (assoc :include-trace? true))]
      (eval-probe-edn inst
-       (str "(if-let [f (requiring-resolve (quote seon.health.metrics/agent-friction-summary))] "
+       (str "(if-let [f (or (requiring-resolve (quote seon.bench.helpers/trial-audit-summary)) "
+            "(requiring-resolve (quote seon.health.metrics/agent-friction-summary)))] "
             "(f (user/conn) (user/main-db) " (pr-str agent-id) " " (pr-str opts-map) ") {})")))))
 
 (defn- ^:seon.flow/edge probe-agent-baseline [inst agent-id branch]
@@ -283,39 +266,24 @@
                       "{:after-tx (long (or (:max-tx branch-db) 0)) :after-main-tx (long (or (:max-tx main-db) 0))})"))]
     (merge {:baseline-evals (long (or (:evals agent-row) 0)) :after-tx 0 :after-main-tx 0} tx-map)))
 
-(def ^:private telemetry-numeric-pairs
-  [[:turns :turns] [:cache-hit-tokens :kv-hit-tokens] [:cache-miss-tokens :kv-miss-tokens]
-   [:prompt-tokens :prompt-tokens] [:completion-tokens :completion-tokens]
-   [:prefix-hash-count :prefix-hashes] [:prefix-busts :prefix-busts] [:ooms :ooms]
-   [:eval-errors :eval-errors] [:upstream-errors :upstream-errors]
-   [:rogue-fs-count :rogue-fs-count] [:no-match-count :no-match-count]
-   [:delegated-calls :delegated-calls] [:settled-delegated-calls :settled-delegated-calls]])
-
 (defn trial-telemetry
-  "Projects optional per-trial friction telemetry from `trace` and `category`."
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :map]] :map] :cost/ticks 400}
-  [category trace]
-  (let [trace-map (if (map? trace) trace {})]
-    (reduce (fn [acc [src-key dst-key]]
-              (let [val (get trace-map src-key)]
-                (if (number? val) (assoc acc dst-key (long val)) acc)))
-            (cond-> {}
-              category (assoc :category category)
-              (boolean? (:turn-overrun? trace-map)) (assoc :turn-overrun? (:turn-overrun? trace-map)))
-            telemetry-numeric-pairs)))
+  [category trace] (bh/trial-telemetry category trace))
 
 (defn trial-result
   "Assembles one trial result map from its op responses and friction trace."
   {:malli/schema [:=> [:cat :map] :map] :cost/ticks 400}
-  [{:keys [id category port boot-ms elapsed-ms outcome ag-snap eval-res agent-res test-res merge-res
+  [{:keys [id category arm pair-id port boot-ms elapsed-ms outcome ag-snap eval-res agent-res test-res merge-res
            health-res final-trace failure]}]
   (let [timed-out? (boolean (= :timeout (get-in agent-res [:wait :error])))
         status (cond (:ok? outcome) (if (:merged? outcome) :merged :passed) timed-out? :timeout :else :failed)]
-    (merge {:id id :status status :timed-out? timed-out? :port port :boot-ms boot-ms :elapsed-ms elapsed-ms
-            :ok? (boolean (:ok? outcome)) :merged? (boolean (:merged? outcome)) :agent-status (:status ag-snap)
-            :evals (long (or (:evals final-trace) (:evals ag-snap) 0)) :eval eval-res :agent agent-res
-            :test test-res :merge merge-res :health-ok? (boolean (:ok? health-res))
-            :last-snippet (:last-snippet final-trace) :last-error failure}
+    (merge (cond-> {:id id :status status :timed-out? timed-out? :port port :boot-ms boot-ms :elapsed-ms elapsed-ms
+                    :ok? (boolean (:ok? outcome)) :merged? (boolean (:merged? outcome)) :agent-status (:status ag-snap)
+                    :evals (long (or (:evals final-trace) (:evals ag-snap) 0)) :eval eval-res :agent agent-res
+                    :test test-res :merge merge-res :health-ok? (boolean (:ok? health-res))
+                    :last-snippet (:last-snippet final-trace) :last-error failure}
+             arm (assoc :arm arm)
+             pair-id (assoc :pair-id pair-id))
            (trial-telemetry category final-trace))))
 
 (defn run-one-trial!
@@ -344,7 +312,7 @@
             _ (pause-preexisting-agents! inst-handle chat-aid)
             _ (emit! {:status :booted :evals 0 :alive? true :boot-ms (long (:boot-ms inst-handle))})
             plan (trial-task-plan task)
-            baseline (when chat-aid (probe-agent-baseline inst-handle agent-id branch))
+            baseline (if chat-aid (probe-agent-baseline inst-handle agent-id branch) {:after-main-tx (long (or (:main-tx (instance-op! inst-handle {:op :status})) 0))})
             baseline-evals (long (or (:baseline-evals baseline) 0))
             eval-res (when-let [code (:eval-code task)]
                        (instance-op! inst-handle {:op :eval :agent agent-id :branch branch :code code}))
@@ -365,7 +333,7 @@
                               wait (wait-for-agent! inst-handle agent-id timeout-ms on-poll baseline)]
                           {:spawn spawn :message msg :wait wait}))
             ag-snap (some #(when (= agent-id (:id %)) %) (get-in agent-res [:wait :status :agents]))
-            final-trace (when (or agent-res eval-res) (probe-trial-trace inst-handle agent-id branch baseline))
+            final-trace (when (or agent-res eval-res) (probe-trial-trace inst-handle agent-id branch (assoc baseline :scope (:scope plan) :include-trace? (:include-trace? task))))
             timed-out? (= :timeout (get-in agent-res [:wait :error]))
             already-merged? (= :merged (:status ag-snap))
             test-res (when (and (not timed-out?) (:run-tests? task) (or (not already-merged?) (:retest-main? task)))
@@ -380,10 +348,7 @@
             failure (trial-failure {:timeout-ms timeout-ms :agent-res agent-res :test-res test-res :merge-res merge-res
                                     :ag-snap ag-snap :task task :final-trace (when-not (:ok? outcome) final-trace)
                                     :health-res health-res :halted-not-merged? (:halted-not-merged? outcome)})]
-        (trial-result {:id id :category (:category task) :port (:port inst-handle) :boot-ms (:boot-ms inst-handle)
-                       :elapsed-ms (elapsed-ms!) :outcome outcome :ag-snap ag-snap :eval-res eval-res
-                       :agent-res agent-res :test-res test-res :merge-res merge-res
-                       :health-res health-res :final-trace final-trace :failure failure}))
+        (trial-result {:id id :category (:category task) :arm (:arm task) :pair-id (:pair-id task) :port (:port inst-handle) :boot-ms (:boot-ms inst-handle) :elapsed-ms (elapsed-ms!) :outcome outcome :ag-snap ag-snap :eval-res eval-res :agent-res agent-res :test-res test-res :merge-res merge-res :health-res health-res :final-trace final-trace :failure failure}))
       (catch Throwable ex
         {:id id :status :error :timed-out? false :ok? false :elapsed-ms (elapsed-ms!)
          :error (or (.getMessage ex) (str ex)) :data (ex-data ex)})
@@ -415,7 +380,7 @@
                          (or (:timed-out? result-row) (= :timeout (:status result-row))) :timeout
                          :else :failed)
         err-text (or (:last-error result-row) (:error result-row))
-        telemetry-keys (into [:category :turn-overrun?] (map second telemetry-numeric-pairs))]
+        telemetry-keys (into [:category :arm :pair-id :turn-overrun? :child-merged? :total-kv-hit-pct] (map second bh/telemetry-numeric-pairs))]
     (merge
       (cond-> {:id (:id result-row) :status row-status :port (:port result-row)
                :evals (long (or (:evals result-row) 0)) :elapsed-ms (long (or (:elapsed-ms result-row) 0))
