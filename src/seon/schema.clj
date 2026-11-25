@@ -391,12 +391,78 @@
 
 (defn shrink-failing-args [& args] (apply six/shrink-failing-args args))
 
+(defn validate-schema-registration!
+  "Validates a candidate Malli schema (reusing compiled registry & cached `:declarations`) before storing in Datahike."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :map] :map] [:=> [:cat [:maybe :seon.host/db] :map [:maybe :map]] :map]]}
+  ([db m] (validate-schema-registration! db m nil))
+  ([db m sibling-forms]
+   (let [key      (or (:key m) (:seon.schema/key m))
+         raw-form (or (:form m) (:seon.schema/form m))
+         doc      (or (:doc m) (:seon.schema/doc m))
+         raw-ex   (or (:examples m) (:seon.schema/examples m))]
+     (when-not (multi-segment-schema-key? key)
+       (throw (ex-info (str "Schema key must use a multi-segment namespace co-located with code "
+                            "(e.g. :seon.billing/amount, not :billing/amount), got: " (pr-str key))
+                       {:error :seon.schema/invalid-key :key key})))
+     (let [parsed-form (if (string? raw-form) (edn/read-string raw-form) raw-form)
+           parsed-ex   (cond
+                         (and (string? raw-ex) (not (str/blank? raw-ex))) (edn/read-string raw-ex)
+                         (sequential? raw-ex) (vec raw-ex)
+                         :else nil)
+           base-ri (registry-for-db db)
+           reg-info (if (and (empty? sibling-forms) (= parsed-form (get (:forms base-ri) key)))
+                      base-ri
+                      (registry-for-db db (assoc (or sibling-forms {}) key parsed-form)))
+           {:keys [registry declarations decl-by-id]} reg-info
+           opts {:registry registry}
+           compiled (try
+                      (m/schema key opts)
+                      (catch Throwable t
+                        (throw (ex-info (str "Invalid Malli schema for " key ": " (.getMessage t))
+                                        {:error :seon.schema/compile-failed :key key :form parsed-form}))))
+           valid? (m/validator compiled opts)
+           sample (or (when (seq parsed-ex)
+                        (doseq [ex parsed-ex]
+                          (when-not (valid? ex)
+                            (throw (ex-info (str "Schema " key " rejected its own example " (pr-str ex) ": "
+                                                 (pr-str (me/humanize (m/explain compiled ex opts))))
+                                            {:error :seon.schema/invalid-example :key key :example ex}))))
+                        (first parsed-ex))
+                      (try
+                        (let [g (mg/generate compiled {:registry registry :seed 42 :size 6})]
+                          (when-not (valid? g)
+                            (throw (ex-info (str "Generated value for " key " failed its own validator: " (pr-str g))
+                                            {:error :seon.schema/bad-generator :key key :generated g})))
+                          g)
+                        (catch Throwable t
+                          (throw (ex-info (str "Schema " key " has no working generator and no `:examples`: "
+                                               (.getMessage t)
+                                               ". Provide `:examples [val ...]` or `:gen/fmap`.")
+                                          {:error :seon.schema/missing-generator :key key :form parsed-form})))))
+           dh-decls (if-let [d1 (get decl-by-id key)]
+                      (sync-dh-decls (or (:schema db) {}) [d1])
+                      (sync-dh-decls (or (:schema db) {}) declarations))
+           batch-refs (into {key (six/schema-tempid key)}
+                            (map (fn [k] [k (six/schema-tempid k)]))
+                            (keys sibling-forms))
+           ent (six/enrich-schema-entity-tx
+                db
+                {:seon.schema/key key :seon.schema/form parsed-form
+                 :seon.schema/doc doc :seon.schema/examples parsed-ex}
+                registry
+                {:schema->ref batch-refs})
+           retracts (six/stale-schema-edge-retracts db [ent])]
+       {:ok? true :sample sample :dh-decls dh-decls :retract-ops retracts :entity ent}))))
+
+(defn- live-branch-db []
+  (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref :conn deref))
+
 (defn stress-var
   "Deterministically exercises `fn-sym` with concrete `:examples`, relational `:=>` guard, `seed = 42` generated inputs,
    deterministic counterexample shrinking, and `:cost/*` budgets."
   {:malli/schema [:function [:=> [:cat :qualified-symbol] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]]}
-  ([fn-sym] (stress-var nil fn-sym {}))
-  ([a b] (if (qualified-symbol? a) (stress-var nil a (if (map? b) b {})) (stress-var a b {})))
+  ([fn-sym] (stress-var (live-branch-db) fn-sym {}))
+  ([a b] (if (qualified-symbol? a) (stress-var (live-branch-db) a (if (map? b) b {})) (stress-var a b {})))
   ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
    (when-let [v (resolve fn-sym)]
      (let [m0 (meta v)
@@ -499,66 +565,3 @@
                    outcome (reduce check-one {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0} items)
                    ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
                (assoc outcome :ms (double ms))))))))))
-
-(defn validate-schema-registration!
-  "Validates a candidate Malli schema (reusing compiled registry & cached `:declarations`) before storing in Datahike."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :map] :map] [:=> [:cat [:maybe :seon.host/db] :map [:maybe :map]] :map]]}
-  ([db m] (validate-schema-registration! db m nil))
-  ([db m sibling-forms]
-   (let [key      (or (:key m) (:seon.schema/key m))
-         raw-form (or (:form m) (:seon.schema/form m))
-         doc      (or (:doc m) (:seon.schema/doc m))
-         raw-ex   (or (:examples m) (:seon.schema/examples m))]
-     (when-not (multi-segment-schema-key? key)
-       (throw (ex-info (str "Schema key must use a multi-segment namespace co-located with code "
-                            "(e.g. :seon.billing/amount, not :billing/amount), got: " (pr-str key))
-                       {:error :seon.schema/invalid-key :key key})))
-     (let [parsed-form (if (string? raw-form) (edn/read-string raw-form) raw-form)
-           parsed-ex   (cond
-                         (and (string? raw-ex) (not (str/blank? raw-ex))) (edn/read-string raw-ex)
-                         (sequential? raw-ex) (vec raw-ex)
-                         :else nil)
-           base-ri (registry-for-db db)
-           reg-info (if (and (empty? sibling-forms) (= parsed-form (get (:forms base-ri) key)))
-                      base-ri
-                      (registry-for-db db (assoc (or sibling-forms {}) key parsed-form)))
-           {:keys [registry declarations decl-by-id]} reg-info
-           opts {:registry registry}
-           compiled (try
-                      (m/schema key opts)
-                      (catch Throwable t
-                        (throw (ex-info (str "Invalid Malli schema for " key ": " (.getMessage t))
-                                        {:error :seon.schema/compile-failed :key key :form parsed-form}))))
-           valid? (m/validator compiled opts)
-           sample (or (when (seq parsed-ex)
-                        (doseq [ex parsed-ex]
-                          (when-not (valid? ex)
-                            (throw (ex-info (str "Schema " key " rejected its own example " (pr-str ex) ": "
-                                                 (pr-str (me/humanize (m/explain compiled ex opts))))
-                                            {:error :seon.schema/invalid-example :key key :example ex}))))
-                        (first parsed-ex))
-                      (try
-                        (let [g (mg/generate compiled {:registry registry :seed 42 :size 6})]
-                          (when-not (valid? g)
-                            (throw (ex-info (str "Generated value for " key " failed its own validator: " (pr-str g))
-                                            {:error :seon.schema/bad-generator :key key :generated g})))
-                          g)
-                        (catch Throwable t
-                          (throw (ex-info (str "Schema " key " has no working generator and no `:examples`: "
-                                               (.getMessage t)
-                                               ". Provide `:examples [val ...]` or `:gen/fmap`.")
-                                          {:error :seon.schema/missing-generator :key key :form parsed-form})))))
-           dh-decls (if-let [d1 (get decl-by-id key)]
-                      (sync-dh-decls (or (:schema db) {}) [d1])
-                      (sync-dh-decls (or (:schema db) {}) declarations))
-           batch-refs (into {key (six/schema-tempid key)}
-                            (map (fn [k] [k (six/schema-tempid k)]))
-                            (keys sibling-forms))
-           ent (six/enrich-schema-entity-tx
-                db
-                {:seon.schema/key key :seon.schema/form parsed-form
-                 :seon.schema/doc doc :seon.schema/examples parsed-ex}
-                registry
-                {:schema->ref batch-refs})
-           retracts (six/stale-schema-edge-retracts db [ent])]
-       {:ok? true :sample sample :dh-decls dh-decls :retract-ops retracts :entity ent}))))
