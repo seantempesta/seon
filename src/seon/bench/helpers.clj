@@ -359,48 +359,52 @@
          (when (and (dh :seon.code.var/name) (dh :seon.code.var/schema))
            (->> (d/datoms db :aevt :seon.code.var/schema)
                 (keep (fn [dt]
-                        (let [e (:e dt) sch (:v dt)
-                              vnm (eav1 e :seon.code.var/name)
-                              vns (eav1 e :seon.code.var/ns)
-                              priv? (eav1 e :seon.code.var/private?)
-                              edge? (eav1 e :seon.code.var/flow-edge?)
-                              mac? (eav1 e :seon.code.var/macro?)
-                              tst? (eav1 e :seon.code.var/test?)]
-                          (when (and (qualified-symbol? vnm) (symbol? vns)
-                                     (not priv?) (not edge?) (not mac?) (not tst?)
-                                     (str/starts-with? (name vns) "seon.")
-                                     (not (str/ends-with? (name vns) "-test"))
-                                     (not (contains? '#{seon.main seon.fork} vns))
-                                     (not (str/ends-with? (name vnm) "!"))
-                                     (loose-map-return? sch)
-                                     (not (has-host-arg? sch)))
-                            (let [slug (str/replace (str (subs (name vns) 5) "-" (name vnm)) #"[^a-zA-Z0-9-]" "-")
-                                  tid (keyword "rand" (str "contract-" slug))]
-                              {:id tid :category :schema-proof
-                               :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
-                               :verify-spec {:kind :tighten-return-contract :var vnm}
-                               :task {:id tid :scope vns
-                                      :title (str "Specify exact return contract for " vnm)
-                                      :plan (str "Inspect `" vnm "`, its returned data shape, and its callers in `" vns "`. Tighten its return specification so its actual returned keys are explicit and verified by automated checks.")}})))))
+                        (let [sch (:v dt)]
+                        (when (and (loose-map-return? sch) (not (has-host-arg? sch)))
+                          (let [e (:e dt)
+                                vnm (eav1 e :seon.code.var/name)
+                                vns (eav1 e :seon.code.var/ns)]
+                            (when (and (qualified-symbol? vnm) (symbol? vns)
+                                       (str/starts-with? (name vns) "seon.")
+                                       (not (str/ends-with? (name vns) "-test"))
+                                       (not (contains? '#{seon.main seon.fork} vns))
+                                       (not (str/ends-with? (name vnm) "!"))
+                                       (not (eav1 e :seon.code.var/private?))
+                                       (not (eav1 e :seon.code.var/flow-edge?))
+                                       (not (eav1 e :seon.code.var/macro?))
+                                       (not (eav1 e :seon.code.var/test?)))
+                              (let [slug (str/replace (str (subs (name vns) 5) "-" (name vnm)) #"[^a-zA-Z0-9-]" "-")
+                                    tid (keyword "rand" (str "contract-" slug))]
+                                {:id tid :category :schema-proof
+                                 :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                                 :verify-spec {:kind :tighten-return-contract :var vnm}
+                                 :task {:id tid :scope vns
+                                        :title (str "Specify exact return contract for " vnm)
+                                        :plan (str "Inspect `" vnm "`, its returned data shape, and its callers in `" vns "`. Tighten its return specification so its actual returned keys are explicit and verified by automated checks.")}})))))))
                 (sort-by #(str (:id %))) vec))
          pure-nss
          (when (and (dh :seon.code.var/ns) (dh :seon.code.var/arglists))
-           (into #{}
-                 (keep (fn [dt]
-                         (let [e (:e dt) vns (:v dt)
-                               vnm (eav1 e :seon.code.var/name)]
-                           (when (and (symbol? vns) (qualified-symbol? vnm)
-                                      (str/starts-with? (name vns) "seon.")
-                                      (not (str/ends-with? (name vns) "-test"))
-                                      (not (contains? '#{seon.main seon.fork} vns))
-                                      (not (eav1 e :seon.code.var/private?))
-                                      (not (eav1 e :seon.code.var/macro?))
-                                      (not (eav1 e :seon.code.var/test?))
-                                      (not (eav1 e :seon.code.var/flow-edge?))
-                                      (not (str/ends-with? (name vnm) "!"))
-                                      (seq (eav1 e :seon.code.var/arglists)))
-                             vns))))
-                 (d/datoms db :aevt :seon.code.var/ns)))
+           (reduce (fn [acc dt]
+             (let [vns (:v dt)]
+               (if (or (contains? acc vns)
+                       (not (symbol? vns))
+                       (not (str/starts-with? (name vns) "seon."))
+                       (str/ends-with? (name vns) "-test")
+                       (contains? '#{seon.main seon.fork} vns))
+                 acc
+                 (let [e (:e dt)
+                       vnm (eav1 e :seon.code.var/name)]
+                   (if (and (qualified-symbol? vnm)
+                            (not (str/ends-with? (name vnm) "!"))
+                            (not (eav1 e :seon.code.var/private?))
+                            (not (eav1 e :seon.code.var/macro?))
+                            (not (eav1 e :seon.code.var/test?))
+                            (not (eav1 e :seon.code.var/flow-edge?))
+                            (seq (eav1 e :seon.code.var/arglists)))
+                     (conj acc vns)
+                     acc)))))
+           #{}
+           (d/datoms db :aevt :seon.code.var/ns)))
          ns-tasks
          (when (seq pure-nss)
            (->> pure-nss
