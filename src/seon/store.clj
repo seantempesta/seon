@@ -26,7 +26,8 @@
             [datahike.index.interface :as di]
             [datahike.reads :as reads]
             [jolt.scheme :as scm]
-            [jolt.fs :as fs]))
+            [jolt.fs :as fs]
+            [datahike.datom :as dd]))
 
 (def checkout-root schema/checkout-root)
 
@@ -345,39 +346,6 @@
   {:malli/schema [:=> [:cat pos-int?] :any]}
   [threshold]
   (cw/lru-cache-factory {} :threshold (long threshold)))
-
-(defn lru-get!
-"Bounded LRU lookup-or-miss that replays recorded `datahike.reads` ranges on cache hits."
-  {:malli/schema [:=> [:cat :any :int :any :seon.host/fn] :any]}
-[cache-atom threshold k compute-fn]
-(when-not (satisfies? cache/CacheProtocol @cache-atom)
-  (reset!
-    cache-atom
-    (cache/lru-cache-factory {} :threshold (long threshold))))
-(if-let [outer di/*reads*]
-(let [entry (cw/lookup-or-miss
-              cache-atom
-              k
-              (fn [_]
-                (let [[val rs] (reads/with-reads compute-fn)]
-                  {:seon.store/lru-val val,
-                   :seon.store/lru-reads rs})))]
-  (if (and (map? entry) (contains? entry :seon.store/lru-val))
-    (do
-      (when (seq (:seon.store/lru-reads entry))
-        (swap! outer into (:seon.store/lru-reads entry)))
-      (:seon.store/lru-val entry))
-    (let [[val rs] (reads/with-reads compute-fn)]
-      (swap!
-        cache-atom
-        cache/miss
-        k
-        {:seon.store/lru-val val, :seon.store/lru-reads rs})
-      val)))
-(let [entry (cw/lookup-or-miss cache-atom k (fn [_] (compute-fn)))]
-  (if (and (map? entry) (contains? entry :seon.store/lru-val))
-    (:seon.store/lru-val entry)
-    entry))))
 
 (defn ^:seon.flow/edge rm-rf!
   "Recursively deletes a file or directory tree via symlink-safe `jolt.fs/delete-tree` (nil-safe, accepts File, Path, or path String)."
@@ -733,20 +701,6 @@
 
 (defonce ^:private ^:seon.flow/edge head-db-cache (lru-cache 16))
 
-(defn head
-  {:malli/schema [:=> [:cat [:or :seon.host/conn :seon.host/db :map] :keyword] :any]}
-  [store-or-conn branch]
-  (let [s (if (instance? clojure.lang.IDeref store-or-conn)
-            (:store @store-or-conn)
-            (or (:store store-or-conn) store-or-conn))
-        raw-head (try (k/get s branch nil {:sync? true}) (catch Throwable _ nil))
-        cid (get-in raw-head [:meta :datahike/commit-id])]
-    (if (and raw-head cid)
-      (lru-get! head-db-cache 16 [s branch cid]
-                #(datahike.writing/stored->db
-                  (datahike.writing/resolve-head s branch raw-head {:sync? true}) s))
-      (d/branch-as-db s branch))))
-
 (defn fork-parent-target
   "Resolves branch-to-branch merge target for `branch` / `agent-id` honoring `:seon.agent/merge-target` (`:main`/`:none` -> nil, explicit branch/agent ref -> target, omitted -> parent branch of `:seon.agent/forked-from`)."
   {:malli/schema [:=> [:cat :seon.host/db :keyword [:maybe :keyword]] [:maybe :map]] :cost/ticks 1000000}
@@ -930,3 +884,104 @@
              cur
              (let [w (:writer cur)]
                (cond-> db w (assoc :writer w)))))))
+
+(defn- ensure-lru! [cache-atom threshold]
+  (when-not (satisfies? cache/CacheProtocol @cache-atom)
+    (reset! cache-atom (cache/lru-cache-factory {} :threshold (long threshold)))))
+
+(defn lru-get!
+"Bounded LRU lookup-or-miss that replays recorded `datahike.reads` ranges on cache hits."
+  {:malli/schema [:=> [:cat :any :int :any :seon.host/fn] :any]}
+[cache-atom threshold k compute-fn]
+(ensure-lru! cache-atom threshold)
+(if-let [outer di/*reads*]
+  (let [entry (cw/lookup-or-miss
+                cache-atom k
+                (fn [_]
+                  (let [[val rs] (reads/with-reads compute-fn)]
+                    {:seon.store/lru-val val :seon.store/lru-reads rs})))]
+    (if (and (map? entry) (contains? entry :seon.store/lru-val))
+      (do (when (seq (:seon.store/lru-reads entry))
+            (swap! outer into (:seon.store/lru-reads entry)))
+          (:seon.store/lru-val entry))
+      (let [[val rs] (reads/with-reads compute-fn)]
+        (swap! cache-atom cache/miss k {:seon.store/lru-val val :seon.store/lru-reads rs})
+        val)))
+  (let [entry (cw/lookup-or-miss cache-atom k (fn [_] (compute-fn)))]
+    (if (and (map? entry) (contains? entry :seon.store/lru-val))
+      (:seon.store/lru-val entry)
+      entry))))
+
+(defn head
+  {:malli/schema [:=> [:cat [:or :seon.host/conn :seon.host/db :map] :keyword] :any]}
+  [store-or-conn branch]
+  (let [s (if (instance? clojure.lang.IDeref store-or-conn)
+            (:store @store-or-conn)
+            (or (:store store-or-conn) store-or-conn))
+        raw-head (try (k/get s branch nil {:sync? true}) (catch Throwable _ nil))
+        cid (get-in raw-head [:meta :datahike/commit-id])]
+    (if (and raw-head cid)
+      (lru-get! head-db-cache 16 [s branch cid]
+                #(datahike.writing/stored->db
+                  (datahike.writing/resolve-head s branch raw-head {:sync? true}) s))
+      (d/branch-as-db s branch))))
+
+(defn lru-peek
+  "Peeks `k` in `cache-atom` without invoking a miss fn, unwrapping `:seon.store/lru-val` (and replaying `:seon.store/lru-reads` when `di/*reads*` is bound)."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] :any]
+                  [:=> [:cat :any :any :any] :any]]
+   :cost/ticks 200000}
+  ([cache-atom k] (lru-peek cache-atom k nil))
+  ([cache-atom k not-found]
+   (let [cur (when (instance? clojure.lang.IDeref cache-atom) @cache-atom)
+         raw (if (map? cur) (get cur k not-found) not-found)]
+     (if (identical? raw not-found)
+       not-found
+       (if (and (map? raw) (contains? raw :seon.store/lru-val))
+         (do (when-let [outer di/*reads*]
+               (when-let [rs (seq (:seon.store/lru-reads raw))]
+                 (swap! outer into rs)))
+             (:seon.store/lru-val raw))
+         raw)))))
+
+(defn lru-put!
+  "Stores `v` under `k` in bounded LRU `cache-atom` (initializing to `threshold`, default 64, if needed) and returns `v`."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any :any] :any]
+                  [:=> [:cat :any pos-int? :any :any] :any]]
+   :cost/ticks 500000}
+  ([cache-atom k v] (lru-put! cache-atom 64 k v))
+  ([cache-atom threshold k v]
+   (ensure-lru! cache-atom threshold)
+   (swap! cache-atom cache/miss k v)
+   v))
+
+(defn resolve-lazy-str
+  "Resolves an inline or out-of-line Datahike lazy datom value `v` to a string (nil when `v` is nil)."
+  {:malli/schema [:function
+                  [:=> [:cat :any] [:maybe :string]]
+                  [:=> [:cat [:maybe :seon.host/db] :any] [:maybe :string]]]
+   :cost/ticks 500000}
+  ([v] (resolve-lazy-str nil v))
+  ([db v]
+   (cond
+     (nil? v) nil
+     (dd/lazy-value? v)
+     (let [s (:store db)
+           r (when s (k/get s (dd/lazy-key v) ::miss {:sync? true}))
+           val (if (and (some? r) (not (identical? ::miss r))) r (dd/value-of v))]
+       (when (some? val) (str val)))
+     :else (str v))))
+
+(defn tx-instant-ms
+  "Returns epoch milliseconds for Datahike transaction id `tx` via `:db/txInstant`, or nil."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :int]] [:maybe :int]]
+   :cost/ticks 500000}
+  [db tx]
+  (when (and db (integer? tx) (pos? (long tx)))
+    (when-let [inst (:v (first (d/datoms db :eavt (long tx) :db/txInstant)))]
+      (cond
+        (instance? java.util.Date inst) (.getTime ^java.util.Date inst)
+        (number? inst) (long inst)
+        :else nil))))

@@ -17,8 +17,7 @@
             [seon.fork.helpers :as helpers]
             [seon.fork.worker-support :as wsup]
             [seon.schema :as schema]
-            [seon.store :as store]
-            [seon.fork.sandbox :as sandbox]))
+            [seon.store :as store]))
 
 (ffi/load-library)
 
@@ -45,7 +44,8 @@
 (defn apply-form-overlay! [& args] (apply wsup/apply-form-overlay! args))
 
 (defn- run-test-worker!
-  {:doc " (catches up warm-commit before overlay)."}
+  "Runs a reach-selected test and seed=42 generative batch in an isolated COW worker,
+  catching up `warm-commit -> main-cid` before applying the branch overlay."
   [end {:keys [batch-id cfg branch overlay test-items gen-items samples seed warm-commit]}]
   (let [conn (when (and cfg branch)
                (store/after-fork! cfg)
@@ -391,7 +391,6 @@
   (remote/close-streams-but! #{cfd})
   (let [mine (remote/open cfd {:pump :fiber :buf 32})]
     (try
-      (sandbox/apply-worker-sandbox! v)
       (if (= child-type :agent)
         (run-agent-worker! mine (assoc v :base-commit (or (:base-commit v) warm-commit)))
         (run-test-worker! mine (assoc v :warm-commit (or (:warm-commit v) warm-commit))))
@@ -452,7 +451,7 @@
                 (neg? pid)
                 (do (remote/close! cend)
                     (remote/close-fd! cfd)
-                    (a/>!! ev-out {:ev :fork-refused :type child-type :code pid})
+                    (a/>!! ev-out {:ev :fork-refused :type child-type :agent-id (:agent-id v) :batch-id (:batch-id v) :code pid})
                     (recur children warm-commit))
 
                 :else

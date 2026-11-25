@@ -1,12 +1,12 @@
 (ns seon.git-proc
   "The `:git` Flow proc (`:io` workload):
-   - Auto-syncs branch commits onto local `refs/heads/seon/<branch>` via `git fast-import` (0 worktrees!).
-   - Honors `:commit-git?` (`false` makes `:sync-branch`, `:write-back`, and `:delete-branch-ref` no-ops).
-   - Deletes pruned `refs/heads/seon/<branch>` refs via `:op :delete-branch-ref` (single `:branch` or batch `:branches`).
-   - Receives `:write-back` from `:transactor` after a green 3-way merge on `:main`, renders `:touched-paths`
-     byte-for-byte from the immutable commit DB, writes them to disk, creates a local 2-parent Git merge
-     commit on `HEAD`, updates `:git/commit` via `:transactor`, and automatically triggers atomic
-     `seon.switchover/run-switch-over!` when `:boot-affected?` is true and `:auto-switch-over?` is enabled."
+  - Auto-syncs branch commits onto local `refs/heads/seon/<branch>` via `git fast-import` (0 worktrees!).
+  - Honors `:commit-git?` (`false` makes `:sync-branch`, `:diff-branch`, `:write-back`, and `:delete-branch-ref` no-ops).
+  - Deletes pruned `refs/heads/seon/<branch>` refs via `:op :delete-branch-ref` (single `:branch` or batch `:branches`).
+  - Receives `:write-back` from `:transactor` after a green 3-way merge on `:main`, renders `:touched-paths`
+    byte-for-byte from the immutable commit DB, writes them to disk, creates a local 2-parent Git merge
+    commit on `HEAD`, updates `:git/commit` via `:transactor`, and automatically triggers atomic
+    `seon.switchover/run-switch-over!` when `:boot-affected?` is true and `:auto-switch-over?` is enabled."
   (:require [clojure.core.async :as a]
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
@@ -20,23 +20,32 @@
     (a/close! ch)))
 
 (defn- handle-diff-branch!
-  "Single-owner `:diff-branch` handler for `git-proc`: exports branch ref via `--force` and returns git diff."
+  "Single-owner `:diff-branch` handler for `git-proc`: exports branch ref via `--force` and returns git diff (no-op when `:commit-git?` is false)."
   [st {:keys [branch plan reply-ch]}]
-  (if (or (nil? branch) (= branch :main))
-    (do (reply! reply-ch {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
-                          :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
-                          :git-ref nil :diff nil})
-        [st nil])
-    (try
-      (let [exported (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) branch plan)
-            git-diff (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported))]
-        (reply! reply-ch {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
-                          :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
-                          :git-ref (:ref exported) :diff git-diff})
-        [(assoc-in st [:branch-refs branch] (:sha exported)) nil])
-      (catch Throwable ex
-        (reply! reply-ch {:ok? false :branch branch :error (or (.getMessage ex) (str ex))})
-        [st {::flow/error [{:proc :git :op :diff-branch :error (.getMessage ex)}]}]))))
+  (cond
+  (or (nil? branch) (= branch :main))
+  (do (reply! reply-ch {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
+                        :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
+                        :git-ref nil :diff nil})
+      [st nil])
+
+  (false? (:commit-git? st))
+  (do (reply! reply-ch {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
+                        :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
+                        :git-ref nil :diff nil :skipped :skipped-commit-git-false})
+      [st {::flow/report [(str "[:git] :diff-branch :skipped-commit-git-false (" branch ")")]}])
+
+  :else
+  (try
+    (let [exported (git/export-branch-ref! (:conn st) (:cfg st) (:repo-dir st) branch plan)
+          git-diff (git/git! (:repo-dir st) "diff" "HEAD" (:ref exported))]
+      (reply! reply-ch {:ok? (:ok? plan) :branch branch :touched-paths (:touched-paths plan)
+                        :entity-diffs (:entity-diffs plan) :conflicts (:conflicts plan)
+                        :git-ref (:ref exported) :diff git-diff})
+      [(assoc-in st [:branch-refs branch] (:sha exported)) nil])
+    (catch Throwable ex
+      (reply! reply-ch {:ok? false :branch branch :error (or (.getMessage ex) (str ex))})
+      [st {::flow/error [{:proc :git :op :diff-branch :error (.getMessage ex)}]}]))))
 
 (defn- handle-sync-branch! [st msg]
   (if (false? (:commit-git? st))
