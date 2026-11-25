@@ -216,13 +216,13 @@
                                     {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/helper
                                      :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0
                                      :seon.agent.eval/code "(+ 2 2)"}]})
-        (let [evs (mapv #(d/pull @conn '[*] (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))
+        (let [evs (vec (sort-by :seon.agent.eval/turn (map #(d/pull @conn (quote [*]) (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))))
               n-evs (rstatus/compute-wait-nudge-data @conn @conn ag evs (+ msg-ms 1000))]
           (is (= 2 (:eval-count n-evs))))
         ;; Recent status update suppresses nudge
         (d/transact conn {:tx-data [(rstatus/build-status-tx {:label "Working" :pct 50 :stage :researching}
                                                              :agent/helper (+ msg-ms 2000))]})
-        (let [evs (mapv #(d/pull @conn '[*] (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))]
+        (let [evs (vec (sort-by :seon.agent.eval/turn (map #(d/pull @conn (quote [*]) (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))))]
           (is (nil? (rstatus/compute-wait-nudge-data @conn @conn ag evs (+ msg-ms 9000)))))
         ;; Plain-prose reply suppresses nudge even after status expires
         (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/helper
