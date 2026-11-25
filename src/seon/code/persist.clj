@@ -149,10 +149,19 @@
     (fn [[target-ns srcs]]
       (let [existing (ns-forms db target-ns)
             existing-ns-src (some #(when (= (:seon.code.form/key %) (str target-ns "#ns")) (:seon.code.form/src %)) existing)
-            srcs (if existing-ns-src (vec (remove bare-ns-form? srcs)) srcs)
-            raw-ns? (boolean (some #(str/starts-with? (str/triml %) "(ns ") srcs))
-            auto-ns (when-not raw-ns? (cst-ns/sync-ns-requires-for-live-ns target-ns existing-ns-src srcs))
-            srcs (if auto-ns (into [auto-ns] srcs) srcs)
+            srcs (vec (mapcat #(if-let [[nh nb] (cst-ns/split-leading-ns-src %)] [nh nb] [%])
+                              (if existing-ns-src (remove bare-ns-form? srcs) srcs)))
+            raw-ns-idx (first (keep-indexed #(when (str/starts-with? (str/triml %2) "(ns ") %1) srcs))
+            raw-ns? (some? raw-ns-idx)
+            body-srcs (if raw-ns? (vec (remove #(str/starts-with? (str/triml %) "(ns ") srcs)) srcs)
+            auto-ns (if raw-ns?
+                      (when (seq body-srcs)
+                        (cst-ns/sync-ns-requires-for-live-ns target-ns (nth srcs raw-ns-idx) body-srcs))
+                      (cst-ns/sync-ns-requires-for-live-ns target-ns existing-ns-src srcs))
+            srcs (cond
+                   (and raw-ns? auto-ns) (assoc srcs raw-ns-idx auto-ns)
+                   auto-ns (into [auto-ns] srcs)
+                   :else srcs)
             has-ns-form? (or raw-ns? (some? auto-ns))
             existing-local-defs (into #{} (map #(symbol (name (:seon.code.var/name %)))) (ns-vars db target-ns))
             header (cond has-ns-form? "" existing-ns-src (str existing-ns-src "\n") :else (str "(ns " target-ns ")\n"))
