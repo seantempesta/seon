@@ -381,16 +381,18 @@
           done-tasks (refine/passed-non-template-tasks @conn (:passed-tasks gate-res))
           s-tx (vec (:schema-tx plan))
           tx-ops (vec (:tx-data plan))
-          has-edits? (boolean (or (seq s-tx) (seq tx-ops) (seq done-tasks)))
+          auto-ops (refine/auto-anchor-parent-proofs-tx @conn b-db agent-id)
+          has-edits? (boolean (or (seq s-tx) (seq tx-ops) (seq done-tasks) (seq auto-ops)))
           _ (try
               (when has-edits?
                 (let [[schema-ops raw-rest] (split-schema-ops tx-ops)
-                    rest-ops (mark-passed-tasks-done raw-rest done-tasks)
-                    tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
-                           :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
-                (when (seq s-tx) (d/transact tconn {:tx-data s-tx}))
-                (when (seq schema-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data schema-ops})))
-                (when (seq rest-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data rest-ops})))))
+                      rest-ops (mark-passed-tasks-done raw-rest done-tasks)
+                      tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
+                             :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
+                  (when (seq s-tx) (d/transact tconn {:tx-data s-tx}))
+                  (when (seq schema-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data schema-ops})))
+                  (when (seq rest-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data rest-ops})))
+                  (when (seq auto-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data auto-ops})))))
               (finally (d/release tconn)))
           db0 @conn
           summary (when (contains? (:schema b-db) :seon.agent/summary)

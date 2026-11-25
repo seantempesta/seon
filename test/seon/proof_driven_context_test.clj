@@ -265,16 +265,18 @@
             ;; t3: Refiner authors RED deftest on its branch + updates parent task via branch-update-task-tx
             (d/transact rconn {:tx-data (code/file-import-tx @rconn "test/demo/slug_test.clj"
                                                              "(ns demo.slug-test (:require [clojure.test :refer [deftest is]] [demo.slug :as slug]))\n(deftest existing-slug-test (is (= \"a\" (slug/clean-slug \"a\"))))\n(deftest new-red-slug-proof-test (is (= \"hello-world\" (slug/clean-slug \"Hello World\"))))\n" false)})
+            (do (is (true? (:ok? (gate/evaluate-agent-gate @conn @rconn ref-aid))) "Refinement gate must auto-accept newly authored compiling branch deftest even before manual update-task!")
             (let [utx (refine/branch-update-task-tx @rconn :demo/slug-task
-                                                    {:proofs ['demo.slug-test/new-red-slug-proof-test
-                                                              'demo.slug-test/existing-slug-test]
-                                                     :tests ['demo.slug-test/new-red-slug-proof-test]
-                                                     :plan "Update `demo.slug/clean-slug` so `demo.slug-test/new-red-slug-proof-test` passes."})]
-              (d/transact rconn {:tx-data utx}))
+                                                    {:plan "Update `demo.slug/clean-slug` for lowercase dash slugs."})]
+              (d/transact rconn {:tx-data utx})))
             ;; t4: expected-red-proof-vars includes ONLY newly authored proof, NEVER pre-existing :main test!
-            (let [exp-red (refine/expected-red-proof-vars @conn @rconn ref-aid)]
-              (is (= #{'demo.slug-test/new-red-slug-proof-test} exp-red))
-              (is (not (contains? exp-red 'demo.slug-test/existing-slug-test))))
+            (let [exp-red (refine/expected-red-proof-vars @conn @rconn ref-aid)
+                auto-ops (refine/auto-anchor-parent-proofs-tx @conn @rconn ref-aid)]
+            (is (= #{'demo.slug-test/new-red-slug-proof-test} exp-red))
+            (is (not (contains? exp-red 'demo.slug-test/existing-slug-test)))
+            (is (= 1 (count auto-ops)))
+            (is (= :demo/slug-task (:seon.task/id (first auto-ops))))
+            (is (= #{'demo.slug-test/new-red-slug-proof-test} (:seon.task/tests (first auto-ops)))))
             (is (true? (:ok? (gate/evaluate-agent-gate @conn @rconn ref-aid))))
             (finally (d/release rconn))))
         ;; t5: Fork-merge Refiner -> worker branch marks :refine/* done on BOTH branches & unpauses :worker/slug!
