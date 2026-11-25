@@ -171,21 +171,14 @@
         (reduce (fn [acc k]
                   (let [[ns-str var-str] (str/split k #"/" 2)]
                     (if (and ns-str var-str (not (str/includes? var-str "#")))
-                      (let [nsym (symbol ns-str)]
-                        (when-let [ns-obj (find-ns nsym)] (ns-unmap ns-obj (symbol var-str)))
-                        (update acc nsym (fnil conj #{}) var-str))
+                      (update acc (symbol ns-str) (fnil conj #{}) var-str)
                       acc)))
                 {} retracted-keys)
         all-unmapped (into #{} (mapcat identity) (vals retracted-by-ns))
         upsert-keys (into #{} (map :seon.code.form/key) upserts)
         retracted-nss (into #{} (keep #(let [s (str %)] (when (str/ends-with? s "#ns") (symbol (subs s 0 (- (count s) 3)))))) retracted-keys)
         updated-ns-hdrs (into #{} (keep #(when (str/ends-with? (str (:seon.code.form/key %)) "#ns") (:seon.code.form/ns %))) upserts)
-        _ (when (and (seq all-unmapped) (seq updated-ns-hdrs))
-            (doseq [nsym updated-ns-hdrs :let [ns-obj (find-ns nsym)] :when ns-obj vname all-unmapped]
-              (let [vsym (symbol vname)]
-                (when-let [v (get (ns-map ns-obj) vsym)]
-                  (when (and (var? v) (contains? retracted-by-ns (ns-name (:ns (meta v)))))
-                    (ns-unmap ns-obj vsym))))))
+        
         rebind-forms
         (when (and has-src? (or (seq all-unmapped) (seq retracted-nss)))
           (for [nsym (into (set (keys retracted-by-ns)) updated-ns-hdrs)
@@ -205,7 +198,9 @@
                     :when (and (not (contains? upsert-keys fk)) (not (contains? retracted-keys fk)))]
                 f))))]
     {:retracted-nss retracted-nss
-     :all-upserts (vec (vals (reduce (fn [m f] (assoc m (:seon.code.form/key f) f)) {} (concat unloaded-forms rebind-forms upserts))))}))
+    :retracted-by-ns retracted-by-ns
+    :all-unmapped all-unmapped
+    :all-upserts (vec (vals (reduce (fn [m f] (assoc m (:seon.code.form/key f) f)) {} (concat unloaded-forms rebind-forms upserts))))}))
 
 (defn apply-overlay!
   "Applies a branch/merge delta `{:upserts [...] :retracted-keys #{...}}` live into the current
@@ -220,14 +215,25 @@
   ([db delta] (apply-overlay! db delta false nil))
   ([db delta tolerant?] (apply-overlay! db delta tolerant? nil))
   ([db {:keys [schema-upserts retracted-schemas] :as delta} tolerant? forms-for-ns]
-   (let [{:keys [retracted-nss all-upserts]} (collect-overlay-upserts db delta forms-for-ns)
+   (let [{:keys [retracted-nss retracted-by-ns all-unmapped all-upserts]} (collect-overlay-upserts db delta forms-for-ns)
          touched-nss (volatile! #{})
          errors (volatile! [])]
      (doseq [{:keys [:seon.code.form/key :seon.code.form/ns :seon.code.form/src]} (sort-forms-topologically all-upserts)]
        (let [load-one (fn []
                         (let [ns-obj (create-ns ns)]
                           (when (str/ends-with? (str key) "#ns")
-                            (doseq [[al _] (ns-aliases ns-obj)] (ns-unalias ns-obj al)))
+                          (doseq [[al _] (ns-aliases ns-obj)] (ns-unalias ns-obj al))
+                          (when (seq all-unmapped)
+                            (doseq [vname all-unmapped
+                                    :let [vsym (symbol vname)
+                                          v (get (ns-map ns-obj) vsym)]
+                                    :when (and (var? v)
+                                               (let [def-ns (ns-name (:ns (meta v)))]
+                                                 (and (contains? retracted-by-ns def-ns)
+                                                      (or (not= def-ns ns)
+                                                          (and (str/includes? src ":refer")
+                                                               (str/includes? src vname))))))]
+                              (ns-unmap ns-obj vsym))))
                           (binding [*ns* ns-obj]
                             (refer-clojure)
                             (let [rdr (java.io.PushbackReader. (java.io.StringReader. src))]
@@ -239,6 +245,16 @@
          (if tolerant?
            (try (load-one) (catch Throwable ex (vswap! errors conj {:key key :error (or (.getMessage ex) (str ex))})))
            (load-one))))
+     (let [upserted-keys (into #{} (map :seon.code.form/key) all-upserts)]
+       (doseq [[nsym vnames] retracted-by-ns
+               :let [ns-obj (find-ns nsym)]
+               :when ns-obj
+               vname vnames
+               :when (not (contains? upserted-keys (str (name nsym) "/" vname)))
+               :let [vsym (symbol vname)
+                     v (get (ns-map ns-obj) vsym)]
+               :when (and (var? v) (= nsym (ns-name (:ns (meta v)))))]
+         (ns-unmap ns-obj vsym)))
      (doseq [old-ns retracted-nss]
        (when (and (not (contains? @touched-nss old-ns)) (find-ns old-ns)) (remove-ns old-ns)))
      (let [arm-db (when-not (seq schema/*base-forms-override*) db)
@@ -337,7 +353,11 @@
          stale-branch? (and base-cid main-cid (not= base-cid main-cid))
          base-db-d (when stale-branch? (delay (d/commit-as-db conn base-cid)))
          forms-fn (when stale-branch? #(candidate-ns-forms @base-db-d main-db to-db %))
-         run-ov! (fn [] (apply-overlay! (if stale-branch? main-db to-db) delta (boolean tolerant?) forms-fn))
+         ov-db (if stale-branch? main-db to-db)
+         exp-delta (if (or (seq (:upserts delta)) (seq (:retracted-keys delta)))
+                     (expand-overlay-rebinds to-db delta)
+                     delta)
+         run-ov! (fn [] (apply-overlay! ov-db exp-delta (boolean tolerant?) forms-fn))
          errs (if (and stale-branch?
                        (or (seq (:upserts delta)) (seq (:retracted-keys delta)))
                        (not (seq schema/*base-forms-override*)))

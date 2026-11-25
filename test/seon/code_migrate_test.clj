@@ -325,3 +325,46 @@
               (is (some? (d/transact conn {:tx-data (:tx-data plan)})))
               (is (= :w/dref (:seon.agent.eval/agent (d/pull @conn '[:seon.agent.eval/agent] [:seon.agent.eval/id ev-id])))))
             (finally (d/release bconn))))))))
+
+(deftest apply-overlay-defers-unmap-until-after-upserts-test
+  (let [ns-a 'seon.tmp.overlay-order-a
+        ns-b 'seon.tmp.overlay-order-b
+        seen-bound? (atom nil)]
+    (try
+      (seon.code.overlay/apply-overlay!
+        nil
+        {:upserts [{:seon.code.form/key "seon.tmp.overlay-order-a#ns" :seon.code.form/ns ns-a :seon.code.form/order 0
+                    :seon.code.form/src "(ns seon.tmp.overlay-order-a)"}
+                   {:seon.code.form/key "seon.tmp.overlay-order-a/priv-helper" :seon.code.form/ns ns-a :seon.code.form/order 1
+                    :seon.code.form/src "(defn- priv-helper [x] (+ x 10))"}
+                   {:seon.code.form/key "seon.tmp.overlay-order-a/pub-fn" :seon.code.form/ns ns-a :seon.code.form/order 2
+                    :seon.code.form/src "(defn pub-fn [x] (priv-helper x))"}]
+         :retracted-keys #{}})
+      (is (= 15 ((resolve 'seon.tmp.overlay-order-a/pub-fn) 5)))
+      ;; Simulate move-vars!: priv-helper retracted from ns-a, moved to ns-b, pub-fn updated in ns-a;
+      ;; forms-for-ns calls the STILL-LIVE pub-fn during collect-overlay-upserts!
+      (seon.code.overlay/apply-overlay!
+        nil
+        {:upserts [{:seon.code.form/key "seon.tmp.overlay-order-b#ns" :seon.code.form/ns ns-b :seon.code.form/order 0
+                    :seon.code.form/src "(ns seon.tmp.overlay-order-b)"}
+                   {:seon.code.form/key "seon.tmp.overlay-order-b/priv-helper" :seon.code.form/ns ns-b :seon.code.form/order 1
+                    :seon.code.form/src "(defn- priv-helper [x] (+ x 10))"}
+                   {:seon.code.form/key "seon.tmp.overlay-order-b/pub-fn" :seon.code.form/ns ns-b :seon.code.form/order 2
+                    :seon.code.form/src "(defn pub-fn [x] (priv-helper x))"}
+                   {:seon.code.form/key "seon.tmp.overlay-order-a#ns" :seon.code.form/ns ns-a :seon.code.form/order 0
+                   :seon.code.form/deps #{'seon.tmp.overlay-order-b}
+                   :seon.code.form/src "(ns seon.tmp.overlay-order-a (:require [seon.tmp.overlay-order-b :as b]))"}
+                   {:seon.code.form/key "seon.tmp.overlay-order-a/pub-fn" :seon.code.form/ns ns-a :seon.code.form/order 1
+                   :seon.code.form/deps #{'seon.tmp.overlay-order-b/pub-fn}
+                   :seon.code.form/src "(defn pub-fn [x] (b/pub-fn x))"}]
+         :retracted-keys #{"seon.tmp.overlay-order-a/priv-helper"}}
+        false
+        (fn [_]
+          (reset! seen-bound? ((resolve 'seon.tmp.overlay-order-a/pub-fn) 7))
+          []))
+      (is (= 17 @seen-bound?) "retracted private helper must remain bound while collect-overlay-upserts and upserts run")
+      (is (= 15 ((resolve 'seon.tmp.overlay-order-a/pub-fn) 5)))
+      (is (nil? (ns-resolve (find-ns ns-a) 'priv-helper)) "retracted private helper must be unmapped after upserts complete")
+      (finally
+        (when (find-ns ns-a) (remove-ns ns-a))
+        (when (find-ns ns-b) (remove-ns ns-b))))))
