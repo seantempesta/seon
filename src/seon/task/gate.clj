@@ -6,7 +6,8 @@
             [seon.store :as store]
             [seon.rule.seed :as rseed]
             [clojure.string :as str]
-            [seon.reconciler.policy :as policy]))
+            [seon.reconciler.policy :as policy]
+            [seon.ctx.diff :as diff]))
 
 (defn- eid-of [db a v]
   (when (and db (some? v) (get-in db [:schema a]))
@@ -137,13 +138,13 @@
      (try
        (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
          (when (and mc bc (not= mc bc))
-           (let [base (or (d/merge-base branch-db mc bc) mc)]
-             (when (not= base bc)
-               (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
-                          :seon.code.var/name :seon.code.ns/name :seon.code.doc/id
-                          :seon.code.file/path :seon.schema/key]
-                     attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
-                 (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
+           (when-let [base (diff/fast-merge-base main-db branch-db)]
+           (when (not= base bc)
+             (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+                        :seon.code.var/name :seon.code.ns/name :seon.code.doc/id
+                        :seon.code.file/path :seon.schema/key]
+                   attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
+               (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
        (catch Throwable _ false)))))
 
 (defn wrapup-grace-notify-op
@@ -267,9 +268,10 @@
                 mc (when (instance? datahike.db.DB mdb) (d/commit-id mdb))
                 fc (or (:seon.agent/fork-commit ma) (:seon.agent/fork-commit ba))
                 base (cond
-                       (and fc bc (not= fc bc)) fc
-                       (and mc bc (not= mc bc)) (try (d/merge-base bdb mc bc) (catch Throwable _ nil))
-                       :else nil)
+                     (and fc bc (not= fc bc) (diff/ancestor-within? bdb fc bc 256)) fc
+                     (and fc bc (not= fc bc)) (try (d/merge-base bdb fc bc) (catch Throwable _ nil))
+                     (and mc bc (not= mc bc)) (diff/fast-merge-base mdb bdb)
+                     :else nil)
                 raw-ch (if (and base bc (not= base bc))
                          (try (vec (d/changes bdb base bc)) (catch Throwable _ []))
                          [])
