@@ -180,6 +180,15 @@
          hrs (long (or (:history-hours opts)
                        (config-val mdb nil :seon.config/gc-history-hours)
                        (:seon.config/gc-history-hours default-config-values)))
+         orphan-vecs (when (and (contains? (:schema mdb) :seon.vector/coarse)
+                                  (contains? (:schema mdb) :seon.vector/of))
+                         (into []
+                               (keep (fn [dt]
+                                       (when-not (first (d/datoms mdb :eavt (:e dt) :seon.vector/of))
+                                         [:db/retractEntity (:e dt)])))
+                               (d/datoms mdb :aevt :seon.vector/coarse)))
+         _ (when (seq orphan-vecs)
+             (d/transact conn {:tx-data orphan-vecs}))
          pruned (prune-merged-branches! conn keep-n)
          cutoff (java.util.Date. (- (System/currentTimeMillis) (* hrs 3600 1000)))
          swept @(d/gc-storage conn cutoff)

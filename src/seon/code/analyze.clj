@@ -312,7 +312,7 @@
            many-attrs (filterv #(contains? dh-sch %)
                                (if preserve-analyzed? base-attrs (conj base-attrs :seon.code.var/ops)))
            many-set (set many-attrs)
-           check-catches? (and (not preserve-analyzed?) (contains? dh-sch :seon.code.var/catches))
+           check-catches? (contains? dh-sch :seon.code.var/catches)
            norm-val (fn [a x]
                       (if (and (= :db.type/ref (get-in dh-sch [a :db/valueType]))
                                (vector? x) (= 2 (count x)) (contains? dh-sch (first x)))
