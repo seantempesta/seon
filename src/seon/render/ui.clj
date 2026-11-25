@@ -12,7 +12,8 @@
             [seon.signals :as sig]
             [seon.web.styles :as styles]
             [seon.render.links :as rlinks]
-            [seon.web.router :as router]))
+            [seon.web.router :as router]
+            [seon.render.ui.stream :as ustream]))
 
 (defn entry-agent-id [& args] (apply rdata/entry-agent-id args))
 
@@ -83,51 +84,6 @@
      (when (and has-kids? exp?)
        (for [c kids] (render-agent-tree-node kids-by-p viewing-id expanded-set agent-states target-mode expert? (inc depth) c)))]))
 
-(defn sidebar-unit
-  "Slide-out conversation/agent sidebar; auto-collapses when `viewport-w < 760`."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :any] :cost/ticks 5000000}
-  [db {:keys [agent-states]}]
-  (let [{:keys [viewing-id view-mode sidebar-open? expanded-agents viewport-w expert-mode?]} (user-view-state db)
-        vw (long (or viewport-w 1280))
-        narrow? (< vw 760)
-        target-mode (if (= :session (rdata/canonical-view-mode view-mode)) :session :canvas)]
-    (if-not (and sidebar-open? (not narrow?))
-      [:aside {:id "seon-sidebar" :class (str "sidebar closed" (when narrow? " sidebar-collapsed")) :data-viewport-w (str vw)}]
-      (let [all (->> (d/datoms db :aevt :seon.agent/id)
-                     (map #(assoc (d/pull db '[:seon.agent/id :seon.agent/parent :seon.agent/interactive?
-                                               :seon.agent/label :seon.agent/entry? :seon.agent/archived?
-                                               :seon.agent/ready?] (:e %))
-                                  :seon.agent/entity-tx (:tx %)))
-                     (remove #(or (:seon.agent/archived? %) (:seon.agent/interactive? %)
-                                  (str/starts-with? (str (namespace (:seon.agent/id %))) "example")))
-                     (sort-by #(vector (if (:seon.agent/entry? %) 0 1) (- (long (or (:seon.agent/entity-tx %) 0))) (str (:seon.agent/id %))))
-                     vec)
-            by-id (into {} (map (juxt :seon.agent/id identity)) all)
-            by-p (group-by :seon.agent/parent all)
-            roots (filterv #(let [p (:seon.agent/parent %)] (or (nil? p) (not (contains? by-id p)))) all)]
-        [:aside {:id "seon-sidebar" :class "sidebar open" :data-viewport-w (str vw)}
-         [:div {:class "sidebar-inner"}
-          [:div {:class "sidebar-head"}
-           (if expert-mode?
-             [:a {:href "/system" :class "ent-link nav-link kicker" :title "Open Seon Runtime System Entity"
-                  :data-preview-ref "[:seon.system/id :root]" :interestfor "seon-hovercard"
-                  :on-click '(seon.web/set-view-mode! :system)} (str "Agents · " (count all))]
-             [:span {:class "kicker"} "Conversations"])]
-          [:div {:class "tree-scroll"}
-           (if (empty? roots)
-             [:p {:class "muted tiny"} (if expert-mode? "No agents yet." "No conversations yet.")]
-             (for [r roots] (render-agent-tree-node by-p viewing-id expanded-agents agent-states target-mode expert-mode? 0 r)))]
-          [:details {:id "sidebar-spawn" :class "sidebar-spawn"}
-           [:summary {:class "kicker"} (if expert-mode? "+ New agent" "+ New conversation")]
-           [:form {:class "form-stack" :style "margin-top:8px" :on-submit (list 'seon.web/spawn-agent-form! viewing-id)}
-            (if expert-mode?
-              (list [:input {:class "inp sm" :name "agent_id" :placeholder "Name (e.g. :ui/polish)"}]
-                    [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
-                    [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
-                    [:button {:type "submit" :class "btn primary sm"} (str "Create under " (rdata/agent-label db viewing-id))])
-              (list [:input {:class "inp sm" :name "goal" :placeholder "New conversation name…"}]
-                    [:button {:type "submit" :class "btn primary sm"} "Start"]))]]]]))))
-
 (defn composer-unit
   "Bottom docked message composer adapted for Normal User vs Developer Mode."
   {:malli/schema [:=> [:cat :seon.host/db :map] :any] :cost/ticks 2000000}
@@ -165,38 +121,9 @@
   [_db css-text]
   [:style {:id "seon-css"} (render/raw-html css-text)])
 
-(defn stream-phase-info
-  "Classifies a live-stream entry into phase metadata."
-  {:malli/schema [:=> [:cat [:maybe :map]] [:map [:phase :keyword] [:label :string] [:css-class :string]]]
-   :cost/ticks 50000 :cost/bytes 16384}
-  [sinfo]
-  (let [raw (when (map? sinfo) (or (:phase sinfo) (:status sinfo)))]
-    (case raw
-      (:thinking :reasoning :reasoning-token) {:phase :thinking :label "Thinking" :css-class "phase-thinking"}
-      (:tools :eval :running-tools :done)     {:phase :tools :label "Tools" :css-class "phase-tools"}
-      (:writing :token)                       {:phase :writing :label "Writing" :css-class "phase-writing"}
-      :testing                                {:phase :testing :label "Testing" :css-class "phase-testing"}
-      :merging                                {:phase :merging :label "Merging" :css-class "phase-merging"}
-      {:phase :working :label "Working" :css-class "phase-working"})))
+(defn ^{:seon.code/reexport 'seon.render.ui.stream/stream-phase-info} stream-phase-info [& args] (apply ustream/stream-phase-info args))
 
-(defn stream-live-snippet
-  "Extracts a 1-line live preview snippet for a fixed 60px status card."
-  {:malli/schema [:=> [:cat [:maybe :map]] :string] :cost/ticks 100000 :cost/bytes 32768}
-  [sinfo]
-  (if-not (map? sinfo)
-    "\u00A0"
-    (let [{:keys [phase]} (stream-phase-info sinfo)
-          ll #(when (and (string? %) (not (str/blank? %)))
-                (some->> (str/split-lines %) (map str/trim) (remove (fn [x] (or (str/blank? x) (str/starts-with? x "──")))) last not-empty))
-          ts (when (string? (:tool-snippet sinfo)) (not-empty (str/trim (:tool-snippet sinfo))))
-          raw (case phase
-                :writing  (or (ll (:text sinfo)) (ll (:reasoning sinfo)) "Writing response…")
-                :thinking (or (ll (:reasoning sinfo)) (ll (:text sinfo)) "Reasoning…")
-                :tools    (or ts (ll (:text sinfo)) (ll (:reasoning sinfo)) "Running REPL tools…")
-                :testing  (or ts "Running reach tests…")
-                :merging  (or ts "Merging verified branch…")
-                (or ts (ll (:text sinfo)) (ll (:reasoning sinfo)) "Working…"))]
-      (if (str/blank? raw) "\u00A0" (if (> (count raw) 140) (subs raw 0 140) raw)))))
+(defn ^{:seon.code/reexport 'seon.render.ui.stream/stream-live-snippet} stream-live-snippet [& args] (apply ustream/stream-live-snippet args))
 
 (defn- header-focal-crumbs [db inspect-ref inspect-trail canon viewing-id expert-mode?]
   (if-not expert-mode?
@@ -314,48 +241,11 @@
                  :on-click '(seon.web/toggle-expert-mode!)}
         (if expert-mode? "Dev Mode · ON" "Dev")]]]]))
 
-(defn- num-or [m k d] (let [v (get m k)] (if (number? v) (max 0 (long v)) d)))
+(defn- num-or [& args] (apply ustream/num-or args))
 
-(defn- calc-tps [phase step-ch st lm]
-  (when (and (contains? #{:thinking :writing} phase) (pos? step-ch) (pos? st) (>= lm st))
-    (max 1 (Math/round (/ (/ (double step-ch) 4.0) (max 0.5 (/ (double (- lm st)) 1000.0)))))))
+(defn ^{:seon.code/reexport 'seon.render.ui.stream/aggregate-stream-rate} aggregate-stream-rate [& args] (apply ustream/aggregate-stream-rate args))
 
-(defn aggregate-stream-rate
-  "Computes aggregate live `tok/s` string (e.g. `\"· 142 tok/s\"`) across actively streaming entries."
-  {:malli/schema [:=> [:cat [:maybe :map]] :string] :cost/ticks 100000 :cost/bytes 32768}
-  [streams]
-  (if-not (map? streams)
-    ""
-    (let [tot (reduce-kv
-               (fn [acc _aid sinfo]
-                 (if-not (map? sinfo)
-                   acc
-                   (let [{:keys [phase]} (stream-phase-info sinfo)
-                         sc (num-or sinfo :step-chars (num-or sinfo :chars 0))
-                         tps (calc-tps phase sc (num-or sinfo :started-ms 0) (num-or sinfo :last-ms 0))]
-                     (if tps (+ acc tps) acc))))
-               0 streams)]
-      (if (pos? tot) (str "· " tot " tok/s") ""))))
-
-(defn format-stream-rate
-  "Formats live streaming throughput (`48 tok/s`) or total tokens (`1.2k tok`) / `—`."
-  {:malli/schema [:=> [:cat [:maybe :map]] :string] :cost/ticks 50000 :cost/bytes 16384}
-  [sinfo]
-  (if-not (map? sinfo)
-    "—"
-    (let [{:keys [phase]} (stream-phase-info sinfo)
-          chars (num-or sinfo :chars (+ (count (str (:reasoning sinfo ""))) (count (str (:text sinfo "")))))
-          step-ch (num-or sinfo :step-chars chars)
-          ctx-toks (num-or sinfo :context-tokens 0)
-          run-toks (if (pos? ctx-toks) (+ ctx-toks (quot step-ch 4)) (Math/round (/ (double chars) 4.0)))
-          fmt (fn [n] (cond (>= n 1000000) (str (/ (Math/round (/ (double n) 100000.0)) 10.0) "M")
-                            (>= n 1000) (str (/ (Math/round (/ (double n) 100.0)) 10.0) "k")
-                            :else (str (max 1 n))))
-          tps (calc-tps phase step-ch (num-or sinfo :started-ms 0) (num-or sinfo :last-ms 0))]
-      (cond (and tps (pos? run-toks)) (str (fmt run-toks) " (" tps "/s)")
-            tps (str tps " tok/s")
-            (pos? run-toks) (str (fmt run-toks) " tok")
-            :else "—"))))
+(defn ^{:seon.code/reexport 'seon.render.ui.stream/format-stream-rate} format-stream-rate [& args] (apply ustream/format-stream-rate args))
 
 (defn stream-unit
   "Live streaming & collapsible status sidebar (`#seon-stream-unit`, 0 DB reads when `:expert-mode?` is supplied)."
@@ -440,6 +330,70 @@
              (when ctx-pct
                [:div {:class (str "status-ctx-bar" (cond (>= ctx-pct 80.0) " is-hot" (>= ctx-pct 60.0) " is-warm" :else ""))
                       :style (str "width:" ctx-pct "%") :title (str run-c " / " max-c " context tokens (" ctx-pct "%)")}])]))]]]]))
+
+(defonce ^:private ^:seon.flow/edge sidebar-agents-cache (store/lru-cache 8))
+
+(defn- sidebar-agents-list [db]
+  (let [ck (store/cache-key db)
+        compute (fn []
+                  (let [dh (:schema db)
+                        attr-map (fn [a] (if (contains? dh a) (into {} (map (fn [dt] [(:e dt) (:v dt)])) (d/datoms db :aevt a)) {}))
+                        arch (attr-map :seon.agent/archived?)
+                        inter (attr-map :seon.agent/interactive?)
+                        par (attr-map :seon.agent/parent)
+                        lbl (attr-map :seon.agent/label)
+                        ent (attr-map :seon.agent/entry?)
+                        rdy (attr-map :seon.agent/ready?)]
+                    (->> (d/datoms db :aevt :seon.agent/id)
+                         (keep (fn [dt]
+                                 (let [e (:e dt) aid (:v dt)]
+                                   (when-not (or (get arch e) (get inter e)
+                                                 (str/starts-with? (str (namespace aid)) "example"))
+                                     (cond-> {:seon.agent/id aid :seon.agent/entity-tx (:tx dt)}
+                                       (get par e) (assoc :seon.agent/parent (get par e))
+                                       (get lbl e) (assoc :seon.agent/label (get lbl e))
+                                       (get ent e) (assoc :seon.agent/entry? true)
+                                       (get rdy e) (assoc :seon.agent/ready? true))))))
+                         (sort-by #(vector (if (:seon.agent/entry? %) 0 1) (- (long (or (:seon.agent/entity-tx %) 0))) (str (:seon.agent/id %))))
+                         vec)))]
+    (if ck (store/lru-get! sidebar-agents-cache 8 ck compute) (compute))))
+
+(defn sidebar-unit
+  "Slide-out conversation/agent sidebar; auto-collapses when `viewport-w < 760`."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :any] :cost/ticks 5000000}
+  [db {:keys [agent-states]}]
+  (let [{:keys [viewing-id view-mode sidebar-open? expanded-agents viewport-w expert-mode?]} (user-view-state db)
+        vw (long (or viewport-w 1280))
+        narrow? (< vw 760)
+        target-mode (if (= :session (rdata/canonical-view-mode view-mode)) :session :canvas)]
+    (if-not (and sidebar-open? (not narrow?))
+      [:aside {:id "seon-sidebar" :class (str "sidebar closed" (when narrow? " sidebar-collapsed")) :data-viewport-w (str vw)}]
+      (let [all (sidebar-agents-list db)
+            by-id (into {} (map (juxt :seon.agent/id identity)) all)
+            by-p (group-by :seon.agent/parent all)
+            roots (filterv #(let [p (:seon.agent/parent %)] (or (nil? p) (not (contains? by-id p)))) all)]
+        [:aside {:id "seon-sidebar" :class "sidebar open" :data-viewport-w (str vw)}
+         [:div {:class "sidebar-inner"}
+          [:div {:class "sidebar-head"}
+           (if expert-mode?
+             [:a {:href "/system" :class "ent-link nav-link kicker" :title "Open Seon Runtime System Entity"
+                  :data-preview-ref "[:seon.system/id :root]" :interestfor "seon-hovercard"
+                  :on-click '(seon.web/set-view-mode! :system)} (str "Agents · " (count all))]
+             [:span {:class "kicker"} "Conversations"])]
+          [:div {:class "tree-scroll"}
+           (if (empty? roots)
+             [:p {:class "muted tiny"} (if expert-mode? "No agents yet." "No conversations yet.")]
+             (for [r roots] (render-agent-tree-node by-p viewing-id expanded-agents agent-states target-mode expert-mode? 0 r)))]
+          [:details {:id "sidebar-spawn" :class "sidebar-spawn"}
+           [:summary {:class "kicker"} (if expert-mode? "+ New agent" "+ New conversation")]
+           [:form {:class "form-stack" :style "margin-top:8px" :on-submit (list 'seon.web/spawn-agent-form! viewing-id)}
+            (if expert-mode?
+              (list [:input {:class "inp sm" :name "agent_id" :placeholder "Name (e.g. :ui/polish)"}]
+                    [:input {:class "inp sm" :name "scope" :placeholder "Scope (e.g. seon.web)"}]
+                    [:input {:class "inp sm" :name "goal" :placeholder "What should it work on?"}]
+                    [:button {:type "submit" :class "btn primary sm"} (str "Create under " (rdata/agent-label db viewing-id))])
+              (list [:input {:class "inp sm" :name "goal" :placeholder "New conversation name…"}]
+                    [:button {:type "submit" :class "btn primary sm"} "Start"]))]]]]))))
 
 (defn page-unit-specs
   "Returns the 6 mounted incremental-walk units — 100% driven by Datahike `:user/default`."

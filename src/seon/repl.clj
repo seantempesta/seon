@@ -260,6 +260,52 @@
                          (concat (keep :seon.code.form/ns (:upserts ops)) tlist))]
     (vec (sort-by (fn [s] [(if (contains? direct-nss (namespace s)) 0 1) (str s)]) test-syms))))
 
+(defn- resolve-run-tests-targets [bdb ops target more]
+  (let [raw (if (seq more) (cons target more) [target])
+        [pos-args kw-args] (split-with (complement keyword?) raw)
+        kw-map (when (and (seq kw-args) (even? (count kw-args))) (apply hash-map kw-args))
+        opt-m (merge (when (map? (last pos-args)) (last pos-args)) kw-map)
+        tlist (if-let [vs (or (:only opt-m) (:vars opt-m) (:tests opt-m))]
+                (if (coll? vs) (vec vs) [vs])
+                (vec (mapcat #(cond (or (nil? %) (map? %) (keyword? %)) nil (coll? %) % :else [%]) pos-args)))
+        test-syms (if (seq tlist)
+                    (->> tlist
+                         (mapcat (fn [x]
+                                   (let [s (if (string? x) (symbol x) x)]
+                                     (cond (namespace s) (if (:seon.code.var/test? (d/pull bdb '[:seon.code.var/test?] [:seon.code.var/name s]))
+                                                           [s] (code/reaching-tests bdb (symbol (namespace s))))
+                                           (str/ends-with? (name s) "-test")
+                                           (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))] (when (:seon.code.var/test? v) (:seon.code.var/name v)))
+                                                 (d/datoms bdb :avet :seon.code.var/ns s))
+                                           :else (code/reaching-tests bdb s)))))
+                         distinct sort vec)
+                    (->> (distinct (keep :seon.code.form/ns (:upserts ops))) (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
+        gen-vars (if (seq tlist)
+                   (vec (distinct (keep (fn [x]
+                                          (let [s (if (string? x) (symbol x) x)]
+                                            (when (and (qualified-symbol? s) (not (str/ends-with? (namespace s) "-test")))
+                                              (let [v (d/pull bdb '[:seon.code.var/test? :seon.code.var/flow-edge? :seon.code.var/schema] [:seon.code.var/name s])]
+                                                (when (and (not (:seon.code.var/test? v)) (not (:seon.code.var/flow-edge? v))
+                                                           (schema/generatable-function-schema? (:seon.code.var/schema v)))
+                                                  s)))))
+                                        tlist)))
+                   (let [ed-eids (vec (distinct (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form (:seon.code.form/key %))) (:upserts ops))))
+                         ed-nss (into #{} (keep :seon.code.form/ns) (:upserts ops))
+                         same-ns-callers (when (contains? (:schema bdb) :seon.code.var/calls)
+                                           (into [] (comp (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/calls %)))
+                                                          (filter #(contains? ed-nss (:seon.code.var/ns (d/pull bdb '[:seon.code.var/ns] %)))))
+                                                 ed-eids))]
+                     (->> (concat ed-eids same-ns-callers)
+                          (keep (fn [e]
+                                  (let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test? :seon.code.var/flow-edge? :seon.code.var/schema] e)
+                                        vn (:seon.code.var/name v)]
+                                    (when (and vn (not (:seon.code.var/test? v)) (not (:seon.code.var/flow-edge? v))
+                                               (not (str/ends-with? (namespace vn) "-test"))
+                                               (schema/generatable-function-schema? (:seon.code.var/schema v)))
+                                      vn))))
+                          distinct sort vec)))]
+    {:ordered-tests (order-direct-tests-first ops tlist test-syms) :gen-vars gen-vars}))
+
 (defn run-tests!
   "Runs reach-selected or explicit `deftest`s (direct tests first, soft-capped inside in-process eval budget) AND `seed=42` Malli generative checks on edited/target contracted vars."
   {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]], :seon.eval/budget-override {:ticks 6000000000, :bytes 12884901888}, :seon.flow/edge true}
@@ -270,52 +316,8 @@
            base-cid (branch-merge-base-cid mdb bdb branch)
            ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
            _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb (select-keys ops [:upserts :retracted-keys])))
-           raw (if (seq more) (cons target more) [target])
-           [pos-args kw-args] (split-with (complement keyword?) raw)
-           kw-map (when (and (seq kw-args) (even? (count kw-args))) (apply hash-map kw-args))
-           opt-m (merge (when (map? (last pos-args)) (last pos-args)) kw-map)
-           tlist (if-let [vs (or (:only opt-m) (:vars opt-m) (:tests opt-m))]
-                   (if (coll? vs) (vec vs) [vs])
-                   (vec (mapcat #(cond (or (nil? %) (map? %) (keyword? %)) nil (coll? %) % :else [%]) pos-args)))
-           test-syms (if (seq tlist)
-                       (->> tlist
-                            (mapcat (fn [x]
-                                      (let [s (if (string? x) (symbol x) x)]
-                                        (cond (namespace s) (if (:seon.code.var/test? (d/pull bdb '[:seon.code.var/test?] [:seon.code.var/name s]))
-                                                              [s] (code/reaching-tests bdb (symbol (namespace s))))
-                                              (str/ends-with? (name s) "-test")
-                                              (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))] (when (:seon.code.var/test? v) (:seon.code.var/name v)))
-                                                    (d/datoms bdb :avet :seon.code.var/ns s))
-                                              :else (code/reaching-tests bdb s)))))
-                            distinct sort vec)
-                       (->> (distinct (keep :seon.code.form/ns (:upserts ops))) (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
-           ordered-tests (order-direct-tests-first ops tlist test-syms)
-           gen-vars (if (seq tlist)
-                      (vec (distinct (keep (fn [x]
-                                             (let [s (if (string? x) (symbol x) x)]
-                                               (when (and (qualified-symbol? s) (not (str/ends-with? (namespace s) "-test")))
-                                                 (let [v (d/pull bdb '[:seon.code.var/test? :seon.code.var/flow-edge? :seon.code.var/schema] [:seon.code.var/name s])]
-                                                   (when (and (not (:seon.code.var/test? v)) (not (:seon.code.var/flow-edge? v))
-                                                              (schema/generatable-function-schema? (:seon.code.var/schema v)))
-                                                     s)))))
-                                           tlist)))
-                      (let [ed-eids (vec (distinct (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form (:seon.code.form/key %))) (:upserts ops))))
-                            ed-nss (into #{} (keep :seon.code.form/ns) (:upserts ops))
-                            same-ns-callers (when (contains? (:schema bdb) :seon.code.var/calls)
-                                              (into [] (comp (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/calls %)))
-                                                             (filter #(contains? ed-nss (:seon.code.var/ns (d/pull bdb '[:seon.code.var/ns] %)))))
-                                                    ed-eids))]
-                        (->> (concat ed-eids same-ns-callers)
-                             (keep (fn [e]
-                                     (let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test? :seon.code.var/flow-edge? :seon.code.var/schema] e)
-                                           vn (:seon.code.var/name v)]
-                                       (when (and vn (not (:seon.code.var/test? v)) (not (:seon.code.var/flow-edge? v))
-                                                  (not (str/ends-with? (namespace vn) "-test"))
-                                                  (schema/generatable-function-schema? (:seon.code.var/schema v)))
-                                         vn))))
-                             distinct sort vec)))
-           b0 (code/alloc-bytes)
-           soft-byte-cap 8589934592
+           {:keys [ordered-tests gen-vars]} (resolve-run-tests-targets bdb ops target more)
+           b0 (code/alloc-bytes) soft-byte-cap 8589934592
            {:keys [results skipped-by-budget gen-results]}
            (wsup/call-with-candidate-overrides bdb
              (fn [_]
