@@ -15,7 +15,8 @@
             [seon.health.metrics :as hmetrics]
             [seon.repl.search :as search]
             [seon.bench.golden :as bgolden]
-            [seon.health.liveness :as hliveness]))
+            [seon.health.liveness :as hliveness]
+            [seon.render.wire]))
 
 (defn- intern-doc! [u sym f]
   (let [v (intern u sym (if (var? f) (fn [& args] (apply @f args)) f))
@@ -328,7 +329,7 @@
     {:conn c :bdb b :mdb (or (:main-db o) (when c (store/head c :main)) b)}))
 
 (defn ^:seon.flow/edge simulate-context
-  "Projects `aid` on branch vs `:main` (plus wire for agents) with `:diff-vs-main`."
+  "Projects `aid` on branch vs `:main` (plus wire for agents, and `:walk-text` when `:render-text? true`) with `:diff-vs-main`."
   {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]] :cost/ticks 60000000}
   ([] (simulate-context (:agent-id *agent-ctx*) nil))
   ([aid] (simulate-context aid nil))
@@ -337,7 +338,7 @@
      (when (and mdb bdb)
        (let [t (or aid (:agent-id *agent-ctx*) [:seon.system/id :root])
              fr (cond (vector? t) t (qualified-keyword? t) [:seon.agent/id t] :else [:seon.system/id :root])
-             po (merge {:target :wire :use-cache? false} (dissoc o :db :main-db :conn :wire?))
+             po (merge {:target :wire :use-cache? false} (dissoc o :db :main-db :conn :wire? :render-text?))
              br (ctx/project-entity mdb bdb fr po) mr (ctx/project-entity mdb mdb fr po)
              bf (:fitted br) mf (:fitted mr) ks [:ref :entity :schema :zone :chosen-fn :tokens :area :rank/score :rules :status]
              ix #(into {} (map (fn [i] [(or (:ref i) [:db/id (:entity i)]) i])) %)
@@ -350,7 +351,8 @@
                   :diff-vs-main {:added (vec (sort-by pr-str (set/difference bk mk))) :removed (vec (sort-by pr-str (set/difference mk bk)))
                                  :changed-fn (vec (keep #(let [a (:chosen-fn (mm %)) b (:chosen-fn (bm %))] (when (not= a b) {:ref % :from a :to b})) (sort-by pr-str (set/intersection bk mk))))
                                  :token-delta (- (long (:tokens bf 0)) (long (:tokens mf 0)))}}
-           wr (assoc :wire {:messages (count (:messages wr)) :tokens (long (or (get-in wr [:fit-trace :tokens]) (:tokens bf 0)))})))))))
+           wr (assoc :wire (cond-> {:messages (count (:messages wr)) :tokens (long (or (get-in wr [:fit-trace :tokens]) (:tokens bf 0)))}
+                             (:render-text? o) (assoc :walk-text (:walk-text wr))))))))))
 
 (defn ^:seon.flow/edge check-corpus
   "Runs the 12-scenario Situation Corpus & generality lint on branch vs `:main`."

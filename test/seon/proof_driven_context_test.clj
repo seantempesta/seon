@@ -23,7 +23,10 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.transactor.merge :as tmerge]
             [seon.transactor.spawn :as tspawn]
-            [seon.schema.index :as six]))
+            [seon.schema.index :as six]
+            [seon.code.cst.ns :as cst-ns]
+            [seon.render.status :as rstatus]
+            [seon.render.wire]))
 
 (deftest ^{:cost/ticks 90000000} bidirectional-ordered-doc-atoms-and-task-refs-test
   (testing "ordered-citations and resolve-doc-refs preserve appearance order of exact :seon.code.doc/id atoms and wire var/schema doc-refs"
@@ -411,3 +414,65 @@
                                        [:db/add [:seon.task/id :refine/x] :seon.task/done? true]
                                        {:seon.code.var/name 'demo/f}]
                                       [:refine/x])))))))
+
+(deftest ^{:cost/ticks 120000000} ns-header-sync-live-preview-scope-handoff-and-kv-preservation-test
+  (testing "sync-ns-requires-for-srcs creates clean (ns ...) header for brand-new ns and splices missing used aliases on existing ns"
+    (let [new-hdr (cst-ns/sync-ns-requires-for-srcs 'demo.new-test nil
+                    ["(deftest t1 (is (= 1 (foo/bar))))"]
+                    {'foo 'seon.foo 'unused 'seon.unused}
+                    {'deftest 'clojure.test 'is 'clojure.test 'testing 'clojure.test})]
+      (is (= "(ns demo.new-test\n  (:require [clojure.test :refer [deftest is]]\n            [seon.foo :as foo]))" new-hdr)))
+    (let [ex "(ns demo.ex\n  (:require [clojure.string :as str]))"
+          upd (cst-ns/sync-ns-requires-for-srcs 'demo.ex ex
+                ["(defn f [s] (edn/read-string (str/trim s)))"]
+                {'edn 'clojure.edn 'str 'clojure.string 'unused 'seon.nope} {})]
+      (is (string? upd))
+      (is (.contains ^String upd "[clojure.edn :as edn]"))
+      (is (not (.contains ^String upd "seon.nope"))))
+    (let [ex "(ns demo.ex\n  (:require [clojure.string :as str]))"]
+      (is (nil? (cst-ns/sync-ns-requires-for-srcs 'demo.ex ex ["(defn f [s] (str/trim s))"] {'str 'clojure.string} {})))))
+  (with-test-store [{:keys [conn]}]
+    (testing "persist-forms-by-ns persists #ns header for brand-new namespace without explicit (ns ...) form"
+      (let [tx (code/persist-forms-by-ns @conn {'demo.brand-new-auto-ns ["(defn hello [x] x)"]} {})]
+        (is (some #(= "demo.brand-new-auto-ns#ns" (:seon.code.form/key %)) tx))))
+    (testing "proof-backward-rows surfaces sibling scope vars alongside proof & empty stub, and forked editor gets <target-context-preview>"
+      (let [_ (d/transact conn {:tx-data (code/persist-forms-by-ns @conn
+                                           {'demo.pv ["(ns demo.pv)"
+                                                      "(defn hiccup->text {:malli/schema [:=> [:cat :any] :string]} [h] (str h))"
+                                                      "(defn hiccup->headings {:malli/schema [:=> [:cat :any] [:vector :string]]} [_] [])"]} {})})
+            _ (d/transact conn {:tx-data (code/persist-forms-by-ns @conn
+                                           {'demo.pv-test ["(ns demo.pv-test (:require [clojure.test :refer [deftest is]] [demo.pv :as pv]))"
+                                                           "(deftest headings-proof-test (is (= [\"Hi\"] (pv/hiccup->headings [:h1 \"Hi\"]))))"]} {})})
+            _ (d/transact conn {:tx-data [{:seon.task/id :demo/pv-task :seon.task/title "Add headings" :seon.task/scope 'demo.pv
+                                           :seon.task/plan "Add hiccup->headings matching hiccup->text." :seon.task/done? false
+                                           :seon.task/tests #{'demo.pv-test/headings-proof-test}
+                                           :seon.task/proofs #{[:seon.code.var/name 'demo.pv-test/headings-proof-test]}}
+                                          {:seon.agent/id :worker/pv :seon.agent/branch :branch/pv :seon.agent/scope 'demo.pv
+                                           :seon.agent/tasks #{[:seon.task/id :demo/pv-task]}}
+                                          {:seon.agent/id :tune/pv :seon.agent/branch :branch/tune-pv :seon.agent/scope 'seon.ctx
+                                           :seon.agent/forked-from [:seon.agent/id :worker/pv]
+                                           :seon.agent/merge-target [:seon.agent/id :worker/pv]}
+                                          {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :tune/pv :seon.agent.eval/turn 1
+                                           :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code ":inspect" :seon.agent.eval/value ":inspect"
+                                           :seon.agent.eval/out "" :seon.agent.eval/ticks 10 :seon.agent.eval/bytes 10 :seon.agent.eval/ms 1.0}]})
+            db @conn
+            sib-eid (:e (first (d/datoms db :avet :seon.code.var/name 'demo.pv/hiccup->text)))
+            rows (cgraph/proof-backward-rows db db :worker/pv)
+            wreq (seon.render.wire/build-live-wire-request db db :tune/pv {:include-tail? true})
+            tprev (some #(when (= "target-context-preview" (:tag %)) %) (:tail-blocks wreq))]
+        (is (some #(= sib-eid (first %)) rows) "Sibling var hiccup->text must surface for post-refiner worker")
+        (is (some? tprev) "Forked editor must receive <target-context-preview> in tail-blocks after Turn 1")
+        (is (= ":worker/pv" (get-in tprev [:attrs :for])))
+        (is (.contains ^String (:text tprev) "simulate-context"))))
+    (testing "branch-reset-tx advances on pre-Turn-1 :fork-review but preserves KV cache on append-only mid-session :fork-review"
+      (let [r1 (d/transact conn {:tx-data [{:seon.agent/id :worker/kv1 :seon.agent/branch :branch/kv1}
+                                           {:db/id :db/current-tx :seon.tx/merged :fork-review}]})
+            db1 (:db-after r1)
+            _ (d/transact conn {:tx-data [{:seon.agent/id :worker/kv2 :seon.agent/branch :branch/kv2}
+                                          {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :worker/kv2 :seon.agent.eval/turn 1
+                                           :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "1" :seon.agent.eval/value "1"
+                                           :seon.agent.eval/out "" :seon.agent.eval/ticks 1 :seon.agent.eval/bytes 1 :seon.agent.eval/ms 0.1}]})
+            r2b (d/transact conn {:tx-data [{:db/id :db/current-tx :seon.tx/merged :fork-review}]})
+            db2 (:db-after r2b)]
+        (is (= (:max-tx db1) (rstatus/branch-reset-tx db1 :worker/kv1)) "Pre-Turn-1 worker should re-anchor onto refined :fork-review tx")
+        (is (< (rstatus/branch-reset-tx db2 :worker/kv2) (:max-tx db2)) "Mid-session append-only :fork-review must NOT advance branch-reset-tx past Turn 1")))))

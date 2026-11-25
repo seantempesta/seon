@@ -272,6 +272,55 @@
                       (when (and (zero? n-edits) (>= (long cur-turn) (max 2 (quot max-tt 2))))
                         " · halfway through budget with 0 persisted edits — begin implementing and testing now"))})))))
 
+(defn- resolve-merge-target-id [main-db branch-db ag]
+  (when-let [mt (:seon.agent/merge-target ag)]
+    (let [aid (cond
+                (qualified-keyword? mt) mt
+                (and (vector? mt) (= :seon.agent/id (first mt))) (second mt)
+                (map? mt) (or (:seon.agent/id mt)
+                              (when (integer? (:db/id mt))
+                                (or (:seon.agent/id (d/pull branch-db '[:seon.agent/id] (:db/id mt)))
+                                    (:seon.agent/id (d/pull main-db '[:seon.agent/id] (:db/id mt))))))
+                (integer? mt) (or (:seon.agent/id (d/pull branch-db '[:seon.agent/id] mt))
+                                  (:seon.agent/id (d/pull main-db '[:seon.agent/id] mt)))
+                :else nil)]
+      (when (and (qualified-keyword? aid) (not= aid (:seon.agent/id ag))) aid))))
+
+(defn- build-target-preview-block [main-db branch-db ag evals depth]
+  (when (and (zero? (long depth)) (seq evals))
+    (when-let [taid (resolve-merge-target-id main-db branch-db ag)]
+      (let [tag (or (rdata/pull-agent-entity main-db branch-db taid) {:seon.agent/id taid})
+            tevs (rdata/agent-evals-in branch-db taid)
+            pw (project-wire main-db branch-db tag {:use-live-touches? false})
+            m-tag (when (not (identical? main-db branch-db))
+                    (rdata/pull-agent-entity main-db main-db taid))
+            mpw (when m-tag (project-wire main-db main-db m-tag {:use-live-touches? false}))
+            tiles (:active-tiles pw)
+            tkey (fn [t] (or (:handle t) (:id t) (:entity t)))
+            cur-ks (into #{} (map tkey) tiles)
+            base-ks (if mpw (into #{} (map tkey) (:active-tiles mpw)) #{})
+            added (when mpw (vec (sort-by str (remove base-ks cur-ks))))
+            removed (when mpw (vec (sort-by str (remove cur-ks base-ks))))
+            dropped (get-in pw [:surface-stats :dropped] 0)
+            tot (long (get-in pw [:surface-stats :tokens] 0))
+            bud (long (get-in pw [:surface-stats :budget] 16000))
+            rows (mapv (fn [t]
+                         (str "- " (tkey t) " (" (or (:schema t) :entity) " · " (or (:chosen-fn t) :default)
+                              " · " (long (or (:tokens t) 0)) " tok)"))
+                       tiles)
+            wtxt (str (:walk-text pw))
+            excerpt (when-not (str/blank? wtxt)
+                      (if (> (count wtxt) 1800) (str (subs wtxt 0 1800) "\n… [call (user/simulate-context " taid " {:render-text? true}) for full text]") wtxt))]
+        {:tag "target-context-preview"
+         :attrs {:for (str taid) :mode (if (seq tevs) "mid-session" "turn-0")
+                 :tokens (str tot) :tiles (str (count tiles))}
+         :text (str "Live projected context for " taid " (" (count tiles) " tiles, " tot " / " bud " tok; " dropped " dropped)"
+                    (when mpw (str " · diff vs :main: +" (count added) " " (pr-str added) " / -" (count removed) " " (pr-str removed)))
+                    ":\n"
+                    (if (seq rows) (str/join "\n" rows) "(none)")
+                    (when excerpt (str "\n\nRendered preview:\n" excerpt))
+                    "\n\nFull text: (user/simulate-context " taid " {:render-text? true}) | 12-scenario check: (user/check-corpus)")}))))
+
 (defn build-live-wire-request
   "Single source of truth for LLM wire context & Context Lab: ONE KV-cache prefix + ONE `<context-delta>` via `seon.ctx/project-entity`."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]
@@ -315,9 +364,10 @@
                 db-moved? (or (not= walk-main-cid (live-cid main-db)) (not= (live-cid walk-db) (live-cid branch-db)))
                 need-delta? (and inc-tail? (not explain?) (or db-moved? (seq evals)))
                 delta-res (when need-delta? (build-live-delta-blocks main-db branch-db ag cur-turn prev-shown opts))
+                tprev-block (when (and inc-tail? (not explain?)) (build-target-preview-block main-db branch-db ag evals d0))
                 vp-block (when inc-tail? (build-viewport-block main-db ag viewport-screenshot (boolean vision?) (:force-vision? opts)))
                 budget-block (when inc-tail? (build-budget-block main-db branch-db ag cur-turn evals))
-                tail-blocks (when inc-tail? (vec (concat (:blocks delta-res) (when budget-block [budget-block]) (when vp-block [vp-block]))))
+                tail-blocks (when inc-tail? (vec (concat (:blocks delta-res) (when tprev-block [tprev-block]) (when budget-block [budget-block]) (when vp-block [vp-block]))))
                 activity-text (when inc-tail? (not-empty (str/join "\n\n" (keep :text tail-blocks))))
                 prefix-msg-eids (into #{} (comp (filter #(= :seon.agent.message/entity (:schema %))) (keep :entity)) active-tiles)
                 rendered-msg-eids (into (into prefix-msg-eids (keys prev-shown)) (:rendered-msg-eids delta-res))
@@ -336,7 +386,7 @@
                        :viewport-screenshot viewport-screenshot})]
             (cond-> (assoc wire :agent ag :tiles tile-projections :candidates candidates :rule-trace rule-trace
                            :fit-trace (assoc fit-trace :delta-tokens (long (:delta-tokens delta-res 0)))
-                           :shown all-shown :surface-stats surface-stats
+                           :shown all-shown :surface-stats surface-stats :walk-text eff-walk
                            :tail-blocks (or tail-blocks []) :activity-text activity-text :walk-db walk-db
                            :delta-tiles (or (:delta-tiles delta-res) [])
                            :evals evals :messages-inbox msgs :unread unread)
