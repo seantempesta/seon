@@ -12,7 +12,8 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [jolt.fs :as fs]
-            [seon.cite :as cite]))
+            [seon.cite :as cite]
+            [malli.generator :as mg]))
 
 (defn form-props
   "Returns the Malli properties map attached to `form` (or `{}` if none)."
@@ -569,3 +570,22 @@
                          [k (dissoc m :seon.schema/key)]))))
              all-ks))
      :else {:error :invalid-schema-query :query query})))
+
+(defn safe-example
+  {:malli/schema [:=> [:cat :any :map] :any], :cost/ticks 500000}
+  [input-sch opts]
+  (try
+    (mg/generate input-sch (assoc opts :seed 42 :size 4))
+    (catch Throwable _ nil)))
+
+(defn edn-safe-ipc
+  {:malli/schema [:=> [:cat :any] :any], :cost/ticks 500000}
+  [x]
+  (cond
+    (or (nil? x) (boolean? x) (integer? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) x
+    (float? x) (let [d (double x)] (if (or (Double/isNaN d) (Double/isInfinite d)) (str d) x))
+    (map? x) (into {} (map (fn [[k v]] [(edn-safe-ipc k) (edn-safe-ipc v)])) x)
+    (vector? x) (mapv edn-safe-ipc x)
+    (set? x) (into #{} (map edn-safe-ipc) x)
+    (sequential? x) (mapv edn-safe-ipc x)
+    :else (pr-str x)))

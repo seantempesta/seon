@@ -142,10 +142,7 @@
 
 (defn schema-refs-in-form [& args] (apply six/schema-refs-in-form args))
 
-(defn- safe-example [input-sch opts]
-  (try
-    (mg/generate input-sch (assoc opts :seed 42 :size 4))
-    (catch Throwable _ nil)))
+(defn- safe-example [& args] (apply six/safe-example args))
 
 (def ^:dynamic *bypass-contracts* false)
 
@@ -166,17 +163,19 @@
 (defonce ^:private ^:seon.flow/edge db-registry-cache
   (cw/lru-cache-factory {} :threshold 32))
 
-(defn- strip-schema-doc [x]
-  (cond
-    (map? x)
-    (let [m (dissoc x :seon.schema/doc)]
-      (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} m))
-    (vector? x)
-    (let [v (mapv strip-schema-doc x)]
-      (if (and (>= (count v) 2) (map? (nth v 1)) (empty? (nth v 1)))
-        (into [(nth v 0)] (subvec v 2))
-        v))
-    :else x))
+(defn- strip-schema-doc
+{:malli/schema [:=> [:cat :any] :any], :cost/ticks 500000}
+[x]
+(cond
+  (map? x)
+  (let [m (dissoc x :seon.schema/doc)]
+    (reduce-kv (fn [acc k v] (assoc acc k (strip-schema-doc v))) {} m))
+  (vector? x)
+  (let [v (mapv strip-schema-doc x)]
+    (if (and (>= (count v) 2) (map? (nth v 1)) (empty? (nth v 1)))
+      (into [(nth v 0)] (subvec v 2))
+      v))
+  :else x))
 
 (defonce ^:private ^:seon.flow/edge stripped-base-cache (atom {:forms nil :stripped nil}))
 
@@ -463,15 +462,7 @@
 (defn- live-branch-db []
   (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref :conn deref))
 
-(defn- edn-safe-ipc [x]
-  (cond
-    (or (nil? x) (boolean? x) (integer? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) x
-    (float? x) (let [d (double x)] (if (or (Double/isNaN d) (Double/isInfinite d)) (str d) x))
-    (map? x) (into {} (map (fn [[k v]] [(edn-safe-ipc k) (edn-safe-ipc v)])) x)
-    (vector? x) (mapv edn-safe-ipc x)
-    (set? x) (into #{} (map edn-safe-ipc) x)
-    (sequential? x) (mapv edn-safe-ipc x)
-    :else (pr-str x)))
+(defn- edn-safe-ipc [& args] (apply six/edn-safe-ipc args))
 
 (defn- stress-arity
   {:seon.flow/edge true}

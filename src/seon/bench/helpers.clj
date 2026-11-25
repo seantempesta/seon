@@ -440,8 +440,7 @@
 
 (defn ^:seon.flow/edge repl-sample-random-tasks
   "REPL helper (`user/sample-random-tasks`): samples `n` diverse real tasks from live Datahike."
-  {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat [:maybe :map]] [:vector :map]]]
-   :cost/ticks 20000000}
+  {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat [:maybe :map]] [:vector :map]]], :cost/ticks 20000000, :seon.eval/budget-override {:ticks 200000000, :bytes 536870912}}
   ([] (repl-sample-random-tasks nil))
   ([opts]
    (let [ctx (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)
