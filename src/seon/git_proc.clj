@@ -175,7 +175,15 @@
      (= cid :sw-done)
      (let [st' (assoc st :switching-over? false)]
        (if (:ok? msg)
-         [st' {::flow/report ["[:git] atomic switch-over successor spawned cleanly; awaiting hand-over."]}]
+         (let [resolve-ops (when-let [conn (:conn st)]
+                           (let [db @conn]
+                             (when (contains? (:schema db) :seon.error/kind)
+                               (vec (for [dt (d/datoms db :avet :seon.error/kind :switchover-failed)
+                                          :let [e (d/pull db (quote [:seon.error/id :seon.error/status]) (:e dt))]
+                                          :when (and (:seon.error/id e) (not= :resolved (:seon.error/status e)))]
+                                      {:op :resolve-fault :id (:seon.error/id e)})))))]
+         [st' (cond-> {::flow/report ["[:git] atomic switch-over successor spawned cleanly; awaiting hand-over."]}
+                (seq resolve-ops) (assoc :tx resolve-ops))])
          [st' {:tx [{:op :record-fault
                      :proc :git
                      :class :switchover-failed
