@@ -138,9 +138,14 @@
                  vnames (vec (keep #(when (symbol? (second %)) (symbol (name nsym) (name (second %)))) fvs))
                  vname (first vnames)
                  db0 @conn
-                 sch-err (some #(when-let [s (extract-defn-malli-schema %)]
+                 sch-err (or (when (and (str/ends-with? (name nsym) "-test")
+                                    (re-find #"\(user/(?:db|main-db|conn)\b" raw-src)
+                                    (not (str/includes? raw-src "*agent-ctx*")))
+                           {:ok? false :error :repl-helper-in-test-ns :ns nsym
+                            :hint "Test namespaces run in isolated COW workers where user/db, user/main-db, and user/conn do not exist. Use (seon.test-fixture/with-test-store [{:keys [conn]}] @conn) instead."})
+                         (some #(when-let [s (extract-defn-malli-schema %)]
                                   (let [vn (when (symbol? (second %)) (symbol (name nsym) (name (second %))))]
-                                    (validate-defn-malli-schema db0 (or vn nsym) (str (or vn nsym)) % s))) fvs)]
+                                    (validate-defn-malli-schema db0 (or vn nsym) (str (or vn nsym)) % s))) fvs))]
              (if sch-err
                sch-err
                (let [existing-ns-src (:seon.code.form/src (d/pull db0 (quote [:seon.code.form/src]) [:seon.code.form/key (str nsym "#ns")]))

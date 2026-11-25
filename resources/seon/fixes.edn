@@ -512,4 +512,17 @@
   :seon.fix/error-class :near-cap-ns-headroom-and-clip-n1-bug,
   :seon.fix/id #uuid "ca9f1b5a-0a6c-4231-82d5-1566d4199f38",
   :seon.fix/root-cause "prep-meta-edit lacked ^:seon.flow/edge; cohesive commit-message, merge-autofix, and edit-ns modules accumulated inside near-8k parents; clip clamped prefix length to (max 1 (dec lim)) instead of (max 0 (dec lim)).",
-  :seon.fix/symptom "seon.code.edit/prep-meta-edit triggered 1 :silent-catch-all; seon.code.edit/seon.git/seon.merge sat within 30 tokens of the 8k cap; seon.render.text/clip returned 2-char \"a…\" for n=1."}]
+  :seon.fix/symptom "seon.code.edit/prep-meta-edit triggered 1 :silent-catch-all; seon.code.edit/seon.git/seon.merge sat within 30 tokens of the 8k cap; seon.render.text/clip returned 2-char \"a…\" for n=1."}
+ {:seon.fix/change-summary "Extracted seon.web.mcp (seon.web.actions 7978->6461) and seon.render.markdown.activity (seon.render.markdown 7950->4955) with Malli contracts & examples on interleave-timeline/prompt-msg?/split-exchanges; pruned 12 unused requires; bumped move-vars! budget override to 2GB.",
+  :seon.fix/created-ms 1795631064346,
+  :seon.fix/error-class :near-cap-web-markdown-and-move-vars-budget,
+  :seon.fix/id #uuid "7dfac542-8d49-491b-a774-9bd0a64304cc",
+  :seon.fix/root-cause "MCP JSON-RPC handlers lived inside seon.web.actions and activity-fold timeline renderers lived inside seon.render.markdown; move-vars! budget override was 1GB.",
+  :seon.fix/symptom "seon.web.actions (7978 tok) and seon.render.markdown (7950 tok) sat within 50 tokens of the 8k cap; move-vars! hit its 1GB eval cap when moving 13+ forms."}
+ {:seon.fix/change-summary "Added merge-before-deliver synchronization (callee-merge-in-flight? + callers-awaiting-callees in extracted seon.reconciler.calls, dropping seon.reconciler 8142->6502); rejected (user/db|main-db|conn) in *-test via add-fn! upfront.",
+  :seon.fix/created-ms 1795631599355,
+  :seon.fix/error-class :bplus-merge-before-deliver-and-test-user-db-guard,
+  :seon.fix/id #uuid "2136b13e-07bd-44d6-acdb-eac9be058075",
+  :seon.fix/regression-test seon.alloc-guard-test/wave12b-reconciler-merge-before-deliver-and-test-user-db-guard-test,
+  :seon.fix/root-cause "reconcile-candidates delivered :settle-calls before edited auto-merging callees finished :testing/:merging; add-fn! did not reject (user/db)/(user/main-db)/(user/conn) in *-test namespaces.",
+  :seon.fix/symptom "In B+-tree write+merge delegation, reconciler woke :agent/root immediately on user/answer! before edited callees finished :testing/:merging, causing root to spend 9 turns searching :main for unmerged edits; agents writing (user/db) in *-test namespaces passed local runs then failed in COW merge-gate workers."}]
