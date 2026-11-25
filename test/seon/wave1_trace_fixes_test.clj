@@ -215,7 +215,7 @@
                 wmsg (some #(when (= :turn-cap-wrapup (:type %)) %) (:tx out1))]
             (is (some? wmsg) "edited branch at turn cap must receive :turn-cap-wrapup nudge")
             (is (= :ag/w1-edited (:to wmsg)))
-            (is (str/includes? (:body wmsg) "(user/ready!)"))
+            (is (str/includes? (:body wmsg) "reply concisely"))
             ;; Second tick at same head-tx must NOT double-send
             (let [[_ out2] (rec/reconciler-proc st1 :exits {:agent-id :ag/w1-edited :ev :turn-idle :pid 1})]
               (is (nil? (some #(when (= :turn-cap-wrapup (:type %)) %) (:tx out2)))))

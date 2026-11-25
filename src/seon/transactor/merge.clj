@@ -127,13 +127,9 @@
         (mapv rw rest-ops)))))
 
 (defn- format-merge-failure-body [branch msg-type conflicts]
-  (let [hdr (if (= :health-block msg-type)
-              (str "Merge blocked by branch health error(s) on " branch " — fix these and call (user/ready!) again:")
-              (str "3-way merge conflict on " branch " — reconcile against :main and call (user/ready!) again:"))
-        lines (for [c (take 8 conflicts)]
-                (str "- " (pr-str (:entity c)) " [" (name (or (:reason c) :conflict)) "]"
-                     (when-let [m (:message c)] (str ": " m))))]
-    (str hdr "\n" (str/join "\n" lines))))
+  (str (if (= :health-block msg-type) (str "Health error(s) on " branch) (str "3-way merge conflict on " branch))
+       " — fix and reply concisely:\n"
+       (str/join "\n" (for [c (take 8 conflicts)] (str "- " (pr-str (:entity c)) " [" (name (or (:reason c) :conflict)) "]" (when-let [m (:message c)] (str ": " m)))))))
 
 (defn- ^:seon.flow/edge clear-branch-ready! [cfg branch aid]
   (when (and cfg branch (not= branch :main) aid)
@@ -164,35 +160,19 @@
     :else false))
 
 (defn- extract-review-note-body [conn reviewer reviewer-branch sync-res]
-  (let [rdb (when (and reviewer-branch (not= reviewer-branch :main) (store/branch? conn reviewer-branch))
-              (store/head conn reviewer-branch))
+  (let [rdb (when (and reviewer-branch (not= reviewer-branch :main) (store/branch? conn reviewer-branch)) (store/head conn reviewer-branch))
         evs (when (and rdb reviewer (contains? (:schema rdb) :seon.agent.eval/agent))
               (->> (d/datoms rdb :avet :seon.agent.eval/agent reviewer)
-                   (map #(d/pull rdb '[:seon.agent.eval/turn :seon.agent.eval/call-index
-                                       :seon.agent.eval/code :seon.agent.eval/thought] (:e %)))
-                   (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
-                   vec))
-        prose (or (->> evs (filter #(and (str/blank? (str (:seon.agent.eval/code %)))
-                                         (not (str/blank? (str (:seon.agent.eval/thought %))))))
-                       (map :seon.agent.eval/thought) last)
-                  (->> evs (filter #(not (str/blank? (str (:seon.agent.eval/thought %)))))
-                       (map :seon.agent.eval/thought) last))
-        trim-prose (when (string? prose)
-                     (let [t (str/trim prose)]
-                       (when-not (str/blank? t)
-                         (if (> (count t) 600) (str (subs t 0 597) "...") t))))
-        c-note (when (seq (:conflicts sync-res))
-                 (str " (Note: skipped " (count (:conflicts sync-res)) " conflicting :main entity update(s) to preserve your edits: "
-                      (str/join ", " (map #(pr-str (:entity %)) (take 4 (:conflicts sync-res)))) ".)"))
-        err-note (when-let [e (:error sync-res)]
-                   (str " WARNING: syncing :main into your branch failed (" e ") — continuing on your existing branch state."))
-        sync-line (when (pos? (long (:ops sync-res 0)))
-                    (str "Synced " (:ops sync-res) " updated entity op(s) from :main into your branch."))]
-    (str "Review by " (or reviewer :reviewer) " merged; resuming in a fresh session."
-         (when sync-line (str " " sync-line))
-         (when c-note c-note)
-         (when err-note err-note)
-         (when trim-prose (str "\n\nReviewer note:\n" trim-prose)))))
+                   (map #(d/pull rdb '[:seon.agent.eval/turn :seon.agent.eval/call-index :seon.agent.eval/code :seon.agent.eval/thought] (:e %)))
+                   (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0))) vec))
+        prose (or (->> evs (filter #(and (str/blank? (str (:seon.agent.eval/code %))) (not (str/blank? (str (:seon.agent.eval/thought %)))))) (map :seon.agent.eval/thought) last)
+                  (->> evs (filter #(not (str/blank? (str (:seon.agent.eval/thought %))))) (map :seon.agent.eval/thought) last))
+        tp (when (string? prose) (let [t (str/trim prose)] (when-not (str/blank? t) (if (> (count t) 600) (str (subs t 0 597) "...") t))))]
+    (str "Review by " (or reviewer :reviewer) " merged; resuming."
+         (when (pos? (long (:ops sync-res 0))) (str " Synced " (:ops sync-res) " op(s) from :main."))
+         (when (seq (:conflicts sync-res)) (str " Skipped " (count (:conflicts sync-res)) " conflicting :main op(s)."))
+         (when-let [e (:error sync-res)] (str " WARNING: :main sync failed (" e ")."))
+         (when tp (str "\n\nReviewer note:\n" tp)))))
 
 (defn- ^:seon.flow/edge safe-branch-head [conn branch fallback]
   (or (try (store/head conn branch) (catch Throwable _ nil)) fallback))

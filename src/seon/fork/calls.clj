@@ -311,12 +311,13 @@
      (agent-monitor-snapshot conn target-agent))))
 
 (defn ^:seon.flow/edge ready!
-  "Signals this agent's session done (`:ready? true :waiting? false`), optionally recording `:seon.agent/summary`."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat [:maybe :string]] [:maybe :map]]]}
+  "Optional explicit completion signal (`:ready? true`); normal agents auto-test & merge on prose reply with edits."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat [:maybe [:or :string :map]]] [:maybe :map]]]}
   ([] (ready! nil))
   ([summary]
    (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
-     (let [s (when (and (string? summary) (not (str/blank? summary))) (str/trim summary))
+     (let [raw (cond (string? summary) summary (map? summary) (or (:summary summary) (:message summary)) :else nil)
+           s (when (and (string? raw) (not (str/blank? raw))) (str/trim raw))
            ent (cond-> {:seon.agent/id agent-id :seon.agent/waiting? false :seon.agent/ready? true}
                  s (assoc :seon.agent/summary s))]
        (d/transact conn {:tx-data [ent]})
@@ -324,8 +325,8 @@
          s (assoc :summary s))))))
 
 (defn ^:seon.flow/edge finish-review!
-  "Finishes a forked review session with a clear `summary` message, triggering tests and merge-back into the parent agent's branch."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat [:maybe :string]] [:maybe :map]]]}
+  "Optional explicit review completion signal (same as `ready!`; prose reply with edits also auto-merges back)."
+  {:seon.repl/export true :malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat [:maybe [:or :string :map]]] [:maybe :map]]]}
   ([] (ready! nil))
   ([summary] (ready! summary)))
 
