@@ -228,7 +228,7 @@
         (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/helper
                                      :seon.agent.eval/turn 3 :seon.agent.eval/call-index 0
                                      :seon.agent.eval/code "" :seon.agent.eval/thought "All healthy!"}]})
-        (let [evs (mapv #(d/pull @conn '[*] (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))]
+        (let [evs (vec (sort-by :seon.agent.eval/turn (map #(d/pull @conn (quote [*]) (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))))]
           (is (nil? (rstatus/compute-wait-nudge-data @conn @conn ag evs (+ msg-ms 60000))))))
 
       ;; 4. 100-sample seed=42 generative checks
