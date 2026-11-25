@@ -150,11 +150,10 @@
               kw-refs  (collect-keywords #{} form)
               var-refs (set (remove #(= "#ns" (name %)) deps))
               is-test? (= 'deftest hd)
-              plat-test? (and is-test?
-                              (boolean (some #(contains? boot-root-keys (str %)) var-refs)))
+              
               ticks-b (or (:cost/ticks merged-meta) (get-in merged-meta [:seon.test/estimate :ticks]))
               bytes-b (or (:cost/bytes merged-meta) (get-in merged-meta [:seon.test/estimate :bytes]))
-              big-o   (:cost/big-o merged-meta)]
+              ]
           (cond-> {:seon.code.var/name vsym
                    :seon.code.var/ns nsym
                    :seon.code.var/ns-ref (str "ns/" nsym)
@@ -162,7 +161,7 @@
                    :seon.code.var/private? (boolean (or (= 'defn- hd) (:private merged-meta)))
                    :seon.code.var/macro? (= 'defmacro hd)
                    :seon.code.var/test? is-test?
-                   :seon.code.var/platform-test? plat-test?
+                   
                    :seon.code.var/flow-edge? (boolean (:seon.flow/edge merged-meta))}
             doc               (assoc :seon.code.var/doc doc)
             (seq arglists)    (assoc :seon.code.var/arglists arglists)
@@ -171,7 +170,7 @@
             (seq var-refs)    (assoc :seon.code.var/refs var-refs)
             (number? ticks-b) (assoc :seon.code.var/ticks-budget (long ticks-b))
             (number? bytes-b) (assoc :seon.code.var/bytes-budget (long bytes-b))
-            (string? big-o)   (assoc :seon.code.var/big-o big-o)))))))
+            ))))))
 
 (defn ir-unit-refs
   {:malli/schema [:function [:=> [:cat :any] [:map [:refs [:set :symbol]] [:keywords [:set :qualified-keyword]]]]]}
@@ -543,7 +542,7 @@
      :seon.code.form/nested-scan? (boolean nested?)}))
 
 (defn read-clj
-  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:maybe [:set :symbol]]] :map]]}
+  {:malli/schema [:function [:=> [:cat :string [:string {:gen/elements ["" "(ns demo.a)\n(defn f [x] (inc x))\n" "(ns demo.b (:require [clojure.string :as str]))\n(defn g [s] (str/trim s))\n"]}]] :map] [:=> [:cat :string [:string {:gen/elements ["" "(ns demo.a)\n(defn f [x] (inc x))\n" "(ns demo.b (:require [clojure.string :as str]))\n(defn g [s] (str/trim s))\n"]}] [:maybe [:set :symbol]]] :map]]}
   ([path ^String text] (read-clj path text nil))
   ([path ^String text extra-local-defs]
    (let [offsets (line-offsets text)

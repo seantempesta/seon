@@ -18,7 +18,7 @@
  :boolean
 
  :seon.agent.call/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-call-card} [:seon.agent.call/id :seon.agent.call/id] [:seon.agent.call/caller :seon.agent.call/caller] [:seon.agent.call/callee :seon.agent.call/callee] [:seon.agent.call/parent-call {:optional true} :seon.agent.call/parent-call] [:seon.agent.call/message-id {:optional true} :seon.agent.call/message-id] [:seon.agent.call/prompt :seon.agent.call/prompt] [:seon.agent.call/result-schema {:optional true} :seon.agent.call/result-schema] [:seon.agent.call/status :seon.agent.call/status] [:seon.agent.call/result {:optional true} :seon.agent.call/result] [:seon.agent.call/error {:optional true} :seon.agent.call/error] [:seon.agent.call/created-tx {:optional true} :seon.agent.call/created-tx] [:seon.agent.call/settled-tx {:optional true} :seon.agent.call/settled-tx] [:seon.agent.call/delivered? {:optional true} :seon.agent.call/delivered?] [:seon.agent.call/caller-ref {:optional true} :seon.agent.call/caller-ref] [:seon.agent.call/callee-ref {:optional true} :seon.agent.call/callee-ref] [:seon.agent.call/task-ref {:optional true} :seon.agent.call/task-ref]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-call-card, :seon.schema/doc "Structured inter-agent delegation call entity with cycle detection, Malli result-schema validation, and linked subtask."} [:seon.agent.call/id :seon.agent.call/id] [:seon.agent.call/caller :seon.agent.call/caller] [:seon.agent.call/callee :seon.agent.call/callee] [:seon.agent.call/parent-call {:optional true} :seon.agent.call/parent-call] [:seon.agent.call/message-id {:optional true} :seon.agent.call/message-id] [:seon.agent.call/prompt :seon.agent.call/prompt] [:seon.agent.call/result-schema {:optional true} :seon.agent.call/result-schema] [:seon.agent.call/status :seon.agent.call/status] [:seon.agent.call/result {:optional true} :seon.agent.call/result] [:seon.agent.call/error {:optional true} :seon.agent.call/error] [:seon.agent.call/created-tx {:optional true} :seon.agent.call/created-tx] [:seon.agent.call/settled-tx {:optional true} :seon.agent.call/settled-tx] [:seon.agent.call/delivered? {:optional true} :seon.agent.call/delivered?] [:seon.agent.call/caller-ref {:optional true} :seon.agent.call/caller-ref] [:seon.agent.call/callee-ref {:optional true} :seon.agent.call/callee-ref] [:seon.agent.call/task-ref {:optional true} :seon.agent.call/task-ref]]
 
  :seon.agent.call/error
  [:any {:gen/elements [{:class :failed, :message "error"}]}]
@@ -81,7 +81,7 @@
  :int
 
  :seon.agent.eval/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-eval-card} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens] [:seon.agent.eval/prefix-hash {:optional true} :seon.agent.eval/prefix-hash] [:seon.agent.eval/touched {:optional true} :seon.agent.eval/touched] [:seon.agent.eval/result-schemas {:optional true} :seon.agent.eval/result-schemas] [:seon.agent.eval/images {:optional true} :seon.agent.eval/images] [:seon.agent.eval/agent-ref {:optional true} :seon.agent.eval/agent-ref] [:seon.agent.eval/touched-refs {:optional true} :seon.agent.eval/touched-refs] [:seon.agent.eval/called-vars {:optional true} :seon.agent.eval/called-vars]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-eval-card, :seon.schema/doc "Recorded Clojure REPL evaluation entity capturing code, output, value, timing, token usage, and IR witnesses."} [:seon.agent.eval/id :seon.agent.eval/id] [:seon.agent.eval/agent :seon.agent.eval/agent] [:seon.agent.eval/turn :seon.agent.eval/turn] [:seon.agent.eval/call-index {:optional true} :seon.agent.eval/call-index] [:seon.agent.eval/call-id {:optional true} :seon.agent.eval/call-id] [:seon.agent.eval/handle {:optional true} :seon.agent.eval/handle] [:seon.agent.eval/result-schema {:optional true} :seon.agent.eval/result-schema] [:seon.agent.eval/seen-messages {:optional true} :seon.agent.eval/seen-messages] [:seon.agent.eval/thought {:optional true} :seon.agent.eval/thought] [:seon.agent.eval/reasoning {:optional true} :seon.agent.eval/reasoning] [:seon.agent.eval/intent {:optional true} :seon.agent.eval/intent] [:seon.agent.eval/code :seon.agent.eval/code] [:seon.agent.eval/value {:optional true} :seon.agent.eval/value] [:seon.agent.eval/out {:optional true} :seon.agent.eval/out] [:seon.agent.eval/error {:optional true} :seon.agent.eval/error] [:seon.agent.eval/ticks {:optional true} :seon.agent.eval/ticks] [:seon.agent.eval/bytes {:optional true} :seon.agent.eval/bytes] [:seon.agent.eval/ms {:optional true} :seon.agent.eval/ms] [:seon.agent.eval/prompt-tokens {:optional true} :seon.agent.eval/prompt-tokens] [:seon.agent.eval/completion-tokens {:optional true} :seon.agent.eval/completion-tokens] [:seon.agent.eval/cache-hit-tokens {:optional true} :seon.agent.eval/cache-hit-tokens] [:seon.agent.eval/cache-miss-tokens {:optional true} :seon.agent.eval/cache-miss-tokens] [:seon.agent.eval/prefix-hash {:optional true} :seon.agent.eval/prefix-hash] [:seon.agent.eval/touched {:optional true} :seon.agent.eval/touched] [:seon.agent.eval/result-schemas {:optional true} :seon.agent.eval/result-schemas] [:seon.agent.eval/images {:optional true} :seon.agent.eval/images] [:seon.agent.eval/agent-ref {:optional true} :seon.agent.eval/agent-ref] [:seon.agent.eval/touched-refs {:optional true} :seon.agent.eval/touched-refs] [:seon.agent.eval/called-vars {:optional true} :seon.agent.eval/called-vars]]
 
  :seon.agent.eval/error
  :string
@@ -144,7 +144,7 @@
  :string
 
  :seon.agent.message/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.infra/render-message-card} [:seon.agent.message/id :seon.agent.message/id] [:seon.agent.message/seq :seon.agent.message/seq] [:seon.agent.message/from :seon.agent.message/from] [:seon.agent.message/to :seon.agent.message/to] [:seon.agent.message/type :seon.agent.message/type] [:seon.agent.message/body :seon.agent.message/body]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.infra/render-message-card, :seon.schema/doc "Persistent inter-agent and user-to-agent message entity tracked per recipient via seen-message sets."} [:seon.agent.message/id :seon.agent.message/id] [:seon.agent.message/seq :seon.agent.message/seq] [:seon.agent.message/from :seon.agent.message/from] [:seon.agent.message/to :seon.agent.message/to] [:seon.agent.message/type :seon.agent.message/type] [:seon.agent.message/body :seon.agent.message/body]]
 
  :seon.agent.message/from
  [:keyword {:seon.db/index true}]
@@ -179,11 +179,8 @@
  :seon.agent/canvas-hiccup
  [:vector {:seon.db/storable true, :seon.schema/doc "Optional static Hiccup vector painted directly onto this agent's live Canvas (d/as-of time-travelable, XSS-sanitized)."} :any]
 
- :seon.agent/compacted-through-turn
- [:int {:seon.merge/skip true}]
-
  :seon.agent/context-prefs
- [:map {:seon.merge/skip true, :gen/elements [{} {:recent-data-limit 4, :max-vars-shown 24}]} [:recent-data-limit {:optional true} :int] [:max-vars-shown {:optional true} :int] [:max-schemas-shown {:optional true} :int] [:extra-namespaces {:optional true} [:vector :symbol]] [:extra-schemas {:optional true} [:vector :qualified-keyword]]]
+ [:map {:seon.merge/skip true, :gen/elements [{} {:extra-namespaces [seon.ctx]}], :seon.schema/doc "Optional agent context preferences (:extra-namespaces, :mode)."} [:extra-namespaces {:optional true} [:vector :symbol]] [:mode {:optional true} :keyword]]
 
  :seon.agent/curated
  [:vector {:seon.merge/skip true, :gen/elements [[] [[:seon.code.var/name seon.render/step-walk]]], :seon.schema/doc "Curated entity lookup refs promoted by this agent for downstream tree-overlap context sharing."} :any]
@@ -275,9 +272,6 @@
  :seon.agent/tested-tx
  [:int {:seon.merge/skip true}]
 
- :seon.agent/tool-call
- [:map [:id [:string {:min 1}]] [:code [:string {:min 1}]]]
-
  :seon.agent/waiting?
  [:boolean {:seon.merge/skip true}]
 
@@ -332,14 +326,11 @@
  :seon.bench/scoreboard
  [:map {:seon.render/hiccup seon.render.entities.diagnostics/render-golden-scoreboard-card, :gen/elements [{:suite-id :golden/v1, :level :calm, :summary "golden/v1: 87.5% merge (7/7) · med 9.0t · 64.2s · 91.4% KV · 0 OOM", :runs-count 2, :merge-rate-pct 87.5, :overall-pass-rate-pct 87.5, :median-turns-to-merge 9.0, :median-wall-s 64.2, :kv-cache-hit-pct 91.4, :upstream-errors 0, :livelocks 0, :timeouts 0, :ooms 0, :delta-vs-prev {:merge-rate-pct 12.5, :overall-pass-rate-pct 12.5, :median-turns-to-merge -2.0, :kv-cache-hit-pct 3.1, :ooms -1, :livelocks 0, :timeouts 0}, :latest {:git-commit "abc1234", :main-tx 536878630, :model "deepseek-flash", :status :partial, :total 8, :passed 7, :merged 7, :merge-rate-pct 87.5, :overall-pass-rate-pct 87.5, :median-turns-to-merge 9.0, :median-wall-s 64.2, :kv-cache-hit-pct 91.4, :upstream-errors 0, :livelocks 0, :timeouts 0, :ooms 0}, :history [{:git-commit "def5678", :main-tx 536878000, :model "deepseek-flash", :status :partial, :total 8, :passed 6, :merged 6, :merge-rate-pct 75.0, :overall-pass-rate-pct 75.0, :median-turns-to-merge 11.0, :median-wall-s 78.5, :kv-cache-hit-pct 88.3, :upstream-errors 0, :livelocks 0, :timeouts 0, :ooms 1} {:git-commit "abc1234", :main-tx 536878630, :model "deepseek-flash", :status :partial, :total 8, :passed 7, :merged 7, :merge-rate-pct 87.5, :overall-pass-rate-pct 87.5, :median-turns-to-merge 9.0, :median-wall-s 64.2, :kv-cache-hit-pct 91.4, :upstream-errors 0, :livelocks 0, :timeouts 0, :ooms 0}]} {:suite-id :golden/v1, :level :warm, :summary "golden/v1: no recorded runs yet", :runs-count 0, :merge-rate-pct 0.0, :overall-pass-rate-pct 0.0, :median-turns-to-merge nil, :median-wall-s nil, :kv-cache-hit-pct nil, :upstream-errors 0, :livelocks 0, :timeouts 0, :ooms 0, :delta-vs-prev nil, :latest nil, :history []}], :seon.schema/doc "Pure derived cross-commit golden benchmark scoreboard over stored :seon.bench.run/entity runs."} [:suite-id :keyword] [:level :seon.signal/level] [:summary :string] [:runs-count [:int {:min 0}]] [:merge-rate-pct number?] [:overall-pass-rate-pct number?] [:median-turns-to-merge [:maybe number?]] [:median-wall-s [:maybe number?]] [:kv-cache-hit-pct [:maybe number?]] [:upstream-errors [:int {:min 0}]] [:livelocks [:int {:min 0}]] [:timeouts {:optional true} [:int {:min 0}]] [:ooms [:int {:min 0}]] [:delta-vs-prev [:maybe :map]] [:latest {:optional true} [:maybe [:map [:livelocks {:optional true} [:int {:min 0}]] [:timeouts {:optional true} [:int {:min 0}]]]]] [:history [:vector [:map [:livelocks {:optional true} [:int {:min 0}]] [:timeouts {:optional true} [:int {:min 0}]]]]] [:by-category {:optional true} [:map-of :keyword :map]]]
 
- :seon.bench/typed-answer
- [:map {:seon.schema/doc "Structured typed answer schema for benchmark and specialist audit calls."} [:summary :string] [:findings [:vector :string]] [:recommendation :string]]
-
  :seon.code.doc/body
  :string
 
  :seon.code.doc/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-doc-full} [:seon.code.doc/id :seon.code.doc/id] [:seon.code.doc/path :seon.code.doc/path] [:seon.code.doc/order :seon.code.doc/order] [:seon.code.doc/heading :seon.code.doc/heading] [:seon.code.doc/body :seon.code.doc/body] [:seon.code.doc/references {:optional true} :seon.code.doc/references]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-doc-full, :seon.schema/doc "Heading-split Markdown documentation atom linked to cited vars, namespaces, and schemas via :seon.code.doc/references."} [:seon.code.doc/id :seon.code.doc/id] [:seon.code.doc/path :seon.code.doc/path] [:seon.code.doc/order :seon.code.doc/order] [:seon.code.doc/heading :seon.code.doc/heading] [:seon.code.doc/body :seon.code.doc/body] [:seon.code.doc/references {:optional true} :seon.code.doc/references]]
 
  :seon.code.doc/heading
  :string
@@ -357,7 +348,7 @@
  [:set {:seon.db/to [:seon.code.var/entity :seon.code.ns/entity :seon.schema/entity], :seon.schema/doc "True :db.type/ref links from a doc section to cited vars, namespaces, and schemas."} :seon.store/ref]
 
  :seon.code.file/entity
- [:map {:seon.db/attributes true} [:seon.code.file/path :seon.code.file/path] [:seon.code.file/text :seon.code.file/text] [:seon.code.file/exec? {:optional true} :seon.code.file/exec?]]
+ [:map {:seon.db/attributes true, :seon.schema/doc "Non-Clojure/non-Markdown tracked repository file stored losslessly in Datahike."} [:seon.code.file/path :seon.code.file/path] [:seon.code.file/text :seon.code.file/text] [:seon.code.file/exec? {:optional true} :seon.code.file/exec?]]
 
  :seon.code.file/exec?
  :boolean
@@ -375,7 +366,7 @@
  [:set {:seon.db/index true} :symbol]
 
  :seon.code.form/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.infra/render-form-full} [:seon.code.form/key :seon.code.form/key] [:seon.code.form/ns :seon.code.form/ns] [:seon.code.form/order :seon.code.form/order] [:seon.code.form/lead {:optional true} :seon.code.form/lead] [:seon.code.form/src :seon.code.form/src] [:seon.code.form/hash :seon.code.form/hash] [:seon.code.form/deps {:optional true} :seon.code.form/deps] [:seon.code.form/test? {:optional true} :seon.code.form/test?] [:seon.code.form/lines {:optional true} :seon.code.form/lines] [:seon.code.form/chars {:optional true} :seon.code.form/chars] [:seon.code.form/nested-scan? {:optional true} :seon.code.form/nested-scan?]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.infra/render-form-full, :seon.schema/doc "Lossless top-level Clojure form entity stored with source text, AST hash, and static dependencies."} [:seon.code.form/key :seon.code.form/key] [:seon.code.form/ns :seon.code.form/ns] [:seon.code.form/order :seon.code.form/order] [:seon.code.form/lead {:optional true} :seon.code.form/lead] [:seon.code.form/src :seon.code.form/src] [:seon.code.form/hash :seon.code.form/hash] [:seon.code.form/deps {:optional true} :seon.code.form/deps] [:seon.code.form/test? {:optional true} :seon.code.form/test?] [:seon.code.form/lines {:optional true} :seon.code.form/lines] [:seon.code.form/chars {:optional true} :seon.code.form/chars] [:seon.code.form/nested-scan? {:optional true} :seon.code.form/nested-scan?]]
 
  :seon.code.form/hash
  [:string {:min 8}]
@@ -408,10 +399,7 @@
  :string
 
  :seon.code.ns/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-ns-full} [:seon.code.ns/name :seon.code.ns/name] [:seon.code.ns/parent {:optional true} :seon.code.ns/parent] [:seon.code.ns/path {:optional true} :seon.code.ns/path] [:seon.code.ns/doc {:optional true} :seon.code.ns/doc] [:seon.code.ns/requires {:optional true} :seon.code.ns/requires] [:seon.code.ns/tail {:optional true} :seon.code.ns/tail] [:seon.code.ns/requires-ns {:optional true} :seon.code.ns/requires-ns] [:seon.code.ns/origin {:optional true} :seon.code.ns/origin] [:seon.code.ns/forms-hash {:optional true} :seon.code.ns/forms-hash] [:seon.code.ns/unused-requires {:optional true} :seon.code.ns/unused-requires]]
-
- :seon.code.ns/forms-hash
- [:string {:min 1, :seon.schema/doc "Content signature of sorted [key form-hash] pairs for this namespace; validates persisted :seon.code.ns/unused-requires."}]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities.work/render-ns-full, :seon.schema/doc "First-class Clojure namespace entity forming Seon's B+-tree parent hierarchy (:seon.code.ns/parent) and require graph."} [:seon.code.ns/name :seon.code.ns/name] [:seon.code.ns/parent {:optional true} :seon.code.ns/parent] [:seon.code.ns/path {:optional true} :seon.code.ns/path] [:seon.code.ns/doc {:optional true} :seon.code.ns/doc] [:seon.code.ns/requires {:optional true} :seon.code.ns/requires] [:seon.code.ns/tail {:optional true} :seon.code.ns/tail] [:seon.code.ns/requires-ns {:optional true} :seon.code.ns/requires-ns] [:seon.code.ns/origin {:optional true} :seon.code.ns/origin]]
 
  :seon.code.ns/name
  [:and {:seon.db/identity true, :seon.db/content-id true} :symbol]
@@ -434,14 +422,8 @@
  :seon.code.ns/tail
  :string
 
- :seon.code.ns/unused-requires
- [:vector {:seon.db/storable true, :seon.schema/doc "Parse-time list of unused :require library symbols when :seon.code.ns/forms-hash matches."} :symbol]
-
  :seon.code.var/arglists
  [:vector [:vector :symbol]]
-
- :seon.code.var/big-o
- :string
 
  :seon.code.var/bytes-budget
  [:int {:min 0, :max 10000000000}]
@@ -471,7 +453,7 @@
  [:set {:seon.db/to [:seon.code.doc/entity :seon.code.var/entity :seon.code.ns/entity :seon.schema/entity], :seon.db/index true, :seon.schema/doc "True :db.type/ref links to exact doc atoms and peer entities cited in this var docstring."} :seon.store/ref]
 
  :seon.code.var/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-var-full} [:seon.code.var/name :seon.code.var/name] [:seon.code.var/ns :seon.code.var/ns] [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref] [:seon.code.var/form :seon.code.var/form] [:seon.code.var/doc {:optional true} :seon.code.var/doc] [:seon.code.var/arglists {:optional true} :seon.code.var/arglists] [:seon.code.var/private? {:optional true} :seon.code.var/private?] [:seon.code.var/macro? {:optional true} :seon.code.var/macro?] [:seon.code.var/test? {:optional true} :seon.code.var/test?] [:seon.code.var/platform-test? {:optional true} :seon.code.var/platform-test?] [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?] [:seon.code.var/schema {:optional true} :seon.code.var/schema] [:seon.code.var/keywords {:optional true} :seon.code.var/keywords] [:seon.code.var/refs {:optional true} :seon.code.var/refs] [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget] [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget] [:seon.code.var/big-o {:optional true} :seon.code.var/big-o] [:seon.code.var/calls {:optional true} :seon.code.var/calls] [:seon.code.var/ops {:optional true} :seon.code.var/ops] [:seon.code.var/catches {:optional true} :seon.code.var/catches] [:seon.code.var/input {:optional true} :seon.code.var/input] [:seon.code.var/optional-input {:optional true} :seon.code.var/optional-input] [:seon.code.var/output {:optional true} :seon.code.var/output] [:seon.code.var/doc-refs {:optional true} :seon.code.var/doc-refs] [:seon.code.var/doc-ref-order {:optional true} :seon.code.var/doc-ref-order]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-var-full, :seon.schema/doc "Structured Clojure var entity linking arglists, :malli/schema contracts, I/O schema refs, call graph, and doc citations."} [:seon.code.var/name :seon.code.var/name] [:seon.code.var/ns :seon.code.var/ns] [:seon.code.var/ns-ref {:optional true} :seon.code.var/ns-ref] [:seon.code.var/form :seon.code.var/form] [:seon.code.var/doc {:optional true} :seon.code.var/doc] [:seon.code.var/arglists {:optional true} :seon.code.var/arglists] [:seon.code.var/private? {:optional true} :seon.code.var/private?] [:seon.code.var/macro? {:optional true} :seon.code.var/macro?] [:seon.code.var/test? {:optional true} :seon.code.var/test?] [:seon.code.var/flow-edge? {:optional true} :seon.code.var/flow-edge?] [:seon.code.var/schema {:optional true} :seon.code.var/schema] [:seon.code.var/keywords {:optional true} :seon.code.var/keywords] [:seon.code.var/refs {:optional true} :seon.code.var/refs] [:seon.code.var/ticks-budget {:optional true} :seon.code.var/ticks-budget] [:seon.code.var/bytes-budget {:optional true} :seon.code.var/bytes-budget] [:seon.code.var/calls {:optional true} :seon.code.var/calls] [:seon.code.var/ops {:optional true} :seon.code.var/ops] [:seon.code.var/catches {:optional true} :seon.code.var/catches] [:seon.code.var/input {:optional true} :seon.code.var/input] [:seon.code.var/optional-input {:optional true} :seon.code.var/optional-input] [:seon.code.var/output {:optional true} :seon.code.var/output] [:seon.code.var/doc-refs {:optional true} :seon.code.var/doc-refs] [:seon.code.var/doc-ref-order {:optional true} :seon.code.var/doc-ref-order]]
 
  :seon.code.var/flow-edge?
  :boolean
@@ -506,9 +488,6 @@
  :seon.code.var/output
  [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Output schema(s) and returned map keys extracted via malli.core/ast from :malli/schema :output."} :seon.store/ref]
 
- :seon.code.var/platform-test?
- [:and {:seon.db/index true} :boolean]
-
  :seon.code.var/private?
  :boolean
 
@@ -535,9 +514,6 @@
 
  :seon.config.build/jolt-whole-program-inference
  [:boolean {:default false, :seon.schema/doc "Whether Jolt AOT enables whole-program type inference."}]
-
- :seon.config.source/tree-excludes
- [:vector {:seon.db/storable true, :default ["claude_scratch" "runs" "target"], :gen/elements [["claude_scratch" "runs" "target"]], :seon.schema/doc "Workspace top-level directory names excluded from source tree scans."} :string]
 
  :seon.config/ai-api-key-env
  [:string {:min 1}]
@@ -570,7 +546,7 @@
  [:int {:min 4, :max 512, :default 32, :seon.schema/doc "Datahike node cache size in MB for each forked child agent process."}]
 
  :seon.config/entity
- [:map {:seon.db/attributes true, :seon.schema/context-policy :internal, :seon.schema/doc "Operational runtime configuration entity stored in Datahike."} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/gc-generations {:optional true} :seon.config/gc-generations] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights] [:seon.config/store-map-bytes {:optional true} :seon.config/store-map-bytes] [:seon.config/gc-keep-merged-branches {:optional true} :seon.config/gc-keep-merged-branches] [:seon.config/gc-history-hours {:optional true} :seon.config/gc-history-hours] [:seon.config/review-every-turns {:optional true} :seon.config/review-every-turns] [:seon.config/unwritten-review-turns {:optional true} :seon.config/unwritten-review-turns] [:seon.config/semantic-min-score {:optional true} :seon.config/semantic-min-score] [:seon.config/ns-outline-tokens {:optional true} :seon.config/ns-outline-tokens] [:seon.config/eval-out-chars {:optional true} :seon.config/eval-out-chars] [:seon.config/heavy-eval-bytes {:optional true} :seon.config/heavy-eval-bytes] [:seon.config/heavy-eval-ms {:optional true} :seon.config/heavy-eval-ms] [:seon.config/friction-min-kv-pct {:optional true} :seon.config/friction-min-kv-pct] [:seon.config.build/jolt-cache-mb {:optional true} :seon.config.build/jolt-cache-mb] [:seon.config.build/jolt-compiler-options {:optional true} :seon.config.build/jolt-compiler-options] [:seon.config.build/jolt-whole-program-inference {:optional true} :seon.config.build/jolt-whole-program-inference] [:seon.config.source/tree-excludes {:optional true} :seon.config.source/tree-excludes] [:seon.config/max-bounces {:optional true} :seon.config/max-bounces] [:seon.config/max-total-turns {:optional true} :seon.config/max-total-turns] [:seon.config/ui-area-multiplier {:optional true} :seon.config/ui-area-multiplier] [:seon.config/ui-max-items {:optional true} :seon.config/ui-max-items] [:seon.config/ui-per-item-area-ratio {:optional true} :seon.config/ui-per-item-area-ratio] [:seon.config/ui-sidebar-breakpoint {:optional true} :seon.config/ui-sidebar-breakpoint] [:seon.config/preview-widths {:optional true} :seon.config/preview-widths] [:seon.config/auto-refine-tasks? {:optional true} :seon.config/auto-refine-tasks?]]
+ [:map {:seon.db/attributes true, :seon.schema/context-policy :internal, :seon.schema/doc "Operational runtime configuration entity stored in Datahike."} [:seon.config/key :seon.config/key] [:seon.config/eval-ticks {:optional true} :seon.config/eval-ticks] [:seon.config/eval-bytes {:optional true} :seon.config/eval-bytes] [:seon.config/gen-samples {:optional true} :seon.config/gen-samples] [:seon.config/gen-seed {:optional true} :seon.config/gen-seed] [:seon.config/max-os-procs {:optional true} :seon.config/max-os-procs] [:seon.config/max-test-workers {:optional true} :seon.config/max-test-workers] [:seon.config/max-model-slots {:optional true} :seon.config/max-model-slots] [:seon.config/child-cache-mb {:optional true} :seon.config/child-cache-mb] [:seon.config/auto-sync-git? {:optional true} :seon.config/auto-sync-git?] [:seon.config/auto-merge? {:optional true} :seon.config/auto-merge?] [:seon.config/auto-switch-over? {:optional true} :seon.config/auto-switch-over?] [:seon.config/fast-test-ms {:optional true} :seon.config/fast-test-ms] [:seon.config/ai-model {:optional true} :seon.config/ai-model] [:seon.config/ai-base-url {:optional true} :seon.config/ai-base-url] [:seon.config/ai-api-key-env {:optional true} :seon.config/ai-api-key-env] [:seon.config/ai-thinking {:optional true} :seon.config/ai-thinking] [:seon.config/ai-reasoning-effort {:optional true} :seon.config/ai-reasoning-effort] [:seon.config/extra {:optional true} :seon.config/extra] [:seon.config/max-tool-turns {:optional true} :seon.config/max-tool-turns] [:seon.config/viewport-screenshot? {:optional true} :seon.config/viewport-screenshot?] [:seon.config/rank-weights {:optional true} :seon.config/rank-weights] [:seon.config/store-map-bytes {:optional true} :seon.config/store-map-bytes] [:seon.config/gc-keep-merged-branches {:optional true} :seon.config/gc-keep-merged-branches] [:seon.config/gc-history-hours {:optional true} :seon.config/gc-history-hours] [:seon.config/review-every-turns {:optional true} :seon.config/review-every-turns] [:seon.config/unwritten-review-turns {:optional true} :seon.config/unwritten-review-turns] [:seon.config/semantic-min-score {:optional true} :seon.config/semantic-min-score] [:seon.config/eval-out-chars {:optional true} :seon.config/eval-out-chars] [:seon.config/heavy-eval-bytes {:optional true} :seon.config/heavy-eval-bytes] [:seon.config/heavy-eval-ms {:optional true} :seon.config/heavy-eval-ms] [:seon.config/friction-min-kv-pct {:optional true} :seon.config/friction-min-kv-pct] [:seon.config.build/jolt-cache-mb {:optional true} :seon.config.build/jolt-cache-mb] [:seon.config.build/jolt-compiler-options {:optional true} :seon.config.build/jolt-compiler-options] [:seon.config.build/jolt-whole-program-inference {:optional true} :seon.config.build/jolt-whole-program-inference] [:seon.config/max-bounces {:optional true} :seon.config/max-bounces] [:seon.config/max-total-turns {:optional true} :seon.config/max-total-turns] [:seon.config/ui-area-multiplier {:optional true} :seon.config/ui-area-multiplier] [:seon.config/ui-max-items {:optional true} :seon.config/ui-max-items] [:seon.config/ui-per-item-area-ratio {:optional true} :seon.config/ui-per-item-area-ratio] [:seon.config/ui-sidebar-breakpoint {:optional true} :seon.config/ui-sidebar-breakpoint] [:seon.config/preview-widths {:optional true} :seon.config/preview-widths] [:seon.config/auto-refine-tasks? {:optional true} :seon.config/auto-refine-tasks?]]
 
  :seon.config/eval-bytes
  [:int {:min 65536, :max 17179869184}]
@@ -589,9 +565,6 @@
 
  :seon.config/friction-min-kv-pct
  [:int {:min 0, :max 100, :default 70, :seon.schema/doc "Minimum KV-cache hit percentage (default 70%) before trace friction flags low KV cache reuse."}]
-
- :seon.config/gc-generations
- [:int {:min 4, :max 6}]
 
  :seon.config/gc-history-hours
  [:int {:default 168, :seon.schema/doc "Minimum age in hours before d/gc-storage sweeps historical non-head commits (protects active branch merge-bases)."}]
@@ -632,9 +605,6 @@
  :seon.config/max-total-turns
  [:int {:min 0, :max 500, :default 48, :seon.schema/doc "Maximum cumulative autonomous turns since last external message before pausing a worker (default 48)."}]
 
- :seon.config/ns-outline-tokens
- [:int {:min 1000, :default 6000, :seon.schema/doc "Token threshold above which render-ns-full includes a compact full form outline."}]
-
  :seon.config/preview-widths
  [:vector {:seon.db/storable true, :default [360 640], :min 1, :max 4, :gen/elements [[360 640] [360 760]], :seon.schema/doc "Default WKWebView viewport widths in px used to measure and preview :seon.ui/hiccup renderers (default [360 640])."} [:int {:min 200, :max 2560}]]
 
@@ -668,33 +638,6 @@
  :seon.config/viewport-screenshot?
  :boolean
 
- :seon.ctx.miss/agent
- [:and {:seon.db/index true, :seon.schema/doc "Agent keyword that experienced the context miss."} :qualified-keyword]
-
- :seon.ctx.miss/hop
- [:int {:seon.schema/doc "Graph hop distance from the focal entity."}]
-
- :seon.ctx.miss/id
- [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique UUID identifying a context miss record."} :uuid]
-
- :seon.ctx.miss/ref
- [:any {:seon.db/storable true, :gen/elements [[:seon.code.var/name seon.ctx/project-entity]], :seon.schema/doc "Lookup ref or entity id of the missed entity."}]
-
- :seon.ctx.miss/schema
- [:qualified-keyword {:seon.schema/doc "Schema keyword of the missed entity."}]
-
- :seon.ctx.miss/status
- [:enum {:seon.db/index true, :seon.schema/doc "Resolution status of the context miss (:open or :fixed)."} :open :fixed]
-
- :seon.ctx.miss/turn
- [:int {:seon.schema/doc "Eval turn number when the context miss was observed."}]
-
- :seon.ctx.miss/via-attr
- [:qualified-keyword {:seon.schema/doc "Datahike attribute along which the missed entity was reached."}]
-
- :seon.ctx/miss
- [:map {:seon.db/attributes true, :seon.schema/context-policy :internal, :seon.schema/doc "Recorded context miss linking an agent turn to an unmatched connected entity."} [:seon.ctx.miss/id :seon.ctx.miss/id] [:seon.ctx.miss/agent :seon.ctx.miss/agent] [:seon.ctx.miss/turn :seon.ctx.miss/turn] [:seon.ctx.miss/ref :seon.ctx.miss/ref] [:seon.ctx.miss/schema :seon.ctx.miss/schema] [:seon.ctx.miss/hop :seon.ctx.miss/hop] [:seon.ctx.miss/via-attr :seon.ctx.miss/via-attr] [:seon.ctx.miss/status :seon.ctx.miss/status]]
-
  :seon.ctx/pattern
  [:vector {:gen/elements [['*] [:seon.agent/id :seon.agent/branch :seon.agent/goal]]} :any]
 
@@ -716,23 +659,17 @@
  :seon.error/branch
  [:keyword {:seon.db/index true, :seon.schema/doc "Datahike branch affected by this error, if any."}]
 
- :seon.error/call-chain
- [:vector {:gen/elements [[] [seon.ctx/project-entity]], :seon.schema/doc "Ordered Seon var call chain leading to the failing cut-point."} :qualified-symbol]
-
  :seon.error/data
  [:map {:seon.db/storable true, :seon.schema/doc "Structured error payload (HTTP status, retry-after, stack/context data)."}]
 
  :seon.error/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.error/render, :seon.schema/doc "First-class error entity stored in Datahike (replaces silent model idle & unifies faults)."} [:seon.error/id :seon.error/id] [:seon.error/kind :seon.error/kind] [:seon.error/severity :seon.error/severity] [:seon.error/source :seon.error/source] [:seon.error/message :seon.error/message] [:seon.error/status :seon.error/status] [:seon.error/at {:optional true} :seon.error/at] [:seon.error/agent {:optional true} :seon.error/agent] [:seon.error/branch {:optional true} :seon.error/branch] [:seon.error/data {:optional true} :seon.error/data] [:seon.error/eval {:optional true} :seon.error/eval] [:seon.error/var {:optional true} :seon.error/var] [:seon.error/agent-ref {:optional true} :seon.error/agent-ref] [:seon.error/blame {:optional true} :seon.error/blame] [:seon.error/var-ref {:optional true} :seon.error/var-ref] [:seon.error/schema-ref {:optional true} :seon.error/schema-ref] [:seon.error/call-chain {:optional true} :seon.error/call-chain] [:seon.error/input-sample {:optional true} :seon.error/input-sample]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.error/render, :seon.schema/doc "First-class error entity stored in Datahike (replaces silent model idle & unifies faults)."} [:seon.error/id :seon.error/id] [:seon.error/kind :seon.error/kind] [:seon.error/severity :seon.error/severity] [:seon.error/source :seon.error/source] [:seon.error/message :seon.error/message] [:seon.error/status :seon.error/status] [:seon.error/at {:optional true} :seon.error/at] [:seon.error/agent {:optional true} :seon.error/agent] [:seon.error/branch {:optional true} :seon.error/branch] [:seon.error/data {:optional true} :seon.error/data] [:seon.error/eval {:optional true} :seon.error/eval] [:seon.error/var {:optional true} :seon.error/var] [:seon.error/agent-ref {:optional true} :seon.error/agent-ref] [:seon.error/blame {:optional true} :seon.error/blame] [:seon.error/var-ref {:optional true} :seon.error/var-ref] [:seon.error/schema-ref {:optional true} :seon.error/schema-ref]]
 
  :seon.error/eval
  [:uuid {:seon.db/index true, :seon.schema/doc "Eval UUID that produced this error, if any."}]
 
  :seon.error/id
  [:uuid {:seon.db/identity true, :seon.schema/doc "Unique identity UUID of a first-class error entity."}]
-
- :seon.error/input-sample
- [:string {:gen/elements ["" "{:a 1}"], :seon.schema/doc "Truncated concrete failing args (output/exception blame) or valid example args (input-contract blame)."}]
 
  :seon.error/kind
  [:keyword {:seon.db/index true, :seon.schema/doc "Error class keyword (e.g. :model/rate-limit, :flow/proc-fault, :eval/error, :health/violation)."}]
@@ -768,16 +705,13 @@
  :int
 
  :seon.fix/entity
- [:map {:seon.db/attributes true, :seon.schema/doc "First-class Datahike ledger entity tracking eliminated agent/runtime error classes and measured benchmark deltas."} [:seon.fix/id :seon.fix/id] [:seon.fix/error-class :seon.fix/error-class] [:seon.fix/symptom :seon.fix/symptom] [:seon.fix/root-cause :seon.fix/root-cause] [:seon.fix/change-summary :seon.fix/change-summary] [:seon.fix/merge-tx {:optional true} :seon.fix/merge-tx] [:seon.fix/regression-test {:optional true} :seon.fix/regression-test] [:seon.fix/before-after {:optional true} :seon.fix/before-after] [:seon.fix/created-ms {:optional true} :seon.fix/created-ms]]
+ [:map {:seon.db/attributes true, :seon.schema/doc "First-class Datahike ledger entity tracking eliminated agent/runtime error classes and measured benchmark deltas."} [:seon.fix/id :seon.fix/id] [:seon.fix/error-class :seon.fix/error-class] [:seon.fix/symptom :seon.fix/symptom] [:seon.fix/root-cause :seon.fix/root-cause] [:seon.fix/change-summary :seon.fix/change-summary] [:seon.fix/regression-test {:optional true} :seon.fix/regression-test] [:seon.fix/before-after {:optional true} :seon.fix/before-after] [:seon.fix/created-ms {:optional true} :seon.fix/created-ms]]
 
  :seon.fix/error-class
  [:keyword {:seon.db/index true}]
 
  :seon.fix/id
  [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique ID of a recorded error-class fix."} :uuid]
-
- :seon.fix/merge-tx
- :int
 
  :seon.fix/regression-test
  :symbol
@@ -803,36 +737,6 @@
  :seon.graph/chain-boundary
  [:map {:seon.render/hiccup seon.render.entities.graph/render-chain-boundary, :gen/elements [{:steps [seon.ctx/project-entity], :input-schema :seon.agent/entity, :output-schema :seon.ui/hiccup, :sample-in "{:seon.agent/id :agent/root}", :sample-out "[:div \"ok\"]", :known-refs [], :doc-atoms []}], :seon.schema/doc "Collapsed typed function-chain boundary A0 -> Ak with concrete seed=42 witness and Known-Set back-refs."} [:steps [:vector :qualified-symbol]] [:input-schema {:optional true} [:maybe :qualified-keyword]] [:output-schema {:optional true} [:maybe :qualified-keyword]] [:input-type {:optional true} [:maybe :any]] [:output-type {:optional true} [:maybe :any]] [:sample-in {:optional true} [:maybe :string]] [:sample-out {:optional true} [:maybe :string]] [:known-refs {:optional true} [:vector :map]] [:doc-atoms {:optional true} [:vector :map]]]
 
- :seon.health.fault/branch
- :keyword
-
- :seon.health.fault/class
- [:and {:seon.db/index true} :keyword]
-
- :seon.health.fault/entity
- [:map {:seon.db/attributes true, :seon.schema/context-policy :internal} [:seon.health.fault/id :seon.health.fault/id] [:seon.health.fault/class :seon.health.fault/class] [:seon.health.fault/severity {:optional true} :seon.health.fault/severity] [:seon.health.fault/proc {:optional true} :seon.health.fault/proc] [:seon.health.fault/ns {:optional true} :seon.health.fault/ns] [:seon.health.fault/subject {:optional true} :seon.health.fault/subject] [:seon.health.fault/message :seon.health.fault/message] [:seon.health.fault/branch {:optional true} :seon.health.fault/branch] [:seon.health.fault/resolved? {:optional true} :seon.health.fault/resolved?]]
-
- :seon.health.fault/id
- [:and {:seon.db/identity true, :seon.db/content-id true} :uuid]
-
- :seon.health.fault/message
- :string
-
- :seon.health.fault/ns
- [:and {:seon.db/index true} :symbol]
-
- :seon.health.fault/proc
- :keyword
-
- :seon.health.fault/resolved?
- :boolean
-
- :seon.health.fault/severity
- [:enum :error :warning]
-
- :seon.health.fault/subject
- [:and {:seon.db/index true} :string]
-
  :seon.health/agent-friction
  [:map {:gen/elements [{:agent :worker/demo, :branch :branch/demo, :evals 8, :turns 6, :max-turn 6, :max-tool-turns 32, :turn-overrun? false, :empty-code-turns 0, :prompt-tokens 42000, :completion-tokens 2400, :cache-hit-tokens 36000, :cache-miss-tokens 6000, :kv-cache-hit-pct 85.7, :prefix-hash-count 1, :prefix-busts 0, :eval-errors 0, :error-classes {}, :repeated-errors 0, :ooms 0, :cst-errors 0, :no-match-count 0, :test-failure-messages 0, :upstream-errors 0, :rogue-fs-count 0, :heavy-evals 0, :max-mb 18.4, :max-ms 42.1, :friction-score 0, :level :calm} {:agent :worker/hot, :branch :branch/hot, :evals 40, :turns 35, :max-turn 35, :max-tool-turns 32, :turn-overrun? true, :empty-code-turns 4, :prompt-tokens 120000, :completion-tokens 9000, :cache-hit-tokens 60000, :cache-miss-tokens 60000, :kv-cache-hit-pct 50.0, :prefix-hash-count 3, :prefix-busts 2, :eval-errors 5, :error-classes {:alloc-budget-overrun 2, :other 3}, :repeated-errors 2, :ooms 2, :cst-errors 1, :no-match-count 2, :test-failure-messages 1, :upstream-errors 1, :rogue-fs-count 1, :heavy-evals 3, :max-mb 260.0, :max-ms 6400.0, :friction-score 92, :level :hot}], :seon.schema/doc "Per-agent trace friction telemetry summary computed via indexed :avet :seon.agent.eval/agent reads."} [:agent :keyword] [:branch :keyword] [:evals [:int {:min 0}]] [:turns [:int {:min 0}]] [:max-turn [:int {:min 0}]] [:max-tool-turns [:int {:min 0}]] [:turn-overrun? :boolean] [:empty-code-turns [:int {:min 0}]] [:prompt-tokens [:int {:min 0}]] [:completion-tokens [:int {:min 0}]] [:cache-hit-tokens [:int {:min 0}]] [:cache-miss-tokens [:int {:min 0}]] [:kv-cache-hit-pct [:maybe number?]] [:prefix-hash-count [:int {:min 0}]] [:prefix-busts [:int {:min 0}]] [:eval-errors [:int {:min 0}]] [:error-classes [:map-of :keyword :int]] [:repeated-errors [:int {:min 0}]] [:ooms [:int {:min 0}]] [:cst-errors [:int {:min 0}]] [:no-match-count [:int {:min 0}]] [:test-failure-messages [:int {:min 0}]] [:upstream-errors [:int {:min 0}]] [:rogue-fs-count [:int {:min 0}]] [:heavy-evals [:int {:min 0}]] [:max-mb number?] [:max-ms number?] [:friction-score [:int {:min 0}]] [:level :seon.signal/level] [:merged? {:optional true} :boolean] [:ready? {:optional true} :boolean] [:delegated-calls {:optional true} [:int {:min 0}]] [:last-snippet {:optional true} [:maybe :string]] [:last-error {:optional true} [:maybe :string]]]
 
@@ -846,7 +750,7 @@
  [:map [:class :keyword] [:severity [:enum :error :warning]] [:subject :string] [:message :string] [:branch {:optional true} :keyword] [:var {:optional true} :qualified-symbol] [:ns {:optional true} :symbol] [:agent {:optional true} :keyword] [:kind {:optional true} [:enum :static :live]]]
 
  :seon.health/report
- [:map {:seon.render/hiccup seon.render.entities.work/render-health-report, :description "System health snapshot: derived structural violations, global failing tests, and open proc faults."} [:ok? :boolean] [:branch :keyword] [:counts [:map-of :keyword :int]] [:problems [:vector :seon.health/problem]]]
+ [:map {:seon.render/hiccup seon.render.entities.work/render-health-report, :seon.schema/doc "System health snapshot: derived structural violations, global failing tests, and open proc faults."} [:ok? :boolean] [:branch :keyword] [:counts [:map-of :keyword :int]] [:problems [:vector :seon.health/problem]]]
 
  :seon.media/base64
  :string
@@ -938,26 +842,23 @@
  :seon.schema/context-policy
  [:enum {:seon.schema/doc "Explicit policy for NASA schema->rule coverage (:default, :never, :internal)."} :default :never :internal]
 
- :seon.schema/declaration
- [:map {:description "Derived Datahike attribute map."} [:db/ident :qualified-keyword] [:db/valueType :keyword] [:db/cardinality :keyword] [:db/unique {:optional true} :keyword] [:db/index {:optional true} :boolean] [:db/isComponent {:optional true} :boolean] [:db/noHistory {:optional true} :boolean] [:db/contentId {:optional true} :boolean]]
-
  :seon.schema/doc
- [:string {:description "Human & agent documentation for this schema."}]
+ [:string {:seon.schema/doc "Human & agent documentation for this schema."}]
 
  :seon.schema/doc-refs
  [:set {:seon.db/to [:seon.code.doc/entity :seon.code.var/entity :seon.code.ns/entity :seon.schema/entity], :seon.db/index true, :seon.schema/doc "True :db.type/ref links to exact doc atoms and peer entities cited in :seon.schema/doc."} :seon.store/ref]
 
  :seon.schema/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-schema-detail, :description "First-class Malli schema entity stored in Datahike."} [:seon.schema/key :seon.schema/key] [:seon.schema/form :seon.schema/form] [:seon.schema/doc {:optional true} :seon.schema/doc] [:seon.schema/examples {:optional true} :seon.schema/examples] [:seon.schema/type {:optional true} :seon.schema/type] [:seon.schema/keys {:optional true} :seon.schema/keys] [:seon.schema/optional-keys {:optional true} :seon.schema/optional-keys] [:seon.schema/ref-targets {:optional true} :seon.schema/ref-targets] [:seon.schema/context-policy {:optional true} :seon.schema/context-policy] [:seon.schema/doc-refs {:optional true} :seon.schema/doc-refs]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-schema-detail, :seon.schema/doc "First-class Malli schema entity stored in Datahike."} [:seon.schema/key :seon.schema/key] [:seon.schema/form :seon.schema/form] [:seon.schema/doc {:optional true} :seon.schema/doc] [:seon.schema/examples {:optional true} :seon.schema/examples] [:seon.schema/type {:optional true} :seon.schema/type] [:seon.schema/keys {:optional true} :seon.schema/keys] [:seon.schema/optional-keys {:optional true} :seon.schema/optional-keys] [:seon.schema/ref-targets {:optional true} :seon.schema/ref-targets] [:seon.schema/context-policy {:optional true} :seon.schema/context-policy] [:seon.schema/doc-refs {:optional true} :seon.schema/doc-refs]]
 
  :seon.schema/examples
- [:vector {:max 4, :description "Explicit valid example values (real sampled attribute values or compact entity maps) for docs, context, and generators lacking a built-in gen."} :any]
+ [:vector {:max 4, :seon.schema/doc "Explicit valid example values (real sampled attribute values or compact entity maps) for docs, context, and generators lacking a built-in gen."} :any]
 
  :seon.schema/form
- [:any {:seon.db/storable true, :description "Malli schema form stored natively as plain Clojure data (:db.type/data).", :gen/elements [:int :string [:vector :keyword] [:double {:min 0.0}]]}]
+ [:any {:seon.db/storable true, :gen/elements [:int :string [:vector :keyword] [:double {:min 0.0}]], :seon.schema/doc "Malli schema form stored natively as plain Clojure data (:db.type/data)."}]
 
  :seon.schema/key
- [:and {:seon.db/identity true, :seon.db/content-id true, :description "Unique multi-segment qualified keyword naming a Malli schema."} :qualified-keyword]
+ [:and {:seon.db/identity true, :seon.db/content-id true, :seon.schema/doc "Unique multi-segment qualified keyword naming a Malli schema."} :qualified-keyword]
 
  :seon.schema/keys
  [:set {:seon.db/to [:seon.schema/entity], :seon.schema/doc "Required :map key refs extracted via malli.core/ast."} :seon.store/ref]
@@ -996,13 +897,13 @@
  [:map {:seon.schema/doc "Combined snapshot of all 5 ambient operational signals (flow, pressure, context, proof, health).", :gen/elements [{:pressure {:slow-renders 0, :frame-budget-ms 40.0, :level :calm, :summary "ticks 12.0% · mem 24.5% · frame 8.4ms", :eval-sample-count 16, :peak-mb 62.7, :frame-ms 8.4, :ticks-pct 12.0, :bytes-pct 24.5, :cap-mb 256.0}, :flow {:ready 1, :running 0, :waiting 2, :level :calm, :summary "0 running · 2 waiting · 1 ready", :active 3, :pulse? false, :blocked 0, :stalled 0}, :proof {:level :calm, :green 369, :failing 0, :unproved 0, :total-tests 369, :merge-ready? true, :branch :main, :summary "369 green · 0 fail · merge-ready"}, :level :calm, :tx 536874800, :context {:level :calm, :prefix-reuse-pct 89.5, :budget-util-pct 42.0, :eval-ok-pct 96.0, :prompt-tokens 120000, :cached-tokens 107400, :prefix-busts 0, :summary "KV 89.5% · budget 42.0% · ok 96.0%"}, :health {:level :calm, :ok? true, :errors 0, :warnings 2, :open-errors 0, :oversized-ns 0, :large-fns 12, :summary "healthy · 0 err · 2 warn · 0 oversized"}, :branch :main, :ms 1.2} {:pressure {:slow-renders 0, :frame-budget-ms 40.0, :level :warm, :summary "ticks 58.0% · mem 64.0% · frame 32.0ms", :eval-sample-count 16, :peak-mb 163.8, :frame-ms 32.0, :ticks-pct 58.0, :bytes-pct 64.0, :cap-mb 256.0}, :flow {:ready 0, :running 2, :waiting 1, :level :warm, :summary "2 running · 1 waiting · 1 stalled", :active 4, :pulse? true, :blocked 0, :stalled 1}, :proof {:level :warm, :green 350, :failing 0, :unproved 19, :total-tests 369, :merge-ready? false, :branch :branch/dev, :summary "350 green · 19 unproved"}, :level :warm, :tx 536874810, :context {:level :warm, :prefix-reuse-pct 68.0, :budget-util-pct 76.0, :eval-ok-pct 84.0, :prompt-tokens 80000, :cached-tokens 54400, :prefix-busts 1, :summary "KV 68.0% · budget 76.0% · 1 bust"}, :health {:level :warm, :ok? true, :errors 0, :warnings 6, :open-errors 1, :oversized-ns 0, :large-fns 20, :summary "healthy · 1 open · 6 warn · 0 oversized"}, :branch :branch/dev, :ms 2.1} {:pressure {:slow-renders 2, :frame-budget-ms 40.0, :level :hot, :summary "ticks 92.0% · mem 88.5% · 2 slow frames", :eval-sample-count 16, :peak-mb 226.5, :frame-ms 125.0, :ticks-pct 92.0, :bytes-pct 88.5, :cap-mb 256.0}, :flow {:ready 0, :running 1, :waiting 0, :level :hot, :summary "1 running · 1 stalled · 2 blocked", :active 4, :pulse? true, :blocked 2, :stalled 1}, :proof {:level :hot, :green 367, :failing 2, :unproved 0, :total-tests 369, :merge-ready? false, :branch :branch/dev, :summary "367 green · 2 failing"}, :level :hot, :tx 536874820, :context {:level :hot, :prefix-reuse-pct 41.0, :budget-util-pct 94.0, :eval-ok-pct 62.0, :prompt-tokens 50000, :cached-tokens 20500, :prefix-busts 3, :summary "KV 41.0% · budget 94.0% · 3 busts"}, :health {:level :hot, :ok? false, :errors 2, :warnings 8, :open-errors 2, :oversized-ns 1, :large-fns 22, :summary "2 errors · 2 open · 1 oversized ns"}, :branch :branch/dev, :ms 3.4}]} [:level :seon.signal/level] [:branch :keyword] [:tx :int] [:ms number?] [:flow :seon.signal/flow] [:pressure :seon.signal/pressure] [:context :seon.signal/context] [:proof :seon.signal/proof] [:health :seon.signal/health]]
 
  :seon.store/branch
- [:keyword {:description "Datahike branch identifier (`:main` or `:branch/*`)."}]
+ [:keyword {:seon.schema/doc "Datahike branch identifier (`:main` or `:branch/*`)."}]
 
  :seon.store/point
- [:map {:description "Immutable coordinate addressing any Datahike state across branches and time."} [:commit :uuid] [:tx :int] [:branch :seon.store/branch]]
+ [:map {:seon.schema/doc "Immutable coordinate addressing any Datahike state across branches and time."} [:commit :uuid] [:tx :int] [:branch :seon.store/branch]]
 
  :seon.store/ref
- [:or {:description "A Datahike reference: entity id, tempid, lookup ref, or nested entity map."} :int [:string {:min 1}] [:tuple :qualified-keyword :any] [:map [:db/id :int]]]
+ [:or {:seon.schema/doc "A Datahike reference: entity id, tempid, lookup ref, or nested entity map."} :int [:string {:min 1}] [:tuple :qualified-keyword :any] [:map [:db/id :int]]]
 
  :seon.summary/agent
  [:and {:seon.db/index true, :seon.schema/doc "Author agent keyword (e.g. :agent/root or :agent/chronicler)."} :keyword]
@@ -1062,7 +963,7 @@
  :boolean
 
  :seon.task/entity
- [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-task-full} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?] [:seon.task/template? {:optional true} :seon.task/template?] [:seon.task/template {:optional true} :seon.task/template] [:seon.task/owner {:optional true} :seon.task/owner] [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/summary {:optional true} :seon.task/summary] [:seon.task/curated {:optional true} :seon.task/curated] [:seon.task/test-vars {:optional true} :seon.task/test-vars] [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/refs {:optional true} :seon.task/refs] [:seon.task/ref-order {:optional true} :seon.task/ref-order]]
+ [:map {:seon.db/attributes true, :seon.render/hiccup seon.render.entities/render-task-full, :seon.schema/doc "First-class task entity driving agent scope, DAG prerequisites (:seon.task/needs), verification tests, and merge gates."} [:seon.task/id :seon.task/id] [:seon.task/scope {:optional true} :seon.task/scope] [:seon.task/title :seon.task/title] [:seon.task/plan {:optional true} :seon.task/plan] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/tests {:optional true} :seon.task/tests] [:seon.task/done? {:optional true} :seon.task/done?] [:seon.task/template? {:optional true} :seon.task/template?] [:seon.task/template {:optional true} :seon.task/template] [:seon.task/owner {:optional true} :seon.task/owner] [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/summary {:optional true} :seon.task/summary] [:seon.task/curated {:optional true} :seon.task/curated] [:seon.task/test-vars {:optional true} :seon.task/test-vars] [:seon.task/refs {:optional true} :seon.task/refs] [:seon.task/ref-order {:optional true} :seon.task/ref-order]]
 
  :seon.task/id
  [:and {:seon.db/identity true, :seon.db/content-id true} :qualified-keyword]
@@ -1078,9 +979,6 @@
 
  :seon.task/plan
  :string
-
- :seon.task/proofs
- [:set {:seon.db/to [:seon.code.var/entity], :seon.schema/doc "True :db.type/ref test var entities that prove this task complete."} :seon.store/ref]
 
  :seon.task/ref-order
  [:vector {:gen/elements [[] [[:seon.code.doc/id "docs/render.md#sec"]]], :seon.schema/doc "Ordered lookup-refs matching appearance order in :seon.task/plan for coherent doc-atom assembly."} :any]
@@ -1118,11 +1016,8 @@
  :seon.test.run/cached
  [:int {:seon.db/no-history? true}]
 
- :seon.test.run/commit
- [:uuid {:seon.db/no-history? true}]
-
  :seon.test.run/entity
- [:map {:seon.db/attributes true, :seon.schema/context-policy :internal} [:seon.test.run/branch :seon.test.run/branch] [:seon.test.run/commit {:optional true} :seon.test.run/commit] [:seon.test.run/agent {:optional true} :seon.test.run/agent] [:seon.test.run/pass? :seon.test.run/pass?] [:seon.test.run/failed-digests {:optional true} :seon.test.run/failed-digests] [:seon.test.run/ran {:optional true} :seon.test.run/ran] [:seon.test.run/cached {:optional true} :seon.test.run/cached]]
+ [:map {:seon.db/attributes true, :seon.schema/context-policy :internal, :seon.schema/doc "Latest reach-selected test run summary per Datahike branch (:seon.test.run/branch)."} [:seon.test.run/branch :seon.test.run/branch] [:seon.test.run/agent {:optional true} :seon.test.run/agent] [:seon.test.run/pass? :seon.test.run/pass?] [:seon.test.run/failed-digests {:optional true} :seon.test.run/failed-digests] [:seon.test.run/ran {:optional true} :seon.test.run/ran] [:seon.test.run/cached {:optional true} :seon.test.run/cached]]
 
  :seon.test.run/failed-digests
  [:set {:seon.db/no-history? true} [:string {:min 8}]]
@@ -1161,16 +1056,13 @@
  [:and {:seon.db/to [:seon.code.var/entity], :seon.db/no-history? true, :seon.schema/doc "True :db.type/ref link from a test verdict to its :seon.code.var/entity."} :seon.store/ref]
 
  :seon.test/verdict
- [:map {:seon.db/attributes true} [:seon.test/digest :seon.test/digest] [:seon.test/var :seon.test/var] [:seon.test/kind {:optional true} :seon.test/kind] [:seon.test/pass? :seon.test/pass?] [:seon.test/ms :seon.test/ms] [:seon.test/ticks {:optional true} :seon.test/ticks] [:seon.test/bytes {:optional true} :seon.test/bytes] [:seon.test/report :seon.test/report] [:seon.test/var-ref {:optional true} :seon.test/var-ref]]
+ [:map {:seon.db/attributes true, :seon.schema/doc "Content-addressed test/generative verdict keyed by Merkle reach digest (:seon.test/digest)."} [:seon.test/digest :seon.test/digest] [:seon.test/var :seon.test/var] [:seon.test/kind {:optional true} :seon.test/kind] [:seon.test/pass? :seon.test/pass?] [:seon.test/ms :seon.test/ms] [:seon.test/ticks {:optional true} :seon.test/ticks] [:seon.test/bytes {:optional true} :seon.test/bytes] [:seon.test/report :seon.test/report] [:seon.test/var-ref {:optional true} :seon.test/var-ref]]
 
  :seon.tx/agent
  [:keyword {:seon.db/index true, :seon.schema/doc "Agent keyword id responsible for this Datahike transaction."}]
 
  :seon.tx/branch
  [:keyword {:seon.db/index true, :seon.schema/doc "Branch keyword on which this Datahike transaction occurred."}]
-
- :seon.tx/eval
- [:uuid {:seon.db/index true, :seon.schema/doc "Eval UUID responsible for this Datahike transaction."}]
 
  :seon.tx/merged
  [:keyword {:seon.db/index true, :seon.schema/doc "Source branch keyword merged into :main by this transaction."}]
@@ -1208,23 +1100,17 @@
  :seon.ui.status/updated-ms
  [:and {:seon.db/index true, :gen/elements [1700000000000 1700000005000], :seon.schema/doc "Epoch milliseconds when this live visual status was last updated."} :int [:>= 0]]
 
- :seon.ui/avail-w
- [:and :int [:>= 80] [:<= 10000]]
-
  :seon.ui/hiccup
  [:any {:gen/elements [[:div "ok"] [:span {:class "badge"} "live"]], :seon.schema/doc "Standard Hiccup vector rendered into HTML or Markdown."}]
 
  :seon.ui/min-width
  [:and :int [:>= 0] [:<= 10000]]
 
- :seon.ui/slot
- [:enum :header :sidebar :main :inspector :modal :wire]
-
  :seon.user/as-of-tx
  :int
 
  :seon.user/entity
- [:map {:seon.db/attributes true, :description "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar, expanded tree, theme, live viewport dimensions, inspector ref/trail, lab prefs & Datahike time-travel tx.", :gen/elements [{:seon.user/inspect-ref [:seon.code.var/name seon.main/start-flow-instance!], :seon.user/view-mode :canvas, :seon.user/sidebar-open? false, :seon.user/theme :auto, :seon.user/viewport-w 1280, :seon.user/id :user/default, :seon.user/lab-prefs {}, :seon.user/inspect-trail [], :seon.user/viewport-h 820}], :seon.schema/context-policy :internal} [:seon.user/id :seon.user/id] [:seon.user/viewing {:optional true} :seon.user/viewing] [:seon.user/view-mode {:optional true} :seon.user/view-mode] [:seon.user/sidebar-open? {:optional true} :seon.user/sidebar-open?] [:seon.user/expanded-agents {:optional true} :seon.user/expanded-agents] [:seon.user/selected-branch {:optional true} :seon.user/selected-branch] [:seon.user/as-of-tx {:optional true} :seon.user/as-of-tx] [:seon.user/theme {:optional true} :seon.user/theme] [:seon.user/viewport-w {:optional true} :seon.user/viewport-w] [:seon.user/viewport-h {:optional true} :seon.user/viewport-h] [:seon.user/inspect-ref {:optional true} :seon.user/inspect-ref] [:seon.user/inspect-trail {:optional true} :seon.user/inspect-trail] [:seon.user/lab-prefs {:optional true} :seon.user/lab-prefs] [:seon.user/expert-mode? {:optional true} :seon.user/expert-mode?]]
+ [:map {:seon.db/attributes true, :gen/elements [{:seon.user/inspect-ref [:seon.code.var/name seon.main/start-flow-instance!], :seon.user/view-mode :canvas, :seon.user/sidebar-open? false, :seon.user/theme :auto, :seon.user/viewport-w 1280, :seon.user/id :user/default, :seon.user/lab-prefs {}, :seon.user/inspect-trail [], :seon.user/viewport-h 820}], :seon.schema/context-policy :internal, :seon.schema/doc "Persistent inside-out user viewport state: which agent is viewed, mode, sidebar, expanded tree, theme, live viewport dimensions, inspector ref/trail, lab prefs & Datahike time-travel tx."} [:seon.user/id :seon.user/id] [:seon.user/viewing {:optional true} :seon.user/viewing] [:seon.user/view-mode {:optional true} :seon.user/view-mode] [:seon.user/sidebar-open? {:optional true} :seon.user/sidebar-open?] [:seon.user/expanded-agents {:optional true} :seon.user/expanded-agents] [:seon.user/selected-branch {:optional true} :seon.user/selected-branch] [:seon.user/as-of-tx {:optional true} :seon.user/as-of-tx] [:seon.user/theme {:optional true} :seon.user/theme] [:seon.user/viewport-w {:optional true} :seon.user/viewport-w] [:seon.user/viewport-h {:optional true} :seon.user/viewport-h] [:seon.user/inspect-ref {:optional true} :seon.user/inspect-ref] [:seon.user/inspect-trail {:optional true} :seon.user/inspect-trail] [:seon.user/lab-prefs {:optional true} :seon.user/lab-prefs] [:seon.user/expert-mode? {:optional true} :seon.user/expert-mode?]]
 
  :seon.user/expanded-agents
  [:set :keyword]
@@ -1269,7 +1155,7 @@
  bytes?
 
  :seon.vector/entity
- [:map {:seon.db/attributes true, :seon.schema/doc "Stored Matryoshka embedding vector entity (f16 full + int8 coarse) keyed by :seon.vector/of.", :seon.schema/context-policy :internal} [:seon.vector/of :seon.vector/of] [:seon.vector/model :seon.vector/model] [:seon.vector/text :seon.vector/text] [:seon.vector/f16 :seon.vector/f16] [:seon.vector/coarse :seon.vector/coarse] [:seon.vector/tokens {:optional true} :seon.vector/tokens]]
+ [:map {:seon.db/attributes true, :seon.schema/doc "Stored Matryoshka embedding vector entity (f16 full + int8 coarse) keyed by :seon.vector/of.", :seon.schema/context-policy :internal} [:seon.vector/of :seon.vector/of] [:seon.vector/model :seon.vector/model] [:seon.vector/text :seon.vector/text] [:seon.vector/f16 :seon.vector/f16] [:seon.vector/coarse :seon.vector/coarse]]
 
  :seon.vector/f16
  bytes?
@@ -1283,23 +1169,5 @@
  :seon.vector/text
  :string
 
- :seon.vector/tokens
- :int
-
- :seon.view/max-items
- [:and {:seon.schema/doc "Positive cap on rendered items in a view collection."} pos-int?]
-
- :seon.view/mode
- [:enum {:seon.schema/doc "View audience mode: :human (browser HTML) or :agent (compact wire text)."} :human :agent]
-
- :seon.view/target
- [:enum {:seon.schema/doc "Target surface for context and view projection."} :canvas :workspace :debug :wire :any]
-
  :seon.view/token-budget
- [:and {:seon.schema/doc "Positive token budget cap for projected context."} pos-int?]
-
- :seon.web/call
- [:sequential {:min 1, :description "Normal Clojure call form `(fn-sym & args)` invoked via `POST /call`."} :any]
-
- :seon.web/tab
- [:enum :flow :program :schemas :branches :agents]}
+ [:and {:seon.schema/doc "Positive token budget cap for projected context."} pos-int?]}

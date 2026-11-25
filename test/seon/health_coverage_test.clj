@@ -365,16 +365,12 @@
           (is (= :seon.task/test-vars (:via-attr hit)))
           (is (= :open (:status hit))))
         (d/transact conn
-          {:tx-data [{:seon.ctx.miss/id miss-id-1 :seon.ctx.miss/agent :agent/miss-probe :seon.ctx.miss/turn 1
-                      :seon.ctx.miss/ref [:seon.code.var/name 'seon.miss.ns/hidden-fn]
-                      :seon.ctx.miss/schema :seon.code.var/entity :seon.ctx.miss/hop 2
-                      :seon.ctx.miss/via-attr :seon.task/test-vars :seon.ctx.miss/status :open}
-                     {:seon.ctx.miss/id miss-id-2 :seon.ctx.miss/agent :agent/miss-probe :seon.ctx.miss/turn 2
-                      :seon.ctx.miss/ref [:seon.schema/key :seon.task/entity]
-                      :seon.ctx.miss/schema :seon.schema/entity :seon.ctx.miss/hop 1
-                      :seon.ctx.miss/via-attr :seon.agent/tasks :seon.ctx.miss/status :open}]})
+          {:tx-data [{:seon.agent.eval/id (hasch/uuid [:miss-eval 2])
+                      :seon.agent.eval/agent :agent/miss-probe :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0
+                      :seon.agent.eval/code "(user/source 'seon.miss.ns/hidden-fn)"
+                      :seon.agent.eval/value "\"(defn hidden-fn [] 1)\""}]})
         (let [misses2 (cov/detect-trace-misses @conn)]
-          (is (= 2 (count misses2)) "Deduplicates by [:agent :missed-ref] while merging persisted open misses"))))))
+          (is (= 1 (count (filter #(= :agent/miss-probe (:agent %)) misses2))) "Deduplicates repeated live trace misses by [:agent :missed-ref]"))))))
 
 (deftest warm-coverage-report-speed-and-corpus-attach-test
   (testing "Warm static coverage-report is strictly < 16ms and {:include-corpus? true} attaches corpus + ablation onto rule-atlas"

@@ -462,3 +462,50 @@
       (let [pr (seon.bench.cluster/run-parallel-trial! {:tasks []})]
         (is (true? (:ok? pr)))
         (is (= 0 (:count pr)))))))
+
+(deftest wave4-data-model-malli-docs-semantic-recall-and-btree-ns-test
+  (testing "Wave 4: render-schema-detail renders examples, widened schema regex & scoped-without-task recall, semantic near recall, and B+-tree ns-children enrichment"
+    ;; 1. render-schema-detail renders :seon.schema/examples
+    (let [ren (requiring-resolve 'seon.render.entities/render-schema-detail)
+          h (:seon.ui/hiccup (ren {:seon.schema/entity {:seon.schema/key :seon.demo/ex :seon.schema/type :map
+                                                        :seon.schema/form [:map [:a :int]] :seon.schema/doc "Demo."
+                                                        :seon.schema/examples [{:a 42}]}}))]
+      (is (clojure.string/includes? (pr-str h) "{:a 42}") "render-schema-detail must display :seon.schema/examples"))
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (concat
+                                   (code/file-import-tx @conn "src/demo/tree.clj" "(ns demo.tree)\n(defn root-fn [] :ok)\n" false)
+                                   (code/file-import-tx @conn "src/demo/tree/child.clj" "(ns demo.tree.child)\n(defn leaf-fn \"Computes paused status.\" [x] x)\n" false)
+                                   [{:seon.task/id :task/child-work :seon.task/title "Fix child" :seon.task/scope 'demo.tree.child :seon.task/done? false}
+                                    {:seon.agent/id :ns/demo.tree.child :seon.agent/branch :main :seon.agent/scope 'demo.tree.child
+                                     :seon.agent/goal "Inspect :seon.agent/paused? behavior for paused status"}
+                                    {:seon.task/id :task/sem-only :seon.task/title "Unrelated lexical words" :seon.task/plan "Zebra quartz" :seon.task/done? false}
+                                    {:seon.agent/id :w/sem :seon.agent/branch :main :seon.agent/tasks #{[:seon.task/id :task/sem-only]}}])})
+      ;; 2. B+-tree ns-children enrichment includes child var-count, open-tasks, and specialist
+      (let [rlinks (requiring-resolve 'seon.render.links/enrich-entity-params)
+            ep (rlinks @conn {:seon.code.ns/name 'demo.tree})
+            kids (:seon.ui/ns-children ep)]
+        (is (= 1 (count kids)))
+        (is (= 'demo.tree.child (:seon.code.ns/name (first kids))))
+        (is (= 1 (:var-count (first kids))))
+        (is (= 1 (:open-tasks (first kids))))
+        (is (= :ns/demo.tree.child (:specialist (first kids)))))
+      ;; 3. Scoped specialist WITHOUT a task entity still gets Branch-1 recall + widened :seon.agent/paused? schema regex + doc scoring!
+      (let [cgraph (requiring-resolve 'seon.ctx.graph/goal-lexical-rows)
+            rows (cgraph @conn @conn :ns/demo.tree.child)
+            eids (set (map first rows))
+            leaf-e (:e (first (d/datoms @conn :avet :seon.code.var/name 'demo.tree.child/leaf-fn)))
+            paused-e (:e (first (d/datoms @conn :avet :seon.schema/key :seon.agent/paused?)))]
+        (is (contains? eids leaf-e) "Scoped specialist without task entity must recall matching scope var via doc score")
+        (is (contains? eids paused-e) "Widened regex must recall ?-suffixed schema :seon.agent/paused?"))
+      ;; 4. Stored EmbeddingGemma-style vector triggers O(1) C-SIMD seon.vector/near recall in Branch 2
+      (let [svec-pack (requiring-resolve 'seon.vector/pack)
+            v-unit (into [1.0] (repeat 127 0.0))
+            t-eid (:e (first (d/datoms @conn :avet :seon.task/id :task/sem-only)))
+            leaf-e (:e (first (d/datoms @conn :avet :seon.code.var/name 'demo.tree.child/leaf-fn)))
+            packed (svec-pack v-unit 128)]
+        (d/transact conn {:tx-data [(assoc packed :seon.vector/of t-eid :seon.vector/model "test" :seon.vector/text "t")
+                                    (assoc packed :seon.vector/of leaf-e :seon.vector/model "test" :seon.vector/text "v")]})
+        (let [cgraph (requiring-resolve 'seon.ctx.graph/goal-lexical-rows)
+              rows (cgraph @conn @conn :w/sem)
+              eids (set (map first rows))]
+          (is (contains? eids leaf-e) "Unscoped task with stored vector must recall matching var via seon.vector/near"))))))

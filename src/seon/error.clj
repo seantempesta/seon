@@ -121,9 +121,7 @@
    :seon.error/agent-ref [store-ref?]
    :seon.error/blame [#{:input-contract :output-contract :exception :test-assertion}]
    :seon.error/var-ref [store-ref?]
-   :seon.error/schema-ref [store-ref?]
-   :seon.error/call-chain [#(and (vector? %) (every? qualified-symbol? %))]
-   :seon.error/input-sample [string?]})
+   :seon.error/schema-ref [store-ref?]})
 
 (defn error-tx
   "Validated `:seon.error/*` entity constructor."

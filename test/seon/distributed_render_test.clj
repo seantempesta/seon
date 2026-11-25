@@ -178,12 +178,12 @@
      :seon.code.var/doc "Compact chip renderer for a var entity with full contract metadata."
      :seon.code.var/arglists [['input]]
      :seon.code.var/private? false :seon.code.var/macro? false :seon.code.var/test? false
-     :seon.code.var/platform-test? false :seon.code.var/flow-edge? false
+     :seon.code.var/flow-edge? false
      :seon.code.var/schema [:=> [:cat [:map [:seon.code.var/entity :seon.code.var/entity]]]
                             [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
      :seon.code.var/ticks-budget 500000
      :seon.code.var/bytes-budget 262144
-     :seon.code.var/big-o "O(1)"
+     
      :seon.code.var/refs #{'clojure.core/str}}
     :seon.code.form/src "(defn render-var-chip [{v :seon.code.var/entity}] {:seon.ui/hiccup [:span (str (:seon.code.var/name v))]})"}
 
@@ -297,7 +297,7 @@
                                  :seon.code.var/private? false
                                  :seon.code.var/macro? false
                                  :seon.code.var/test? false
-                                 :seon.code.var/platform-test? false
+                                 
                                  :seon.code.var/flow-edge? false
                                  :seon.code.var/schema (:malli/schema m)}
                                 nil #{})))

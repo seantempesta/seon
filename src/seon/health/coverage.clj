@@ -417,7 +417,7 @@
   ([db opts]
    (let [inc-a? (not (false? (:include-atlas? opts))) inc-c? (boolean (:include-corpus? opts))
          use-c? (not (false? (:use-cache? opts))) csig (when use-c? (diff/code-db-sig db)) rsig (when use-c? (rules/rules-db-sig db))
-         mc (when (and use-c? db ((db-schema db) :seon.ctx.miss/status)) (count (d/datoms db :avet :seon.ctx.miss/status :open)))
+         mc 0
          base (if (and csig rsig)
                 (let [full (refresh-browser-boxes (store/lru-get! coverage-report-cache 16 [(store/store-id db) csig rsig mc] #(compute-coverage-report db true)))]
                   (if inc-a? full (with-meta (dissoc full :rule-atlas) {:seon/schema :seon.health/coverage})))

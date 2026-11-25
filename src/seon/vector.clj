@@ -340,11 +340,10 @@
      (keep (fn [i]
              (let [it (nth iv i) v (nth vv i) tok (when (and tv (< i (count tv))) (nth tv i))]
                (when (and (:eid it) (seq v))
-                 (cond-> (assoc (pack v)
-                                :seon.vector/of (:eid it)
-                                :seon.vector/model cur-model
-                                :seon.vector/text (str (or (:digest it) "")))
-                   (integer? tok) (assoc :seon.vector/tokens (long tok))))))
+                 (assoc (pack v)
+                 :seon.vector/of (:eid it)
+                 :seon.vector/model cur-model
+                 :seon.vector/text (str (or (:digest it) ""))))))
            (range n)))))
 
 (defn ^:seon.flow/edge write-frame!

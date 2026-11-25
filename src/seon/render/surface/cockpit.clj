@@ -78,18 +78,7 @@
       (if ck (store/lru-get! tuner-diff-cache 16 ck run*) (run*)))))
 
 (defn- pull-empirical-misses [main-db]
-  (let [dh (when main-db (db-schema main-db))]
-    (if-not (and dh (or (dh :seon.ctx.miss/id) (dh :seon.ctx/miss)))
-      []
-      (let [attr (if (dh :seon.ctx.miss/id) :seon.ctx.miss/id :seon.ctx/miss)
-            pat (quote [:seon.ctx.miss/id :seon.ctx.miss/agent :seon.ctx.miss/turn
-                        :seon.ctx.miss/ref :seon.ctx.miss/schema :seon.ctx.miss/hop
-                        :seon.ctx.miss/via-attr :seon.ctx.miss/status])]
-        (->> (d/datoms main-db :aevt attr)
-             (take 24)
-             (map #(d/pull main-db pat (:e %)))
-             (remove #(= :fixed (:seon.ctx.miss/status %)))
-             vec)))))
+  [])
 
 (defn discover-tuning-sessions
   "Discovers active/recent Pause-and-Fork Context Tuning sessions purely from `:seon.agent/forked-from`

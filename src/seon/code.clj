@@ -596,9 +596,8 @@
                   latest (store/head conn br)]
               (when (and latest (not= (d/commit-id @conn) (d/commit-id latest)))
                 (store/adopt-head! conn latest))))
-          (binding [store/*tx-meta* (cond-> {:seon.tx/agent (or agent-id :repl)
-                                             :seon.tx/branch (get-in @conn [:config :branch] :main)}
-                                      (:eval-id res) (assoc :seon.tx/eval (:eval-id res)))]
+          (binding [store/*tx-meta* {:seon.tx/agent (or agent-id :repl)
+                                    :seon.tx/branch (get-in @conn [:config :branch] :main)}]
             (d/transact conn {:tx-data (:tx-data res)}))))
         (recur (inc idx)
                (:final-ns res cur-ns)

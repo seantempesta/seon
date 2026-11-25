@@ -114,7 +114,7 @@
               doc-in-e (:e (first (d/datoms db1 :avet :seon.code.doc/id "docs/spec.md#input-shape")))
               doc-f1-e (:e (first (d/datoms db1 :avet :seon.code.doc/id "docs/spec.md#step-one")))]
           (d/transact conn {:tx-data [{:seon.task/id :task/demo-chain :seon.task/title "Fix chain" :seon.task/done? false
-                                       :seon.task/scope 'demo.chain :seon.task/proofs #{proof-e}}
+                                       :seon.task/scope 'demo.chain :seon.task/test-vars #{proof-e}}
                                       {:seon.agent/id :agent/chain-worker :seon.agent/branch :branch/chain
                                        :seon.agent/tasks #{[:seon.task/id :task/demo-chain]}}]})
           (let [rows (cgraph/proof-backward-rows @conn @conn :agent/chain-worker)
@@ -205,7 +205,7 @@
                                                         "(ns demo.cache-test (:require [clojure.test :refer [deftest is]]))\n(deftest cache-proof-test (is (= 1 2)))\n" false)})
         (let [pe (:e (first (d/datoms @conn :avet :seon.code.var/name 'demo.cache-test/cache-proof-test)))]
           (d/transact conn {:tx-data [{:seon.task/id :task/rough-goal
-                                       :seon.task/proofs #{pe}
+                                       :seon.task/test-vars #{pe}
                                        :seon.task/refs #{pe}
                                        :seon.task/plan "Make `demo.cache-test/cache-proof-test` pass."}]})
           (let [g1 (gate/evaluate-agent-gate @conn @conn :refine/worker-1)]
@@ -446,7 +446,7 @@
             _ (d/transact conn {:tx-data [{:seon.task/id :demo/pv-task :seon.task/title "Add headings" :seon.task/scope 'demo.pv
                                            :seon.task/plan "Add hiccup->headings matching hiccup->text." :seon.task/done? false
                                            :seon.task/tests #{'demo.pv-test/headings-proof-test}
-                                           :seon.task/proofs #{[:seon.code.var/name 'demo.pv-test/headings-proof-test]}}
+                                           :seon.task/test-vars #{[:seon.code.var/name 'demo.pv-test/headings-proof-test]}}
                                           {:seon.agent/id :worker/pv :seon.agent/branch :branch/pv :seon.agent/scope 'demo.pv
                                            :seon.agent/tasks #{[:seon.task/id :demo/pv-task]}}
                                           {:seon.agent/id :tune/pv :seon.agent/branch :branch/tune-pv :seon.agent/scope 'seon.ctx

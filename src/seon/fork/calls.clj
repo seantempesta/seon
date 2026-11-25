@@ -396,13 +396,9 @@
                          (vec (remove #(or (contains? rm %) (contains? rm (normalize-pin-ref %))) p)))))
         prefs0 (if (map? (:seon.agent/context-prefs cur)) (:seon.agent/context-prefs cur) {})
         pref-patch (when (map? tune)
-                     (let [{:keys [recent-data-limit max-vars-shown max-schemas-shown extra-namespaces extra-schemas]} tune]
-                       (cond-> {}
-                         (integer? recent-data-limit) (assoc :recent-data-limit (long recent-data-limit))
-                         (integer? max-vars-shown)    (assoc :max-vars-shown (long max-vars-shown))
-                         (integer? max-schemas-shown) (assoc :max-schemas-shown (long max-schemas-shown))
-                         (contains? tune :extra-namespaces) (assoc :extra-namespaces (mapv #(if (string? %) (symbol %) %) extra-namespaces))
-                         (contains? tune :extra-schemas) (assoc :extra-schemas (vec extra-schemas)))))
+                     (let [{:keys [extra-namespaces]} tune]
+                     (cond-> {}
+                       (contains? tune :extra-namespaces) (assoc :extra-namespaces (mapv #(if (string? %) (symbol %) %) extra-namespaces)))))
         prefs1 (if (seq pref-patch) (merge prefs0 pref-patch) prefs0)
         pat (:pattern tune)
         patch (cond-> {}

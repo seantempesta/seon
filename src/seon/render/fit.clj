@@ -408,7 +408,7 @@
         slot-b (when (= :html (:target o)) (resolve-slot-budget o))
         avail-w (long (or (:avail-w slot-b) (fmeas/safe-long (:avail-w o) 10000)))
         browser-boxes (when (map? (:browser-boxes o)) (:browser-boxes o))
-        extra-ctx (cond-> {} (:slot o) (assoc :seon.ui/slot (:slot o)) (:avail-w slot-b) (assoc :seon.ui/avail-w (:avail-w slot-b)))
+        extra-ctx {}
         fb-map (:fallback-renderers o) main-db (:main-db o)
         reg-info (let [r-db (cached-registry-info db)
                        r-m (when (and main-db (not= main-db db)) (cached-registry-info main-db))]
@@ -448,11 +448,8 @@
        r-opts (cond-> (select-keys o [:turn])
                 (or (:weights o) (nil? (:turn o))) (assoc :weights (or (:weights o) (read-rank-weights db))))
        ranked (rank-candidates projections r-opts)
-       mi (when (and (integer? (:max-items o)) (pos? (long (:max-items o)))) (max 24 (* 2 (long (:max-items o)))))
-       [head tail] (if (and mi (> (count ranked) mi)) [(vec (take mi ranked)) (vec (drop mi ranked))] [ranked []])
-       with-cands (populate-candidates db head o)
-       res (upgrade-ladder with-cands o)]
-   (if (seq tail) (update res :dropped into tail) res))))
+       with-cands (populate-candidates db ranked o)]
+   (upgrade-ladder with-cands o))))
 
 (defn explain-candidates
   "Explains ranking signals, modifiers, provenance, and EVERY rendered variation + selection/skip reason."

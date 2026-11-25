@@ -75,6 +75,8 @@
      (mk-fix base
        [(ns* 'seon.sit.cache)
         (vr* {:name 'seon.sit.cache/invalidate-cache :ns 'seon.sit.cache :doc "Invalidates LRU."})
+        (ns* 'seon.sit.other)
+        (vr* {:name 'seon.sit.other/unrelated-noise :ns 'seon.sit.other :doc "Unrelated weather forecast."})
         (dc* {:id "docs/sit-caching.md#lru-invalidation" :path "docs/sit-caching.md" :heading "## LRU" :body "Commit keys."})
         (tk* {:id :sit/vague-task :title "Fix stale LRU cache invalidation" :plan "Fix stale LRU."})
         (ag* {:id :sit/vague-agent :branch :branch/sit-vague :goal "Fix stale LRU cache invalidation" :tasks #{[:seon.task/id :sit/vague-task]}})])
@@ -90,6 +92,8 @@
         (vr* {:name 'seon.sit.core/compute :ns 'seon.sit.core :form "seon.sit.core/compute" :input #{[:seon.schema/key :seon.task/entity]} :output #{[:seon.schema/key :seon.code.var/entity]}})
         (vr* {:name 'seon.sit.api/handler :ns 'seon.sit.api :refs #{'seon.sit.core/compute} :calls #{[:seon.code.var/name 'seon.sit.core/compute]}})
         (vr* {:name 'seon.sit.core-test/compute-test :ns 'seon.sit.core-test :test? true :refs #{'seon.sit.core/compute} :calls #{[:seon.code.var/name 'seon.sit.core/compute]}})
+        (ns* 'seon.sit.other)
+        (vr* {:name 'seon.sit.other/unrelated-noise :ns 'seon.sit.other :doc "Unrelated."})
         (ag* {:id :sit/editor :branch :branch/sit-editor :scope 'seon.sit.core :goal "Update compute"})]
        [(fm* {:key "seon.sit.core/compute" :ns 'seon.sit.core :hash "c1" :src "(defn compute [t] (assoc t :ok true))"})])
      :sit/concept-doc-teaching
@@ -165,11 +169,13 @@
   [{:id :sit/scoped-task :title "Scoped task + prereq + scope + pin" :focus-ref [:seon.agent/id :sit/scoped-agent] :target :wire
     :expected-present [[:seon.task/id :sit/main-task] [:seon.task/id :sit/prereq] [:seon.code.ns/name 'seon.sit.alpha] [:seon.code.var/name 'seon.sit.alpha/entry]]}
    {:id :sit/vague-request :title "Vague 1-sentence goal, zero scope/files" :focus-ref [:seon.agent/id :sit/vague-agent] :target :wire
-    :expected-present [[:seon.task/id :sit/vague-task] [:seon.code.doc/id "docs/sit-caching.md#lru-invalidation"] [:seon.code.var/name 'seon.sit.cache/invalidate-cache]]}
+   :expected-present [[:seon.task/id :sit/vague-task] [:seon.code.doc/id "docs/sit-caching.md#lru-invalidation"] [:seon.code.var/name 'seon.sit.cache/invalidate-cache]]
+   :expected-absent [[:seon.code.var/name 'seon.sit.other/unrelated-noise]]}
    {:id :sit/forked-review :title "Forked review targeting paused parent (zero repeat)" :focus-ref [:seon.agent/id :sit/reviewer] :target :wire :check :forked-review
     :expected-present [[:seon.agent/id :sit/worker] [:seon.task/id :sit/worker-task]]}
    {:id :sit/active-code-neighborhood :title "Branch-edited var + I/O schema + caller + test" :focus-ref [:seon.agent/id :sit/editor] :target :wire
-    :expected-present [[:seon.code.var/name 'seon.sit.core/compute] [:seon.schema/key :seon.task/entity] [:seon.code.var/name 'seon.sit.api/handler] [:seon.code.var/name 'seon.sit.core-test/compute-test]]}
+   :expected-present [[:seon.code.var/name 'seon.sit.core/compute] [:seon.schema/key :seon.task/entity] [:seon.code.var/name 'seon.sit.api/handler] [:seon.code.var/name 'seon.sit.core-test/compute-test]]
+   :expected-absent [[:seon.code.var/name 'seon.sit.other/unrelated-noise]]}
    {:id :sit/concept-doc-teaching :title "Touching canvas/schema surfaces referencing doc once" :focus-ref [:seon.agent/id :sit/doc-agent] :target :wire :check :doc-once
     :expected-present [[:seon.code.doc/id "docs/sit-canvas.md#canvas-guide"]]}
    {:id :sit/visual-ui-authoring :title "Authoring :seon.ui/hiccup renderer sees siblings" :focus-ref [:seon.agent/id :sit/ui-author] :target :wire
@@ -340,14 +346,7 @@
                     :when ref] ref)))))))
 
 (defn- open-persisted-misses [db]
-  (if-not (and db ((db-schema db) :seon.ctx.miss/status)) []
-      (mapv (fn [dt]
-              (let [{:seon.ctx.miss/keys [id agent turn ref schema hop via-attr status]}
-                    (d/pull db '[:seon.ctx.miss/id :seon.ctx.miss/agent :seon.ctx.miss/turn :seon.ctx.miss/ref
-                                 :seon.ctx.miss/schema :seon.ctx.miss/hop :seon.ctx.miss/via-attr :seon.ctx.miss/status] (:e dt))]
-                {:id id :agent agent :turn (long (or turn 0)) :missed-ref ref :schema schema
-                 :hop (long (or hop 1)) :via-attr via-attr :status (or status :open)}))
-            (d/datoms db :avet :seon.ctx.miss/status :open))))
+  [])
 
 (defn ^:seon.flow/edge detect-trace-misses
   "Scans recent bounded evals for manual lookup calls on 1-2 hop neighbors not projected into context."

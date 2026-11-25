@@ -91,9 +91,9 @@
         nf (fn [x d] (if (number? x) (let [v (double x)] (if (and (== v v) (not (Double/isInfinite v))) (max 0.0 (min 5.0 v)) (double d))) (double d)))
         cl (fn [x lo hi d] (if (number? x) (let [v (double x)] (if (and (== v v) (not (Double/isInfinite v))) (max (long lo) (min (long hi) (long (Math/round v)))) (long d))) (long d)))]
     {:target (if (= :html (:target p)) :html :wire)
-     :token-budget (cl (:token-budget p) 100 64000 2400)
+     :token-budget (cl (:token-budget p) 100 64000 16000)
      :avail-w (cl (:avail-w p) 240 2400 960)
-     :strategy (if (= :depth-first (:strategy p)) :depth-first :breadth-first)
+     :strategy (if (= :breadth-first (:strategy p)) :breadth-first :depth-first)
      :weight-preset preset
      :weights {:urgency (nf (:urgency wi) (:urgency bw)) :recency (nf (:recency wi) (:recency bw))
                :convergence (nf (or (:convergence wi) (:touches wi)) (:convergence bw))
