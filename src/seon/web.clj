@@ -124,7 +124,7 @@
           "<script>" sticky-scroll-js "</script>"
           "<script>" viewport-sync-js "</script><script>" css/hovercard-js "</script><script>" css/url-sync-js "</script>"
           "</head><body>"
-          "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking: false, statusOpen: false, aggRate: ''}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking ? 'open' : 'closed'\" data-status=\"closed\" data-attr:data-status=\"$statusOpen ? 'open' : 'closed'\">"
+          "<div id=\"seon-app\" class=\"app-shell\" data-signals=\"{showThinking:false,statusOpen:false,aggRate:''}\" data-thinking=\"closed\" data-attr:data-thinking=\"$showThinking?'open':'closed'\" data-status=\"closed\" data-attr:data-status=\"$statusOpen?'open':'closed'\">"
           header
           "<div class=\"app-body\">"
           sidebar
@@ -136,7 +136,7 @@
           "</div>"
           stream
           "</div></div>"
-          "<div style=\"display:none\" data-init=\"@get('/events', {retry: 'always', retryMaxCount: Infinity, openWhenHidden: true})\"></div>"
+          "<div hidden data-init=\"@get('/events',{filterSignals:{include:/^$/},retry:'always',retryMaxCount:Infinity,openWhenHidden:true})\"></div>"
           "<div id=\"seon-hovercard\" popover=\"hint\" role=\"tooltip\" class=\"hovercard\"></div></body></html>"))))
 
 (defn ^:seon.flow/edge start-http-listener!
