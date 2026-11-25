@@ -5,7 +5,9 @@
             [seon.store :as store :refer [db-schema]]
             [seon.render.text :refer [round1]]
             [seon.fork.calls :as fcalls]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [seon.render.fit :as fit]
+            [seon.schema :as schema]))
 
 (defn parse-listening-port
   "Extracts the bound localhost integer port from a Seon startup log line, or nil."
@@ -299,8 +301,8 @@
   {:malli/schema [:=> [:cat [:map [:timeout-ms :int] [:agent-res [:maybe :map]] [:test-res [:maybe :map]]
                              [:merge-res [:maybe :map]] [:ag-snap [:maybe :map]] [:final-trace [:maybe :map]]
                              [:health-res [:maybe :map]] [:halted-not-merged? :boolean]
-                             [:task {:optional true} [:maybe :map]]]] [:maybe :string]] :cost/ticks 15000000}
-  [{:keys [timeout-ms agent-res test-res merge-res ag-snap final-trace health-res halted-not-merged? task]}]
+                             [:task {:optional true} [:maybe :map]] [:verify-res {:optional true} [:maybe :map]]]] [:maybe :string]] :cost/ticks 15000000}
+  [{:keys [timeout-ms agent-res test-res merge-res ag-snap final-trace health-res halted-not-merged? task verify-res]}]
   (let [min-delegated (long (or (:min-delegated-calls task) 0))
         settled-calls (settled-call-count final-trace)]
     (or (when (= :timeout (get-in agent-res [:wait :error]))
@@ -321,86 +323,120 @@
           (str "delegated-calls-short: " settled-calls "/" min-delegated " settled"))
         (when (and (:chat-agent task) (clojure.string/blank? (str (or (:last-reply final-trace) ""))))
           "chat-agent produced empty reply")
-        (when (not (:ok? health-res))
+        (when (and verify-res (false? (:ok? verify-res)))
+          (str "verify-failed: " (:reason verify-res)))
+        (when (and health-res (not (:ok? health-res)))
           (str "health-err: " (or (:error health-res) (pr-str (take 2 (filter #(= :error (:severity %)) (:problems health-res)))))))
         (:last-error final-trace))))
 
+(defn- loose-map-return? [sch]
+  (let [one? (fn [s] (and (vector? s) (= :=> (first s))
+                          (let [r (last s)]
+                            (or (= :map r) (= [:maybe :map] r)))))]
+    (or (one? sch)
+        (and (vector? sch) (= :function (first sch)) (some one? (rest sch))))))
+
+(defn- has-host-arg? [sch]
+  (boolean (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
+                 (tree-seq coll? seq sch))))
+
 (defn sample-random-tasks
-  "Deterministically samples `n` diverse real tasks directly from live Datahike `db` (using `seed`) across
-   3 pools (loose `:map` return contracts, entity schemas needing renderers, and pure namespace helpers)
-   in O(V + S) indexed reads (<15 MB) so context-tuning never overfits to a fixed prompt set."
+  "Deterministically samples `n` diverse, verified, unrigged real tasks live from Datahike `db` (using `seed`)
+   across 3 non-vacuous pools (pure loose-return contracts, namespaces with pure defns, and under-rendered schemas)
+   each carrying a serializable `:verify-spec`."
   {:malli/schema [:=> [:cat :seon.host/db [:? [:maybe :map]]] [:vector :map]]
-   :cost/ticks 15000000}
+   :cost/ticks 25000000}
   ([db] (sample-random-tasks db nil))
   ([db opts]
    (let [o (if (map? opts) opts {})
          n (max 1 (long (or (:n o) 4)))
          seed (long (or (:seed o) 42))
          timeout-ms (long (or (:timeout-ms o) 240000))
+         dh (db-schema db)
          det-shuffle (fn [xs] (vec (sort-by #(hash [seed (:id %)]) xs)))
+         eav1 (fn [e a] (when (dh a) (:v (first (d/datoms db :eavt e a)))))
          loose-vars
-         (when (and ((db-schema db) :seon.code.var/name) ((db-schema db) :seon.code.var/schema))
+         (when (and (dh :seon.code.var/name) (dh :seon.code.var/schema))
            (->> (d/datoms db :aevt :seon.code.var/schema)
                 (keep (fn [dt]
-                        (let [e (:e dt)
-                              sch (:v dt)
-                              vnm (:v (first (d/datoms db :eavt e :seon.code.var/name)))
-                              vns (:v (first (d/datoms db :eavt e :seon.code.var/ns)))
-                              priv? (:v (first (d/datoms db :eavt e :seon.code.var/private?)))]
-                          (when (and (qualified-symbol? vnm) (symbol? vns) (not priv?)
+                        (let [e (:e dt) sch (:v dt)
+                              vnm (eav1 e :seon.code.var/name)
+                              vns (eav1 e :seon.code.var/ns)
+                              priv? (eav1 e :seon.code.var/private?)
+                              edge? (eav1 e :seon.code.var/flow-edge?)
+                              mac? (eav1 e :seon.code.var/macro?)
+                              tst? (eav1 e :seon.code.var/test?)]
+                          (when (and (qualified-symbol? vnm) (symbol? vns)
+                                     (not priv?) (not edge?) (not mac?) (not tst?)
                                      (str/starts-with? (name vns) "seon.")
                                      (not (str/ends-with? (name vns) "-test"))
-                                     (vector? sch) (= :=> (first sch))
-                                     (= :map (last sch)))
-                            (let [tid (keyword "rand" (str "contract-" (str/replace (name vnm) #"[^a-zA-Z0-9-]" "-")))]
+                                     (not (contains? '#{seon.main seon.fork} vns))
+                                     (not (str/ends-with? (name vnm) "!"))
+                                     (loose-map-return? sch)
+                                     (not (has-host-arg? sch)))
+                            (let [slug (str/replace (str (subs (name vns) 5) "-" (name vnm)) #"[^a-zA-Z0-9-]" "-")
+                                  tid (keyword "rand" (str "contract-" slug))]
                               {:id tid :category :schema-proof
                                :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                               :verify-spec {:kind :tighten-return-contract :var vnm}
                                :task {:id tid :scope vns
-                                      :title (str "Tighten loose :map return contract on " vnm)
-                                      :plan (str "The public function `" vnm "` currently declares a loose `:map` return schema. Inspect its actual returned keys and callers, replace the loose `:map` return contract with explicit Malli keys (or a named schema), and verify all tests and seed=42 generative checks pass.")}})))))
-                (sort-by #(str (:id %)))
-                vec))
+                                      :title (str "Specify exact return contract for " vnm)
+                                      :plan (str "Inspect `" vnm "`, its returned data shape, and its callers in `" vns "`. Tighten its return specification so its actual returned keys are explicit and verified by automated checks.")}})))))
+                (sort-by #(str (:id %))) vec))
+         pure-nss
+         (when (and (dh :seon.code.var/ns) (dh :seon.code.var/arglists))
+           (into #{}
+                 (keep (fn [dt]
+                         (let [e (:e dt) vns (:v dt)
+                               vnm (eav1 e :seon.code.var/name)]
+                           (when (and (symbol? vns) (qualified-symbol? vnm)
+                                      (str/starts-with? (name vns) "seon.")
+                                      (not (str/ends-with? (name vns) "-test"))
+                                      (not (contains? '#{seon.main seon.fork} vns))
+                                      (not (eav1 e :seon.code.var/private?))
+                                      (not (eav1 e :seon.code.var/macro?))
+                                      (not (eav1 e :seon.code.var/test?))
+                                      (not (eav1 e :seon.code.var/flow-edge?))
+                                      (not (str/ends-with? (name vnm) "!"))
+                                      (seq (eav1 e :seon.code.var/arglists)))
+                             vns))))
+                 (d/datoms db :aevt :seon.code.var/ns)))
          ns-tasks
-         (when ((db-schema db) :seon.code.ns/name)
-           (->> (d/datoms db :aevt :seon.code.ns/name)
-                (keep (fn [dt]
-                        (let [nsym (:v dt)]
-                          (when (and (symbol? nsym)
-                                     (str/starts-with? (name nsym) "seon.")
-                                     (not (str/ends-with? (name nsym) "-test"))
-                                     (not (contains? '#{seon.main seon.fork} nsym)))
-                            (let [tid (keyword "rand" (str "audit-" (str/replace (name nsym) "." "-")))]
-                              {:id tid :category :ns-contract-audit
-                               :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
-                               :task {:id tid :scope nsym
-                                      :title (str "Add Malli :examples and unit test coverage for a pure helper in " nsym)
-                                      :plan (str "Inspect the pure public functions in `" nsym "`, pick one lacking concrete Malli `:examples` or direct unit test coverage, add crisp `:examples` to its `:malli/schema` plus a focused unit test verifying normal and edge cases, and prove everything green.")}})))))
-                (sort-by #(str (:id %)))
-                vec))
+         (when (seq pure-nss)
+           (->> pure-nss
+                (mapv (fn [nsym]
+                        (let [tid (keyword "rand" (str "audit-" (str/replace (name nsym) "." "-")))]
+                          {:id tid :category :ns-contract-audit
+                           :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                           :verify-spec {:kind :ns-test-or-example :ns nsym}
+                           :task {:id tid :scope nsym
+                                  :title (str "Add behavioral unit tests and contract examples in " nsym)
+                                  :plan (str "Review the pure public functions in `" nsym "`, pick one lacking direct unit tests or concrete contract examples, add edge-case tests and examples for it, and prove everything green.")}})))
+                (sort-by #(str (:id %))) vec))
          schema-tasks
-         (when ((db-schema db) :seon.schema/key)
+         (when (dh :seon.schema/key)
            (->> (d/datoms db :aevt :seon.schema/key)
                 (keep (fn [dt]
-                        (let [sk (:v dt)]
+                        (let [e (:e dt) sk (:v dt)
+                              pol (eav1 e :seon.schema/context-policy)
+                              rcnt (count (fit/discover-renderers db sk))]
                           (when (and (qualified-keyword? sk) (= "entity" (name sk))
-                                     (str/starts-with? (namespace sk) "seon."))
+                                     (str/starts-with? (namespace sk) "seon.")
+                                     (not (contains? #{:never :internal} pol))
+                                     (< rcnt 2))
                             (let [tid (keyword "rand" (str "render-" (str/replace (namespace sk) "." "-")))]
                               {:id tid :category :entity-renderers
                                :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                               :verify-spec {:kind :entity-renderers :schema sk :min-renderers 2}
                                :task {:id tid :scope 'seon.render.entities
-                                      :title (str "Verify/improve multi-footprint pure Hiccup renderers for " sk)
-                                      :plan (str "Check renderer coverage and footprint distinctness for `" sk "` using `(user/coverage)`. Ensure it has clean compact and detailed pure `:seon.ui/hiccup` renderers with `:malli/schema` and unit test coverage.")}})))))
-                (sort-by #(str (:id %)))
-                vec))
+                                      :title (str "Add compact and detailed renderers for " sk)
+                                      :plan (str "Inspect how `" sk "` is currently rendered across compact and detailed views. Ensure it has clean distinct compact and detailed renderers with unit tests proving both.")}})))))
+                (sort-by #(str (:id %))) vec))
          pools (filterv seq [(det-shuffle loose-vars) (det-shuffle ns-tasks) (det-shuffle schema-tasks)])]
-     (vec
-      (take n
-            (loop [ps pools acc []]
-              (if (or (>= (count acc) n) (empty? ps))
-                acc
-                (let [heads (keep first ps)
-                      tails (filterv seq (map rest ps))]
-                  (recur tails (into acc heads))))))))))
+     (vec (take n (loop [ps pools acc []]
+                    (if (or (>= (count acc) n) (empty? ps))
+                      acc
+                      (recur (filterv seq (map rest ps)) (into acc (keep first ps))))))))))
 
 (defn ^:seon.flow/edge repl-sample-random-tasks
   "REPL helper (`user/sample-random-tasks`): samples `n` diverse real tasks from live Datahike."
@@ -411,3 +447,55 @@
    (let [ctx (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)
          db (or (:db opts) (when-let [c (:conn ctx)] @c))]
      (if db (sample-random-tasks db opts) []))))
+
+(defn ^:seon.flow/edge verify-task-spec
+  "Evaluates a serializable `:verify-spec` map against post-merge `:main` `db`, returning `{:ok? bool :reason str}`."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] :map]
+   :cost/ticks 25000000}
+  [db spec]
+  (if-not (and db (map? spec) (:kind spec))
+    {:ok? true :kind :none}
+    (case (:kind spec)
+      :tighten-return-contract
+      (let [vsym (:var spec)
+            ve (:e (first (d/datoms db :avet :seon.code.var/name vsym)))
+            sch (when ve (:v (first (d/datoms db :eavt ve :seon.code.var/schema))))
+            still-loose? (or (nil? sch) (loose-map-return? sch))
+            stress (when (and (not still-loose?) (schema/generatable-function-schema? sch))
+                     (try (schema/stress-var db vsym {:samples 50 :seed 42}) (catch Throwable _ nil)))]
+        (cond
+          (nil? ve) {:ok? false :kind :tighten-return-contract :reason (str "Var not found: " vsym)}
+          still-loose? {:ok? false :kind :tighten-return-contract :reason (str vsym " still has loose return schema: " (pr-str sch))}
+          (and stress (false? (:ok? stress))) {:ok? false :kind :tighten-return-contract :reason (str "stress-var failed: " (:reason stress))}
+          :else {:ok? true :kind :tighten-return-contract :var vsym :schema sch}))
+
+      :ns-test-or-example
+      (let [nsym (:ns spec)
+            after-tx (long (or (:after-main-tx spec) 0))
+            ex-hits (for [dt (d/datoms db :avet :seon.code.var/ns nsym)
+                          :let [e (:e dt)
+                                sch-dt (first (d/datoms db :eavt e :seon.code.var/schema))]
+                          :when (and sch-dt (> (long (:tx sch-dt 0)) after-tx)
+                                     (str/includes? (pr-str (:v sch-dt)) ":examples"))]
+                      (:v (first (d/datoms db :eavt e :seon.code.var/name))))
+            test-hits (for [dt (d/datoms db :aevt :seon.code.var/test?)
+                            :when (and (true? (:v dt)) (> (long (:tx dt 0)) after-tx))
+                            :let [e (:e dt)
+                                  vns (:v (first (d/datoms db :eavt e :seon.code.var/ns)))
+                                  refs (map :v (d/datoms db :eavt e :seon.code.var/refs))]
+                            :when (or (= vns (symbol (str (name nsym) "-test")))
+                                      (some #(= (name nsym) (namespace %)) refs))]
+                        (:v (first (d/datoms db :eavt e :seon.code.var/name))))]
+        (if (or (seq ex-hits) (seq test-hits))
+          {:ok? true :kind :ns-test-or-example :ns nsym :examples (vec ex-hits) :tests (vec test-hits)}
+          {:ok? false :kind :ns-test-or-example :reason (str "No new unit test or contract examples recorded for " nsym " after tx " after-tx)}))
+
+      :entity-renderers
+      (let [sk (:schema spec)
+            min-r (long (or (:min-renderers spec) 2))
+            rends (fit/discover-renderers db sk)]
+        (if (>= (count rends) min-r)
+          {:ok? true :kind :entity-renderers :schema sk :count (count rends) :renderers (vec rends)}
+          {:ok? false :kind :entity-renderers :reason (str sk " has only " (count rends) " renderer(s), need >= " min-r)}))
+
+      {:ok? true :kind (:kind spec)})))

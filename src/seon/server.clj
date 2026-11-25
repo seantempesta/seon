@@ -19,7 +19,13 @@
             [seon.vector :as vec]
             [seon.vector.flow :as vflow]
             [seon.git.forks :as forks]
-            [seon.render.fit :as fit]))
+            [seon.render.fit :as fit]
+            [seon.agent :as sagent]
+            [seon.bench.helpers :as bhelpers]
+            [seon.health.corpus :as hcorpus]
+            [seon.health.coverage :as hcov]
+            [seon.task.gate :as tgate]
+            [seon.repl :as srepl]))
 
 (defn- reply! [ch val]
   (when ch
@@ -44,7 +50,7 @@
                        (into #{} (keep (fn [e] (:seon.agent/branch (d/pull db '[:seon.agent/branch] e)))) arch-eids))
                      #{})
       agents (->> all-ag-dts
-                  (keep #(reconciler/derive-agent-status db store {} #{} #{} (:v %)))
+                  (keep #(reconciler/derive-agent-status db store (or @sagent/live-status-snap {}) #{} #{} (:v %)))
                   (sort-by #(str (:id %)))
                   vec)
       active-agent-brs (into #{:db :main} (keep :branch) agents)
@@ -356,6 +362,62 @@
                      :explore-scope [:scope (explore-scope db (:ns req)) (str "Scope not found: " (:ns req))])]
     (reply! reply-ch (if v {:ok? true k v} {:ok? false :error miss}))))
 
+(defn- ^:seon.flow/edge handle-readonly-query-op! [conn op req reply-ch]
+  (let [mdb @conn
+        branch-db (fn [br] (if (and br (not= br :main) (contains? (d/branches conn) br)) (store/head conn br) mdb))]
+    (reply! reply-ch
+      (case op
+        :verify-task ((requiring-resolve 'seon.bench.helpers/verify-task-spec) mdb (:spec req))
+        :corpus ((requiring-resolve 'seon.repl/check-corpus) {:db (branch-db (:branch req)) :main-db mdb})
+        :coverage ((requiring-resolve 'seon.health.coverage/coverage-report) mdb (or (:opts req) {}))
+        :simulate-context
+        (let [aid (:agent-id req) br (:branch req) bdb (branch-db br)
+              sim ((requiring-resolve 'seon.repl/simulate-context) aid {:db bdb :main-db mdb :conn conn :wire? false})
+              ch (try (when (and br (not= br :main))
+                        (code/changed-form-ops conn (d/merge-base conn :main br) (d/commit-id bdb)))
+                      (catch Throwable _ {}))
+              load-rs (requiring-resolve 'seon.rule/load-rules)
+              mr (into #{} (map :seon.rule/id) (load-rs mdb))
+              brs (into #{} (map :seon.rule/id) (load-rs bdb))]
+          {:ok? true :selected-count (count (:selected sim)) :tokens (:tokens sim)
+           :diff-vs-main (:diff-vs-main sim) :selected-refs (mapv :ref (take 16 (:selected sim)))
+           :upserted-forms (vec (sort (keep :seon.code.form/key (:upserts ch))))
+           :new-rules (vec (sort (remove mr brs)))})
+        :agent-trace
+        (let [aid (:agent-id req)
+              ma (d/pull mdb '[:seon.agent/branch :seon.agent/paused? :seon.agent/merged-tx :seon.agent/tested-tx :seon.agent/fork-commit] [:seon.agent/id aid])
+              br (or (:branch req) (:seon.agent/branch ma) :main)
+              bdb (branch-db br)]
+          (if (:audit? req)
+            ((requiring-resolve 'seon.bench.helpers/trial-audit-summary) conn mdb aid (assoc (or (:opts req) {}) :branch br))
+            (let [evs (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
+                           (map #(d/pull bdb '[:seon.agent.eval/turn :seon.agent.eval/call-index :seon.agent.eval/intent :seon.agent.eval/code :seon.agent.eval/error :seon.agent.eval/thought :seon.agent.eval/ms] (:e %)))
+                           (sort-by (juxt #(long (or (:seon.agent.eval/turn %) 0)) #(long (or (:seon.agent.eval/call-index %) 0)))) vec)
+                  errs (filterv #(not (str/blank? (str (:seon.agent.eval/error %)))) evs)
+                  ed ((requiring-resolve 'seon.task.gate/branch-latest-edit-info) mdb bdb ma)
+                  turns (count (distinct (keep :seon.agent.eval/turn evs)))
+                  clip (fn [s n] (let [t (str (or s ""))] (if (> (count t) n) (str (subs t 0 n) "…") t)))]
+              {:ok? true :turns turns :evals (count evs) :errors (count errs) :has-edits? (boolean (:has-edits? ed))
+               :merged-tx (:seon.agent/merged-tx ma) :paused? (boolean (:seon.agent/paused? ma))
+               :max-tx (long (or (:max-tx bdb) 0)) :main-tx (long (or (:max-tx mdb) 0))
+               :trace (mapv (fn [e] (cond-> {:turn (:seon.agent.eval/turn e) :intent (:seon.agent.eval/intent e) :code (clip (:seon.agent.eval/code e) 220)}
+                                      (not (str/blank? (str (:seon.agent.eval/error e)))) (assoc :error (clip (:seon.agent.eval/error e) 220))
+                                      (and (str/blank? (str (:seon.agent.eval/code e))) (not (str/blank? (str (:seon.agent.eval/thought e))))) (assoc :thought (clip (:seon.agent.eval/thought e) 260)))) evs)})))
+        :bench-run
+        (let [which (or (:which req) :latest)]
+          (if-not (contains? (:schema mdb) :seon.bench.run/id)
+            {:ok? false :error :no-bench-schema}
+            {:ok? true :result
+             (cond
+               (uuid? which) (d/pull mdb '[*] [:seon.bench.run/id which])
+               (= :list which) (->> (d/datoms mdb :aevt :seon.bench.run/id)
+                                    (map #(d/pull mdb '[:seon.bench.run/id :seon.bench.run/title :seon.bench.run/status :seon.bench.run/passed :seon.bench.run/failed :seon.bench.run/total :seon.bench.run/started-ms :seon.bench.run/finished-ms] (:e %)))
+                                    (sort-by #(long (or (:seon.bench.run/started-ms %) 0)) >) (take 10) vec)
+               :else (let [lat (->> (d/datoms mdb :aevt :seon.bench.run/id)
+                                    (map #(d/pull mdb '[:db/id :seon.bench.run/started-ms] (:e %)))
+                                    (sort-by #(long (or (:seon.bench.run/started-ms %) 0)) >) first)]
+                       (when lat (d/pull mdb '[*] (:db/id lat)))))}))))))
+
 (defn server-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
   ([] {:params {:in-ch "External request channel `{:req map :reply-ch chan}`"
@@ -404,6 +466,9 @@
 
            (:explore-var :explore-schema :explore-scope)
            (do (handle-explore-op! @(:conn st) op req reply-ch) [st' nil])
+
+           (:verify-task :corpus :coverage :simulate-context :agent-trace :bench-run)
+           (do (handle-readonly-query-op! (:conn st) op req reply-ch) [st' nil])
 
            :health
            (do (reply! reply-ch (health/report @(:conn st)))

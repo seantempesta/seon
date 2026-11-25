@@ -493,11 +493,11 @@
         nil))))
 
 (defn op-timeout-ms
-  "Returns bounded `/op` server timeout in ms: honors caller `:timeout-ms` (clamped `1000..600000`), else `:test` 120s, `:eval`/`:merge` 60s, default 30s."
+  "Returns bounded `/op` timeout in ms: honors `:timeout-ms` (`1000..600000`), else `:test` 180s, `:switch-over`/`:push` 120s, `:eval`/`:merge` 90s, default 30s."
   {:malli/schema [:=> [:cat [:maybe :map]] pos-int?]
    :cost/ticks 50000}
   [op-req]
   (let [t (:timeout-ms op-req)]
     (long (if (and (number? t) (pos? t))
             (min 600000 (max 1000 (long t)))
-            (case (:op op-req) :test 120000 (:eval :merge) 60000 30000)))))
+            (case (:op op-req) :test 180000 (:switch-over :push) 120000 (:eval :merge) 90000 30000)))))

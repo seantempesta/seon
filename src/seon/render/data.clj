@@ -171,7 +171,6 @@
   (boolean (or (= :main (:seon.agent/read-branch ag)) (:seon.agent/router? ag))))
 
 (defn user-view-state
-  "Reads `:user/default` view, nav stack, inspector trail, and lab prefs."
   {:malli/schema [:=> [:cat :any [:? [:maybe :map]]] :map] :cost/ticks 5000000}
   ([db] (user-view-state db nil))
   ([db opts]

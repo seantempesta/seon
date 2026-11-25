@@ -367,10 +367,10 @@
                                     (when (and (qualified-keyword? aid) (not= "example" (namespace aid))
                                                (not (eav1 bdb (:e %) :seon.agent/archived?)))
                                       aid)))
-                           (take 16) vec))
+                           vec))
                det (mapcat
                     (fn [aid]
-                      (let [lks (->> (d/datoms bdb :avet :seon.agent.eval/agent aid) (take 8)
+                      (let [lks (->> (d/datoms bdb :avet :seon.agent.eval/agent aid)
                                      (mapcat (fn [dt] (let [c (eav1 bdb (:e dt) :seon.agent.eval/code)
                                                             t (long (or (eav1 bdb (:e dt) :seon.agent.eval/turn) 0))]
                                                         (for [ref (extract-lookup-refs c) :let [te (res-e ref)] :when te] [t ref te])))) vec)]

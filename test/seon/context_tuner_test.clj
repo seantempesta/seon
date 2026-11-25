@@ -401,3 +401,29 @@
         (is (some? tprev) "Tuner must get <target-context-preview> on Turn 0")
         (is (.contains ^String (:text tprev) "Boom fail") "Turn-0 preview must surface target recent failing evals")
         (is (nil? gprev) "Branch keyword :merge-target must never fabricate a ghost agent preview")))))
+
+(deftest wave2-honest-sampler-verify-spec-and-trial-outcome-test
+  (testing "sample-random-tasks excludes vacuous namespaces & already-rendered/impure targets, attaches :verify-spec, and trial-outcome enforces health + verify"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (concat
+                                   (code/file-import-tx @conn "src/seon/demo/constonly.clj" "(ns seon.demo.constonly)
+(def css \".a{}\")" false)
+                                   (code/file-import-tx @conn "src/seon/demo/pure.clj" "(ns seon.demo.pure)
+(defn loose-fn {:malli/schema [:=> [:cat :int] :map]} [x] {:a x})
+(defn ^:seon.flow/edge edge-fn! {:malli/schema [:=> [:cat :int] :map]} [x] {:a x})" false)
+                                   [{:seon.schema/key :seon.demo/entity :seon.schema/form [:map [:seon.demo/id :keyword]]}])})
+      (let [tasks (bhelpers/sample-random-tasks @conn {:n 10 :seed 42})
+            ids (set (map :id tasks))
+            scopes (set (map #(get-in % [:task :scope]) tasks))]
+        (is (not (contains? scopes 'seon.demo.constonly)) "0-defn constant namespace must be excluded")
+        (is (some #(= 'seon.demo.pure/loose-fn (get-in % [:verify-spec :var])) tasks) "Pure loose-return var must be sampled")
+        (is (not (some #(= 'seon.demo.pure/edge-fn! (get-in % [:verify-spec :var])) tasks)) "Impure edge! var must be excluded")
+        (is (every? #(map? (:verify-spec %)) tasks) "Every sampled task must carry a serializable :verify-spec")
+        (is (false? (:ok? (bhelpers/verify-task-spec @conn {:kind :tighten-return-contract :var 'seon.demo.pure/loose-fn}))))
+        (is (false? (:ok? (bhelpers/verify-task-spec @conn {:kind :entity-renderers :schema :seon.demo/entity :min-renderers 2})))))
+      (let [to (requiring-resolve 'seon.bench.cluster/trial-outcome)
+            base {:task {:merge? true} :ag-snap {:status :merged} :eval-res nil :agent-res {:wait {:ok? true}}
+                  :test-res {:ok? true} :merge-res {:ok? true}}]
+        (is (false? (:ok? (to (assoc base :health-res {:ok? false})))) "trial-outcome must reject unhealthy main")
+        (is (false? (:ok? (to (assoc base :health-res {:ok? true} :verify-res {:ok? false :reason "still loose"})))) "trial-outcome must reject failed verify-spec")
+        (is (true? (:ok? (to (assoc base :health-res {:ok? true} :verify-res {:ok? true})))))))))
