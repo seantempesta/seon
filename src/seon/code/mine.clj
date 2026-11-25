@@ -245,7 +245,7 @@
 (def ^:private excluded-dup-names
   #{"ns" "-main" "report" "render" "init" "start!" "stop!"
     "install-user-helpers!" "install-agent-helpers!" "install-repl-helpers!" "install-ctx-helpers!"
-    "handle-req" "handle-ipc" "handle-timer" "call!" "record-summary!" "resolve-doc-refs"})
+    "handle-req" "handle-ipc" "handle-timer" "call!" "record-summary!" "resolve-doc-refs" "reply!"})
 
 (defn- scan-hygiene-index [db]
 (let [sch (:schema db) foreign (static/foreign-nss db)
@@ -269,7 +269,7 @@
   #"(?:java\.io\.File\.|\(File\.|\(\.delete\b|ProcessBuilder\.|\(\.mkdirs\b)")
 
 (def ^:private default-hygiene-template-plan
-  "1. Inspect curated vars/namespaces, `user/callers`, and `user/tests-for`.\n2. Consolidate duplicates, migrate raw Java IO/process to `jolt.fs`/`jolt.process`, or split cleanly without breaking contracts.\n3. Prove `(user/run-tests!)` + `(user/health)` green, record `:summary`, then call `(user/ready!)`.")
+  "1. Inspect curated vars/namespaces, `user/callers`, and `user/tests-for`.\n2. Consolidate duplicates, migrate raw Java IO/process to `jolt.fs`/`jolt.process`, or split cleanly without breaking contracts.\n3. Prove `(user/run-tests!)` + `(user/health)` green, then reply concisely in Markdown (no tool calls) — Seon automatically tests and merges your branch.")
 
 (defn- mk-finding [kind slug scope title summary curated impact]
   {:id (keyword "hygiene" (normalize-hygiene-slug slug)) :kind kind :scope scope

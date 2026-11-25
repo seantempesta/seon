@@ -7,7 +7,11 @@
             [seon.store :as store :refer [db-schema]]
             [seon.signals.scoreboard :as scoreboard]
             [seon.store.query :as sq]
-            [seon.render.text :as rtext :refer [clamp-pct]]))
+            [seon.render.text :as rtext :refer [clamp-pct]]
+            [datahike.index.interface :as di]
+            [datahike.reads :as reads]
+            [seon.ctx.diff :as diff]
+            [clojure.core.cache :as cache]))
 
 (def ^:private level-rank {:calm 0 :warm 1 :hot 2})
 
@@ -312,15 +316,22 @@
 
 (defn all-signals
   "Computes all 5 ambient operational signals (flow, pressure, context, proof, health) cleanly in < 5 ms.
-   Cached per Datahike commit-id via `store/lru-get!` with transparent `datahike.reads` replay."
+   Delta-anchored per `[store-id branch]` via `d/changes` with transparent `datahike.reads` replay."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.signal/snapshot]
    :cost/ticks 15000000}
   [db]
-  (let [c-key (when (instance? datahike.db.DB db)
-                [(get-in db [:config :store :id])
-                 (get-in db [:config :branch] :main)
-                 (d/commit-id db)
-                 (:max-tx db)])
+  (let [watch #{:seon.agent/id :seon.agent/archived? :seon.agent/interactive? :seon.agent/awaiting
+                :seon.agent/paused? :seon.agent/waiting? :seon.agent/ready?
+                :seon.error/status :seon.error/agent :seon.error/severity :seon.error/kind
+                :seon.error/message :seon.error/source :seon.error/data
+                :seon.agent.eval/id :seon.agent.eval/agent :seon.agent.eval/turn :seon.agent.eval/ms
+                :seon.agent.eval/ticks :seon.agent.eval/bytes :seon.agent.eval/error
+                :seon.agent.eval/prefix-hash :seon.agent.eval/prompt-tokens
+                :seon.agent.eval/cache-hit-tokens :seon.agent.eval/cache-miss-tokens
+                :seon.test.run/branch :seon.test.run/pass? :seon.test.run/failed-digests
+                :seon.test.run/ran :seon.test.run/cached :seon.code.var/test?
+                :seon.config/key :seon.config/eval-ticks :seon.config/eval-bytes
+                :seon.bench.run/id :seon.bench.run/proxy-stats}
         compute
         (fn []
           (let [t0 (System/nanoTime)
@@ -334,21 +345,45 @@
                 lvl (worst-level [(:level flow) (:level pressure) (:level context) (:level proof) (:level health)])
                 ms (rtext/round1 (/ (double (- (System/nanoTime) t0)) 1000000.0))]
             (with-meta
-              {:level lvl
-               :branch (db-branch db)
-               :tx (db-tx db)
-               :ms ms
-               :flow flow
-               :pressure pressure
-               :context context
-               :proof proof
-               :health health}
-              {:seon/schema :seon.signal/snapshot})))]
+              {:level lvl :branch (db-branch db) :tx (db-tx db) :ms ms
+               :flow flow :pressure pressure :context context :proof proof :health health}
+              {:seon/schema :seon.signal/snapshot})))
+        live? (and (instance? datahike.db.DB db)
+                   (not (instance? datahike.db.AsOfDB db))
+                   (not (instance? datahike.db.HistoricalDB db)))
+        cur-cid (when live? (store/live-cid db))
+        sid (when live? (get-in db [:config :store :id]))
+        br (when live? (get-in db [:config :branch] :main))
+        mtx (long (or (:max-tx db) 0))
+        ak (when (and cur-cid sid br) [sid br])]
     (store/without-agent-eval-reads
-    (fn []
-      (if c-key
-        (store/lru-get! signals-snap-cache 16 c-key compute)
-        (compute))))))
+     (fn []
+       (let [outer di/*reads*]
+         (if-not ak
+           (compute)
+           (let [raw (get @signals-snap-cache ak)
+                 anc (if (and (map? raw) (contains? raw :seon.store/lru-val)) (:seon.store/lru-val raw) raw)
+                 unchanged? (when (and (map? anc) (:cid anc) (not= (:cid anc) cur-cid)
+                                       (diff/ancestor-within? db (:cid anc) cur-cid 16))
+                              (try
+                                (let [attrs (into watch (keep #(get-in db [:ident-ref-map %])) watch)]
+                                  (not-any? #(contains? attrs (:a %)) (d/changes db (:cid anc) cur-cid)))
+                                (catch Throwable _ false)))
+                 hit (cond
+                       (and (map? anc) (= cur-cid (:cid anc)) (= mtx (:max-tx anc))) anc
+                       unchanged? (let [snap' (assoc (:snap anc) :tx (db-tx db))
+                                        entry' (assoc anc :cid cur-cid :max-tx mtx :snap snap')]
+                                    (swap! signals-snap-cache cache/miss ak entry')
+                                    entry')
+                       :else nil)]
+             (if hit
+               (do (when (and outer (seq (:reads hit))) (swap! outer into (:reads hit)))
+                   (:snap hit))
+               (let [[snap rs] (if outer (reads/with-reads compute) [(compute) nil])
+                     entry {:cid cur-cid :max-tx mtx :snap snap :reads rs}]
+                 (swap! signals-snap-cache cache/miss ak entry)
+                 (when (and outer (seq rs)) (swap! outer into rs))
+                 snap)))))))))
 
 (defn- sig-action [sig-kind]
   (if (= :context sig-kind)

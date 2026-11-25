@@ -10,7 +10,8 @@
             [seon.render.links :as rlinks :refer [db-cache-sig]]
             [seon.schema.index :as six]
             [seon.store :as store]
-            [seon.render.text :as rtext]))
+            [seon.render.text :as rtext]
+            [seon.ctx.diff :as diff]))
 
 (def ^:private ignored-nss
   #{"clojure.core" "clojure.string" "clojure.set" "clojure.edn" "clojure.java.io" "clojure.test"
@@ -58,7 +59,7 @@
 (defn- cached-var-index [db]
   (if-not (and db (seq (db-schema db)))
     {:var-entries [] :by-simple-name {} :ns-by-name {}}
-    (if-let [sig (db-cache-sig db)]
+    (if-let [sig (or (diff/code-db-sig db) (db-cache-sig db))]
       (store/lru-get! var-index-cache 16 sig #(build-var-index db))
       (build-var-index db))))
 

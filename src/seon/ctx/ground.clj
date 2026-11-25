@@ -11,7 +11,8 @@
             [seon.vector :as vec]
             [seon.render.fit :as fit]
             [datahike.index.interface :as di]
-            [datahike.reads :as reads]))
+            [datahike.reads :as reads]
+            [clojure.core.cache :as cache]))
 
 (defn resolve-lookup-eid
   "Resolves an integer EID, `[:db/id eid]`, or `[attr val]` lookup ref against `branch-db` first, falling back to `main-db`."
@@ -144,7 +145,7 @@
                                                    (and (true? (:v pdt)) (>= (long (:tx pdt 0)) tx))))
                                                (d/datoms branch-db :avet :seon.test/var-ref vr)))]
                           (when (and vr dg (not cleared?)) dg))))
-                    (d/datoms branch-db :aevt :seon.test/pass?))))
+                    (if (get-in bdh [:seon.test/pass? :db/index]) (d/datoms branch-db :avet :seon.test/pass? false) (d/datoms branch-db :aevt :seon.test/pass?)))))
         []))))
 
 (defn merge-pull-patterns
@@ -371,20 +372,19 @@
             hit (cond
                   (and anc (= cur-cid (:cid anc)) (= mtx (:max-tx anc))) anc
                   unchanged? (let [p (assoc anc :cid cur-cid :max-tx mtx)]
-                               (swap! overview-anchor-cache assoc ak p) p)
+                               (swap! overview-anchor-cache cache/miss ak p) p)
                   :else nil)]
         (if hit
           (do (when (and outer (seq (:reads hit))) (swap! outer into (:reads hit)))
               (:rows hit))
           (let [[rows rs] (reads/with-reads compute)
                 entry {:cid cur-cid :max-tx mtx :rows rows :reads rs}]
-            (store/lru-get! overview-anchor-cache 16 ak (fn [] entry))
-            (swap! overview-anchor-cache assoc ak entry)
+            (swap! overview-anchor-cache cache/miss ak entry)
             (when (and outer (seq rs)) (swap! outer into rs))
             rows))))))
 
 (defn active-task-rows
-  "Zero-planner indexed rows `[task-eid prereq-eid-or-nil tx]` for `:rule.ctx/active-tasks`: collects focal agent's `:seon.agent/tasks` across `branch-db`/`main-db` and walks transitive `:seon.task/needs` prerequisites."
+  "Zero-planner indexed rows `[task-eid prereq-eid-or-nil tx]` for `:rule.ctx/active-tasks`: collects focal agent's `:seon.agent/tasks` (branch-overrides-main) and walks transitive `:seon.task/needs` across both DBs."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:vector [:tuple :int :any :int]]]
    :cost/ticks 5000000}
   [main-db branch-db agent-id]
@@ -392,36 +392,52 @@
     []
     (let [bdb (or branch-db main-db)
           mdb (or main-db branch-db)
-          same? (identical? mdb bdb)
+          same? (or (identical? mdb bdb) (let [ca (live-cid mdb) cb (live-cid bdb)] (and ca cb (= ca cb))))
+          pull-ag-tasks (fn [db]
+                          (when (and ((db-schema db) :seon.agent/id) ((db-schema db) :seon.agent/tasks))
+                            (when-let [ae (:e (first (d/datoms db :avet :seon.agent/id agent-id)))]
+                              (reduce (fn [m dt]
+                                        (let [te (:v dt) tx (long (:tx dt))]
+                                          (if (> tx (long (get m te -1))) (assoc m te tx) m)))
+                                      {} (d/datoms db :eavt ae :seon.agent/tasks)))))
+          b-exists? (boolean (and ((db-schema bdb) :seon.agent/id)
+                                  (first (d/datoms bdb :avet :seon.agent/id agent-id))))
+          b-tasks (when b-exists? (pull-ag-tasks bdb))
+          tasks (cond
+                  (seq b-tasks) b-tasks
+                  (and (not same?) (not b-exists?)) (or (pull-ag-tasks mdb) {})
+                  (not same?) (let [m-tasks (pull-ag-tasks mdb)]
+                                (if (and (empty? b-tasks)
+                                         (not (some #(and (= :seon.agent/tasks (:a %)) (not (:added %)))
+                                                    (when-let [ae (:e (first (d/datoms bdb :avet :seon.agent/id agent-id)))]
+                                                      (d/datoms (d/history bdb) :eavt ae :seon.agent/tasks)))))
+                                  (or m-tasks {})
+                                  {}))
+                  :else {})
           dbs (if same? [bdb] [bdb mdb])
-          tasks (reduce (fn [acc db]
-                          (if-let [ae (when ((db-schema db) :seon.agent/id)
-                                        (:e (first (d/datoms db :avet :seon.agent/id agent-id))))]
-                            (reduce (fn [m dt]
-                                      (let [te (:v dt) tx (long (:tx dt))]
-                                        (if (> tx (long (get m te -1))) (assoc m te tx) m)))
-                                    acc (when ((db-schema db) :seon.agent/tasks)
-                                          (d/datoms db :eavt ae :seon.agent/tasks)))
-                            acc))
-                        {} dbs)
-          need-db (if ((db-schema bdb) :seon.task/needs) bdb mdb)
-          has-needs? (and ((db-schema need-db) :seon.task/needs) ((db-schema need-db) :seon.task/id))
+          needs-of (fn [e]
+                     (distinct (mapcat (fn [db]
+                                         (when ((db-schema db) :seon.task/needs)
+                                           (map :v (d/datoms db :eavt e :seon.task/needs))))
+                                       dbs)))
+          resolve-tid (fn [tid]
+                        (when (keyword? tid)
+                          (some (fn [db]
+                                  (when ((db-schema db) :seon.task/id)
+                                    (:e (first (d/datoms db :avet :seon.task/id tid)))))
+                                dbs)))
           prereqs-of (fn [root-te]
-                       (if-not has-needs?
-                         []
-                         (loop [q (conj clojure.lang.PersistentQueue/EMPTY root-te)
-                                seen #{root-te}
-                                out []]
-                           (if-let [cur (peek q)]
-                             (let [q' (pop q)
-                                   nids (map :v (d/datoms need-db :eavt cur :seon.task/needs))
-                                   nxt (keep (fn [tid]
-                                               (when (keyword? tid)
-                                                 (when-let [pe (:e (first (d/datoms need-db :avet :seon.task/id tid)))]
-                                                   (when-not (contains? seen pe) pe))))
-                                             nids)]
-                               (recur (into q' nxt) (into seen nxt) (into out nxt)))
-                             out))))]
+                       (loop [q (conj clojure.lang.PersistentQueue/EMPTY root-te)
+                              seen #{root-te}
+                              out []]
+                         (if-let [cur (peek q)]
+                           (let [q' (pop q)
+                                 nxt (keep (fn [tid]
+                                             (when-let [pe (resolve-tid tid)]
+                                               (when-not (contains? seen pe) pe)))
+                                           (needs-of cur))]
+                             (recur (into q' nxt) (into seen nxt) (into out nxt)))
+                           out)))]
       (vec (mapcat (fn [[te tx]]
                      (let [ps (prereqs-of te)]
                        (if (seq ps)

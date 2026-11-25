@@ -260,14 +260,17 @@
    :cost/ticks 2000000}
   ([db] (load-rules db nil))
   ([db fallback-rules]
-   (let [compute (fn []
-                   (let [base (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules []))
-                         stored (if (and db (contains? (dsch db) :seon.rule/id)) (scan-stored-rules db) {})]
-                     (->> (vals (if (seq stored) stored base))
+   (let [has-stored? (boolean (and db (contains? (dsch db) :seon.rule/id)
+                                   (first (d/datoms db :aevt :seon.rule/id))))
+         compute (fn []
+                   (let [stored (if has-stored? (scan-stored-rules db) {})
+                         base (if (seq stored) stored (into {} (map (juxt :seon.rule/id identity)) (or fallback-rules [])))]
+                     (->> (vals base)
                           (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
                           vec)))
          rsig (when (and db (not (instance? datahike.db.AsOfDB db)) (not (instance? datahike.db.HistoricalDB db)))
-                (when-let [s (rules-db-sig db)] [s (hash fallback-rules)]))]
+                (when-let [s (rules-db-sig db)]
+                  [s (if has-stored? :stored (hash fallback-rules))]))]
      (if rsig (store/lru-get! rules-load-cache 16 rsig compute) (compute)))))
 
 (defn- branch-passing-run [db dh tx]
@@ -353,70 +356,6 @@
                             (apply d/q eff-q args))))
          [])))))
 
-(defn- step-one-rule [state r stratum dbs aid fref feid prev-state tx-datoms dirty-attrs recomputed skipped]
-  (let [rid (:seon.rule/id r) prev (get-in prev-state [:runs rid])
-        {:keys [wm-attrs db-keys uses-agent?] :as qm} (rq/query-meta (:seon.rule/query r))
-        wm-clean? (and prev (= (:rule-def prev) r)
-                       (or (not uses-agent?) (and (= aid (:agent-id prev-state)) (= fref (:focus-ref prev-state)) (= feid (:focus-eid prev-state))))
-                       (not (@dirty-attrs :*)) (not (wm-attrs :*)) (not (some @dirty-attrs wm-attrs)))
-        rel-dt (when wm-clean?
-                 (cond (nil? tx-datoms) nil (map? tx-datoms) (vec (mapcat #(get tx-datoms %) db-keys)) :else tx-datoms))
-        db-clean? (and wm-clean? (or (empty? db-keys) (and (some? rel-dt) (not (reads/reads-touched? (:reads-idx prev) rel-dt)))))]
-    (if db-clean?
-      (do (vswap! skipped inc)
-          (when-let [outer di/*reads*] (when (seq (:reads prev)) (swap! outer into (:reads prev))))
-          {:wm (if (seq (:asserted-facts prev)) (add-facts (:wm state) (:asserted-facts prev) {:rule rid :stratum stratum}) (:wm state))
-           :projections (if (seq (:projections prev)) (into (:projections state) (:projections prev)) (:projections state))
-           :runs (assoc (:runs state) rid (assoc prev :skipped? true))})
-      (let [wm (:wm state) old-f (or (:asserted-facts prev) #{}) miss? (rq/wm-req-miss? wm qm)
-            t0 (if miss? 0 (System/nanoTime))
-            [envs rs] (if miss? [[] #{}] (reads/with-reads #(eval-rule-query wm dbs aid r fref feid)))
-            {:keys [facts projections]} (if (seq envs) (instantiate-asserts envs (:seon.rule/assert r) rid stratum) {:facts #{} :projections []})
-            ridx (if (seq rs) (reads/reads-index rs) empty-reads-idx)
-            ms (if miss? 0.0 (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0))]
-        (vswap! recomputed inc)
-        (when (not= facts old-f)
-          (doseq [[_ a _] (set/union (set/difference facts old-f) (set/difference old-f facts))]
-            (vswap! dirty-attrs conj a)))
-        {:wm (if (seq facts) (add-facts wm facts {:rule rid :stratum stratum}) wm)
-         :projections (if (seq projections) (into (:projections state) projections) (:projections state))
-         :runs (assoc (:runs state) rid
-                      {:rule-id rid :rule-def r :stratum stratum :category (:seon.rule/category r :present)
-                       :fired (count envs) :asserted-count (count facts) :asserted-facts facts :projections projections
-                       :reads rs :reads-idx ridx :reads-by-db (if miss? {} (into {} (map (fn [k] [k ridx])) db-keys))
-                       :db-keys db-keys :uses-agent? uses-agent? :reads-count (count rs) :skipped? false :ms ms})}))))
-
-(defn step-rules
-  "Incrementally evaluates `rules` in stratum order via native Datahike `d/q` inside `datahike.reads/with-reads`."
-  {:malli/schema [:function
-                  [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any]] :map]
-                  [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any] [:maybe :keyword]] :map]]
-   :cost/ticks 20000000}
-  ([prev-state a2 a3 rules tx-datoms] (step-rules prev-state a2 a3 rules tx-datoms nil))
-  ([prev-state a2 a3 rules tx-datoms target]
-   (let [{:keys [base-wm dbs agent-id focus-ref focus-eid]} (normalize-step-args a2 a3)
-         active (filterv #(and (:seon.rule/enabled? % true) (rule-applies-to-target? % target)) rules)
-         by-stratum (group-by #(long (:seon.rule/stratum % 50)) active)
-         dirty-attrs (volatile! (initial-dirty-attrs prev-state base-wm active target))
-         recomputed (volatile! 0) skipped (volatile! 0)
-         final (reduce (fn [st stratum]
-                         (reduce (fn [st2 r]
-                                   (step-one-rule st2 r stratum dbs agent-id focus-ref focus-eid prev-state tx-datoms dirty-attrs recomputed skipped))
-                                 st (sort-by #(str (:seon.rule/id %)) (get by-stratum stratum))))
-                       {:wm base-wm :projections [] :runs {}}
-                       (sort (keys by-stratum)))]
-     (assoc final :base-facts (:facts base-wm) :agent-id agent-id :focus-ref focus-ref :focus-eid focus-eid
-            :target target :recomputed @recomputed :skipped @skipped))))
-
-(defn fire-rules
-  "Cold stratified rule evaluation convenience wrapper over `step-rules`."
-  {:malli/schema [:function
-                  [:=> [:cat :map :any [:vector :map]] :map]
-                  [:=> [:cat :map :any [:vector :map] [:maybe :keyword]] :map]]
-   :cost/ticks 20000000}
-  ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
-  ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))
-
 (defonce ^:private ^:seon.flow/edge edited-forms-cache (store/lru-cache 64))
 
 (defn ^:seon.flow/edge edited-form-eids
@@ -474,3 +413,73 @@
                 (if (and (integer? t) (> (long t) (long mx))) (long t) mx)))
             0 (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
     0))
+
+(def ^:dynamic *track-reads?*
+  "When false (and no outer `datahike.index.interface/*reads*` is active), `step-one-rule` evaluates `d/q` with Datahike's full query planner enabled."
+  true)
+
+(defn- step-one-rule [state r stratum dbs aid fref feid prev-state tx-datoms dirty-attrs recomputed skipped]
+  (let [rid (:seon.rule/id r) prev (get-in prev-state [:runs rid])
+        {:keys [wm-attrs db-keys uses-agent?] :as qm} (rq/query-meta (:seon.rule/query r))
+        wm-clean? (and prev (= (:rule-def prev) r)
+                       (or (not uses-agent?) (and (= aid (:agent-id prev-state)) (= fref (:focus-ref prev-state)) (= feid (:focus-eid prev-state))))
+                       (not (@dirty-attrs :*)) (not (wm-attrs :*)) (not (some @dirty-attrs wm-attrs)))
+        rel-dt (when wm-clean?
+                 (cond (nil? tx-datoms) nil (map? tx-datoms) (vec (mapcat #(get tx-datoms %) db-keys)) :else tx-datoms))
+        db-clean? (and wm-clean? (or (empty? db-keys) (and (some? rel-dt) (not (reads/reads-touched? (:reads-idx prev) rel-dt)))))]
+    (if db-clean?
+      (do (vswap! skipped inc)
+          (when-let [outer di/*reads*] (when (seq (:reads prev)) (swap! outer into (:reads prev))))
+          {:wm (if (seq (:asserted-facts prev)) (add-facts (:wm state) (:asserted-facts prev) {:rule rid :stratum stratum}) (:wm state))
+           :projections (if (seq (:projections prev)) (into (:projections state) (:projections prev)) (:projections state))
+           :runs (assoc (:runs state) rid (assoc prev :skipped? true))})
+      (let [wm (:wm state) old-f (or (:asserted-facts prev) #{}) miss? (rq/wm-req-miss? wm qm)
+            t0 (if miss? 0 (System/nanoTime))
+            [envs rs] (cond miss? [[] #{}]
+                              (or *track-reads?* di/*reads*) (reads/with-reads #(eval-rule-query wm dbs aid r fref feid))
+                              :else [(binding [dq/*disable-planner* true] (eval-rule-query wm dbs aid r fref feid)) #{}])
+            {:keys [facts projections]} (if (seq envs) (instantiate-asserts envs (:seon.rule/assert r) rid stratum) {:facts #{} :projections []})
+            ridx (if (seq rs) (reads/reads-index rs) empty-reads-idx)
+            ms (if miss? 0.0 (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0))]
+        (vswap! recomputed inc)
+        (when (not= facts old-f)
+          (doseq [[_ a _] (set/union (set/difference facts old-f) (set/difference old-f facts))]
+            (vswap! dirty-attrs conj a)))
+        {:wm (if (seq facts) (add-facts wm facts {:rule rid :stratum stratum}) wm)
+         :projections (if (seq projections) (into (:projections state) projections) (:projections state))
+         :runs (assoc (:runs state) rid
+                      {:rule-id rid :rule-def r :stratum stratum :category (:seon.rule/category r :present)
+                       :fired (count envs) :asserted-count (count facts) :asserted-facts facts :projections projections
+                       :reads rs :reads-idx ridx :reads-by-db (if miss? {} (into {} (map (fn [k] [k ridx])) db-keys))
+                       :db-keys db-keys :uses-agent? uses-agent? :reads-count (count rs) :skipped? false :ms ms})}))))
+
+(defn step-rules
+  "Incrementally evaluates `rules` in stratum order via native Datahike `d/q` inside `datahike.reads/with-reads`."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any]] :map]
+                  [:=> [:cat [:maybe :map] :map :any [:vector :map] [:maybe :any] [:maybe :keyword]] :map]]
+   :cost/ticks 20000000}
+  ([prev-state a2 a3 rules tx-datoms] (step-rules prev-state a2 a3 rules tx-datoms nil))
+  ([prev-state a2 a3 rules tx-datoms target]
+   (let [{:keys [base-wm dbs agent-id focus-ref focus-eid]} (normalize-step-args a2 a3)
+         active (filterv #(and (:seon.rule/enabled? % true) (rule-applies-to-target? % target)) rules)
+         by-stratum (group-by #(long (:seon.rule/stratum % 50)) active)
+         dirty-attrs (volatile! (initial-dirty-attrs prev-state base-wm active target))
+         recomputed (volatile! 0) skipped (volatile! 0)
+         final (reduce (fn [st stratum]
+                         (reduce (fn [st2 r]
+                                   (step-one-rule st2 r stratum dbs agent-id focus-ref focus-eid prev-state tx-datoms dirty-attrs recomputed skipped))
+                                 st (sort-by #(str (:seon.rule/id %)) (get by-stratum stratum))))
+                       {:wm base-wm :projections [] :runs {}}
+                       (sort (keys by-stratum)))]
+     (assoc final :base-facts (:facts base-wm) :agent-id agent-id :focus-ref focus-ref :focus-eid focus-eid
+            :target target :recomputed @recomputed :skipped @skipped))))
+
+(defn fire-rules
+  "Cold stratified rule evaluation convenience wrapper over `step-rules`."
+  {:malli/schema [:function
+                  [:=> [:cat :map :any [:vector :map]] :map]
+                  [:=> [:cat :map :any [:vector :map] [:maybe :keyword]] :map]]
+   :cost/ticks 20000000}
+  ([a1 a2 rules] (step-rules nil a1 a2 rules nil nil))
+  ([a1 a2 rules target] (step-rules nil a1 a2 rules nil target)))

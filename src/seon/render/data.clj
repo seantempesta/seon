@@ -172,45 +172,36 @@
 
 (defn user-view-state
   "Reads `:user/default` view, nav stack, inspector trail, and lab prefs."
-  {:malli/schema [:=> [:cat :any] :map] :cost/ticks 5000000}
-  [db]
-  (let [dh (db-schema db)
-        entry-id (entry-agent-id db)
-        insp? (every? dh [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs])
-        pat (cond-> (quote [:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
-                            :seon.user/expanded-agents :seon.user/selected-branch
-                            :seon.user/as-of-tx :seon.user/theme :seon.user/viewport-w :seon.user/viewport-h
-                            {:seon.user/viewing [:seon.agent/id]}])
-              insp? (into [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs]))
-        u (when (and db (contains? dh :seon.user/id) (first (d/datoms db :avet :seon.user/id :user/default)))
-            (d/pull db pat [:seon.user/id :user/default]))
-        viewing-id (or (get-in u [:seon.user/viewing :seon.agent/id]) entry-id)
-        raw-lp (when (map? (:seon.user/lab-prefs u)) (:seon.user/lab-prefs u))
-        nav-back (vec (filter map? (:nav-back raw-lp)))
-        nav-fwd (vec (filter map? (:nav-forward raw-lp)))
-        itrail (vec (keep normalize-inspect-ref (:seon.user/inspect-trail u)))
-        ifwd (vec (keep normalize-inspect-ref (:inspect-forward raw-lp)))]
-    {:user-id (or (:seon.user/id u) :user/default)
-     :entry-id entry-id
-     :viewing-id viewing-id
-     :view-mode (or (:seon.user/view-mode u) :canvas)
-     :sidebar-open? (boolean (:seon.user/sidebar-open? u))
-     :expanded-agents (cond-> (set (:seon.user/expanded-agents u)) entry-id (conj entry-id))
-     :selected-branch (:seon.user/selected-branch u)
-     :as-of-tx (:seon.user/as-of-tx u)
-     :theme (or (:seon.user/theme u) :auto)
-     :viewport-w (or (:seon.user/viewport-w u) 1280)
-     :viewport-h (or (:seon.user/viewport-h u) 820)
-     :inspect-ref (normalize-inspect-ref (:seon.user/inspect-ref u))
-     :inspect-trail itrail
-     :inspect-forward ifwd
-     :nav-back nav-back
-     :nav-forward nav-fwd
-     :nav-can-back? (boolean (or (seq nav-back) (seq itrail)))
-     :nav-can-forward? (boolean (or (seq nav-fwd) (seq ifwd)))
-     :nav-seq (long (or (:nav-seq raw-lp) 0))
-     :nav-op (or (:nav-op raw-lp) :push)
-     :lab-prefs (or raw-lp {})}))
+  {:malli/schema [:=> [:cat :any [:? [:maybe :map]]] :map] :cost/ticks 5000000}
+  ([db] (user-view-state db nil))
+  ([db opts]
+   (let [dh (db-schema db)
+         insp? (every? dh [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs])
+         pat (cond-> (quote [:seon.user/id :seon.user/view-mode :seon.user/sidebar-open?
+                             :seon.user/expanded-agents :seon.user/selected-branch
+                             :seon.user/as-of-tx :seon.user/theme :seon.user/viewport-w :seon.user/viewport-h
+                             {:seon.user/viewing [:seon.agent/id]}])
+               insp? (into [:seon.user/inspect-ref :seon.user/inspect-trail :seon.user/lab-prefs]))
+         u (when (and db (contains? dh :seon.user/id) (first (d/datoms db :avet :seon.user/id :user/default)))
+             (d/pull db pat [:seon.user/id :user/default]))
+         u-view (get-in u [:seon.user/viewing :seon.agent/id])
+         entry-id (when-not (:viewing-id opts) (entry-agent-id db))
+         viewing-id (or u-view entry-id)
+         raw-lp (when (map? (:seon.user/lab-prefs u)) (:seon.user/lab-prefs u))
+         nav-back (vec (filter map? (:nav-back raw-lp)))
+         nav-fwd (vec (filter map? (:nav-forward raw-lp)))
+         itrail (vec (keep normalize-inspect-ref (:seon.user/inspect-trail u)))
+         ifwd (vec (keep normalize-inspect-ref (:inspect-forward raw-lp)))]
+     {:user-id (or (:seon.user/id u) :user/default) :entry-id entry-id :viewing-id viewing-id
+      :view-mode (or (:seon.user/view-mode u) :canvas) :sidebar-open? (boolean (:seon.user/sidebar-open? u))
+      :expanded-agents (cond-> (set (:seon.user/expanded-agents u)) entry-id (conj entry-id))
+      :selected-branch (:seon.user/selected-branch u) :as-of-tx (:seon.user/as-of-tx u)
+      :theme (or (:seon.user/theme u) :auto) :viewport-w (or (:seon.user/viewport-w u) 1280)
+      :viewport-h (or (:seon.user/viewport-h u) 820) :inspect-ref (normalize-inspect-ref (:seon.user/inspect-ref u))
+      :inspect-trail itrail :inspect-forward ifwd :nav-back nav-back :nav-forward nav-fwd
+      :nav-can-back? (boolean (or (seq nav-back) (seq itrail)))
+      :nav-can-forward? (boolean (or (seq nav-fwd) (seq ifwd)))
+      :nav-seq (long (or (:nav-seq raw-lp) 0)) :nav-op (or (:nav-op raw-lp) :push) :lab-prefs (or raw-lp {})})))
 
 (defn branch-db-for [main-db conn branch]
   (if (or (nil? branch) (= branch :main) (nil? conn))

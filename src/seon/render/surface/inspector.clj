@@ -10,7 +10,8 @@
             [seon.render.wire :as rwire]
             [seon.signals :as sig]
             [seon.web.router]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx]
+            [seon.store :as store]))
 
 (defn- btn [cls oc lbl & [dis?]] [:button (cond-> {:type "button" :class cls :on-click oc} dis? (assoc :disabled true)) lbl])
 
@@ -312,6 +313,8 @@
               (when (pos? more)
                 [:span {:class "mono tiny muted"} (str "+" more " more")])]])]]))))
 
+(defonce ^:private explain-fit-cache (store/lru-cache 32))
+
 (defn render-inspector-body
   "Perspective-aware General Entity Browser over the ONE `seon.ctx/project-entity` pipeline."
   {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 45000000}
@@ -335,7 +338,10 @@
                    :main-db main-db :area-budget (* (long (:inspect-width lp)) 1200)
                    :fallback-renderers rwire/fallback-entity-renderers}
           explained (when-let [fi (:focal-item world)]
-                      (fit/explain-entity-fit bdb fi ex-opts))
+                      (let [mc (store/live-cid main-db) bc (store/live-cid bdb)
+                            ek (when (and mc bc) [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb) (:ref world) (:inspect-target lp) (:inspect-budget lp) (:inspect-width lp)])]
+                        (if ek (store/lru-get! explain-fit-cache 32 ek #(fit/explain-entity-fit bdb fi ex-opts))
+                            (fit/explain-entity-fit bdb fi ex-opts))))
           sel-nb (vec (get-in world [:fitted :selected]))
           drop-nb (vec (get-in world [:fitted :dropped]))
           unmatched (vec (:unmatched world))

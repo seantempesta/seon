@@ -16,14 +16,10 @@
             [seon.render.links :as rlinks :refer [live-cid]]
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [datahike.index.interface :as di]))
 
 (defonce ^:private ^:seon.flow/edge ctx-ru-cache (store/lru-cache 64))
-
-(defn- neighborhood-node-key [ent]
-  (or (:seon.task/id ent) (:seon.code.var/name ent) (:seon.error/id ent)
-      (:seon.code.ns/name ent) (:seon.schema/key ent) (:seon.code.doc/id ent)
-      (:seon.rule/id ent) (:seon.fix/id ent) (:seon.agent/id ent) (:db/id ent)))
 
 (defprotocol ICtxAtom
   (-advance! [this db' tx-datoms] "Advance internal snapshot incrementally from committed `db'` and `tx-datoms`.")
@@ -108,10 +104,11 @@
                    {:projs [] :runs {} :recomputed 0 :skipped 0}
                    (let [dbs {:main main-db :branch bdb :code bdb :task tdb}
                          extra (branch-caused-health-facts main-db bdb derived-t)
-                         sr (rules/step-rules nil dbs
+                         sr (binding [rules/*track-reads?* (boolean di/*reads*)]
+                              (rules/step-rules nil dbs
                                               {:agent-id aid :focus-ref (:focus-ref world) :focus-eid (:focus-eid world)
                                                :base-wm (proj/seed-world-wm world derived-t extra)}
-                                              eff-rs nil rule-target)]
+                                              eff-rs nil rule-target))]
                      {:projs (proj/collapse-rule-projections (:projections sr))
                       :runs (:runs sr) :recomputed (:recomputed sr) :skipped (:skipped sr)})))
         ck (when (and (not (false? (:use-cache? o))) mc bc (empty? disabled) (nil? (:rules o)))
@@ -410,7 +407,7 @@
      (let [eid (:eid snap)
            pattern-moved? (boolean (some #(and (= (:e %) eid) (= (:a %) :seon.ctx/pattern)) tx-datoms))]
        (if (or pattern-moved? (some? (:pattern snap)))
-         (build db' eid nil conn)
+         (build db' eid (when-not pattern-moved? (:pattern snap)) conn)
          (let [changed? (volatile! false)
                fwd0 (:fwd-entry snap)
                fwd' (if (or (nil? fwd0) (nil? tx-datoms) (reads/reads-touched? (:reads-idx fwd0) tx-datoms))

@@ -142,7 +142,7 @@
    (let [t0 (System/nanoTime)
          o (if (map? opts) opts {})
          ui-cfg (read-ui-config main-db)
-         vs (rdata/user-view-state main-db)
+         vs (rdata/user-view-state main-db o)
          aid (or (:viewing-id o) (:viewing-id vs) (:entry-id vs) :agent/root)
          vm (or (:view-mode o) (:view-mode vs) :canvas)
          canon (rdata/canonical-view-mode vm)

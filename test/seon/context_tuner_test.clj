@@ -18,7 +18,11 @@
             [seon.bench.golden :as bgolden]
             [seon.bench.helpers :as bhelpers]
             [seon.bench.lab :as blab]
-            [seon.server :as server]))
+            [seon.server :as server]
+            [seon.signals :as sig]
+            [seon.render.data :as rdata]
+            [seon.ctx.tree :as ctree]
+            [seon.render.wire :as rwire]))
 
 (def ^:private baseline0-core-rules
   #{:rule.ctx/active-tasks :rule.ctx/agent-prefix-sessions :rule.ctx/pinned-entities
@@ -367,3 +371,33 @@
         (is (= 1 (count (:error-samples (first (:trials sum)))))))
       (is (:ok? (schema/stress-var nil 'seon.code.parse/named-expr-sig {:samples 50 :seed 42})))
       (is (:ok? (schema/stress-var nil 'seon.bench.lab/summarize-bench-run {:samples 50 :seed 42}))))))
+
+(deftest wave1-scale-anchor-ghost-target-and-delta-safety-test
+  (testing "signals delta-anchor skips O(N) scan on unrelated commits, commit-delta-datoms guards non-ancestors, and target-preview ignores branch keywords while firing on Turn 0"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (or rules/*base-rules-override* (rseed/starter-rules))})
+      (d/transact conn {:tx-data [{:seon.agent/id :w/w1 :seon.agent/branch :main :seon.agent/goal "Work"}
+                                  {:seon.agent/id :tune/w1 :seon.agent/branch :main :seon.agent/scope 'seon.ctx :seon.agent/forked-from [:seon.agent/id :w/w1]
+                                   :seon.agent/merge-target [:seon.agent/id :w/w1]}
+                                  {:seon.agent/id :rev/ghost :seon.agent/branch :main :seon.agent/merge-target :branch/nonexistent}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/w1 :seon.agent.eval/turn 1
+                                   :seon.agent.eval/handle 'result/e1 :seon.agent.eval/code "(boom)" :seon.agent.eval/error "Boom fail"}]})
+      ;; 1. Signals delta-anchor handles unrelated summary commit cleanly
+      (let [s1 (sig/all-signals @conn)
+            _ (d/transact conn {:tx-data [{:seon.summary/id (random-uuid) :seon.summary/kind :milestone :seon.summary/title "Unrelated"}]})
+            s2 (sig/all-signals @conn)]
+        (is (= (:flow s1) (:flow s2)))
+        (is (> (:tx s2) (:tx s1))))
+      ;; 2. user-view-state 2-arg skips entry-agent-id when :viewing-id passed
+      (let [vs (rdata/user-view-state @conn {:viewing-id :w/w1})]
+        (is (nil? (:entry-id vs))))
+      ;; 3. commit-delta-datoms returns nil safely for unrecorded/unknown commit UUID
+      (is (nil? (ctree/commit-delta-datoms (random-uuid) @conn)))
+      ;; 4. build-live-wire-request gives Turn-0 target-context-preview with failing evals for real target, NOT for branch keyword
+      (let [w-real (rwire/build-live-wire-request @conn @conn :tune/w1 {:include-tail? true})
+            tprev (some #(when (= "target-context-preview" (:tag %)) %) (:tail-blocks w-real))
+            w-ghost (rwire/build-live-wire-request @conn @conn :rev/ghost {:include-tail? true})
+            gprev (some #(when (= "target-context-preview" (:tag %)) %) (:tail-blocks w-ghost))]
+        (is (some? tprev) "Tuner must get <target-context-preview> on Turn 0")
+        (is (.contains ^String (:text tprev) "Boom fail") "Turn-0 preview must surface target recent failing evals")
+        (is (nil? gprev) "Branch keyword :merge-target must never fabricate a ghost agent preview")))))
