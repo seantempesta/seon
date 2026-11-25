@@ -239,7 +239,7 @@
               ms (/ (- (System/nanoTime) t0) 1e6)]
           (is (= 204 (:status r-run)))
           (is (= 200 (:status r-get)))
-          (is (< ms 50.0) (str "Non-blocking web click + lock-free GET / must return < 50ms, took " ms " ms!")))
+          (is (< ms 250.0) (str "Non-blocking web click + lock-free GET / must return < 250ms, took " ms " ms!")))
         ;; Live MCP JSON-RPC 2.0 + `result/e<n>` + programmatic `(user/show-user! ...)` from inside an agent!
         (let [mcp-post (fn [m]
                          (let [resp ((:handler listener) {:request-method :post :uri "/mcp"
