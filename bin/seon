@@ -85,7 +85,7 @@ case "$cmd" in
     post_edn "{:op :test :branch ${br}}"
     ;;
   eval)
-    br=${1:?usage: bin/seon eval :branch/name ['(+ 1 2)' | -]}
+    br=${1:?"usage: bin/seon eval :branch/name CODE_OR_STDIN"}
     if [[ -z "${2:-}" || "${2:-}" == "-" ]]; then
       code=$(cat)
     else
