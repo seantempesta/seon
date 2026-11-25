@@ -100,72 +100,6 @@
                 (and (= '?focus b) (const-form? a)) a))))
         ws))
 
-(defn query-meta
-  "Analyzes and caches metadata, WM/DB requirements, focus constraints, and input specs for a rule query."
-  {:malli/schema [:=> [:cat :any] :map], :cost/ticks 200000, :seon.flow/edge nil}
-  [q]
-  (if-not (or (vector? q) (map? q))
-    {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :wm-not-req []
-     :req-tree nil :focus-eq nil :db-keys #{} :fn-syms [] :uses-agent? false :eff-q nil :eff-ins []}
-    (store/lru-get! query-meta-cache 256 q
-      (fn []
-        (let [pq (parse-query q)
-              ws (if (sequential? (:where pq)) (:where pq) [])
-              raw-in-val (:in pq)
-              raw-ins (vec (if (and (sequential? raw-in-val) (seq raw-in-val)) raw-in-val ['$]))
-              ins-set (set raw-ins)
-              fn-syms (vec (distinct (keep #(when (and (seq? %) (qualified-symbol? (first %))) (first %))
-                                           (tree-seq coll? seq ws))))
-              _ (doseq [s fn-syms] (try (requiring-resolve s) (catch Throwable _ nil)))
-              wm-v? #(and (vector? %) (>= (count %) 3) (= '$wm (nth % 0)) (keyword? (nth % 2)))
-              wm-attrs (if-not (ins-set '$wm) #{}
-                         (reduce (fn [a n]
-                                   (cond
-                                     (and (vector? n) (>= (count n) 3) (= '$wm (nth n 0)))
-                                     (conj a (if (keyword? (nth n 2)) (nth n 2) :*))
-                                     (and (seq? n) (some #(= '$wm %) n))
-                                     (let [ks (filter keyword? n)] (if (seq ks) (into a ks) (conj a :*)))
-                                     :else a))
-                                 #{} (tree-seq coll? seq ws)))
-              wm-req (into #{} (keep #(when (wm-v? %) (nth % 2))) ws)
-              wm-const-req (vec (keep #(when (and (wm-v? %) (>= (count %) 4) (scalar-const? (nth % 3)))
-                                         [(nth % 2) (nth % 3)]) ws))
-              pos-by-e (reduce #(if (and (wm-v? %2) (lvar? (nth %2 1)))
-                                  (update %1 (nth %2 1) (fnil conj []) (nth %2 2))
-                                  %1)
-                               {} ws)
-              wm-not-req (vec (keep (fn [cl]
-                                      (when (and (seq? cl) (= 'not (first cl)) (= 2 (count cl)))
-                                        (let [in (second cl)]
-                                          (when (and (wm-v? in) (lvar? (nth in 1)))
-                                            (when-let [a1 (first (get pos-by-e (nth in 1)))]
-                                              [a1 (nth in 2) (if (and (>= (count in) 4) (scalar-const? (nth in 3)))
-                                                               (nth in 3) ::any)])))))
-                                    ws))
-              req-tree (clause-req (cons 'and ws) #{})
-              focus-eq (extract-focus-eq ws)
-              db-keys (reduce (fn [a s]
-                                (case s
-                                  $main (conj a :main) $branch (conj a :branch)
-                                  $code (conj a :code) $task (conj a :task)
-                                  ($ %) (conj a :branch)
-                                  (?agent-eid ?focus-eid) (conj a :main :branch)
-                                  a))
-                              #{} raw-ins)
-              need-$? (and (ins-set '%) (not (ins-set '$)))
-              eff-q (if-not need-$? q
-                      (cond
-                        (map? q) (update q :in #(into ['$ ] (if (sequential? %) % [])))
-                        (sequential? q) (let [v (vec q) i (.indexOf v :in)]
-                                          (if (neg? i) v (vec (concat (subvec v 0 (inc i)) ['$ ] (subvec v (inc i))))))
-                        :else q))]
-          {:pq pq :ins raw-ins :wm-attrs wm-attrs :wm-req wm-req :wm-const-req wm-const-req :wm-not-req wm-not-req
-           :req-tree req-tree :focus-eq focus-eq :db-keys db-keys :fn-syms fn-syms
-           :db-fn-call? (boolean (some #(and (seq? %) (qualified-symbol? (first %)) (some db-srcs (rest %)))
-                                       (tree-seq coll? seq ws)))
-           :uses-agent? (boolean (or (ins-set '?agent) (ins-set '?agent-eid) (ins-set '?focus) (ins-set '?focus-eid)))
-           :eff-q eff-q :eff-ins (if need-$? (into ['$ ] raw-ins) raw-ins)})))))
-
 (defn wm-req-miss?
   "True when working memory `wm` provably fails top-level `$wm` requirements in `qm`."
   {:malli/schema [:=> [:cat :map :map] :boolean]
@@ -263,3 +197,122 @@
         (when-let [ws (binding [di/*reads* nil] (go tree))]
           (doseq [f ws] (f))
           true)))))
+
+(defn- extract-direct-fn-call [pq ws eff-ins]
+  (when (and (empty? (:keys pq)) (empty? (:with pq)) (seq (:find pq)) (every? lvar? (:find pq)))
+    (let [non-feq (remove (fn [cl]
+                            (and (vector? cl) (= 1 (count cl)) (seq? (first cl))
+                                 (= '= (first (first cl))) (= 3 (count (first cl)))
+                                 (or (= '?focus (second (first cl))) (= '?focus (nth (first cl) 2)))))
+                          ws)]
+      (when (= 1 (count non-feq))
+        (let [cl (first non-feq)]
+          (when (and (vector? cl) (= 2 (count cl))
+                     (seq? (first cl)) (qualified-symbol? (first (first cl)))
+                     (vector? (second cl)) (= 1 (count (second cl)))
+                     (vector? (first (second cl))) (every? lvar? (first (second cl))))
+            (let [fsym (first (first cl))
+                  in-idx (into {} (map-indexed (fn [i s] [s i])) eff-ins)
+                  arg-specs (mapv (fn [a]
+                                    (cond
+                                      (contains? in-idx a) [:in (get in-idx a)]
+                                      (scalar-const? a) [:const a]
+                                      :else ::bad))
+                                  (rest (first cl)))
+                  bind-vars (vec (first (second cl)))
+                  find-vars (vec (:find pq))]
+              (when (and (not-any? #{::bad} arg-specs)
+                         (every? (set bind-vars) find-vars))
+                {:sym fsym :arg-specs arg-specs :bind-vars bind-vars :find-vars find-vars}))))))))
+
+(defn query-meta
+  "Analyzes and caches metadata, WM/DB requirements, focus constraints, and input specs for a rule query."
+  {:malli/schema [:=> [:cat :any] :map], :cost/ticks 200000, :seon.flow/edge nil}
+  [q]
+  (if-not (or (vector? q) (map? q))
+    {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :wm-not-req []
+     :req-tree nil :focus-eq nil :db-keys #{} :fn-syms [] :uses-agent? false :eff-q nil :eff-ins []}
+    (store/lru-get! query-meta-cache 256 q
+      (fn []
+        (let [pq (parse-query q)
+              ws (if (sequential? (:where pq)) (:where pq) [])
+              raw-in-val (:in pq)
+              raw-ins (vec (if (and (sequential? raw-in-val) (seq raw-in-val)) raw-in-val ['$]))
+              ins-set (set raw-ins)
+              fn-syms (vec (distinct (keep #(when (and (seq? %) (qualified-symbol? (first %))) (first %))
+                                           (tree-seq coll? seq ws))))
+              _ (doseq [s fn-syms] (try (requiring-resolve s) (catch Throwable _ nil)))
+              wm-v? #(and (vector? %) (>= (count %) 3) (= '$wm (nth % 0)) (keyword? (nth % 2)))
+              wm-attrs (if-not (ins-set '$wm) #{}
+                         (reduce (fn [a n]
+                                   (cond
+                                     (and (vector? n) (>= (count n) 3) (= '$wm (nth n 0)))
+                                     (conj a (if (keyword? (nth n 2)) (nth n 2) :*))
+                                     (and (seq? n) (some #(= '$wm %) n))
+                                     (let [ks (filter keyword? n)] (if (seq ks) (into a ks) (conj a :*)))
+                                     :else a))
+                                 #{} (tree-seq coll? seq ws)))
+              wm-req (into #{} (keep #(when (wm-v? %) (nth % 2))) ws)
+              wm-const-req (vec (keep #(when (and (wm-v? %) (>= (count %) 4) (scalar-const? (nth % 3)))
+                                         [(nth % 2) (nth % 3)]) ws))
+              pos-by-e (reduce #(if (and (wm-v? %2) (lvar? (nth %2 1)))
+                                  (update %1 (nth %2 1) (fnil conj []) (nth %2 2))
+                                  %1)
+                               {} ws)
+              wm-not-req (vec (keep (fn [cl]
+                                      (when (and (seq? cl) (= 'not (first cl)) (= 2 (count cl)))
+                                        (let [in (second cl)]
+                                          (when (and (wm-v? in) (lvar? (nth in 1)))
+                                            (when-let [a1 (first (get pos-by-e (nth in 1)))]
+                                              [a1 (nth in 2) (if (and (>= (count in) 4) (scalar-const? (nth in 3)))
+                                                               (nth in 3) ::any)])))))
+                                    ws))
+              req-tree (clause-req (cons 'and ws) #{})
+              focus-eq (extract-focus-eq ws)
+              db-keys (reduce (fn [a s]
+                                (case s
+                                  $main (conj a :main) $branch (conj a :branch)
+                                  $code (conj a :code) $task (conj a :task)
+                                  ($ %) (conj a :branch)
+                                  (?agent-eid ?focus-eid) (conj a :main :branch)
+                                  a))
+                              #{} raw-ins)
+              need-$? (and (ins-set '%) (not (ins-set '$)))
+              eff-q (if-not need-$? q
+                      (cond
+                        (map? q) (update q :in #(into ['$ ] (if (sequential? %) % [])))
+                        (sequential? q) (let [v (vec q) i (.indexOf v :in)]
+                                          (if (neg? i) v (vec (concat (subvec v 0 (inc i)) ['$ ] (subvec v (inc i))))))
+                        :else q))]
+          (let [eff-ins (if need-$? (into ['$ ] raw-ins) raw-ins)]
+          {:pq pq :ins raw-ins :wm-attrs wm-attrs :wm-req wm-req :wm-const-req wm-const-req :wm-not-req wm-not-req
+           :req-tree req-tree :focus-eq focus-eq :db-keys db-keys :fn-syms fn-syms
+           :db-fn-call? (boolean (some #(and (seq? %) (qualified-symbol? (first %)) (some db-srcs (rest %)))
+                                       (tree-seq coll? seq ws)))
+           :direct-fn-call (extract-direct-fn-call pq ws eff-ins)
+           :uses-agent? (boolean (or (ins-set '?agent) (ins-set '?agent-eid) (ins-set '?focus) (ins-set '?focus-eid)))
+           :eff-q eff-q :eff-ins eff-ins}))))))
+
+(defn eval-direct-fn-call
+"Zero-planner execution for single-fn-call Datalog rules `[(ns/fn args...) [[?v1 ...]]]` with exact `d/q` set parity."
+{:malli/schema [:=> [:cat :map [:vector :any]] [:vector :map]]
+ :cost/ticks 15000000}
+[{:keys [sym arg-specs bind-vars find-vars]} args]
+(if-let [f (when (qualified-symbol? sym)
+             (or (resolve sym) (try (requiring-resolve sym) (catch Throwable _ nil))))]
+  (let [call-args (mapv (fn [[k v]] (if (= k :in) (nth args v nil) v)) (or arg-specs []))
+        rows (apply f call-args)
+        bv (or bind-vars [])
+        fv (or find-vars bv)
+        n (count bv)
+        same-vars? (= bv fv)]
+    (if (seq rows)
+      (into []
+            (comp (keep (fn [row]
+                          (when (and (sequential? row) (>= (count row) n))
+                            (let [m (zipmap bv row)]
+                              (if same-vars? m (select-keys m fv))))))
+                  (distinct))
+            rows)
+      []))
+  []))
