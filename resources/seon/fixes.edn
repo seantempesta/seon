@@ -470,4 +470,12 @@
   :seon.fix/error-class :slow-sidebar-n-plus-1-pull,
   :seon.fix/root-cause "sidebar-unit scanned :aevt :seon.agent/id and called d/pull per entity on every render with no commit-keyed cache.",
   :seon.fix/regression-test seon.ui-live-defects-regression-test/wave8d-flat-aevt-sidebar-latency-and-order-test,
-  :seon.fix/id #uuid "31027d1c-b25d-56ce-8807-2c8b1895f660"}]
+  :seon.fix/id #uuid "31027d1c-b25d-56ce-8807-2c8b1895f660"}
+ {:seon.fix/created-ms 1795627840340,
+  :seon.fix/symptom "Wave 8C audit revealed build-ab-tasks silently dropped :verify-spec, :chat-agent, :branch, :body, and :min-delegated-calls; child :ns/seon.health.coverage hit 512 MB OOM on (user/health :main); eval-efficiency-warnings blew 256 MB pulling 4,425 historical evals; mine-hygiene-findings blew 256 MB cold.",
+  :seon.fix/change-summary "Preserved :verify-spec/:chat-agent/:branch/:body/:min-delegated-calls in build-ab-tasks (omitting synthetic :task for :chat-agent trials), added :all composite verify-task-spec, filtered archived/merged agents out of scan-interesting-evals, and set 1 GB cold budget overrides on health/report and mine-hygiene-*.",
+  :seon.fix/before-after "build-ab-tasks now genuinely enforces :verify-spec and :chat-agent/:min-delegated-calls; eval-efficiency-warnings drops from >256 MB OOM to 177 MB on live :main.",
+  :seon.fix/error-class :ab-dropped-verify-spec-and-health-eval-oom,
+  :seon.fix/root-cause "build-ab-tasks only whitelisted :category and :include-trace?; scan-interesting-evals pulled evals of merged/archived agents; user/health, seon.health/report, and mine-hygiene-findings lacked 1 GB cold budget overrides.",
+  :seon.fix/regression-test seon.bench-golden-test/wave9a-build-ab-preserves-verify-and-chat-agent-test,
+  :seon.fix/id #uuid "07abebda-622d-51bb-9318-b5a7b88c3f82"}]

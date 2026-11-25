@@ -482,7 +482,7 @@
   "Computes the complete `:seon.health/report` map from `db` (pure read, tagged with `:seon/schema`).
    `:ok?` is true whenever zero `:error`-severity problems exist. Shares single-pass snapshots across
    all sub-checks and caches per-form/per-ns static checks so cold & warm allocations stay low."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.health/report]}
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.health/report], :seon.eval/budget-override {:ticks 600000000, :bytes 1073741824}}
   [db]
   (let [sk (db-snapshot-key db)
         compute-full

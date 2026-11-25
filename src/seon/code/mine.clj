@@ -441,7 +441,7 @@
 
 (defn mine-hygiene-findings
   "O(N) indexed Datahike scan detecting `:ast-clone`, `:duplicate-helper`, `:raw-java-io`, `:oversized-namespace`, and `:large-function` findings ranked by `:impact`."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]] :cost/ticks 250000000}
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]], :cost/ticks 250000000, :seon.eval/budget-override {:ticks 600000000, :bytes 1073741824}}
   [db]
   (let [idx (scan-hygiene-index db)]
     (dedupe-rank (concat (detect-ast-and-dup-findings db (:vars idx))
@@ -449,8 +449,7 @@
 
 (defn mine-hygiene-tasks-tx
   "Converts hygiene findings (`mine-hygiene-findings` + optional `:metrics-edn` / `:findings`) into idempotent `:seon.task/*` tx maps using `:template/hygiene-cleanup`. Skips existing/done tasks, attaches verified `:curated` refs + reaching tests, and separates rough plan from template footer with `---`."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :map]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]
-   :cost/ticks 400000000}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :map]] [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]], :cost/ticks 400000000, :seon.eval/budget-override {:ticks 600000000, :bytes 1073741824}}
   ([db] (mine-hygiene-tasks-tx db nil))
   ([db opts]
    (let [o (if (map? opts) opts {}) tpl (or (:template o) :template/hygiene-cleanup)

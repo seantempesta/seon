@@ -290,3 +290,28 @@
       (is (false? (:ok? res-empty)) "0-edit empty merge must NOT pass")
       (is (true? (:merged? res-real)))
       (is (true? (:ok? res-real))))))
+
+(deftest ^{:cost/ticks 60000000} wave9a-build-ab-preserves-verify-and-chat-agent-test
+  (testing "build-ab-tasks preserves :verify-spec on task trials and :chat-agent/:body/:branch/:min-delegated-calls on delegation trials"
+    (let [t-verify {:id :rand/x :category :schema-proof :verify-spec {:kind :tighten-return-contract :var 'seon.foo/bar}
+                    :task {:id :rand/x :scope 'seon.foo :title "T" :plan "P."}}
+          t-chat {:id :bplus/x :category :root-delegation :chat-agent :agent/root :branch :branch/root
+                  :body "Delegate two checks." :min-delegated-calls 2 :run-tests? false :merge? false :require-merge? false
+                  :verify-spec {:kind :all :specs [{:kind :ns-test-or-example :ns 'seon.a} {:kind :ns-test-or-example :ns 'seon.b}]}}
+          out (golden/build-ab-tasks [t-verify t-chat] [[:control {}]] {:include-trace? true})
+          [o1 o2] out]
+      (is (= {:kind :tighten-return-contract :var 'seon.foo/bar} (:verify-spec o1)))
+      (is (map? (:task o1)))
+      (is (= :agent/root (:chat-agent o2)))
+      (is (= :branch/root (:branch o2)))
+      (is (= "Delegate two checks." (:body o2)))
+      (is (= 2 (:min-delegated-calls o2)))
+      (is (= :all (get-in o2 [:verify-spec :kind])))
+      (is (nil? (:task o2)))))
+  (testing "verify-task-spec :all composes child specs and fails fast when any child spec fails"
+    (with-test-store [{:keys [conn]}]
+      (let [r-pass (seon.bench.helpers/verify-task-spec @conn {:kind :all :specs []})
+            r-fail (seon.bench.helpers/verify-task-spec @conn {:kind :all :specs [{:kind :tighten-return-contract :var 'seon.missing/fn}]})]
+        (is (true? (:ok? r-pass)))
+        (is (false? (:ok? r-fail)))
+        (is (= :all (:kind r-fail)))))))
