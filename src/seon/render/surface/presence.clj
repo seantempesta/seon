@@ -112,10 +112,16 @@
         bdb (or branch-db main-db)
         try-pull (fn [db]
                    (when (and db nr (instance? datahike.db.interface.ISearch db))
-                     (try
-                       (let [m (d/pull db (quote [*]) nr)]
-                         (when (and (map? m) (> (count m) 1)) m))
-                       (catch Throwable _ nil))))]
+                     (let [[k v] nr
+                           dh (db-schema db)
+                           eid (cond
+                                 (and (= :db/id k) (integer? v)) v
+                                 (and (keyword? k) (:db/unique (get dh k)))
+                                 (:e (first (d/datoms db :avet k v)))
+                                 :else nil)]
+                       (when (integer? eid)
+                         (let [m (d/pull db (quote [*]) eid)]
+                           (when (and (map? m) (> (count m) 1)) m))))))]
     (when nr
       (when-let [ent (or (try-pull bdb) (when (and main-db (not= main-db bdb)) (try-pull main-db)))]
         {:ref nr :ent ent}))))

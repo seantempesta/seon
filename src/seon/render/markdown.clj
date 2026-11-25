@@ -426,13 +426,13 @@
         exp? (if (contains? opts :expert-mode?) (boolean (:expert-mode? opts)) true)
         db (:db opts)
         pulled (when (and db (instance? datahike.db.interface.ISearch db) ref (not fit?))
-                 (try (not-empty (dissoc (d/pull db (quote [*]) ref) :db/id)) (catch Throwable _ nil)))
+                 (try (not-empty (dissoc (d/pull db (quote [*]) ref) :db/id)) (catch Throwable ex {:seon.view/error (or (.getMessage ex) (str ex))})))
         body (cond
                (not spec) [:div {:class "notice red mono tiny"} (if (:ok? p) "seon-view expects a map." (str "Invalid EDN: " (:error p)))]
                fit? (if-let [rf (requiring-resolve (quote seon.render.surface.presence/render-fitted-spec))]
                       (or (rf db (or (:branch-db opts) db) spec opts) [:div {:class "muted tiny mono"} "No matching entities."])
                       [:div {:class "md-live-body"} (when ref (rlinks/ent-link ref (rdata/entity-short-label ref) "mono strong"))])
-               (and vs (or (contains? spec :data) pulled))
+               (and vs (or (contains? spec :data) (and (map? pulled) (not (:seon.view/error pulled)))))
                (let [r (invoke-seon-view-var vs (if (contains? spec :data) (:data spec) pulled))]
                  (if (:ok? r) [:div {:class "md-live-body"} (:hiccup r)] [:div {:class "notice red mono tiny"} (:error r)]))
                vs [:div {:class "md-live-body"} (rlinks/ent-link [:seon.code.var/name vs] (str vs) "mono strong")]
