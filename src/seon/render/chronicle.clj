@@ -5,7 +5,8 @@
             [hasch.core :as hasch]
             [seon.health :as health]
             [seon.health.metrics :as hmetrics]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.render.text :refer [one-line]]))
 
 (defn- int-or [v d] (if (integer? v) (long v) (long d)))
 
@@ -80,10 +81,6 @@
            (and (>= sp (max 1 (int-or (:min-tx-span t) 400))) mv?) {:due? true :reason :tx-milestone :urgency :normal}
            :else {:due? false :reason nil :urgency :none}))))
 
-(defn- clip-str [s max-n]
-  (let [t (str/replace (str/trim (str (or s ""))) #"\s+" " ")]
-    (if (<= (count t) max-n) t (str (subs t 0 (max 0 (- max-n 1))) "…"))))
-
 (defn- friendly-kw [k]
   (cond
     (keyword? k) (if-let [ns-p (namespace k)] (if (= "agent" ns-p) (name k) (str ns-p "/" (name k))) (name k))
@@ -106,7 +103,7 @@
                          (seq tns) (str "Codebase Activity · " (int-or (:touched-forms d) 0) " forms in " (str/join ", " tns))
                          (false? (:ok? h)) (str "Health Attention · " (:errors h 0) " error(s)")
                          :else "System Pulse · Quiet & Healthy"))
-         ml (for [m (take 3 ms) :let [tx (or (:main-tx m) (:merged-tx m)) g (clip-str (:goal m) 104)]]
+         ml (for [m (take 3 ms) :let [tx (or (:main-tx m) (:merged-tx m)) g (one-line (:goal m) 104)]]
               (str "- **" (friendly-kw (:id m)) "**" (when (integer? tx) (str " (`tx " tx "`)")) (when-not (str/blank? g) (str ": " g))))
          nl (when (seq nss) (str "- **Subsystems:** " (str/join ", " (map #(str "`" (:ns %) "` (" (:forms % 0) ")") (take 5 nss)))
                                  (when (> (count nss) 5) (str " +" (- (count nss) 5) " more"))))
@@ -136,9 +133,9 @@
                              txs (tx-range-label (:seon.summary/from-tx e) (:seon.summary/to-tx e))
                              knd (if (keyword? (:seon.summary/kind e)) (name (:seon.summary/kind e)) "pulse")
                              rfs (when (sequential? (:seon.summary/refs e)) (take 4 (:seon.summary/refs e)))
-                             bdy (when det? (clip-str (:seon.summary/body e) 160))]
+                             bdy (when det? (one-line (:seon.summary/body e) 160))]
                          {:entry e :line (str "- [" (str/join " · " (remove str/blank? [ts txs knd])) "] "
-                                              (clip-str (or (:seon.summary/title e) "Summary") 80)
+                                              (one-line (or (:seon.summary/title e) "Summary") 80)
                                               (when (seq rfs) (str " (" (str/join ", " (map friendly-kw rfs)) ")"))
                                               (when (and det? (not (str/blank? bdy))) (str "\n  " bdy)))})) (range n))
          hdr "Chronicle timeline (`(d/as-of (user/main-db) <to-tx>)`):"

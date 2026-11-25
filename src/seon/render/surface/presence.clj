@@ -10,7 +10,8 @@
             [seon.store :as store :refer [db-schema]]
             [seon.render.sanitize :as sanitize]
             [seon.render.fit :as fit]
-            [seon.render.wire :as rwire]))
+            [seon.render.wire :as rwire]
+            [seon.render.text :refer [clip]]))
 
 (defn sanitize-canvas-hiccup
   "Pure recursive allowlist XSS sanitizer for agent-supplied Canvas Hiccup via `seon.render.sanitize/sanitize-hiccup`
@@ -87,10 +88,6 @@
       :calls calls
       :written-vars (vec (sort written-vars))
       :proof-run proof-run})))
-
-(defn- clip-str [s n]
-  (let [t (str/trim (str (or s "")))]
-    (if (> (count t) n) (str (subs t 0 (max 0 (- n 3))) "...") t)))
 
 (defn- child-status-badge [c]
   (cond
@@ -337,13 +334,13 @@
              [:div {:class "stack-xs"}
               (for [c calls
                     :let [st (:seon.agent.call/status c)
-                          res-s (when (= :resolved st) (clip-str (:seon.agent.call/result c) 140))
-                          err-s (when (= :failed st) (clip-str (:seon.agent.call/error c) 140))]]
+                          res-s (when (= :resolved st) (clip (:seon.agent.call/result c) 140))
+                          err-s (when (= :failed st) (clip (:seon.agent.call/error c) 140))]]
                 [:div {:class "ent-row mono tiny"}
                  [:div {:class "row-between"}
                   (ent-link [:seon.agent/id (:seon.agent.call/callee c)] (if expert-mode? (str (:seon.agent.call/callee c)) (rdata/friendly-agent-name (:seon.agent.call/callee c))) "mono tiny strong")
                   (call-status-badge st)]
-                 [:div {:class "muted"} (clip-str (:seon.agent.call/prompt c) 120)]
+                 [:div {:class "muted"} (clip (:seon.agent.call/prompt c) 120)]
                  (when (seq res-s) [:div {:class "green-text"} (str "-> " res-s)])
                  (when (seq err-s) [:div {:class "red-text"} (str "! " err-s)])])])
            (when (and expert-mode? (seq written-vars))

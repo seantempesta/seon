@@ -116,11 +116,13 @@
                             s))
             keep-settling (into #{}
                                 (filter (fn [[kind cid]]
+                                          (if (= kind :clear-awaiting)
+                                          (boolean (seq (:seon.agent/awaiting (d/pull main-db (quote [:seon.agent/awaiting]) [:seon.agent/id cid]))))
                                           (when-let [c (pull-call-by-id main-db cid)]
                                             (case kind
                                               :deliver (not (:seon.agent.call/delivered? c))
                                               (:incoming :nudge) (= :pending (:seon.agent.call/status c))
-                                              false))))
+                                              false)))))
                                 settling)]
         (assoc st
                :testing (keep-by testing (fn [aid tx i _] (and (not= (:merged-tx i) tx) (not= (:tested-tx i) tx) (not (contains? fail-aids aid)))))
@@ -226,7 +228,7 @@
            {:keys [seen inbox unread eval-ents]} (pull-agent-inbox-and-evals main-db branch-db agent-id)
            cur-eval-eids (into #{} (keep :db/id) eval-ents)
            act (policy/summarize-activity eval-ents inbox)
-           {:keys [awaiting-count awaiting-blocked? has-pending-outgoing? awaiting-ready-to-deliver async-ready-to-deliver]}
+           {:keys [awaiting-count awaiting-blocked? has-pending-outgoing? awaiting-ready-to-deliver awaiting-all-ids awaiting-stale-to-clear async-ready-to-deliver]}
            (call-delivery-state main-db agent-id ma settling-set)
            head-tx (:max-tx branch-db)
            gate (agent-gate-summary main-db branch-db agent-id)
@@ -259,72 +261,80 @@
                                                     eval-ents (:last-eval act) seen inbox settling-set has-pending-outgoing?
                                                     (and (:paused? step-in) (gate/has-active-reviewer? main-db e)))]
        {:id agent-id :parent (:seon.agent/parent ma) :scope (:seon.agent/scope ma) :branch b
-        :tasks (vec (keep :seon.task/id (:seon.agent/tasks ma))) :task (first (keep :seon.task/id (:seon.agent/tasks ma)))
-        :gate gate :router? (boolean (:seon.agent/router? ma)) :goal (:seon.agent/goal ma)
-        :paused? (:paused? step-in) :branch-tx head-tx :evals (:eval-count act) :eval-eids cur-eval-eids
-        :unread-count (count unread) :awaiting-count awaiting-count :live-pid (when-not (:merged? d) live-pid) :busy? busy?
-        :needs-turn? (:needs-turn? d) :needs-test? (:needs-test? d) :needs-merge? (:needs-merge? d) :needs-release? needs-release?
-        :bounce-streak (:bounce-streak d) :turns-since-external (:turns-since-external d)
-        :err-halted? (:err-halted? d) :bounce-halted? (:bounce-halted? d) :turn-budget-halted? (:turn-budget-halted? d)
-        :awaiting-ready-to-deliver awaiting-ready-to-deliver :async-ready-to-deliver async-ready-to-deliver
-        :gate-notify-op gate-notify-op :wrapup-notify-op wrapup-notify-op
-        :auto-settle-ops auto-settle-ops :review-ops review-ops :status (:status d)}))))
+       :tasks (vec (keep :seon.task/id (:seon.agent/tasks ma))) :task (first (keep :seon.task/id (:seon.agent/tasks ma)))
+       :gate gate :router? (boolean (:seon.agent/router? ma)) :goal (:seon.agent/goal ma)
+       :paused? (:paused? step-in) :branch-tx head-tx :evals (:eval-count act) :eval-eids cur-eval-eids
+       :unread-count (count unread) :awaiting-count awaiting-count :live-pid (when-not (:merged? d) live-pid) :busy? busy?
+       :needs-turn? (:needs-turn? d) :needs-test? (:needs-test? d) :needs-merge? (:needs-merge? d) :needs-release? needs-release?
+       :bounce-streak (:bounce-streak d) :turns-since-external (:turns-since-external d)
+       :err-halted? (:err-halted? d) :bounce-halted? (:bounce-halted? d) :turn-budget-halted? (:turn-budget-halted? d)
+       :awaiting-ready-to-deliver awaiting-ready-to-deliver :awaiting-all-ids awaiting-all-ids
+       :awaiting-stale-to-clear awaiting-stale-to-clear :async-ready-to-deliver async-ready-to-deliver
+       :gate-notify-op gate-notify-op :wrapup-notify-op wrapup-notify-op
+       :auto-settle-ops auto-settle-ops :review-ops review-ops :status (:status d)}))))
 
 (defn- callers-awaiting-callees [& args] (apply rcalls/callers-awaiting-callees args))
 
 (defn- callee-merge-in-flight? [& args] (apply rcalls/callee-merge-in-flight? args))
 
 (defn- reconcile-candidates [st1 main-db store candidate-ids]
-  (let [evaluated (keep #(derive-agent-status main-db store (:live st1) (:testing st1) (:merging st1)
-                                              (:settling st1) (:gate-notified st1) %)
-                        (sort candidate-ids))
-        to-run (filterv :needs-turn? evaluated)
-        to-release (filterv :needs-release? evaluated)
-        to-test (filterv :needs-test? evaluated)
-        to-merge (filterv :needs-merge? evaluated)
-        all-views (into (:views st1) (map (juxt :id identity) evaluated))
-        deliver-txs (vec (mapcat (fn [v]
-                                   (let [aw (:awaiting-ready-to-deliver v)
-                                         aw-ok (when (and (seq aw) (not-any? #(callee-merge-in-flight? main-db store all-views %) aw)) aw)
-                                         as-ok (vec (remove #(callee-merge-in-flight? main-db store all-views %) (:async-ready-to-deliver v)))]
-                                     (cond-> []
-                                       (seq aw-ok) (conj {:op :settle-calls :caller (:id v) :call-ids aw-ok :clear-awaiting? true})
-                                       (seq as-ok) (conj {:op :settle-calls :caller (:id v) :call-ids as-ok :clear-awaiting? false}))))
-                                 evaluated))
-        auto-settle-txs (vec (mapcat :auto-settle-ops evaluated))
-        gate-notify-txs (vec (concat (keep :gate-notify-op evaluated) (keep :wrapup-notify-op evaluated) (mapcat :review-ops evaluated)))
-        new-gate-notified (into #{} (concat (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)]) evaluated)
-                                            (keep #(when (:wrapup-notify-op %) [(:id %) (:branch-tx %) :wrapup]) evaluated)
-                                            (keep #(when (seq (:review-ops %)) [(:id %) (:branch-tx %) :review]) evaluated)))
-        new-settling (into #{} (concat (for [tx deliver-txs, cid (:call-ids tx)] [:deliver cid])
-                                       (for [tx auto-settle-txs] [(if (= :send-message (:op tx)) :nudge :incoming) (:call-id tx)])))
-        merge-txs (mapv (fn [v] {:op :merge :branch (:branch v) :agent-id (:id v) :branch-tx (:branch-tx v)
-                                 :message (str "Merge " (:branch v) " (" (:id v) ")")}) to-merge)
-        all-txs (vec (concat auto-settle-txs deliver-txs gate-notify-txs merge-txs))
-        st2 (-> st1
-                (update :views into (map (juxt :id identity) evaluated))
-                (update :live (fn [lm]
-                                (let [lm1 (reduce (fn [m v] (dissoc m (:id v))) lm to-release)
-                                      lm2 (reduce (fn [m v]
-                                                    (if (and (contains? m (:id v)) (not (get-in m [(:id v) :busy?])))
-                                                      (assoc-in m [(:id v) :eval-eids] (:eval-eids v))
-                                                      m))
-                                                  lm1 evaluated)]
-                                  (reduce (fn [m v]
-                                            (assoc m (:id v) {:pid (or (get-in m [(:id v) :pid]) :waking)
-                                                              :busy? true :eval-eids (:eval-eids v)}))
-                                          lm2 to-run))))
-                (update :testing into (map (fn [v] [(:id v) (:branch-tx v)]) to-test))
-                (update :merging into (map (fn [v] [(:id v) (:branch-tx v)]) to-merge))
-                (update :settling into new-settling)
-                (update :gate-notified into new-gate-notified)
-                (update :runs-sent + (count to-run)))
-        run-msgs (into (mapv (fn [v] {:op :release-agent :agent-id (:id v)}) to-release)
-                       (map (fn [v] {:agent-id (:id v) :branch (:branch v)}) to-run))]
-    [st2 (cond-> {}
-           (seq run-msgs) (assoc :run run-msgs)
-           (seq to-test) (assoc :batch (mapv (fn [v] {:branch (:branch v) :agent-id (:id v) :branch-tx (:branch-tx v)}) to-test))
-           (seq all-txs) (assoc :tx all-txs))]))
+(let [evaluated (keep #(derive-agent-status main-db store (:live st1) (:testing st1) (:merging st1)
+                                            (:settling st1) (:gate-notified st1) %)
+                      (sort candidate-ids))
+      to-run (filterv :needs-turn? evaluated)
+      to-release (filterv :needs-release? evaluated)
+      to-test (filterv :needs-test? evaluated)
+      to-merge (filterv :needs-merge? evaluated)
+      eval-ids (into #{} (map :id) evaluated)
+      removed-cands (remove eval-ids candidate-ids)
+      base-views (if (seq removed-cands) (apply dissoc (:views st1) removed-cands) (:views st1))
+      all-views (into base-views (map (juxt :id identity) evaluated))
+      deliver-txs (vec (mapcat (fn [v]
+                                 (let [aw (:awaiting-ready-to-deliver v)
+                                       aw-all (or (:awaiting-all-ids v) aw)
+                                       aw-ok (when (and (seq aw) (not-any? #(callee-merge-in-flight? main-db store all-views %) aw-all)) aw-all)
+                                       stale (when (and (empty? aw-ok) (seq (:awaiting-stale-to-clear v))) (:awaiting-stale-to-clear v))
+                                       as-ok (vec (remove #(callee-merge-in-flight? main-db store all-views %) (:async-ready-to-deliver v)))]
+                                   (cond-> []
+                                     (seq aw-ok) (conj {:op :settle-calls :caller (:id v) :call-ids aw-ok :clear-awaiting? true})
+                                     (seq stale) (conj {:op :settle-calls :caller (:id v) :call-ids stale :clear-awaiting? true :stale-clear? true})
+                                     (seq as-ok) (conj {:op :settle-calls :caller (:id v) :call-ids as-ok :clear-awaiting? false}))))
+                               evaluated))
+      auto-settle-txs (vec (mapcat :auto-settle-ops evaluated))
+      gate-notify-txs (vec (concat (keep :gate-notify-op evaluated) (keep :wrapup-notify-op evaluated) (mapcat :review-ops evaluated)))
+      new-gate-notified (into #{} (concat (keep #(when (:gate-notify-op %) [(:id %) (:branch-tx %)]) evaluated)
+                                          (keep #(when (:wrapup-notify-op %) [(:id %) (:branch-tx %) :wrapup]) evaluated)
+                                          (keep #(when (seq (:review-ops %)) [(:id %) (:branch-tx %) :review]) evaluated)))
+      new-settling (into #{} (concat (for [tx deliver-txs :when (not (:stale-clear? tx)), cid (:call-ids tx)] [:deliver cid])
+                                     (for [tx deliver-txs :when (:stale-clear? tx)] [:clear-awaiting (:caller tx)])
+                                     (for [tx auto-settle-txs] [(if (= :send-message (:op tx)) :nudge :incoming) (:call-id tx)])))
+      merge-txs (mapv (fn [v] {:op :merge :branch (:branch v) :agent-id (:id v) :branch-tx (:branch-tx v)
+                               :message (str "Merge " (:branch v) " (" (:id v) ")")}) to-merge)
+      all-txs (vec (concat auto-settle-txs deliver-txs gate-notify-txs merge-txs))
+      st2 (-> st1
+              (assoc :views all-views)
+              (update :live (fn [lm]
+                              (let [lm1 (reduce (fn [m v] (dissoc m (:id v))) lm to-release)
+                                    lm2 (reduce (fn [m v]
+                                                  (if (and (contains? m (:id v)) (not (get-in m [(:id v) :busy?])))
+                                                    (assoc-in m [(:id v) :eval-eids] (:eval-eids v))
+                                                    m))
+                                                lm1 evaluated)]
+                                (reduce (fn [m v]
+                                          (assoc m (:id v) {:pid (or (get-in m [(:id v) :pid]) :waking)
+                                                            :busy? true :eval-eids (:eval-eids v)}))
+                                        lm2 to-run))))
+              (update :testing into (map (fn [v] [(:id v) (:branch-tx v)]) to-test))
+              (update :merging into (map (fn [v] [(:id v) (:branch-tx v)]) to-merge))
+              (update :settling into new-settling)
+              (update :gate-notified into new-gate-notified)
+              (update :runs-sent + (count to-run)))
+      run-msgs (into (mapv (fn [v] {:op :release-agent :agent-id (:id v)}) to-release)
+                     (map (fn [v] {:agent-id (:id v) :branch (:branch v)}) to-run))]
+  [st2 (cond-> {}
+         (seq run-msgs) (assoc :run run-msgs)
+         (seq to-test) (assoc :batch (mapv (fn [v] {:branch (:branch v) :agent-id (:id v) :branch-tx (:branch-tx v)}) to-test))
+         (seq all-txs) (assoc :tx all-txs))]))
 
 (defn reconciler-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}

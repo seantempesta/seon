@@ -97,29 +97,35 @@
   {:malli/schema [:=> [:cat :seon.host/db :keyword :map [:set :any]] :map], :cost/ticks 5000000}
   [main-db agent-id ma settling-set]
   (let [awaiting-ids (set (:seon.agent/awaiting ma))
-        awaiting-calls (vec (keep #(pull-call-by-id main-db %) awaiting-ids))
-        pending-awaiting (filterv #(= :pending (:seon.agent.call/status %)) awaiting-calls)
-        outgoing-calls (pull-calls-by-attr main-db :seon.agent.call/caller agent-id)]
-    {:awaiting-count (count pending-awaiting)
-     :awaiting-blocked? (boolean (seq pending-awaiting))
-     :has-pending-outgoing? (boolean (some #(= :pending (:seon.agent.call/status %)) outgoing-calls))
-     :awaiting-ready-to-deliver
-     (when (and (seq awaiting-calls) (empty? pending-awaiting))
-       (vec (keep (fn [c]
-                    (let [cid (:seon.agent.call/id c)]
-                      (when (and (not (:seon.agent.call/delivered? c))
-                                 (not (contains? settling-set [:deliver cid])))
-                        cid)))
-                  awaiting-calls)))
-     :async-ready-to-deliver
+      awaiting-calls (vec (keep #(pull-call-by-id main-db %) awaiting-ids))
+      pending-awaiting (filterv #(= :pending (:seon.agent.call/status %)) awaiting-calls)
+      undelivered-awaiting (filterv #(not (:seon.agent.call/delivered? %)) awaiting-calls)
+      stale-awaiting (when (and (seq awaiting-ids) (empty? pending-awaiting) (empty? undelivered-awaiting)
+                                (not (contains? settling-set [:clear-awaiting agent-id])))
+                       (vec awaiting-ids))
+      outgoing-calls (pull-calls-by-attr main-db :seon.agent.call/caller agent-id)]
+  {:awaiting-count (count undelivered-awaiting)
+   :awaiting-blocked? (boolean (seq undelivered-awaiting))
+   :awaiting-all-ids (when (and (seq awaiting-ids) (empty? pending-awaiting)) (vec awaiting-ids))
+   :awaiting-stale-to-clear stale-awaiting
+   :has-pending-outgoing? (boolean (some #(= :pending (:seon.agent.call/status %)) outgoing-calls))
+   :awaiting-ready-to-deliver
+   (when (and (seq awaiting-calls) (empty? pending-awaiting))
      (vec (keep (fn [c]
                   (let [cid (:seon.agent.call/id c)]
-                    (when (and (not (contains? awaiting-ids cid))
-                               (not= :pending (:seon.agent.call/status c))
-                               (not (:seon.agent.call/delivered? c))
+                    (when (and (not (:seon.agent.call/delivered? c))
                                (not (contains? settling-set [:deliver cid])))
                       cid)))
-                outgoing-calls))}))
+                awaiting-calls)))
+   :async-ready-to-deliver
+   (vec (keep (fn [c]
+                (let [cid (:seon.agent.call/id c)]
+                  (when (and (not (contains? awaiting-ids cid))
+                             (not= :pending (:seon.agent.call/status c))
+                             (not (:seon.agent.call/delivered? c))
+                             (not (contains? settling-set [:deliver cid])))
+                    cid)))
+              outgoing-calls))}))
 
 (defn callers-awaiting-callees
   {:malli/schema [:=> [:cat :seon.host/db [:maybe [:or [:set :keyword] [:sequential :keyword]]]] [:set :keyword]], :cost/ticks 5000000}
@@ -144,5 +150,6 @@
        (when-let [callee (:seon.agent.call/callee c)]
          (when-let [cv (get all-views callee)]
            (and (not= :main (:branch cv))
-                (contains? #{:running :runnable :testing :merging} (:status cv))
-                (gate/branch-has-code-edits? main-db (safe-branch-head store main-db (:branch cv))))))))))
+           (or (nil? store) (store/branch? store (:branch cv)))
+           (contains? #{:running :runnable :testing :merging} (:status cv))
+           (gate/branch-has-code-edits? main-db (safe-branch-head store main-db (:branch cv))))))))))

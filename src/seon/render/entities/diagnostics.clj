@@ -2,22 +2,14 @@
   "Pure `ns-map -> ns-map` dual-footprint Hiccup renderers for `:seon.health/friction` and `:seon.bench/scoreboard`."
   (:require [clojure.string :as str]
             [seon.render.links :as rlinks]
-            [seon.render.text :refer [one-line round1]]))
+            [seon.render.text :refer [one-line round1]]
+            [seon.render.entities.prim :as prim :refer [chip]]))
 
 (defn- tone [lvl]
   (case lvl :hot "red" :warm "amber" :calm "green" "slate"))
 
-(defn- chip [min-w cls & xs]
-  {:seon.ui/hiccup (into [:span {:class (str "ent-chip " cls) :data-min-width min-w}] (remove nil? xs))})
-
 (defn- box [min-w cls left right & body]
-  {:seon.ui/hiccup
-   (into [:div {:class (str "card ent-card " cls) :data-min-width min-w}
-          [:div {:class "card-head ent-head"}
-           (into [:div {:class "pill-row"}] (remove nil? left))
-           (when (some? right)
-             (if (vector? right) right [:span {:class "muted tiny mono ent-meta"} (str right)]))]]
-         (remove nil? body))})
+  (apply prim/box "ent-card" min-w cls left right body))
 
 (defn- fmt-delta [v suffix lower-better?]
   (when (number? v)
