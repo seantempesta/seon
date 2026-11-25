@@ -441,9 +441,12 @@
     (if (str/blank? (str src))
       {:ok? false :error :form-not-found :target target :key key}
       (if-let [se (when (contains? meta-map :malli/schema)
+                    (or (when-let [bad-fn (some #(when (fn? %) %) (tree-seq coll? seq (:malli/schema meta-map)))]
+                      {:ok? false :error :unquoted-fn-in-schema :target target :key key
+                       :hint (str "Quote :malli/schema so predicates stay symbols, not fn " (pr-str bad-fn) ".")})
                     (validate-defn-malli-schema db target key
                       (try (binding [*ns* (or (find-ns ns) *ns*)] (read-string src)) (catch Throwable _ nil))
-                      (:malli/schema meta-map)))]
+                      (:malli/schema meta-map))))]
         se
         (let [res (cst-ns/set-defn-meta-src src meta-map)]
           (if-not (:ok? res)
@@ -465,6 +468,12 @@
    (cond
      (not (map? target-or-batch))
      {:ok? false :error :invalid-args :hint "Call (user/set-meta! 'ns/fn {...}) or (user/set-meta! {'ns/f1 {...} ...})."}
+
+     (and (contains? target-or-batch :target) (map? (:meta target-or-batch)))
+     (set-meta! (:target target-or-batch) (:meta target-or-batch) (dissoc target-or-batch :target :meta))
+
+     (not (every? map? (vals target-or-batch)))
+     {:ok? false :error :invalid-batch-map :hint "Use {'ns/f1 {...} ...} or (user/set-meta! 'ns/fn {...})."}
 
      (nil? *agent-ctx*)
      {:ok? false :error :no-agent-ctx}

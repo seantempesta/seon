@@ -500,4 +500,10 @@
   :seon.fix/id #uuid "d6f1697c-000a-4251-be62-dfa42b85ef72",
   :seon.fix/regression-test seon.alloc-guard-test/wave10c-aliased-budget-ns-size-summary-and-ask-kwargs-test,
   :seon.fix/root-cause "effective-eval-budgets called (find-ns (symbol ns-s)) which returns nil on namespace aliases; no O(N) zero-source namespace size helper existed; ask!/call! only accepted 2-3 args; run-one-trial! left verify-res nil on timeout.",
-  :seon.fix/symptom "Aliased calls like (mine/mine-hygiene-findings db) silently dropped :seon.eval/budget-override; agents lacked user/ns-list and 0-arg user/ns-outline (causing 24-turn/4-OOM ns-size scans); user/ask! rejected kwargs; timed-out trials with :verify-spec displayed :verify-ok? true."}]
+  :seon.fix/symptom "Aliased calls like (mine/mine-hygiene-findings db) silently dropped :seon.eval/budget-override; agents lacked user/ns-list and 0-arg user/ns-outline (causing 24-turn/4-OOM ns-size scans); user/ask! rejected kwargs; timed-out trials with :verify-spec displayed :verify-ok? true."}
+ {:seon.fix/change-summary "Resolved live :seon.repl/source metadata in effective-eval-budgets; auto-refreshed user/* helpers in apply-overlay! on installer reload; migrated seon.git.forks/write-and-commit-fork! to jolt.fs (0 raw-java-io); split seon.render.data.progress from seon.render.data (7992 -> ~6200 tok).",
+  :seon.fix/created-ms 1795629771633,
+  :seon.fix/error-class :warm-worker-helper-drift-and-near-cap-ns,
+  :seon.fix/id #uuid "50f44c17-3ee8-4f37-b714-f39cb48cea5d",
+  :seon.fix/root-cause "effective-eval-budgets checked copied wrapper metadata instead of live :seon.repl/source var; apply-overlay! did not re-run install-repl-helpers! on warm workers; seon.render.data grew to 7992 tok.",
+  :seon.fix/symptom "Long-lived warm workers missed updated user/* helpers and :seon.eval/budget-override metadata on hot-reload; seon.git.forks had the last raw-java-io finding; seon.render.data sat at 7992 tokens (8 tokens below cap)."}]

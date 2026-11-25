@@ -260,9 +260,10 @@
             outcome (trial-outcome {:task task :ag-snap ag-snap :eval-res eval-res :agent-res agent-res
                                     :test-res test-res :merge-res merge-res :final-trace final-trace
                                     :health-res health-res :verify-res verify-res})
-            failure (trial-failure {:timeout-ms timeout-ms :agent-res agent-res :test-res test-res :merge-res merge-res
-                                    :ag-snap ag-snap :task task :final-trace (when-not (:ok? outcome) final-trace)
-                                    :health-res health-res :verify-res verify-res :halted-not-merged? (:halted-not-merged? outcome)})]
+            failure (when-not (:ok? outcome)
+                    (trial-failure {:timeout-ms timeout-ms :agent-res agent-res :test-res test-res :merge-res merge-res
+                                    :ag-snap ag-snap :task task :final-trace final-trace
+                                    :health-res health-res :verify-res verify-res :halted-not-merged? (:halted-not-merged? outcome)}))]
         (trial-result {:id id :category (:category task) :arm (:arm task) :pair-id (:pair-id task) :port (:port inst-handle) :boot-ms (:boot-ms inst-handle) :elapsed-ms (elapsed-ms!) :outcome outcome :ag-snap ag-snap :eval-res eval-res :agent-res agent-res :test-res test-res :merge-res merge-res :health-res health-res :final-trace final-trace :verify-res verify-res :failure failure}))
       (catch Throwable ex
         {:id id :status :error :timed-out? false :ok? false :elapsed-ms (elapsed-ms!)

@@ -9,7 +9,8 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [jolt.fibers :as fibers]
-            [seon.code.io :as cio]))
+            [seon.code.io :as cio]
+            [jolt.fs :as fs]))
 
 (def fork-repos
   "The Clojure library forks Seon indexes and edits in place: `{origin submodule-root}`."
@@ -102,13 +103,13 @@
       (git! dir "checkout" "-q" "-B" br))
     (doseq [rel rel-paths]
       (let [full (str root "/" rel)
-            f (io/file dir rel)]
-        (if-let [txt (cio/render-path db full)]
-          (do (.mkdirs (.getParentFile f)) (spit f txt))
-          (if (contains? deleted-paths full)
-            (when (.exists f) (.delete f))
-            (throw (ex-info (str "Refusing blind deletion of " full)
-                            {:error :seon.git/refused-blind-delete :path full}))))))
+          p (fs/path dir rel)]
+      (if-let [txt (cio/render-path db full)]
+        (do (when-let [par (fs/parent p)] (fs/create-dirs par)) (spit (str p) txt))
+        (if (contains? deleted-paths full)
+          (fs/delete-if-exists p)
+          (throw (ex-info (str "Refusing blind deletion of " full)
+                          {:error :seon.git/refused-blind-delete :path full}))))))
     (apply git! dir "add" "-A" "--" (vec rel-paths))
     (let [staged? (not (git-ok? dir "diff" "--cached" "--quiet"))]
       (when staged?
