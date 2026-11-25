@@ -400,7 +400,7 @@
   (cond (set? x) x (coll? x) (set x) (some? x) #{x} :else #{}))
 
 (defn candidate-urgency
-  "Computes the normalized `[0.0, 1.0]` urgency signal for a candidate entity map."
+  "Computes normalized `[0.0, 1.0]` urgency from generic schema/status signals and explicit rule `:priority` (zero rule-ID hardcoding)."
   {:malli/schema [:=> [:cat :map] number?]
    :cost/ticks 100000}
   [c]
@@ -408,34 +408,32 @@
     (clamp01 (:urgency c))
     (let [data (if (map? (:data c)) (:data c) {})
           tags (to-set (:tags c))
-          rules (to-set (:rules c))
           anchor (cond
-                   (or (= :open (:seon.error/status data)) (:open-error? c)
-                       (tags :error) (tags :fault) (rules :rule.ctx/fault-with-recommended-fix)) 1.0
-                   (or (false? (:seon.test/pass? data)) (:failing-test? c)
-                       (tags :failing-test) (rules :rule.ctx/failing-reach-tests)) 0.95
-                   (or (some? (:seon.fix/id data)) (:matching-fix? c) (tags :fix)) 0.90
-                   (or (:edited? c) (:branch-edited? c) (:written? c)
-                       (tags :edited) (rules :rule.ctx/edited-var-on-branch)) 0.85
+                   (or (= :open (:seon.error/status data)) (:open-error? c) (tags :error) (tags :fault)) 1.0
+                   (or (false? (:seon.test/pass? data)) (:failing-test? c) (tags :failing-test)) 0.95
+                   (some? (:seon.agent.message/id data)) 0.90
+                   (or (some? (:seon.fix/id data)) (:matching-fix? c) (tags :fix)) 0.85
+                   (or (:written? c) (:edited? c) (:branch-edited? c) (:pinned? c)
+                       (:world/written? c) (:world/pinned c) (tags :edited) (tags :pinned)) 0.80
                    (or (and (some? (:seon.task/id data)) (not (:seon.task/done? data)))
-                       (:active-task? c) (tags :active-task) (rules :rule.ctx/active-task-and-lineage)) 0.75
-                   (or (:pinned? c) (tags :pinned) (rules :rule.ctx/pinned-entities)) 0.70
+                       (:active-task? c) (tags :active-task)) 0.75
                    :else 0.0)
           pri-u (if (number? (:priority c))
-                  (* 0.45 (clamp01 (/ (finite-double (:priority c) 0.0) 100.0)))
+                  (* 0.65 (clamp01 (/ (finite-double (:priority c) 0.0) 100.0)))
                   0.0)]
       (max anchor pri-u))))
 
 (defn candidate-raw-convergence
-  "Computes raw convergence energy from `:touch-energy`, `:touches`, and converging `:rules`."
+  "Computes raw graph-relevance convergence from `:touch-energy`, `:touches`, `:frontier-score`, and converging `:rules`."
   {:malli/schema [:=> [:cat :map] number?]
    :cost/ticks 50000}
   [c]
   (let [te (when (number? (:touch-energy c)) (max 0.0 (finite-double (:touch-energy c) 0.0)))
         raw-t (if (some? te) (* 2.5 te) (double (max 0 (safe-long (or (:touches c) (:eval-touches c)) 0))))
+        fs (max 0.0 (finite-double (or (:frontier-score c) (get-in c [:params :seon.ui/frontier-score])) 0.0))
         paths (double (max 0 (safe-long (or (:converging-paths c) (:convergence c)
                                             (when (coll? (:rules c)) (count (:rules c)))) 0)))]
-    (+ raw-t paths)))
+    (+ raw-t (* 3.0 fs) paths)))
 
 (defn pool-norm
   "Min-max normalizes a vector of numbers into `[0.0, 1.0]` across the pool."
@@ -449,3 +447,102 @@
       (if (zero? span)
         (mapv #(if (pos? %) 1.0 0.0) ds)
         (mapv #(/ (- % lo) span) ds)))))
+
+(def fallback-entity-renderers
+  "Pure `ns-map -> ns-map` fallback renderers used only when a minimal DB lacks indexed code vars."
+  {:seon.code.var/entity      ['seon.render.entities/render-var-chip 'seon.render.entities/render-var-sig 'seon.render.entities/render-var-full]
+   :seon.code.form/entity     ['seon.render.entities.infra/render-form-chip 'seon.render.entities.infra/render-form-card 'seon.render.entities.infra/render-form-full]
+   :seon.agent.message/entity ['seon.render.entities.infra/render-message-chip 'seon.render.entities.infra/render-message-card]
+   :seon.error/entity         ['seon.render.entities/render-error-badge 'seon.render.entities/render-error-card]
+   :seon.task/entity          ['seon.render.entities/render-task-chip 'seon.render.entities/render-task-card 'seon.render.entities/render-task-full]
+   :seon.schema/entity        ['seon.render.entities/render-schema-chip 'seon.render.entities/render-schema-detail]
+   :seon.code.doc/entity      ['seon.render.entities/render-doc-snippet 'seon.render.entities/render-doc-full]
+   :seon.test/verdict         ['seon.render.entities/render-test-badge 'seon.render.entities/render-test-card]
+   :seon.agent.eval/entity    ['seon.render.entities/render-eval-row 'seon.render.entities/render-eval-card]
+   :seon.code.ns/entity       ['seon.render.entities/render-ns-chip 'seon.render.entities/render-ns-card 'seon.render.entities.work/render-ns-full]
+   :seon.agent/entity         ['seon.render.entities/render-agent-row 'seon.render.entities/render-agent-card]
+   :seon.rule/entity          ['seon.render.entities/render-rule-chip 'seon.render.entities/render-rule-detail]
+   :seon.fix/entity           ['seon.render.entities/render-fix-chip 'seon.render.entities/render-fix-card]
+   :seon.agent.call/entity    ['seon.render.entities/render-call-row 'seon.render.entities/render-call-card]
+   :seon.system/entity        ['seon.render.entities/render-system-chip 'seon.render.entities/render-system-card]
+   :seon.signal/snapshot      ['seon.signals/render-signals-bar 'seon.signals/render-signals-panel]
+   :seon.ctx/snapshot         ['seon.render.entities.work/render-ctx-chip 'seon.render.entities.work/render-ctx-snapshot]
+   :seon.summary/entity       ['seon.render.entities.work/render-summary-chip 'seon.render.entities.work/render-summary-card]
+   :seon.bench.run/entity     ['seon.render.entities.work/render-bench-run-row 'seon.render.entities.work/render-bench-run-card]
+   :seon.health/report        ['seon.render.entities.work/render-health-report]
+   :seon.task/lineage         ['seon.render.entities.work/render-task-lineage]
+   :seon.media/image          ['seon.render.media/render-image-chip 'seon.render.media/render-image-card]
+   :seon.ui.status/entity     ['seon.render.status/render-status-chip 'seon.render.status/render-status-card]})
+
+(defn pass2-upgrade
+  "Pass 2 upgrade loop respecting locked unchanged items, explicit view selections, pool `:per-item-budget`, and item `:max-tokens`/`:budget`."
+  {:malli/schema [:=> [:cat [:vector :map] :int :int :keyword [:maybe :int] :keyword] [:tuple [:vector :map] :int]]
+   :cost/ticks 15000000}
+  [kept used budget strategy per-item-budget target]
+  (let [n (count kept)
+        pool-cap (when (and (integer? per-item-budget) (pos? (long per-item-budget)) (> n 1))
+                   (long per-item-budget))
+        step (fn [entries u i]
+               (let [{:keys [item cands locked-unchanged? explicit-new-view?] :as e} (nth entries i)
+                     cands-v (if (sequential? cands) (vec cands) [])
+                     idx (max 0 (safe-long (:idx e) 0))
+                     cost (safe-long (:cost e) 0)
+                     cost-fn (if (fn? (:cost-fn e)) (:cost-fn e) #(safe-long (:tokens %) 0))
+                     ni (inc idx)]
+                 (if (or locked-unchanged? explicit-new-view? (>= ni (count cands-v)))
+                   [entries u false]
+                   (let [raw-cap (when (map? item) (if (= target :wire) (or (:max-tokens item) (:budget item)) (:budget item)))
+                         exp-cap (when (and (number? raw-cap) (pos? (long raw-cap))) (long raw-cap))
+                         cap (cond (and pool-cap exp-cap) (min pool-cap exp-cap) exp-cap exp-cap :else pool-cap)
+                         nc (safe-long (cost-fn (nth cands-v ni)) 0)
+                         delta (- nc cost)]
+                     (if (and (<= (+ (long u) delta) (long budget)) (or (nil? cap) (<= nc cap)))
+                       [(assoc entries i (assoc e :idx ni :cost nc)) (+ (long u) delta) true]
+                       [entries u false])))))]
+    (if (= strategy :depth-first)
+      (loop [es kept u (long used) i 0]
+        (if (>= i n) [es u]
+            (let [[es' u' mv?] (step es u i)]
+              (if mv? (recur es' u' i) (recur es u (inc i))))))
+      (loop [es kept u (long used)]
+        (let [[es' u' any?] (reduce (fn [[acc cu mv?] i]
+                                      (let [[acc' cu' m?] (step acc cu i)] [acc' cu' (or mv? m?)]))
+                                    [es u false] (range n))]
+          (if any? (recur es' u') [es' u']))))))
+
+(defn finalize-entry
+  "Finalizes a selected upgrade-ladder entry with status, measurements, and variation metadata."
+  {:malli/schema [:=> [:cat :map :keyword :int] :map]
+   :cost/ticks 2000000}
+  [{:keys [item all-cands cands base-idx idx cost rewarmed? locked-unchanged? explicit-new-view?]} target avail-w]
+  (let [item-m (if (map? item) item {})
+        cands-v (if (and (sequential? cands) (seq cands)) (vec cands) [])
+        all-v (if (sequential? all-cands) (vec all-cands) cands-v)
+        n (count cands-v)
+        fallback {:fn :default/projection :hiccup nil :tokens 0 :min-width 0 :area 0 :chars 0 :lines 0}
+        pick (fn [i] (if (pos? n) (let [c (nth cands-v (min (dec n) (max 0 (safe-long i 0))))] (if (map? c) c fallback)) fallback))
+        chosen (pick idx) base-c (pick base-idx)
+        status (if (= target :html)
+                 :fitted
+                 (cond locked-unchanged? :unchanged
+                       explicit-new-view? :upgraded
+                       rewarmed? :rewarmed
+                       (some? (:status item-m)) (:status item-m)
+                       :else :new))]
+    (assoc item-m
+           :chosen chosen :chosen-fn (:fn chosen) :hiccup (:hiccup chosen)
+           :base-fn (:fn base-c) :base-tokens (safe-long (:tokens base-c) 0) :base-area (safe-long (:area base-c) 0)
+           :tokens (if (= target :wire) (safe-long cost 0) (safe-long (:tokens chosen) 0))
+           :measured-tokens (safe-long (:tokens chosen) 0)
+           :min-width (safe-long (:min-width chosen) 0) :area (safe-long (:area chosen) 0)
+           :chars (safe-long (:chars chosen) 0) :lines (safe-long (:lines chosen) 0)
+           :measured-by (or (:measured-by chosen) :static)
+           :overflow-x? (boolean (:overflow-x? chosen))
+           :status status
+           :candidates (mapv (fn [c]
+                               (let [cm (if (map? c) c fallback) mw (safe-long (:min-width cm) 0)]
+                                 (-> (select-keys cm [:fn :tokens :min-width :area :w :h])
+                                     (assoc :measured-by (or (:measured-by cm) :static)
+                                            :overflow-x? (boolean (:overflow-x? cm))
+                                            :fits-width? (and (<= mw (long avail-w)) (not (:overflow-x? cm)))))))
+                             all-v))))

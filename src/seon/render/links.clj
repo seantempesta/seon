@@ -1,18 +1,11 @@
 (ns seon.render.links
-  "Shared semantic `.ent-link` Hiccup primitives, DB/UI utilities, and code-sig cached entity
-   enrichment (`enrich-entity-params` for vars, errors, schemas, tasks, docs, rules, and namespaces)."
+  "Shared semantic `.ent-link` Hiccup primitives, DB/UI utilities, and minimal self-contained
+   entity enrichment (`enrich-entity-params`: own `:seon.code.form/src` + explicit callers/refs)."
   (:require [clojure.string :as str]
             [datahike.api :as d]
-            [seon.code.reach :as reach]
-            [seon.ctx.diff :as diff]
-            [seon.health.efficiency :as heff]
             [seon.render.data :as rdata]
             [seon.store :as store]
             [seon.web.router :as router]))
-
-(defonce ^:private ^:seon.flow/edge ns-enrich-cache (store/lru-cache 64))
-
-(defonce ^:private ^:seon.flow/edge schema-used-by-cache (store/lru-cache 128))
 
 (defn db-schema
   {:malli/schema [:=> [:cat :any] :map] :cost/ticks 50000}
@@ -200,54 +193,6 @@
                      :else (when-let [e (ref-eid x)] (get (d/pull db [target-attr] e) target-attr))))
                  (take limit refs)))))))
 
-(defn- resolve-doc-refs [db refs limit]
-  (when (and db (coll? refs) (seq refs))
-    (not-empty
-     (vec (keep (fn [x]
-                  (if-let [nr (rdata/normalize-inspect-ref x)]
-                    [nr (rdata/entity-short-label nr)]
-                    (when-let [e (ref-eid x)]
-                      (let [p (d/pull db '[:seon.code.var/name :seon.code.ns/name :seon.schema/key :seon.task/id] e)
-                            r (or (rdata/entity-lookup-ref p) [:db/id e])]
-                        [r (rdata/entity-short-label (if (seq (dissoc p :db/id)) p r))]))))
-                (take limit refs))))))
-
-(defn- find-matching-fix [db err-kind]
-  (when (and db (keyword? err-kind) ((db-schema db) :seon.fix/error-class))
-    (when-let [fe (some #(when (= err-kind (:v %)) (:e %)) (d/datoms db :aevt :seon.fix/error-class))]
-      (d/pull db '[*] fe))))
-
-(defn- schema-touching-vars [db sk form scope-ns]
-  (let [dh (db-schema db)]
-    (when (and db sk (dh :seon.code.var/keywords))
-      (let [fields (when (and (vector? form) (= :map (first form)))
-                     (vec (keep #(when (and (vector? %) (keyword? (first %))) (first %))
-                                (if (map? (second form)) (drop 2 form) (rest form)))))
-            compute (fn []
-                      (let [probe (if (seq fields) (take 8 fields) [sk])
-                            step (fn [{:keys [seen in-sc other] :as s} dt]
-                                   (let [e (:e dt)]
-                                     (if (contains? seen e)
-                                       s
-                                       (let [vs (:v (first (d/datoms db :eavt e :seon.code.var/name)))
-                                             in? (boolean (and vs scope-ns (= scope-ns (namespace vs))))
-                                             s2 (cond-> (update s :seen conj e)
-                                                  (and vs in? (< (count in-sc) 8)) (update :in-sc conj vs)
-                                                  (and vs (not in?) (< (count other) 8)) (update :other conj vs))]
-                                         (if (or (>= (count (:in-sc s2)) 8)
-                                                 (and (nil? scope-ns) (>= (count (:other s2)) 8))
-                                                 (>= (count (:seen s2)) 24))
-                                           (reduced s2) s2)))))
-                            acc (reduce (fn [st kw]
-                                          (let [st' (reduce step st (d/datoms db :avet :seon.code.var/keywords kw))]
-                                            (if (or (>= (count (:in-sc st')) 8)
-                                                    (and (nil? scope-ns) (>= (count (:other st')) 8)))
-                                              (reduced st') st')))
-                                        {:seen #{} :in-sc [] :other []} probe)]
-                        (->> (concat (sort-by str (:in-sc acc)) (sort-by str (:other acc))) (take 8) vec)))
-            sig (diff/code-db-sig db)]
-        (not-empty (if sig (store/lru-get! schema-used-by-cache 128 [sig sk scope-ns] compute) (compute)))))))
-
 (defn- schema-field-tags [db form]
   (when (and db (vector? form) (= :map (first form)))
     (let [dh (db-schema db)
@@ -262,239 +207,24 @@
                                :else nil)))))
              entries)))))
 
-(defn- task-lineage-refs [db tid]
-  (let [dh (db-schema db)]
-    (when (and db tid)
-      (let [parents (when (dh :seon.task/needs)
-                      (let [eids (if (get-in dh [:seon.task/needs :db/index])
-                                   (map :e (d/datoms db :avet :seon.task/needs tid))
-                                   (keep #(when (= tid (:v %)) (:e %)) (d/datoms db :aevt :seon.task/needs)))]
-                        (->> eids distinct (keep #(:seon.task/id (d/pull db '[:seon.task/id] %))) sort (take 8) vec not-empty)))
-            past-ags (when (and (dh :seon.agent/tasks) (dh :seon.task/id))
-                       (when-let [teid (:e (first (d/datoms db :avet :seon.task/id tid)))]
-                         (->> (d/datoms db :avet :seon.agent/tasks teid)
-                              (keep #(:seon.agent/id (d/pull db '[:seon.agent/id] (:e %))))
-                              distinct sort (take 4) vec not-empty)))]
-        (cond-> {} parents (assoc :seon.ui/task-needed-by parents) past-ags (assoc :seon.ui/task-past-agents past-ags))))))
-
-(defn- fast-reaching-tests [db vars]
-  (when (and db ((db-schema db) :seon.code.var/refs))
-    (let [seeds (into #{} (keep :seon.code.var/name) vars)]
-      (loop [hop 0 frontier seeds seen seeds seen-e #{} tests #{}]
-        (if (or (empty? frontier) (>= hop 2) (>= (count tests) 8))
-          (vec (sort tests))
-          (let [fe (into #{} (comp (mapcat #(d/datoms db :avet :seon.code.var/refs %))
-                                   (map :e) (remove seen-e) (take 64))
-                         (if (pos? hop) (take 16 frontier) frontier))
-                [nt nf] (reduce (fn [[ts nf] e]
-                                  (let [vn (:v (first (d/datoms db :eavt e :seon.code.var/name)))]
-                                    (cond (nil? vn) [ts nf]
-                                          (true? (:v (first (d/datoms db :eavt e :seon.code.var/test?)))) [(conj ts vn) nf]
-                                          (not (seen vn)) [ts (conj nf vn)]
-                                          :else [ts nf])))
-                                [tests #{}] fe)]
-            (recur (inc hop) nf (into seen nf) (into seen-e fe) nt)))))))
-
-(defn- fast-linked-docs [db nsym ns-ent]
-  (let [dh (db-schema db)
-        seg2 (second (str/split (name nsym) #"\."))
-        stem (when seg2 (str "docs/" seg2 ".md"))
-        eids (distinct (concat (when (and (:db/id ns-ent) (dh :seon.code.doc/references))
-                                 (map :e (take 10 (d/datoms db :avet :seon.code.doc/references (:db/id ns-ent)))))
-                               (when (and stem (dh :seon.code.doc/path))
-                                 (map :e (take 6 (d/datoms db :avet :seon.code.doc/path stem))))))
-        indexed (vec (take 6 (sort-by :id (keep (fn [e]
-                                                  (let [p (d/pull db '[:seon.code.doc/id :seon.code.doc/path :seon.code.doc/heading] e)]
-                                                    (when (:seon.code.doc/id p)
-                                                      {:id (:seon.code.doc/id p) :path (:seon.code.doc/path p) :heading (:seon.code.doc/heading p)})))
-                                                eids))))]
-    (if (seq indexed) indexed (reach/ns-linked-docs db nsym 6))))
-
-(defn- ns-working-schemas [db nsym max-n]
-  (let [dh (db-schema db)]
-    (when (and db nsym (dh :seon.schema/key))
-      (let [freq (volatile! {})
-            bump! (fn [k w] (when (qualified-keyword? k) (vswap! freq update k (fnil + 0) w)))
-            ns-str (name nsym) owned-p (str ns-str ".")
-            s-eid (volatile! {}) s-key (volatile! {})
-            _ (doseq [dt (d/datoms db :aevt :seon.schema/key)]
-                (let [k (:v dt) e (:e dt) kns (namespace k)]
-                  (when (and kns (or (= kns ns-str) (str/starts-with? kns owned-p))) (bump! k 2))
-                  (vswap! s-eid assoc k e) (vswap! s-key assoc e k)))
-            smap @s-key
-            io-set #{:seon.code.var/input :seon.code.var/optional-input :seon.code.var/output}]
-        (when (dh :seon.code.var/ns)
-          (doseq [dt (d/datoms db :avet :seon.code.var/ns nsym)
-                  vdt (d/datoms db :eavt (:e dt))
-                  :let [a (:a vdt)]]
-            (cond (io-set a) (when-let [sk (get smap (:v vdt))] (bump! sk 3))
-                  (= :seon.code.var/keywords a) (bump! (:v vdt) 1))))
-        (let [emap @s-eid]
-          (->> @freq (filter #(contains? emap (key %)))
-               (sort-by (fn [[k w]] [(- w) (str k)])) (take max-n)
-               (mapv (fn [[k _]]
-                       (let [ent (d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc] (get emap k))
-                             sdh (get dh k)]
-                         {:key k :form (:seon.schema/form ent) :doc (:seon.schema/doc ent)
-                          :dh-type (:db/valueType sdh) :dh-card (:db/cardinality sdh)})))))))))
-
-(defonce ^:private ^:seon.flow/edge ns-schema-prefixes-cache (store/lru-cache 32))
-
-(defn- all-ns-schema-prefixes
-  ([db max-n] (all-ns-schema-prefixes db max-n nil))
-  ([db max-n target-nss]
-   (let [dh (db-schema db)]
-     (if-not (and db (dh :seon.schema/key) (dh :seon.code.var/ns))
-       {}
-       (let [compute
-             (fn []
-               (let [smap (volatile! {}) owned (volatile! {})
-                     _ (doseq [dt (d/datoms db :aevt :seon.schema/key)]
-                         (let [k (:v dt) kns (namespace k)]
-                           (vswap! smap assoc (:e dt) k)
-                           (when kns
-                             (let [parts (str/split kns #"\.")]
-                               (loop [i 1]
-                                 (when (<= i (count parts))
-                                   (vswap! owned update-in [(symbol (str/join "." (subvec parts 0 i))) kns] (fnil + 0) 2)
-                                   (recur (inc i))))))))
-                     sm @smap freq (volatile! @owned)
-                     scan-io! (fn [dts]
-                                (doseq [dt dts]
-                                  (when-let [sk (get sm (:v dt))]
-                                    (when-let [kns (namespace sk)]
-                                      (when-let [nsym (:v (first (d/datoms db :eavt (:e dt) :seon.code.var/ns)))]
-                                        (vswap! freq update-in [nsym kns] (fnil + 0) 3))))))]
-                 (when (dh :seon.code.var/input) (scan-io! (d/datoms db :aevt :seon.code.var/input)))
-                 (when (dh :seon.code.var/optional-input) (scan-io! (d/datoms db :aevt :seon.code.var/optional-input)))
-                 (when (dh :seon.code.var/output) (scan-io! (d/datoms db :aevt :seon.code.var/output)))
-                 (into {} (for [[nsym m] @freq]
-                            [nsym (->> m (sort-by (fn [[kns w]] [(- w) kns])) (map first) (take max-n) vec)]))))
-             sig (diff/code-db-sig db)
-             all-m (if sig (store/lru-get! ns-schema-prefixes-cache 32 [sig max-n] compute) (compute))]
-         (if (seq target-nss) (select-keys all-m target-nss) all-m))))))
-
-(defn- ns-vars-and-tests-info [db dh nsym router?]
-  (let [vars (if (and nsym (dh :seon.code.var/ns))
-               (->> (d/datoms db :avet :seon.code.var/ns nsym)
-                    (map (fn [dt]
-                           (reduce (fn [m vdt]
-                                     (case (:a vdt)
-                                       (:seon.code.var/name :seon.code.var/arglists :seon.code.var/doc
-                                        :seon.code.var/schema :seon.code.var/private? :seon.code.var/test?)
-                                       (assoc m (:a vdt) (:v vdt)) m))
-                                   {} (d/datoms db :eavt (:e dt)))))
-                    (sort-by #(str (:seon.code.var/name %))) vec)
-               [])
-        pub (filterv #(and (not (:seon.code.var/private? %)) (not (:seon.code.var/test? %))) vars)
-        priv (mapv #(name (:seon.code.var/name %)) (filter #(and (:seon.code.var/private? %) (not (:seon.code.var/test? %))) vars))
-        own-tests (mapv :seon.code.var/name (filter :seon.code.var/test? vars))
-        r-tests (when (and (not router?) (empty? own-tests) (seq vars)) (fast-reaching-tests db vars))
-        tlist (if (seq own-tests) own-tests (or r-tests []))
-        ns-s (when nsym (name nsym))
-        p2 (when ns-s (let [ps (str/split ns-s #"\.")] (when (>= (count ps) 2) (str (first ps) "." (second ps)))))
-        rank (fn [tns]
-               (let [ts (name tns)]
-                 [(cond (and ns-s (or (= ts (str ns-s "-test")) (str/starts-with? ts (str ns-s "-")))) 0
-                        (and p2 (or (str/starts-with? ts (str p2 "-")) (str/starts-with? ts (str p2 ".")))) 1
-                        :else 2) ts]))
-        tnss (->> tlist (keep #(when-let [s (namespace %)] (symbol s))) distinct (sort-by rank) (take 6) vec)
-        test-reqs (when (and (not router?) (empty? own-tests) (seq tnss) (dh :seon.code.form/key))
-                    (vec (keep (fn [tns]
-                                 (let [as (ns-require-aliases (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str tns "#ns")])))]
-                                   (when (seq as) (str tns " " (str/join " " (take 8 as))))))
-                               tnss)))]
-    {:vars vars :pub pub :priv priv :own-tests own-tests :tlist tlist :test-reqs test-reqs}))
-
-(defn- compute-ns-enrichment [db main-db ns-ent agent]
-  (let [nsym (:seon.code.ns/name ns-ent) dh (db-schema db)
-        nid (or (:db/id ns-ent) (when (and nsym (dh :seon.code.ns/name)) (:e (first (d/datoms db :avet :seon.code.ns/name nsym)))))
-        kids (if (and nid (dh :seon.code.ns/parent))
-               (->> (d/datoms db :avet :seon.code.ns/parent nid)
-                    (map #(d/pull db '[:seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] (:e %)))
-                    (filter :seon.code.ns/name) (sort-by #(str (:seon.code.ns/name %))) vec) [])
-        has-vars? (boolean (and nsym (dh :seon.code.var/ns) (first (d/datoms db :avet :seon.code.var/ns nsym))))
-        router? (boolean (and (seq kids) (or (not has-vars?) (rdata/router-agent? agent))))
-        {:keys [vars pub priv own-tests tlist test-reqs]} (ns-vars-and-tests-info db dh nsym router?)
-        req-al (when (and (not router?) nsym (dh :seon.code.form/key))
-                 (ns-require-aliases (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key (str nsym "#ns")]))))
-        caller-nss (when (and (not router?) (seq pub) (dh :seon.code.var/refs))
-                     (let [ceids (into #{} (comp (mapcat #(d/datoms db :avet :seon.code.var/refs (:seon.code.var/name %))) (map :e)) pub)]
-                       (->> ceids (keep #(:v (first (d/datoms db :eavt % :seon.code.var/ns)))) (remove #(= % nsym)) distinct sort (take 8) vec)))
-        docs (when (and (not router?) nsym) (fast-linked-docs db nsym (assoc ns-ent :db/id nid)))
-        wschs (when (and (not router?) nsym) (ns-working-schemas db nsym 12))
-        feids (when (and (not router?) nsym (dh :seon.code.form/ns)) (mapv :e (d/datoms db :avet :seon.code.form/ns nsym)))
-        est-tok (when (seq feids) (quot (reduce + 0 (map #(let [c (:v (first (d/datoms db :eavt % :seon.code.form/chars)))]
-                                                            (if (number? c) (long c) (count (str (:v (first (d/datoms db :eavt % :seon.code.form/src))))))) feids)) 4))
-        scope-match? (and agent (= nsym (:seon.agent/scope agent)) (not (rdata/router-agent? agent)))
-        alerts (when (and scope-match? nsym)
-                 (if (and (empty? vars) (<= (count kids) 8) (str/includes? (name nsym) "."))
-                   (heff/static-efficiency-warnings db nsym)
-                   (cond-> [] (and est-tok (> est-tok 8000))
-                           (conj {:class :oversized-namespace :severity :warning :kind :static :ns nsym
-                                  :subject (str nsym) :message (str "Namespace " nsym " (~" est-tok " tok > 8000).")}))))
-        rich-kids (when (seq kids)
-                    (let [sprefs (when router? (all-ns-schema-prefixes db 3 (keep :seon.code.ns/name kids)))
-                          ag-map (when (and router? main-db ((db-schema main-db) :seon.agent/id))
-                                   (into {} (keep (fn [dt]
-                                                    (let [a (d/pull main-db '[:seon.agent/id :seon.agent/scope] (:e dt))]
-                                                      (when (and (:seon.agent/scope a) (not (str/starts-with? (str (namespace (:seon.agent/id a))) "example")))
-                                                        [(:seon.agent/scope a) (:seon.agent/id a)])))
-                                                  (d/datoms main-db :aevt :seon.agent/id))))]
-                      (mapv (fn [c] (let [cn (:seon.code.ns/name c)]
-                                      (assoc c :var-count (long (if (and cn (dh :seon.code.var/ns)) (count (d/datoms db :avet :seon.code.var/ns cn)) 0))
-                                             :schema-prefixes (get sprefs cn) :specialist (get ag-map cn)))) kids)))
-        out-thresh (long (or (store/config-val db nil :seon.config/ns-outline-tokens) (:seon.config/ns-outline-tokens store/default-config-values)))]
-    (cond-> {:seon.ui/ns-var-count (count vars) :seon.ui/router-view? router?}
-      (seq req-al) (assoc :seon.ui/ns-req-aliases req-al)
-      (seq pub) (assoc :seon.ui/ns-pub-vars pub)
-      (seq priv) (assoc :seon.ui/ns-priv-vars priv)
-      (seq tlist) (assoc :seon.ui/ns-covering-tests tlist :seon.ui/ns-own-tests? (boolean (seq own-tests)))
-      (seq test-reqs) (assoc :seon.ui/ns-test-reqs test-reqs)
-      (seq caller-nss) (assoc :seon.ui/ns-caller-nss caller-nss)
-      (seq docs) (assoc :seon.ui/ns-linked-docs docs)
-      (seq wschs) (assoc :seon.ui/ns-working-schemas wschs)
-      (seq alerts) (assoc :seon.ui/ns-static-alerts alerts)
-      (seq rich-kids) (assoc :seon.ui/ns-children rich-kids)
-      (and scope-match? est-tok (> est-tok out-thresh) (seq feids)) (assoc :seon.ui/ns-form-outline (:forms ((requiring-resolve 'seon.code.refactor/ns-form-outline) db nsym)))
-      (seq pub) (assoc :seon.ui/ns-hygiene {:pub-n (count pub) :doc-n (count (remove #(str/blank? (str (:seon.code.var/doc %))) pub))
-                                            :schemed-n (count (filter :seon.code.var/schema pub)) :tests-n (count tlist) :est-tokens (long (or est-tok 0))}))))
-
-(defn enrich-ns-params
-  "Code-sig cached namespace metadata for `render-ns-full` (immune to non-code writes)."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :map [:maybe :map]] :map]
-   :cost/ticks 15000000}
-  [db main-db ns-ent agent]
-  (let [nsym (:seon.code.ns/name ns-ent)
-        sig (diff/code-db-sig db)
-        rtr? (boolean (rdata/router-agent? agent))
-        msig (when (and rtr? main-db ((db-schema main-db) :seon.agent/scope))
-               [(store/store-id main-db)
-                (reduce (fn [[n mx] dt] [(inc n) (max mx (long (:tx dt 0)))]) [0 0] (d/datoms main-db :aevt :seon.agent/scope))])
-        ck (when (and sig nsym)
-             [sig msig nsym rtr? (= nsym (:seon.agent/scope agent))])]
-    (if ck
-      (store/lru-get! ns-enrich-cache 64 ck #(compute-ns-enrichment db main-db ns-ent agent))
-      (compute-ns-enrichment db main-db ns-ent agent))))
-
 (defn enrich-entity-params
-  "Resolves auxiliary display data & `:db.type/ref` target labels for entity `ent` on `db`."
-  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]
+  "Tiny self-contained entity enrichment: attaches own `:seon.code.form/src` on a var from its
+   `:seon.code.var/form` ref, own schema/rule direct ref labels, matching `:seon.fix/entity` for
+   errors, and `:seon.ui/callers` ONLY when explicitly requested via `:seon.ui/show-callers?` / `:show-callers?` (or focal inspect)."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :seon.host/db] [:maybe :map]] :map]
                   [:=> [:cat [:maybe :seon.host/db] [:maybe :map] :any] :map]]
-   :cost/ticks 15000000}
+   :cost/ticks 5000000}
   ([db ent] (enrich-entity-params db ent false))
   ([db ent focal-or-opts]
    (if-not (and db (map? ent))
      {}
      (let [opts (if (map? focal-or-opts) focal-or-opts {:focal? (boolean focal-or-opts)})
-           focal? (boolean (:focal? opts)) rich-ns? (boolean (or focal? (:rich-ns? opts)))
-           mdb (or (:main-db opts) db) ag (:agent opts)
-           scope-ns (when-let [s (or (:scope opts) (:seon.agent/scope ag))] (str s))
+           want-callers? (boolean (or (:seon.ui/show-callers? opts) (:show-callers? opts) (:focal? opts)))
            dh (db-schema db)
            src (when-let [fk (and (dh :seon.code.form/key) (:seon.code.var/form ent))]
                  (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fk])))
-           fix (when-let [ek (:seon.error/kind ent)] (find-matching-fix db ek))
-           callers (when (and focal? (dh :seon.code.var/refs) (:seon.code.var/name ent))
+           callers (when (and want-callers? (dh :seon.code.var/refs) (:seon.code.var/name ent))
                      (->> (take 12 (d/datoms db :avet :seon.code.var/refs (:seon.code.var/name ent)))
                           (keep #(:seon.code.var/name (d/pull db '[:seon.code.var/name] (:e %))))
                           distinct sort vec not-empty))
@@ -504,23 +234,22 @@
                     :opt (resolve-attr-values db (:seon.schema/optional-keys ent) :seon.schema/key 16)
                     :refs (resolve-attr-values db (:seon.schema/ref-targets ent) :seon.schema/key 12)
                     :field-tags (schema-field-tags db (:seon.schema/form ent))
-                    :dh-meta (when sdh {:value-type (:db/valueType sdh) :cardinality (:db/cardinality sdh)})
-                    :used-by (schema-touching-vars db sk (:seon.schema/form ent) scope-ns)}))
-           drefs (when (:seon.code.doc/id ent) (resolve-doc-refs db (:seon.code.doc/references ent) 12))
+                    :dh-meta (when sdh {:value-type (:db/valueType sdh) :cardinality (:db/cardinality sdh)})}))
            r-schs (when (:seon.rule/id ent) (resolve-attr-values db (:seon.rule/schema ent) :seon.schema/key 12))
            r-fns (when (:seon.rule/id ent) (resolve-attr-values db (:seon.rule/fn ent) :seon.code.var/name 12))
-           t-extra (when-let [tid (:seon.task/id ent)] (task-lineage-refs mdb tid))
-           ns-extra (when (and rich-ns? (:seon.code.ns/name ent)) (enrich-ns-params db mdb ent ag))]
-       (cond-> (merge {} t-extra ns-extra)
+           err-fix (when-let [k (and (dh :seon.fix/error-class) (:seon.error/kind ent))]
+                     (when-let [fe (:e (first (d/datoms db :avet :seon.fix/error-class k)))]
+                       (dissoc (d/pull db '[:seon.fix/id :seon.fix/error-class :seon.fix/symptom :seon.fix/root-cause
+                                            :seon.fix/change-summary :seon.fix/regression-test :seon.fix/before-after] fe)
+                               :db/id)))]
+       (cond-> {}
          (and (string? src) (not (str/blank? src))) (assoc :seon.code.form/src src)
-         (and (map? fix) (seq (dissoc fix :db/id))) (assoc :seon.fix/entity fix)
          callers (assoc :seon.ui/show-callers? true :seon.ui/callers callers)
          (:keys sks) (assoc :seon.ui/schema-keys (:keys sks))
          (:opt sks) (assoc :seon.ui/schema-optional-keys (:opt sks))
          (:refs sks) (assoc :seon.ui/schema-ref-targets (:refs sks))
          (:field-tags sks) (assoc :seon.ui/schema-field-tags (:field-tags sks))
          (:dh-meta sks) (assoc :seon.ui/schema-dh-meta (:dh-meta sks))
-         (:used-by sks) (assoc :seon.ui/schema-used-by (:used-by sks))
-         drefs (assoc :seon.ui/doc-refs drefs)
          r-schs (assoc :seon.ui/rule-schemas r-schs)
-         r-fns (assoc :seon.ui/rule-fns r-fns))))))
+         r-fns (assoc :seon.ui/rule-fns r-fns)
+         (and (map? err-fix) (:seon.fix/id err-fix)) (assoc :seon.fix/entity err-fix))))))

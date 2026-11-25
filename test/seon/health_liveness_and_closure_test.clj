@@ -19,7 +19,6 @@
             [seon.render.fit :as fit]
             [seon.render.print.policy :as ppol]
             [seon.render.sanitize :as sanitize]
-            [seon.render.tails :as rtails]
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
             [seon.store :as store]
@@ -331,7 +330,7 @@
    (let [budget (long (or (:tail-token-budget opts) 2000))
          scenarios (or (:scenarios opts) (sample-tail-scenarios db))
          fit-opts {:target :wire :strategy :depth-first :token-budget budget
-                   :main-db db :fallback-renderers rtails/fallback-entity-renderers}
+                   :main-db db :fallback-renderers fit/fallback-entity-renderers}
          run-one (fn [items]
                    (let [pri-by-e (into {} (map (juxt :entity :priority)) items)
                          res (fit/fit-projections db items fit-opts)
@@ -384,18 +383,12 @@
           (is (contains? bcls :orphan-wm-consumer))
           (is (contains? bcls :dead-rule-fn)))
         (let [aid :ag/eval-window
-              rec-rule (some #(when (= :rule.ctx/recent-eval-results (:seon.rule/id %)) %) starter)]
-          (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main}
-                                      {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent aid :seon.agent.eval/turn 1
-                                       :seon.agent.eval/code "(old)" :seon.agent.eval/value "1"}
-                                      {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent aid :seon.agent.eval/turn 25
-                                       :seon.agent.eval/code "(mid)" :seon.agent.eval/value "25"}
-                                      {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent aid :seon.agent.eval/turn 30
-                                       :seon.agent.eval/code "(new)" :seon.agent.eval/value "30"}]})
-          (let [res (rules/step-rules nil {:main @conn :branch @conn} {:agent-id aid} [rec-rule] nil)
-                proj-turns (into #{} (map #(:seon.agent.eval/turn (d/pull @conn (quote [:seon.agent.eval/turn]) (:entity %))))
-                                 (:projections res))]
-            (is (= #{25 30} proj-turns) "Turn 1 (age 29 > 12) must be excluded to prevent 568-eval fanout")))
+            err-rule (some #(when (= :rule.ctx/open-errors (:seon.rule/id %)) %) starter)]
+        (d/transact conn {:tx-data [{:seon.agent/id aid :seon.agent/branch :main}
+                                    (error/error-tx {:kind :demo/audit-err :severity :error :source :eval
+                                                     :agent aid :message "Audit open error"})]})
+        (let [res (rules/step-rules nil {:main @conn :branch @conn} {:agent-id aid} [err-rule] nil)]
+          (is (pos? (count (:projections res))) ":rule.ctx/open-errors must project open agent errors cleanly")))
         (let [tail (audit-tail-eviction @conn)]
           (is (true? (:ok? tail)) (pr-str tail))
           (is (true? (get-in tail [:scenarios :quiet :within-budget?])))

@@ -296,8 +296,7 @@
 
 (def supported-query-inputs
   "Exact `:in` input symbols resolved by `seon.rule/resolve-query-inputs`."
-  #{(quote $) (quote $main) (quote $branch) (quote $code) (quote $task)
-    (quote $wm) (quote ?agent) (quote ?agent-eid) (quote ?hierarchy) (quote %)})
+  #{'$ '$main '$branch '$code '$task '$wm '?agent '?agent-eid '?focus '?focus-eid '?hierarchy '%})
 
 (defn detect-rule-holes
   "Pure audit detecting `:orphan-wm-consumer`, `:dead-rule-fn`, `:unknown-rule-input`, `:missing-rule-doc-ref`, and `:conflicting-rule-priority`."
@@ -314,7 +313,7 @@
         dead-proj (when has-vars?
                     (for [r enabled
                           f (or (:seon.coverage/fns (meta r)) (->> (rule-projs db r) (mapcat :fns) distinct sort))
-                          :when (and (qualified-symbol? f) (nil? (first (d/datoms db :avet :seon.code.var/name f))))]
+                          :when (and (qualified-symbol? f) (not (rule-fn-exists? db f)))]
                       {:class :dead-rule-fn :severity :error :rule (:id r) :fn f
                        :subject (str (:id r) "->" f) :message (str (:id r) " asserts missing :fn " f ".")}))
         dead-where (when has-vars?

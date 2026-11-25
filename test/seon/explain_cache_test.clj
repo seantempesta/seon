@@ -249,12 +249,10 @@
 
         ;; rules.edn rank boosts & renderer params present on canonical rules
         (let [by-id (into {} (map (juxt :seon.rule/id identity)) (rseed/starter-rules))
-              ed-p (first (filter map? (:seon.rule/assert (get by-id :rule.ctx/edited-var-on-branch))))
-              err-p (first (filter map? (:seon.rule/assert (get by-id :rule.ctx/fault-with-recommended-fix))))]
-          (is (= 0.15 (:rank/boost ed-p)))
-          (is (true? (get-in ed-p [:params :seon.ui/show-callers?])))
-          (is (= 0.25 (:rank/boost err-p)))
-          (is (= :fix (get-in err-p [:params :seon.ui/expand-section]))))))))
+            ed-p (first (filter map? (:seon.rule/assert (get by-id :rule.ctx/branch-edits))))
+            err-p (first (filter map? (:seon.rule/assert (get by-id :rule.ctx/open-errors))))]
+        (is (true? (get-in ed-p [:params :seon.ui/show-callers?])))
+        (is (= :fix (get-in err-p [:params :seon.ui/expand-section]))))))))
 
 (deftest ^{:cost/ticks 60000000} calibrated-flow-pressure-and-seed42-generative-test
   (testing "Flow separates :paused (:calm) from :stalled (:warm); Pressure uses median+peak and avoids single-spike false :hot"
@@ -312,9 +310,9 @@
                                       {:seon.code.var/name (quote seon.demo.scope/target-fn) :seon.code.var/ns (quote seon.demo.scope) :seon.code.var/doc "Target helper"}
                                       {:seon.code.doc/id "docs/demo.md#demo-note" :seon.code.doc/heading "Demo Note" :seon.code.doc/body "Mentions seon.demo.scope/target-fn" :seon.code.doc/path "docs/demo.md"}
                                       {:seon.task/id task-id :seon.task/title "Minimal vs full context test" :seon.task/scope (quote seon.demo.scope) :seon.task/plan "Verify context prefs" :seon.task/done? false}
-                                      {:seon.agent/id aid-full :seon.agent/branch :main :seon.agent/scope (quote seon.demo.scope) :seon.agent/tasks #{[:seon.task/id task-id]}}
+                                      {:seon.agent/id aid-full :seon.agent/branch :main :seon.agent/scope (quote seon.demo.scope) :seon.agent/tasks #{[:seon.task/id task-id]} :seon.agent/pinned [[:seon.code.var/name (quote seon.demo.scope/target-fn)]]}
                                       {:seon.agent/id aid-min :seon.agent/branch :main :seon.agent/scope (quote seon.demo.scope) :seon.agent/tasks #{[:seon.task/id task-id]}
-                                       :seon.agent/context-prefs {:minimal? true :disabled-rules #{:rule.ctx/scope-and-extra-namespaces :rule.ctx/scope-task-history-and-fixes :rule.ctx/citing-docs :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns}}}]})
+                                       :seon.agent/context-prefs {:minimal? true :disabled-rules #{:rule.ctx/scope-namespaces :rule.ctx/pinned-entities}}}]})
         var-eid (:db/id (d/pull @conn (quote [:db/id]) [:seon.code.var/name (quote seon.demo.scope/target-fn)]))
         _ (is (integer? var-eid))
         _ (d/transact conn {:tx-data [{:seon.agent.eval/id (java.util.UUID/randomUUID) :seon.agent.eval/agent aid-full :seon.agent.eval/turn 1 :seon.agent.eval/code "(user/show (quote seon.demo.scope/target-fn))" :seon.agent.eval/touched [var-eid var-eid]}]}) 
@@ -372,8 +370,8 @@
                 (is (>= (long (get (:counts dt) alpha-eid 0)) 2) "Written var gets +2 write weight")
                 (is (= 2 (get (:counts dt) beta-eid)) "Live in-memory reads accumulate across turns")
                 (is (true? (:written? (get by-e alpha-eid))) "Written flag propagates to unified candidates")
-                (is (= 2 (:touches (get by-e beta-eid))) "Derived live read count propagates to candidates")
-                (is (contains? by-e var-sch-eid) ":rule.ctx/eval-touched-schemas must fire from $wm :world/touched with zero persisted :touched-refs")))
+                (is (>= (long (:touches (get by-e alpha-eid) 0)) 2) "Derived write touch count propagates to candidates")
+                (is (contains? by-e alpha-eid) ":rule.ctx/branch-edits must fire from raw d/changes with zero persisted :touched-refs")))
             (finally
               (ctouches/clear-live-reads! @bconn aid)
               (d/release bconn))))))))

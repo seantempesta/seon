@@ -1,10 +1,12 @@
 (ns seon.ctx
   "Reactive `@seon.ctx/ctx` live bidirectional Datahike projection (`IDeref`/`IRef`/`IAtom2`,
-   `O(|Δ|)` refresh, filtered `:seon.ctx/neighborhood`, `swap!` write-back) and unified context engine."
+   `O(|Δ|)` refresh, filtered `:seon.ctx/neighborhood`, `swap!` write-back) and ONE unified
+   `project-entity` context engine."
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [datahike.reads :as reads]
             [seon.code.files :as files]
+            [seon.ctx.ground :as ground]
             [seon.ctx.project :as proj]
             [seon.ctx.touches :as ctouches]
             [seon.ctx.tree :as tree]
@@ -40,23 +42,21 @@
 
 (defn agent-world-datoms
   "Generic 2-read agent world discovery."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :map] :cost/ticks 8000000}
-  [main-db branch-db agent-id] (proj/agent-world-datoms main-db branch-db agent-id))
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :map] :cost/ticks 12000000}
+  [main-db branch-db agent-id]
+  (proj/agent-world-datoms main-db branch-db agent-id))
+
+(defn entity-world-datoms
+  "Generic 2-read focal world discovery for any entity lookup ref."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map] :cost/ticks 12000000}
+  [main-db branch-db focal-ref]
+  (proj/entity-world-datoms main-db branch-db focal-ref))
 
 (defn merge-pull-patterns
   "Monotonic union of Datahike `:pull` patterns."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]] :cost/ticks 500000}
-  [patterns] (proj/merge-pull-patterns patterns))
-
-(defn merge-projections
-  "Merges rule projections per entity with `d/pull` and provenance."
-  {:malli/schema [:=> [:cat :map [:vector :map]] [:vector :map]] :cost/ticks 15000000}
-  [dbs raw-projections] (proj/merge-projections dbs raw-projections))
-
-(defn compute-shown-delta
-  "Zero-repetition / upgrade / re-warming delta."
-  {:malli/schema [:=> [:cat [:maybe :map] [:vector :map]] [:map [:projections [:vector :map]] [:shown :map]]] :cost/ticks 5000000}
-  [already-shown projections] (proj/compute-shown-delta already-shown projections))
+  [patterns]
+  (proj/merge-pull-patterns patterns))
 
 (defn load-context-rules
   "Loads active `:context` rules from `main-db` + `branch-db` via `seon.rule/load-rules`."
@@ -77,42 +77,6 @@
   {:malli/schema [:=> [:cat :seon.host/db :int :map :map] [:vector :any]] :cost/ticks 10000000}
   [db eid old-m new-m]
   (tree/diff-entity-tx db eid old-m new-m))
-
-(defn- grounded-tail-lvars [q]
-  (into #{}
-        (keep (fn [n]
-                (when (and (vector? n) (= 2 (count n)) (seq? (first n))
-                           (= 'ground (ffirst n)) (= :ephemeral-tail (second (first n)))
-                           (rules/lvar? (second n)))
-                  (second n))))
-        (tree-seq coll? seq (:where (rules/parse-query q)))))
-
-(defn tail-rules-with-producers
-  "Returns the ordered subset of `all-rs` needed to evaluate `:ephemeral-tail` rules (including `(ground :ephemeral-tail)` bindings) and their transitive `$wm` producers."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:maybe [:vector :map]]] :cost/ticks 500000}
-  [all-rs]
-  (let [tail-rs (filterv (fn [r]
-                           (let [as (:seon.rule/assert r)
-                                 glvs (when (and (sequential? as) (some #(and (map? %) (rules/lvar? (:zone %))) as))
-                                        (grounded-tail-lvars (:seon.rule/query r)))]
-                             (and (sequential? as) (seq as)
-                                  (some #(and (map? %)
-                                              (or (= :ephemeral-tail (:zone %))
-                                                  (and glvs (contains? glvs (:zone %)))))
-                                        as))))
-                         all-rs)
-        asserted-attrs (fn [r]
-                         (into #{} (keep #(when (and (vector? %) (>= (count %) 2) (keyword? (second %))) (second %)))
-                               (:seon.rule/assert r)))
-        by-attr (reduce (fn [m r] (reduce (fn [acc a] (update acc a (fnil conj []) r)) m (asserted-attrs r))) {} all-rs)]
-    (when (seq tail-rs)
-      (loop [chosen (into {} (map (juxt :seon.rule/id identity)) tail-rs)
-             frontier tail-rs]
-        (let [need-attrs (into #{} (mapcat rules/rule-wm-read-attrs) frontier)
-              add-rs (into [] (comp (mapcat #(get by-attr %)) (remove #(contains? chosen (:seon.rule/id %)))) need-attrs)]
-          (if (empty? add-rs)
-            (vec (sort-by (juxt #(or (:seon.rule/stratum %) 0) #(str (:seon.rule/id %))) (vals chosen)))
-            (recur (into chosen (map (juxt :seon.rule/id identity)) add-rs) add-rs)))))))
 
 (defn- ^:seon.flow/edge branch-caused-health-facts [main-db branch-db derived-touches]
   (let [wnss (:written-nss derived-touches)]
@@ -137,119 +101,154 @@
            (into [] (keep (fn [p] (when-let [e (resolve-p p)] [e :world/branch-caused-issue (or (:class p) :health-error)])))
                  (concat struct-errs eff-errs))))))))
 
-(defn- seed-world-wm [world derived-touches main-db branch-db]
-  (let [aeid (:agent-eid world)
-        max-tx-m (or (:max-tx derived-touches) {}) written-s (or (:written derived-touches) #{})
-        te (:turn-events derived-touches)]
-    (rules/add-facts
-     (rules/empty-wm)
-     (concat
-      (mapcat (fn [[e tx]] (cond-> [[e :world/connected true]] (pos? (long tx)) (conj [e :world/tx (long tx)]))) (:connected world))
-      (map #(vector % :world/pinned true) (:pinned world))
-      (map #(vector % :world/extra-ns true) (:extra-nss world))
-      (mapcat (fn [[e cnt]]
-                (cond-> [[e :world/touched true] [e :world/touches (long cnt)] [e :world/touched-tx (long (get max-tx-m e 0))]]
-                  (contains? written-s e) (conj [e :world/written? true])))
-              (:counts derived-touches))
-      (keep (fn [[e v]] (when (and (integer? e) (number? v) (pos? (double v))) [e :world/energy (double v)])) (:energy derived-touches))
-      (keep (fn [[e v]] (when (and (integer? e) (number? v) (pos? (double v))) [e :world/frontier (double v)])) (:novel-frontier derived-touches))
-      (keep (fn [[e v]] (when (and (integer? e) (number? v) (pos? (double v))) [e :world/continuation true])) (:continuation derived-touches))
-      (keep #(when (integer? %) [% :turn/error-schema true]) (:error-schemas te))
-      (when (and aeid (:has-error? te)) [[aeid :turn/has-error? true]])
-      (when (and aeid (:large-result? te)) [[aeid :turn/large-result? true]])
-      (branch-caused-health-facts main-db branch-db derived-touches))
-     {:rule :seed/world :stratum 0})))
+(defn- eval-entity-rules [main-db bdb tdb world aid ag eff-rs disabled rule-target derived-t o]
+  (let [mc (live-cid main-db) bc (live-cid bdb)
+        run-ru (fn []
+                 (if (empty? eff-rs)
+                   {:projs [] :runs {} :recomputed 0 :skipped 0}
+                   (let [dbs {:main main-db :branch bdb :code bdb :task tdb}
+                         extra (branch-caused-health-facts main-db bdb derived-t)
+                         sr (rules/step-rules nil dbs
+                                              {:agent-id aid :focus-ref (:focus-ref world) :focus-eid (:focus-eid world)
+                                               :base-wm (proj/seed-world-wm world derived-t extra)}
+                                              eff-rs nil rule-target)]
+                     {:projs (proj/collapse-rule-projections (:projections sr))
+                      :runs (:runs sr) :recomputed (:recomputed sr) :skipped (:skipped sr)})))
+        ck (when (and (not (false? (:use-cache? o))) mc bc (empty? disabled) (nil? (:rules o)))
+             [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb)
+              (:focus-ref world) aid rule-target (count eff-rs)
+              (when ag (rdata/agent-task-ids bdb ag)) (:seon.agent/scope ag) (:seon.agent/pinned ag)
+              (:seon.agent/target ag) (:seon.agent/context-prefs ag) (:sig derived-t)
+              (when rules/*base-rules-override* (System/identityHashCode rules/*base-rules-override*))])]
+    (if ck (store/lru-get! ctx-ru-cache 64 ck run-ru) (run-ru))))
 
-(defn related-updates
-  "Normal `ns-map -> ns-map` incremental context engine over native Datahike `d/q` + `d/pull` + `datahike.reads`."
-  {:malli/schema
-   [:=> [:cat [:map [:seon.db/main :seon.host/db] [:seon.db/branch {:optional true} [:maybe :seon.host/db]]
-               [:seon.agent/id :qualified-keyword] [:seon.view/target {:optional true} :seon.view/target]
-               [:seon.view/token-budget {:optional true} :seon.view/token-budget]
-               [:seon.ctx/prev-session {:optional true} [:maybe :map]] [:seon.ctx/tx-datoms {:optional true} [:maybe :any]]]]
-        [:map [:seon.ctx/projections [:vector :map]] [:seon.ctx/trace :map] [:seon.ctx/session :map] [:seon.ctx/tokens :int]]]
+(defn- fit-entity-results [main-db bdb world ranked fit-target o]
+  (let [fit-items (filterv #(not= :agent-prefix (:zone %)) ranked)
+        fb (or (:fallback-renderers o) fit/fallback-entity-renderers)
+        fopts (merge {:target fit-target :main-db main-db :fallback-renderers fb}
+                     (select-keys o [:avail-w :area-budget :per-item-budget :token-budget :max-items
+                                     :strategy :weights :turn :already-shown :viewport-w :viewport-h
+                                     :sidebar-open? :slot :browser-boxes :text-fn]))
+        fitted (if (:skip-fit? o)
+                 {:selected [] :dropped [] :tokens 0 :area 0 :budget (long (or (:token-budget o) (:area-budget o) 0))
+                  :target fit-target :strategy (or (:strategy o) :breadth-first) :shown (or (:already-shown o) {})}
+                 (if (:explain? o)
+                   (fit/explain-candidates bdb fit-items fopts)
+                   (fit/fit-projections bdb fit-items fopts)))
+        focal-fit (when (and (not (false? (:include-focal-fit? o))) (not (:skip-fit? o))
+                             (map? (:focus-data world)) (seq (dissoc (:focus-data world) :db/id)))
+                    (let [fi {:entity (or (:focus-eid world) (:focus-ref world))
+                              :ref (:focus-ref world) :schema (:focus-schema world)
+                              :data (:focus-data world) :priority 100}
+                          ff-opts (merge {:target fit-target :max-items 1 :main-db main-db :fallback-renderers fb}
+                                         (if (= :html fit-target)
+                                           {:avail-w (long (or (:avail-w o) 960)) :area-budget (long (or (:area-budget o) 600000))}
+                                           {:token-budget (long (or (:focal-token-budget o) 1200))}))]
+                      (first (:selected (fit/fit-projections bdb [fi] ff-opts)))))]
+    {:fitted fitted :focal-fit focal-fit}))
+
+(defn project-entity
+  "ONE unified rule-projected entity context engine for BOTH humans (`:target :html`) and agents (`:target :wire`).
+   Works identically for any `focal-ref` (`[:seon.agent/id ...]`, `[:seon.system/id :root]`, tasks, vars, namespaces,
+   schemas, errors, branches, signals) with optional `:perspective-agent`."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any [:maybe :map]] :map]]
    :cost/ticks 50000000}
-  [{:seon.db/keys [main branch] :seon.agent/keys [id] :seon.view/keys [target token-budget] :seon.ctx/keys [prev-session tx-datoms] :as req}]
-  (let [eff-branch (or branch main) eff-task (or (:seon.db/task req) eff-branch)
-        dbs {:main main :branch eff-branch :code eff-branch :task eff-task}
-        eff-target (or target :wire) budget (long (or token-budget 16000))
-        ctx-rules (load-context-rules main eff-branch (:seon.ctx/rules req))
-        world (or (:seon.ctx/world req) (agent-world-datoms main eff-branch id))
-        base-wm (seed-world-wm world (ctouches/derived-agent-touches main eff-branch id) main eff-branch)
-        step-res (rules/step-rules (:rule-state prev-session) dbs {:agent-id id :base-wm base-wm} ctx-rules tx-datoms eff-target)
-        merged (merge-projections dbs (:projections step-res))
-        {:keys [projections shown]} (compute-shown-delta (:shown prev-session) merged)
-        {:keys [selected dropped tokens]} (proj/budget-and-order-projections projections budget)
-        runs-s (sort-by (juxt :stratum #(str (:rule-id %))) (vals (:runs step-res)))
-        trace {:agent id :target eff-target :token-budget budget :tokens tokens
-               :rules-total (count ctx-rules) :recomputed (:recomputed step-res) :skipped (:skipped step-res)
-               :fired-rules (vec (keep #(when (pos? (long (:fired % 0)))
-                                          (select-keys % [:rule-id :stratum :category :fired :reads-count :ms :skipped?])) runs-s))
-               :skipped-rules (vec (keep #(when (:skipped? %) (:rule-id %)) runs-s))
-               :world-discovery {:agent-eid (:agent-eid world) :forward-attrs (vec (sort (distinct (map :a (:forward world)))))
-                                 :reverse-attrs (:reverse-attrs world) :reverse-hits (count (:reverse world))}
-               :blocks (mapv #(select-keys % [:entity :rules :fn :pull :params :zone :parent :priority :status :tokens :tx]) selected)
-               :dropped (mapv #(select-keys % [:entity :rules :priority :tokens]) dropped)}
-        shown' (reduce #(assoc %1 (:entity %2) (get shown (:entity %2))) (or (:shown prev-session) {}) selected)]
-    {:seon.ctx/projections selected :seon.ctx/trace trace
-     :seon.ctx/session {:rule-state step-res :shown shown' :agent-id id :target eff-target} :seon.ctx/tokens tokens}))
+  ([main-db branch-db focal-ref] (project-entity main-db branch-db focal-ref nil))
+  ([main-db branch-db focal-ref opts]
+   (let [o (if (map? opts) opts {})
+         raw-bdb (or branch-db main-db)
+         hop2? (boolean (:include-hop2-unmatched? o))
+         init-world (proj/entity-world-datoms main-db raw-bdb focal-ref hop2?)
+         focus-kind (:focus-kind init-world)
+         aid (or (:perspective-agent o) (when (= :agent focus-kind) (second (:focus-ref init-world))))
+         ag (when aid (or (:agent o)
+                          (when (= :agent focus-kind) (:focus-data init-world))
+                          (rdata/pull-agent-entity main-db raw-bdb aid)
+                          {:seon.agent/id aid}))
+         bdb (if (and (= :agent focus-kind) (rdata/reads-main? ag)) main-db raw-bdb)
+         world (if (identical? bdb raw-bdb) init-world (proj/entity-world-datoms main-db bdb focal-ref hop2?))
+         tdb (or (:task-db o)
+                 (when ag
+                   (let [tids (rdata/agent-task-ids bdb ag)]
+                     (when (and (seq tids) ((rlinks/db-schema bdb) :seon.task/id)
+                                (some #(first (d/datoms bdb :avet :seon.task/id %)) tids))
+                       bdb)))
+                 main-db)
+         rule-target (case (:target o) (:wire :html :canvas :workspace :debug :any) (:target o) :any)
+         fit-target (if (= :wire (:target o)) :wire :html)
+         prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
+         disabled (into #{} (concat (when (coll? (:disabled-rules prefs)) (:disabled-rules prefs))
+                                    (when (coll? (:disabled-rules o)) (:disabled-rules o))))
+         all-rs (load-context-rules main-db bdb (:rules o))
+         eff-rs (filterv #(not (contains? disabled (:seon.rule/id %))) all-rs)
+         use-lt? (if (contains? o :use-live-touches?) (boolean (:use-live-touches? o)) (some? aid))
+         derived-t (or (:derived-touches o) (when (and aid use-lt?) (ctouches/derived-agent-touches main-db bdb aid)))
+         same-mb? (proj/same-db? main-db bdb)
+         branch-writes (into (set (:written derived-t)) (when-not same-mb? (rules/edited-form-eids main-db bdb)))
+         ru (eval-entity-rules main-db bdb tdb world aid ag eff-rs disabled rule-target derived-t o)
+         tc-m (or (:counts derived-t) {}) eng-m (or (:energy derived-t) {})
+         fs-m (or (:novel-frontier derived-t) {}) wr-s (or (:written derived-t) #{})
+         hyd0 (ground/hydrate-candidates main-db bdb tdb (ground/merge-raw-candidates (:projs ru)) o)
+         hyd1 (mapv (fn [c]
+                      (let [e (:entity c) tc (long (get tc-m e 0)) eng (double (get eng-m e 0.0))
+                            fs (double (get fs-m e 0.0))]
+                        (cond-> c
+                          (pos? tc) (assoc :touches (max tc (long (:touches c 0))))
+                          (pos? eng) (assoc :touch-energy (max eng (double (or (:touch-energy c) 0.0))))
+                          (pos? fs) (assoc :frontier-score (max fs (double (or (:frontier-score c) 0.0))))
+                          (contains? wr-s e) (assoc :written? true))))
+                    hyd0)
+         hydrated (if (not (false? (:semantic? o)))
+                    (ground/attach-semantic-scores main-db bdb (or ag (:focus-ref world)) hyd1)
+                    hyd1)
+         r-opts (cond-> (select-keys o [:turn])
+                  (or (:weights o) (nil? (:turn o))) (assoc :weights (or (:weights o) (fit/read-rank-weights bdb))))
+         ranked (fit/rank-candidates hydrated r-opts)
+         {:keys [fitted focal-fit]} (fit-entity-results main-db bdb world ranked fit-target o)
+         matched-eids (into #{} (keep :entity) ranked)
+         unmatched (if (false? (:include-unmatched? o))
+                     []
+                     (proj/build-unmatched-neighbors main-db bdb world matched-eids (boolean (:include-hop2-unmatched? o))))
+         r-trace (if (false? (:include-rule-trace? o)) [] (proj/build-rule-trace all-rs (:runs ru) disabled))
+         runs-s (sort-by (juxt :stratum #(str (:rule-id %))) (vals (:runs ru)))
+         ctx-trace {:agent aid :focus-ref (:focus-ref world) :target rule-target
+                    :rules-total (count all-rs) :recomputed (:recomputed ru) :skipped (:skipped ru)
+                    :fired-rules (vec (keep #(when (pos? (long (:fired % 0)))
+                                               (select-keys % [:rule-id :stratum :category :fired :reads-count :ms :skipped?]))
+                                            runs-s))
+                    :skipped-rules (vec (keep #(when (:skipped? %) (:rule-id %)) runs-s))
+                    :world-discovery {:focus-eid (:focus-eid world) :datoms-count (:datoms-count world)
+                                      :hop1-count (count (:hop1-eids world)) :hop2-count (count (:hop2-eids world))
+                                      :reverse-attrs (:reverse-attrs world)}}]
+     {:focus-ref (:focus-ref world) :focus-eid (:focus-eid world) :focus-kind focus-kind
+      :focus-data (:focus-data world) :focus-schema (:focus-schema world) :focal-fit focal-fit
+      :world {:datoms-count (:datoms-count world) :hop1-eids (:hop1-eids world)
+              :hop2-eids (:hop2-eids world) :branch-writes branch-writes :agent-eid (:agent-eid world)}
+      :candidates ranked :unmatched unmatched :fitted fitted
+      :rule-trace r-trace :ctx-trace ctx-trace :agent ag :derived-touches derived-t})))
 
 (defn gather-agent-candidates
-  "ONE unified candidate-pool builder used across surfaces, wire, context-lab, and `@seon.ctx/ctx`."
+  "Compatibility wrapper delegating directly to `project-entity` (used by `surface*.clj` and `signals/touches.clj`)."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :map]
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword [:maybe :map]] :map]]
    :cost/ticks 45000000}
   ([main-db branch-db agent-id] (gather-agent-candidates main-db branch-db agent-id nil))
   ([main-db branch-db agent-id opts]
-   (let [o (if (map? opts) opts {}) raw-bdb (or branch-db main-db)
-                                    ag (or (:agent o) (rdata/pull-agent-entity main-db raw-bdb agent-id) {:seon.agent/id agent-id})
-                                    bdb (if (rdata/reads-main? ag) main-db raw-bdb)
-         tdb (or (:task-db o)
-                 (let [tids (rdata/agent-task-ids bdb ag)]
-                   (when (and (seq tids) ((rlinks/db-schema bdb) :seon.task/id) (some #(first (d/datoms bdb :avet :seon.task/id %)) tids)) bdb))
-                 main-db)
-         target (case (:target o) (:canvas :workspace :debug :wire :any) (:target o) :html :canvas :wire)
-         prefs (if (map? (:seon.agent/context-prefs ag)) (:seon.agent/context-prefs ag) {})
-         disabled (into #{} (concat (when (coll? (:disabled-rules prefs)) (:disabled-rules prefs))
-                                    (when (coll? (:disabled-rules o)) (:disabled-rules o))))
-         mc (live-cid main-db) bc (live-cid bdb) same? (proj/same-db? main-db bdb)
-         all-rs (load-context-rules main-db bdb (:rules o))
-         skip (cond-> (set/union disabled (proj/fast-skip-rule-ids main-db bdb ag same?))
-                (false? (:include-evals? o)) (conj :rule.ctx/recent-eval-results))
-         eff-rs (filterv #(not (skip (:seon.rule/id %))) all-rs)
-         world (agent-world-datoms main-db bdb agent-id)
-         minimal? (boolean (if (contains? o :minimal?) (:minimal? o) (:minimal? prefs)))
-         use-lt? (if (contains? o :use-live-touches?) (boolean (:use-live-touches? o)) (not minimal?))
-         derived-t (or (:derived-touches o) (when use-lt? (ctouches/derived-agent-touches main-db bdb agent-id)))
-         run-ru (fn []
-                  (if (empty? eff-rs)
-                    {:projs [] :trace {:agent agent-id :target target :rules-total (count all-rs)
-                                       :fired-rules [] :skipped-rules [] :recomputed 0 :skipped (count all-rs)}}
-                    (let [dbs {:main main-db :branch bdb :code bdb :task tdb}
-                          sr (rules/step-rules nil dbs {:agent-id agent-id :base-wm (seed-world-wm world derived-t main-db bdb)} eff-rs nil target)
-                          runs-s (sort-by (juxt :stratum #(str (:rule-id %))) (vals (:runs sr)))]
-                      {:projs (proj/collapse-rule-projections (if-let [zf (:zone-filter o)] (filterv #(= zf (:zone %)) (:projections sr)) (:projections sr)))
-                       :trace {:agent agent-id :target target :rules-total (count all-rs)
-                               :recomputed (:recomputed sr) :skipped (:skipped sr)
-                               :fired-rules (vec (keep #(when (pos? (long (:fired % 0)))
-                                                          (select-keys % [:rule-id :stratum :category :fired :reads-count :ms :skipped?])) runs-s))
-                               :skipped-rules (vec (keep #(when (:skipped? %) (:rule-id %)) runs-s))}})))
-         ck (when (and (not (false? (:use-cache? o))) mc bc (empty? disabled) (or (nil? (:rules o)) (keyword? (:rules-tag o))))
-              [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb)
-               agent-id target (:rules-tag o) (:zone-filter o) (count eff-rs)
-               (rdata/agent-task-ids bdb ag) (:seon.agent/scope ag) (:seon.agent/context-prefs ag)
-               (:seon.agent/target ag) (:seon.agent/pinned ag) (:sig derived-t)
-               (when rules/*base-rules-override* (System/identityHashCode rules/*base-rules-override*))])
-         ru (if ck (store/lru-get! ctx-ru-cache 64 ck run-ru) (run-ru))
-         cands (proj/augment-and-hydrate-candidates main-db bdb tdb ag world (:projs ru) (cond-> o derived-t (assoc :derived-touches derived-t)))]
-     {:agent ag :world world :candidates cands :ctx-trace (:trace ru) :derived-touches derived-t})))
+   (let [o (if (map? opts) opts {})
+         res (project-entity main-db branch-db [:seon.agent/id agent-id]
+                             (assoc o :skip-fit? true :include-focal-fit? false :include-unmatched? false))]
+     (select-keys res [:agent :world :candidates :ctx-trace :derived-touches :rule-trace]))))
 
 (defn- build-filtered-neighborhood [db aid]
-  (let [{:keys [candidates]} (gather-agent-candidates db db aid {:target :wire :enrich? false :situational? false
-                                                                 :include-evals? false :semantic? true :use-cache? true})
+  (let [{:keys [candidates]} (project-entity db db [:seon.agent/id aid]
+                                             {:target :wire :enrich? false :include-evals? false
+                                              :semantic? true :skip-fit? true :include-focal-fit? false
+                                              :include-unmatched? false})
         ranked (take 8 (filter #(and (integer? (:entity %)) (map? (:data %)) (integer? (get-in % [:data :db/id])))
-                               (fit/rank-candidates candidates)))]
+                               candidates))]
     (reduce (fn [acc item]
               (let [ent (:data item)
                     grp (cond (:seon.task/id ent) :tasks (:seon.code.var/name ent) :vars (:seon.error/id ent) :errors :else :pinned)]
@@ -262,48 +261,67 @@
       {:key :seon.ctx/neighborhood :val nb :reads-idx (reads/reads-index rs)})))
 
 (defn context-trace
-  "Returns full self-introspection trace for `agent-id` showing fired/skipped rules, reads, world discovery, and blocks."
+  "Self-introspection trace for `target-ref` (agent keyword or lookup ref) via `project-entity`."
   {:malli/schema [:function
-                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword] :map]
-                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword [:maybe :map]] :map]]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any [:maybe :map]] :map]]
    :cost/ticks 50000000}
-  ([main-db branch-db agent-id] (context-trace main-db branch-db agent-id nil))
-  ([main-db branch-db agent-id opts]
-   (let [o (if (map? opts) opts {})]
-     (:seon.ctx/trace
-      (related-updates (cond-> {:seon.db/main main-db :seon.db/branch (or branch-db main-db) :seon.agent/id agent-id}
-                         (:target o) (assoc :seon.view/target (:target o))
-                         (:token-budget o) (assoc :seon.view/token-budget (:token-budget o))
-                         (:rules o) (assoc :seon.ctx/rules (:rules o))))))))
+  ([main-db branch-db target-ref] (context-trace main-db branch-db target-ref nil))
+  ([main-db branch-db target-ref opts]
+   (let [o (if (map? opts) opts {})
+         ref (if (vector? target-ref) target-ref [:seon.agent/id target-ref])
+         res (project-entity main-db (or branch-db main-db) ref
+                             (merge {:target :wire :token-budget 16000} o))
+         fitted (:fitted res)
+         sel (:selected fitted)
+         drp (:dropped fitted)]
+     (assoc (:ctx-trace res)
+            :token-budget (:budget fitted)
+            :tokens (:tokens fitted)
+            :rule-trace (:rule-trace res)
+            :unmatched (:unmatched res)
+            :blocks (mapv #(select-keys % [:entity :ref :schema :rules :chosen-fn :pull :params :zone :parent :priority :status :tokens :tx :rank/score]) sel)
+            :dropped (mapv #(select-keys % [:entity :ref :schema :rules :priority :tokens]) drp)))))
 
 (defn diff-context
-  "A/B diffs context projections and token counts between `rules-a` and `rules-b` for `agent-id`."
+  "A/B diffs context projections and token counts between `rules-a` and `rules-b` via `project-entity`."
   {:malli/schema [:function
-                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword [:maybe [:vector :map]] [:maybe [:vector :map]]] :map]
-                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :qualified-keyword [:maybe [:vector :map]] [:maybe [:vector :map]] [:maybe :map]] :map]]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any [:maybe [:vector :map]] [:maybe [:vector :map]]] :map]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any [:maybe [:vector :map]] [:maybe [:vector :map]] [:maybe :map]] :map]]
    :cost/ticks 60000000}
-  ([main-db branch-db agent-id rules-a rules-b] (diff-context main-db branch-db agent-id rules-a rules-b nil))
-  ([main-db branch-db agent-id rules-a rules-b opts]
+  ([main-db branch-db target-ref rules-a rules-b] (diff-context main-db branch-db target-ref rules-a rules-b nil))
+  ([main-db branch-db target-ref rules-a rules-b opts]
    (let [o (if (map? opts) opts {})
-         base (cond-> {:seon.db/main main-db :seon.db/branch (or branch-db main-db) :seon.agent/id agent-id}
-                (:target o) (assoc :seon.view/target (:target o))
-                (:token-budget o) (assoc :seon.view/token-budget (:token-budget o)))
-         ra (related-updates (cond-> base rules-a (assoc :seon.ctx/rules rules-a)))
-         rb (related-updates (cond-> base rules-b (assoc :seon.ctx/rules rules-b)))
-         ma (into {} (map (juxt :entity identity)) (:seon.ctx/projections ra))
-         mb (into {} (map (juxt :entity identity)) (:seon.ctx/projections rb))
-         ks-a (set (keys ma)) ks-b (set (keys mb))]
-     {:agent agent-id :target (get-in ra [:seon.ctx/trace :target])
-      :tokens-before (:seon.ctx/tokens ra) :tokens-after (:seon.ctx/tokens rb)
-      :tokens-delta (- (long (:seon.ctx/tokens rb)) (long (:seon.ctx/tokens ra)))
+         ref (if (vector? target-ref) target-ref [:seon.agent/id target-ref])
+         base (merge {:target :wire :token-budget 16000 :use-cache? false} o)
+         ra (project-entity main-db (or branch-db main-db) ref (cond-> base rules-a (assoc :rules rules-a)))
+         rb (project-entity main-db (or branch-db main-db) ref (cond-> base rules-b (assoc :rules rules-b)))
+         sel-a (get-in ra [:fitted :selected])
+         sel-b (get-in rb [:fitted :selected])
+         ma (into {} (map (juxt :entity identity)) sel-a)
+         mb (into {} (map (juxt :entity identity)) sel-b)
+         ks-a (set (keys ma)) ks-b (set (keys mb))
+         tok-a (long (get-in ra [:fitted :tokens] 0))
+         tok-b (long (get-in rb [:fitted :tokens] 0))
+         rta (into {} (map (juxt :rule :matched-count)) (:rule-trace ra))
+         rtb (into {} (map (juxt :rule :matched-count)) (:rule-trace rb))
+         rids (sort (set/union (set (keys rta)) (set (keys rtb))))]
+     {:agent (when (= :seon.agent/id (first ref)) (second ref))
+      :focus-ref ref
+      :target (get-in ra [:fitted :target])
+      :tokens-before tok-a
+      :tokens-after tok-b
+      :tokens-delta (- tok-b tok-a)
       :added-entities (vec (sort-by str (set/difference ks-b ks-a)))
       :removed-entities (vec (sort-by str (set/difference ks-a ks-b)))
       :changed-pulls (vec (keep #(let [pa (:pull (get ma %)) pb (:pull (get mb %))]
                                    (when (not= pa pb) {:entity % :before pa :after pb}))
                                 (sort-by str (set/intersection ks-a ks-b))))
-      :rule-diffs (:rule-diffs (rules/diff-sessions (get-in ra [:seon.ctx/session :rule-state])
-                                                    (get-in rb [:seon.ctx/session :rule-state])))
-      :trace-before (:seon.ctx/trace ra) :trace-after (:seon.ctx/trace rb)})))
+      :rule-diffs (vec (keep #(let [a (get rta % 0) b (get rtb % 0)]
+                                (when (not= a b) {:rule % :before a :after b}))
+                             rids))
+      :trace-before (:ctx-trace ra)
+      :trace-after (:ctx-trace rb)})))
 
 (defn install-ctx-helpers!
   "Installs `user/context-trace`, `user/diff-context`, `user/rules`, `user/put-rule!`, `user/toggle-rule!`, `user/curate!`."
@@ -316,8 +334,8 @@
           add! (fn [sym f meta-m] (let [v (intern u sym f)] (alter-meta! v merge meta-m) v))]
       [(add! 'context-trace
              (fn ct ([] (ct nil {})) ([a] (if (map? a) (ct nil a) (ct a {})))
-               ([t o] (let [{:keys [mdb bdb aid]} (dbs)] (context-trace mdb bdb (if (qualified-keyword? t) t aid) o))))
-             {:arglists '([] [opts-or-agent] [agent-id opts]) :doc "Inspect context rules, reads & blocks."})
+               ([t o] (let [{:keys [mdb bdb aid]} (dbs)] (context-trace mdb bdb (if (or (qualified-keyword? t) (vector? t)) t aid) o))))
+             {:arglists '([] [opts-or-agent] [agent-or-ref opts]) :doc "Inspect context rules, unmatched neighbors & fitted blocks."})
        (add! 'diff-context
              (fn ([] (let [{:keys [mdb bdb aid]} (dbs)] (diff-context mdb bdb aid (load-context-rules mdb mdb nil) (load-context-rules mdb bdb nil) nil)))
                ([a] (let [{:keys [mdb bdb aid]} (dbs)]

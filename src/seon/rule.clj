@@ -9,34 +9,15 @@
             [seon.ctx.diff :as diff]
             [seon.schema :as schema]
             [seon.schema.index :as six]
-            [seon.store :as store :refer [live-cid]]))
+            [seon.store :as store :refer [live-cid]]
+            [seon.rule.query :as rq]))
 
 (defn- dsch [db] (or (:schema db) (when db (d/schema db)) {}))
 
-(defn- db-req-empty? [db-req dbs]
-  (when (seq db-req)
-    (let [eff (or (:branch dbs) (:code dbs) (:main dbs))]
-      (some (fn [[src a v]]
-              (let [db (case src $ eff $main (or (:main dbs) eff) $branch (or (:branch dbs) (:main dbs) eff)
-                             $code (or (:code dbs) (:branch dbs) (:main dbs))
-                             $task (or (:task dbs) (:branch dbs) (:main dbs)) nil)]
-                (when-let [sp (and db (get (dsch db) a))]
-                  (let [av? (and (not= v ::any) (or (:db/index sp) (:db/unique sp) (= :db.type/ref (:db/valueType sp))))
-                        emp? (binding [di/*reads* nil] (nil? (first (if av? (d/datoms db :avet a v) (d/datoms db :aevt a)))))]
-                    (when emp?
-                      (first (if av? (d/datoms db :avet a v) (d/datoms db :aevt a)))
-                      true)))))
-            db-req))))
-
 (def default-hierarchy
-  "Default `clojure.core/derive` fact hierarchy for polymorphic rule matching."
+  "Default `clojure.core/derive` hierarchy for polymorphic rule matching."
   (reduce (fn [h [c p]] (derive h c p)) (make-hierarchy)
-          [[:rel/mentions-ns :rel/ns-connection] [:rel/scope :rel/ns-connection]
-           [:rel/extra-ns :rel/ns-connection] [:rel/tree-ns :rel/ns-connection]
-           [:rel/mentions-var :rel/var-connection] [:rel/search-hit :rel/var-connection]
-           [:rel/tree-var :rel/var-connection] [:rel/covering-test :rel/var-connection]
-           [:rel/mentions-schema :rel/schema-connection] [:rel/tree-schema :rel/schema-connection]
-           [:rel/curated :rel/strong-signal] [:rel/mentions-ns :rel/strong-signal]
+          [[:rel/curated :rel/strong-signal] [:rel/mentions-ns :rel/strong-signal]
            [:rel/mentions-var :rel/strong-signal] [:rel/mentions-schema :rel/strong-signal]
            [:rel/tree-overlap :rel/strong-signal]
            [:ctx.match/embedding :ctx.match/semantic] [:ctx.match/search :ctx.match/semantic]]))
@@ -145,24 +126,18 @@
                {} ids)))
 
 (def default-datalog-rules
-  "Shared recursive Datahike Datalog rules passed as `%` to native `:seon.rule/query` evaluations."
-  '[[(calls* ?a ?b)        [?a :seon.code.var/calls ?b]]
-    [(calls* ?a ?c)        [?a :seon.code.var/calls ?b] (calls* ?b ?c)]
-    [(needs* ?t1 ?t2)      [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2]]
-    [(needs* ?t1 ?t2)      [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _]]
-    [(needs* ?t1 ?t3)      [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2] (needs* ?t2 ?t3)]
-    [(needs* ?t1 ?t3)      [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _] (needs* ?t2 ?t3)]
-    [(compatible-fn ?s ?f) [?f :seon.code.var/input ?s]
-                           (not [?f :seon.code.var/private? true])
-                           (not [?f :seon.code.var/test? true])]
-    [(compatible-fn ?s ?f) [?f :seon.code.var/output ?s]
-                           (not [?f :seon.code.var/private? true])
-                           (not [?f :seon.code.var/test? true])]
-    [(render-fn ?s ?f)     [?f :seon.code.var/input ?s]
-                           [?f :seon.code.var/output ?u]
-                           [?u :seon.schema/key :seon.ui/hiccup]]
-    [(schema-doc ?s ?d)    [?d :seon.code.doc/references ?s]]
-    [(var-doc ?v ?d)       [?d :seon.code.doc/references ?v]]])
+  "Shared recursive Datahike Datalog rules passed as `%` to `:seon.rule/query`."
+  '[[(calls* ?a ?b) [?a :seon.code.var/calls ?b]]
+    [(calls* ?a ?c) [?a :seon.code.var/calls ?b] (calls* ?b ?c)]
+    [(needs* ?t1 ?t2) [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2]]
+    [(needs* ?t1 ?t2) [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _]]
+    [(needs* ?t1 ?t3) [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2] (needs* ?t2 ?t3)]
+    [(needs* ?t1 ?t3) [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _] (needs* ?t2 ?t3)]
+    [(compatible-fn ?s ?f) [?f :seon.code.var/input ?s] (not [?f :seon.code.var/private? true]) (not [?f :seon.code.var/test? true])]
+    [(compatible-fn ?s ?f) [?f :seon.code.var/output ?s] (not [?f :seon.code.var/private? true]) (not [?f :seon.code.var/test? true])]
+    [(render-fn ?s ?f) [?f :seon.code.var/input ?s] [?f :seon.code.var/output ?u] [?u :seon.schema/key :seon.ui/hiccup]]
+    [(schema-doc ?s ?d) [?d :seon.code.doc/references ?s]]
+    [(var-doc ?v ?d) [?d :seon.code.doc/references ?v]]])
 
 (defn entity-facets
   "Returns vector of Malli schema keywords satisfied by entity `e` (eid or map) on `db`."
@@ -179,18 +154,7 @@
   "Normalizes a vector or map Datahike Datalog query into `{:find :keys :in :where}`."
   {:malli/schema [:=> [:cat :any] :map] :cost/ticks 50000}
   [q]
-  (let [secs #{:find :keys :syms :strs :with :in :where}]
-    (cond
-      (map? q) (select-keys q [:find :keys :syms :strs :with :in :where])
-      (sequential? q)
-      (loop [xs q, cur nil, acc {}]
-        (if (empty? xs)
-          acc
-          (let [x (first xs)]
-            (if (contains? secs x)
-              (recur (rest xs) x (assoc acc x []))
-              (recur (rest xs) cur (if cur (update acc cur (fnil conj []) x) acc))))))
-      :else {})))
+  (rq/parse-query q))
 
 (defn subst-template
   "Recursively substitutes `?lvar` bindings from `env` into a triple or projection map template."
@@ -205,20 +169,31 @@
                            {} tmpl)
     :else tmpl))
 
-(defn- resolve-query-inputs [ins wm dbs agent-id]
+(defn- resolve-query-inputs [ins wm dbs aid fref feid]
   (let [eff (or (:branch dbs) (:code dbs) (:main dbs))
-        ag-eid (delay (when agent-id
-                        (some #(when (and % ((dsch %) :seon.agent/id)) (:e (first (d/datoms % :avet :seon.agent/id agent-id))))
-                              [(:branch dbs) (:main dbs)])))
-        vals (mapv (fn [s]
-                     (case s
-                       $ eff $main (or (:main dbs) eff) $branch (or (:branch dbs) (:main dbs) eff)
-                       $code (or (:code dbs) (:branch dbs) (:main dbs))
-                       $task (or (:task dbs) (:branch dbs) (:main dbs))
-                       $wm (or (:facts wm) #{}) ?agent agent-id ?agent-eid @ag-eid
-                       ?hierarchy (or (:hierarchy wm) default-hierarchy) % default-datalog-rules ::unknown))
-                   ins)]
-    (when (every? #(and (some? %) (not= ::unknown %)) vals) vals)))
+        ae (delay (when aid
+                    (some #(when (and % ((dsch %) :seon.agent/id))
+                             (:e (first (d/datoms % :avet :seon.agent/id aid))))
+                          [(:branch dbs) (:main dbs)])))
+        fr (or fref (when aid [:seon.agent/id aid]))
+        fe (or feid @ae)
+        vs (mapv (fn [s]
+                   (case s
+                     $ eff
+                     $main (or (:main dbs) eff)
+                     $branch (or (:branch dbs) (:main dbs) eff)
+                     $code (or (:code dbs) (:branch dbs) (:main dbs))
+                     $task (or (:task dbs) (:branch dbs) (:main dbs))
+                     $wm (or (:facts wm) #{})
+                     ?agent aid
+                     ?agent-eid @ae
+                     ?focus fr
+                     ?focus-eid fe
+                     ?hierarchy (or (:hierarchy wm) default-hierarchy)
+                     % default-datalog-rules
+                     ::unknown))
+                 ins)]
+    (when (every? #(and (some? %) (not= ::unknown %)) vs) vs)))
 
 (defn- rows->envs [pq raw]
   (let [ks (:keys pq) finds (:find pq)
@@ -255,7 +230,8 @@
      :agent-id (or (wm-scalar a2 :viewer :ctx/viewer)
                    (first (for [[_ a v] (:facts a2) :when (= a :ctx/viewer)] v)))}
     {:base-wm (if (and (map? a3) (:base-wm a3)) (:base-wm a3) (empty-wm))
-     :dbs (if (map? a2) a2 {}) :agent-id (if (map? a3) (:agent-id a3) a3)}))
+    :dbs (if (map? a2) a2 {}) :agent-id (if (map? a3) (:agent-id a3) a3)
+    :focus-ref (when (map? a3) (:focus-ref a3)) :focus-eid (when (map? a3) (:focus-eid a3))}))
 
 (defn- initial-dirty-attrs [prev-state base-wm active target]
   (if (or (nil? prev-state) (not= target (:target prev-state)))
@@ -338,125 +314,63 @@
                       (d/datoms db :avet :seon.test/var-ref var-eid))]
              (and (not= ::cleared res) (or (nil? prun) (boolean (some fset res)))))))))))
 
-(defonce ^:private ^:seon.flow/edge query-meta-cache (store/lru-cache 256))
-
-(defn- query-meta [q]
-  (if-not (or (vector? q) (map? q))
-    {:pq {} :ins [] :wm-attrs #{} :wm-req #{} :wm-const-req [] :wm-not-req [] :db-req [] :db-keys #{} :fn-syms [] :uses-agent? false :eff-q nil :eff-ins []}
-    (store/lru-get! query-meta-cache 256 q
-      (fn []
-        (let [pq (parse-query q) ws (:where pq)
-              fn-syms (vec (distinct (keep #(when (and (seq? %) (qualified-symbol? (first %))) (first %))
-                                           (tree-seq coll? seq ws))))
-              _ (doseq [s fn-syms] (try (requiring-resolve s) (catch Throwable _ nil)))
-              raw-ins (vec (or (seq (:in pq)) ['$])) ins-set (set raw-ins)
-              wm-v? #(and (vector? %) (>= (count %) 3) (= '$wm (first %)) (keyword? (nth % 2)))
-              const-v? #(not (and (symbol? %) (or (= '_ %) (.startsWith (name %) "?"))))
-              wm-attrs (if-not (ins-set '$wm) #{}
-                         (reduce (fn [a n]
-                                   (cond
-                                     (and (vector? n) (>= (count n) 3) (= '$wm (first n)))
-                                     (conj a (if (keyword? (nth n 2)) (nth n 2) :*))
-                                     (and (seq? n) (some #(= '$wm %) n))
-                                     (let [ks (filter keyword? n)] (if (seq ks) (into a ks) (conj a :*)))
-                                     :else a))
-                                 #{} (tree-seq coll? seq ws)))
-              wm-req (into #{} (keep #(when (wm-v? %) (nth % 2))) ws)
-              wm-const-req (vec (keep #(when (and (wm-v? %) (>= (count %) 4) (const-v? (nth % 3))) [(nth % 2) (nth % 3)]) ws))
-              pos-by-e (reduce #(if (and (wm-v? %2) (lvar? (nth %2 1))) (update %1 (nth %2 1) (fnil conj []) (nth %2 2)) %1) {} ws)
-              wm-not-req (vec (keep (fn [cl]
-                                      (when (and (seq? cl) (= 'not (first cl)) (= 2 (count cl)))
-                                        (let [in (second cl)]
-                                          (when (and (wm-v? in) (lvar? (nth in 1)))
-                                            (when-let [a1 (first (get pos-by-e (nth in 1)))]
-                                              [a1 (nth in 2) (if (and (>= (count in) 4) (const-v? (nth in 3))) (nth in 3) ::any)])))))
-                                    ws))
-              db-req (vec (keep #(when (and (vector? %) (>= (count %) 3)
-                                            (#{'$ '$main '$branch '$code '$task} (first %))
-                                            (keyword? (nth % 2)))
-                                   [(first %) (nth % 2) (if (and (>= (count %) 4) (const-v? (nth % 3))) (nth % 3) ::any)]) ws))
-              db-keys (reduce (fn [a s]
-                                (case s $main (conj a :main) $branch (conj a :branch) $code (conj a :code)
-                                        $task (conj a :task) ($ %) (conj a :branch) ?agent-eid (conj a :main :branch) a))
-                              #{} raw-ins)
-              need-$? (and (ins-set '%) (not (ins-set '$)))
-              eff-q (if-not need-$? q
-                      (cond (map? q) (update q :in #(into ['$ ] %))
-                            (sequential? q) (let [v (vec q) i (.indexOf v :in)]
-                                              (if (neg? i) v (vec (concat (subvec v 0 (inc i)) ['$ ] (subvec v (inc i))))))
-                            :else q))]
-          {:pq pq :ins raw-ins :wm-attrs wm-attrs :wm-req wm-req :wm-const-req wm-const-req :wm-not-req wm-not-req
-           :db-req db-req :db-keys db-keys :fn-syms fn-syms
-           :db-fn-call? (boolean (some #(and (seq? %) (qualified-symbol? (first %)) (some #{'$ '$main '$branch '$code '$task} (rest %))) (tree-seq coll? seq ws)))
-           :uses-agent? (boolean (or (ins-set '?agent) (ins-set '?agent-eid)))
-           :eff-q eff-q :eff-ins (if need-$? (into ['$ ] raw-ins) raw-ins)})))))
-
 (defn rule-wm-read-attrs
   "Extracts the set of `$wm` attributes read by `rule`'s `:seon.rule/query`."
   {:malli/schema [:=> [:cat :map] [:set :keyword]] :cost/ticks 50000}
-  [rule] (:wm-attrs (query-meta (:seon.rule/query rule))))
+  [rule] (:wm-attrs (rq/query-meta (:seon.rule/query rule))))
 
 (defn rule-uses-agent?
   "True when `rule`'s `:in` clause binds `?agent` or `?agent-eid`."
   {:malli/schema [:=> [:cat :map] :boolean] :cost/ticks 5000}
-  [rule] (:uses-agent? (query-meta (:seon.rule/query rule))))
+  [rule] (:uses-agent? (rq/query-meta (:seon.rule/query rule))))
 
 (defn rule-db-keys
   "Returns the set of DB keys (`:main`, `:branch`, `:code`, `:task`) read by `rule`'s `:in` clause."
   {:malli/schema [:=> [:cat :map] [:set :keyword]] :cost/ticks 10000}
-  [rule] (:db-keys (query-meta (:seon.rule/query rule))))
+  [rule] (:db-keys (rq/query-meta (:seon.rule/query rule))))
 
 (def ^:private empty-reads-idx (reads/reads-index #{}))
 
-(defn- wm-req-miss? [wm qm]
-  (let [aev (:aev wm) ave (:ave wm) eav (:eav wm)]
-    (boolean
-      (or (some #(not (contains? aev %)) (:wm-req qm))
-          (and (map? ave) (some (fn [[a v]] (not (contains? (get ave a) v))) (:wm-const-req qm)))
-          (and (map? eav)
-               (some (fn [[a1 a2 v2]]
-                       (every? (fn [e] (if (= v2 ::any) (contains? (get eav e) a2) (contains? (get-in eav [e a2]) v2)))
-                               (keys (get aev a1))))
-                     (:wm-not-req qm)))))))
-
 (defn eval-rule-query
-  "Executes `rule`'s native Datahike `:seon.rule/query` via `d/q` and returns binding env maps."
-  {:malli/schema [:=> [:cat :map :map [:maybe :keyword] :map] [:vector :map]] :cost/ticks 10000000}
-  [wm dbs agent-id rule]
-  (let [{:keys [pq db-req fn-syms db-fn-call? eff-q eff-ins] :as qm} (query-meta (:seon.rule/query rule))]
-    (if (or (nil? eff-q) (wm-req-miss? wm qm) (db-req-empty? db-req dbs)
-            (and (seq fn-syms) (not-every? #(or (resolve %) (try (requiring-resolve %) (catch Throwable _ nil))) fn-syms)))
-      []
-      (if-let [args (resolve-query-inputs eff-ins wm dbs agent-id)]
-        (rows->envs pq (if db-fn-call?
-                         (binding [dq/*query-result-cache?* false] (apply d/q eff-q args))
-                         (apply d/q eff-q args)))
-        []))))
+  "Executes rule's native Datahike `:seon.rule/query` via `d/q` and returns binding env maps."
+  {:malli/schema [:function
+                  [:=> [:cat :map :map [:maybe :keyword] :map] [:vector :map]]
+                  [:=> [:cat :map :map [:maybe :keyword] :map :any [:maybe :int]] [:vector :map]]]
+   :cost/ticks 10000000}
+  ([wm dbs agent-id rule] (eval-rule-query wm dbs agent-id rule nil nil))
+  ([wm dbs agent-id rule focus-ref focus-eid]
+   (let [{:keys [pq req-tree focus-eq fn-syms db-fn-call? eff-q eff-ins] :as qm} (rq/query-meta (:seon.rule/query rule))
+         eff-focus (or focus-ref (when agent-id [:seon.agent/id agent-id]))]
+     (if (or (nil? eff-q)
+             (and (some? focus-eq) (not= eff-focus focus-eq))
+             (rq/wm-req-miss? wm qm)
+             (rq/req-tree-empty? req-tree wm dbs agent-id)
+             (and (seq fn-syms) (not-every? #(or (resolve %) (try (requiring-resolve %) (catch Throwable _ nil))) fn-syms)))
+       []
+       (if-let [args (resolve-query-inputs eff-ins wm dbs agent-id focus-ref focus-eid)]
+         (rows->envs pq (if db-fn-call?
+                          (binding [dq/*query-result-cache?* false] (apply d/q eff-q args))
+                          (apply d/q eff-q args)))
+         [])))))
 
-(defn- step-one-rule [state r stratum dbs agent-id prev-state tx-datoms dirty-attrs recomputed skipped]
-  (let [rid (:seon.rule/id r)
-        prev (get-in prev-state [:runs rid])
-        {:keys [wm-attrs db-keys uses-agent?] :as qm} (query-meta (:seon.rule/query r))
+(defn- step-one-rule [state r stratum dbs aid fref feid prev-state tx-datoms dirty-attrs recomputed skipped]
+  (let [rid (:seon.rule/id r) prev (get-in prev-state [:runs rid])
+        {:keys [wm-attrs db-keys uses-agent?] :as qm} (rq/query-meta (:seon.rule/query r))
         wm-clean? (and prev (= (:rule-def prev) r)
-                       (or (not uses-agent?) (= agent-id (:agent-id prev-state)))
+                       (or (not uses-agent?) (and (= aid (:agent-id prev-state)) (= fref (:focus-ref prev-state)) (= feid (:focus-eid prev-state))))
                        (not (@dirty-attrs :*)) (not (wm-attrs :*)) (not (some @dirty-attrs wm-attrs)))
         rel-dt (when wm-clean?
-                 (cond (nil? tx-datoms) nil
-                       (map? tx-datoms) (vec (mapcat #(get tx-datoms %) db-keys))
-                       :else tx-datoms))
-        db-clean? (and wm-clean?
-                       (or (empty? db-keys)
-                           (and (some? rel-dt) (not (reads/reads-touched? (:reads-idx prev) rel-dt)))))]
+                 (cond (nil? tx-datoms) nil (map? tx-datoms) (vec (mapcat #(get tx-datoms %) db-keys)) :else tx-datoms))
+        db-clean? (and wm-clean? (or (empty? db-keys) (and (some? rel-dt) (not (reads/reads-touched? (:reads-idx prev) rel-dt)))))]
     (if db-clean?
       (do (vswap! skipped inc)
           (when-let [outer di/*reads*] (when (seq (:reads prev)) (swap! outer into (:reads prev))))
           {:wm (if (seq (:asserted-facts prev)) (add-facts (:wm state) (:asserted-facts prev) {:rule rid :stratum stratum}) (:wm state))
            :projections (if (seq (:projections prev)) (into (:projections state) (:projections prev)) (:projections state))
            :runs (assoc (:runs state) rid (assoc prev :skipped? true))})
-      (let [wm (:wm state) old-f (or (:asserted-facts prev) #{})
-            miss? (wm-req-miss? wm qm)
+      (let [wm (:wm state) old-f (or (:asserted-facts prev) #{}) miss? (rq/wm-req-miss? wm qm)
             t0 (if miss? 0 (System/nanoTime))
-            [envs rs] (if miss? [[] #{}] (reads/with-reads #(eval-rule-query wm dbs agent-id r)))
+            [envs rs] (if miss? [[] #{}] (reads/with-reads #(eval-rule-query wm dbs aid r fref feid)))
             {:keys [facts projections]} (if (seq envs) (instantiate-asserts envs (:seon.rule/assert r) rid stratum) {:facts #{} :projections []})
             ridx (if (seq rs) (reads/reads-index rs) empty-reads-idx)
             ms (if miss? 0.0 (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0))]
@@ -480,19 +394,19 @@
    :cost/ticks 20000000}
   ([prev-state a2 a3 rules tx-datoms] (step-rules prev-state a2 a3 rules tx-datoms nil))
   ([prev-state a2 a3 rules tx-datoms target]
-   (let [{:keys [base-wm dbs agent-id]} (normalize-step-args a2 a3)
+   (let [{:keys [base-wm dbs agent-id focus-ref focus-eid]} (normalize-step-args a2 a3)
          active (filterv #(and (:seon.rule/enabled? % true) (rule-applies-to-target? % target)) rules)
          by-stratum (group-by #(long (:seon.rule/stratum % 50)) active)
          dirty-attrs (volatile! (initial-dirty-attrs prev-state base-wm active target))
          recomputed (volatile! 0) skipped (volatile! 0)
          final (reduce (fn [st stratum]
                          (reduce (fn [st2 r]
-                                   (step-one-rule st2 r stratum dbs agent-id prev-state tx-datoms dirty-attrs recomputed skipped))
+                                   (step-one-rule st2 r stratum dbs agent-id focus-ref focus-eid prev-state tx-datoms dirty-attrs recomputed skipped))
                                  st (sort-by #(str (:seon.rule/id %)) (get by-stratum stratum))))
                        {:wm base-wm :projections [] :runs {}}
                        (sort (keys by-stratum)))]
-     (assoc final :base-facts (:facts base-wm) :agent-id agent-id :target target
-            :recomputed @recomputed :skipped @skipped))))
+     (assoc final :base-facts (:facts base-wm) :agent-id agent-id :focus-ref focus-ref :focus-eid focus-eid
+            :target target :recomputed @recomputed :skipped @skipped))))
 
 (defn fire-rules
   "Cold stratified rule evaluation convenience wrapper over `step-rules`."
@@ -536,9 +450,9 @@
                                        (when (and (not= (:v dt) mv) (or (nil? mtx) (> (long (:tx dt 0)) (long mtx))))
                                          (:e dt))))
                                    (d/datoms branch-db :aevt :seon.code.form/hash))))))]
-          (if (and sid base bc)
-            (store/lru-get! edited-forms-cache 64 [sid base bc] run)
-            (run)))))))
+          (if-let [csig (and sid base (diff/code-db-sig branch-db))]
+          (store/lru-get! edited-forms-cache 64 [sid base csig] run)
+          (run)))))))
 
 (defn agent-eval-turn-count
   "Returns the count of distinct surviving `:seon.agent.eval/turn` values for `agent-id` in `db` via indexed `:avet` lookup."
@@ -560,10 +474,3 @@
                 (if (and (integer? t) (> (long t) (long mx))) (long t) mx)))
             0 (d/datoms branch-db :avet :seon.agent.eval/agent agent-id))
     0))
-
-(defn non-hub-schema?
-  "True when schema key `sk` is not a ubiquitous host/runtime hub schema."
-  {:malli/schema [:=> [:cat :any] :boolean] :cost/ticks 5000}
-  [sk]
-  (not (contains? #{:seon.host/db :seon.host/conn :seon.host/fn :seon.host/chan :seon.host/ns
-                    :seon.ui/hiccup :seon.agent/entity :seon.agent.eval/entity} sk)))

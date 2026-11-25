@@ -173,18 +173,18 @@
       (is (<= 20 (count rs) 60) (str "Expected 20..35 minimal rules, got " (count rs)))
       (is (= 0 (count (filter :seon.rule/when rs))) "Zero legacy :seon.rule/when rules allowed")
       (is (= (count rs) (count (filter :seon.rule/query rs))) "100% of rules must use native :seon.rule/query")
-      (doseq [req-id [:rule.ctx/fault-with-recommended-fix :rule.ctx/active-task-and-lineage
-                      :rule.ctx/scope-and-extra-namespaces :rule.ctx/scope-task-history-and-fixes
-                      :rule.ctx/pinned-entities :rule.ctx/recent-eval-results
-                      :rule.ctx/edited-var-on-branch :rule.ctx/failing-reach-tests
-                      :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns
-                      :rule.ctx/edited-var-callers :rule.ctx/citing-docs
-                      :rule.gate/task-needs-open :rule.gate/test-failing
-                      :rule.gate/test-missing :rule.gate/agent-blocked
-                      :rule.error/rate-limit-backpressure
-                      :rule.preview/nested-sub-schema :rule.preview/errors-by-kind
-                      :rule.preview/large-collection :rule.preview/multi-facet-entity]]
-        (is (contains? rids req-id) (str "Missing required core rule " req-id)))))
+      (doseq [req-id [:rule.ctx/active-tasks :rule.ctx/agent-prefix-sessions
+                    :rule.ctx/branch-edits :rule.ctx/delegated-calls
+                    :rule.ctx/failing-tests :rule.ctx/open-errors
+                    :rule.ctx/pinned-entities :rule.ctx/review-target
+                    :rule.ctx/scope-namespaces :rule.ctx/system-overview
+                    :rule.ctx/unread-messages
+                    :rule.gate/task-needs-open :rule.gate/test-failing
+                    :rule.gate/test-missing :rule.gate/agent-blocked
+                    :rule.error/rate-limit-backpressure
+                    :rule.preview/nested-sub-schema :rule.preview/errors-by-kind
+                    :rule.preview/large-collection :rule.preview/multi-facet-entity]]
+      (is (contains? rids req-id) (str "Missing required core rule " req-id)))))
 
   (testing "100-sample seed=42 Malli generative checks on scoreboard & touches pure functions + compare-as-of-hyperparams"
     (with-test-store [{:keys [conn]}]

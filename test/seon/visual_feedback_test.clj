@@ -16,7 +16,6 @@
             [seon.render :as render]
             [seon.render.sanitize :as sanitize]
             [seon.render.status :as rstatus]
-            [seon.render.tails :as rtails]
             [seon.render.viz :as viz]
             [seon.schema :as schema]
             [seon.store :as store]
@@ -25,7 +24,8 @@
             [clojure.core.async :as a]
             [seon.agent :as agent]
             [seon.code.graph :as graph]
-            [seon.render.fit :as fit]))
+            [seon.render.fit :as fit]
+            [seon.render.wire :as rwire]))
 
 (defn- clean-canvas-fn [_db agent]
   (viz/bar-chart {:title (str "Agent " (:seon.agent/id agent))
@@ -75,21 +75,26 @@
       (is (nil? (sanitize/sanitize-svg "<div>not-svg</div>"))))))
 
 (deftest viewport-tail-and-preview-summary-defects-test
-  (testing "render-viewport-tail emits crisp factual DOM metadata and attaches real :image when vision? is true"
-    (let [snap {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "IMGDATA"
+  (testing "wire live-viewport block emits crisp factual DOM metadata and attaches real :image when vision? is true"
+  (with-test-store [{:keys [conn]}]
+    (d/transact conn {:tx-data [{:seon.agent/id :agent/vf-vp :seon.agent/branch :main}]})
+    (let [db @conn
+          snap {:route "/" :width 1280 :height 820 :mime "image/jpeg" :base64 "IMGDATA"
                 :dom {:viewing ":agent/root" :mode "canvas" :theme "dark" :overflowX false :svgCount 2}}
-          vis-res (rtails/render-viewport-tail {:seon.tail/viewport {:enabled? true :vision? true :snapshot snap}})
-          txt-res (rtails/render-viewport-tail {:seon.tail/viewport {:enabled? true :vision? false :snapshot snap}})
-          vis-txt (render/hiccup->text (:seon.ui/hiccup vis-res))]
+          vis-w (rwire/build-live-wire-request db db :agent/vf-vp {:viewport-screenshot snap :vision? true :force-vision? true})
+          txt-w (rwire/build-live-wire-request db db :agent/vf-vp {:viewport-screenshot snap :vision? false :force-vision? true})
+          vis-res (first (filter #(= "live-viewport" (:tag %)) (:tail-blocks vis-w)))
+          txt-res (first (filter #(= "live-viewport" (:tag %)) (:tail-blocks txt-w)))
+          vis-txt (:text vis-res)]
       (is (= "live-viewport" (:tag vis-res)))
       (is (= {:mime "image/jpeg" :base64 "IMGDATA" :raw snap} (:image vis-res)))
       (is (nil? (:image txt-res)))
-      (is (str/includes? vis-txt "viewing=:agent/root"))
-      (is (str/includes? vis-txt "mode=canvas"))
-      (is (str/includes? vis-txt "theme=dark"))
-      (is (str/includes? vis-txt "overflowX=false"))
-      (is (str/includes? vis-txt "svgs=2"))
-      (is (not (str/includes? vis-txt "VISUAL DEFECTS")))))
+      (is (str/includes? vis-txt ":viewing \":agent/root\""))
+      (is (str/includes? vis-txt ":mode \"canvas\""))
+      (is (str/includes? vis-txt ":theme \"dark\""))
+      (is (str/includes? vis-txt ":overflowX false"))
+      (is (str/includes? vis-txt ":svgCount 2"))
+      (is (not (str/includes? vis-txt "VISUAL DEFECTS"))))))
 
   (testing "format-preview-summary coaches missing :examples, single-large-renderer nudge, and multi-footprint siblings"
     (let [f-single (preview/normalize-ephemeral-frame
@@ -152,7 +157,7 @@
                             seon.browser.measure/analyze-pixel-fit
                             seon.browser.preview/normalize-ephemeral-frame
                             seon.browser.preview/format-preview-summary
-                            seon.render.tails/render-viewport-tail])]
+                            seon.render.entities.infra/render-message-card])]
           (let [r (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (true? (:ok? r)) (str "seed=42 stress failed for " sym ": " (pr-str r)))))))))
 

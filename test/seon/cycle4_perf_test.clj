@@ -98,13 +98,13 @@
                                    :seon.error/agent-ref [:seon.agent/id :ag/c4-w] :seon.error/var 'demo.c4.b/f1}]})
       (is (integer? (rstatus/unanswered-user-chat-tx @conn @conn :ag/c4-w)))
       (let [rs (rules/load-rules @conn (rseed/starter-rules))
-            ru-w (ctx/related-updates {:seon.db/main @conn :seon.db/branch @conn :seon.agent/id :ag/c4-w :seon.ctx/rules rs})
-            wm-w (get-in ru-w [:seon.ctx/session :rule-state :wm :facts])
-            ru-r (ctx/related-updates {:seon.db/main @conn :seon.db/branch @conn :seon.agent/id :review/c4-r :seon.ctx/rules rs})
-            wm-r (get-in ru-r [:seon.ctx/session :rule-state :wm :facts])]
-        (is (some #(= :wm/unanswered-user-chat (second %)) wm-w) ":rule.ctx/unanswered-user-chat must assert :wm/unanswered-user-chat")
-        (is (some #(= :wm/matched-fix (second %)) wm-w) ":rule.ctx/eval-error-class-fix must assert :wm/matched-fix")
-        (is (some #(= :wm/active-var (second %)) wm-r) ":rule.ctx/review-diagnosis must assert :wm/active-var on target error var"))
+          ru-w (ctx/project-entity @conn @conn [:seon.agent/id :ag/c4-w] {:rules rs :semantic? false})
+          fired-w (into #{} (map :rule-id) (get-in ru-w [:ctx-trace :fired-rules]))
+          ru-r (ctx/project-entity @conn @conn [:seon.agent/id :review/c4-r] {:rules rs :semantic? false})
+          fired-r (into #{} (map :rule-id) (get-in ru-r [:ctx-trace :fired-rules]))]
+      (is (contains? fired-w :rule.ctx/unread-messages) ":rule.ctx/unread-messages must fire on unread user chat")
+      (is (contains? fired-w :rule.ctx/open-errors) ":rule.ctx/open-errors must fire on open agent error")
+      (is (contains? fired-r :rule.ctx/review-target) ":rule.ctx/review-target must fire on reviewer target"))
       (d/transact conn {:tx-data [{:seon.agent.message/id (java.util.UUID/randomUUID)
                                   :seon.agent.message/from :ag/c4-w :seon.agent.message/to :user
                                   :seon.agent.message/type :chat :seon.agent.message/body "Done!"
@@ -146,12 +146,9 @@
                                    :seon.error/message "Boom" :seon.error/agent :ag/c4-t
                                    :seon.error/agent-ref [:seon.agent/id :ag/c4-t] :seon.error/var 'demo.c4.c/f1}]})
       (let [rs (rules/load-rules @conn (rseed/starter-rules))
-            ru (ctx/related-updates {:seon.db/main @conn :seon.db/branch @conn :seon.agent/id :review/c4-t :seon.ctx/rules rs})
-            wm (get-in ru [:seon.ctx/session :rule-state :wm :facts])
-            f1-eid (:e (first (d/datoms @conn :avet :seon.code.var/name 'demo.c4.c/f1)))
-            t-eid (:e (first (d/datoms @conn :avet :seon.code.var/name 'demo.c4.c-test/f1-test)))]
-        (is (contains? wm [f1-eid :wm/active-var :error]) "MF-2: review-diagnosis must assert :wm/active-var :error")
-        (is (some #(= t-eid (:entity %)) (:seon.ctx/projections ru)) "MF-2: reviewer must compound covering test via active-var-covering-tests"))
+          ru (ctx/project-entity @conn @conn [:seon.agent/id :review/c4-t] {:rules rs :semantic? false})
+          t-ag-eid (:e (first (d/datoms @conn :avet :seon.agent/id :ag/c4-t)))]
+      (is (some #(= t-ag-eid (:entity %)) (:candidates ru)) "MF-2: reviewer must surface review target via :rule.ctx/review-target"))
       ;; MF-3: speculative d/with schema edit must NOT return stale registry; AsOfDB caches cleanly
       (let [r-base (schema/registry-for-db @conn)
             spec-db (:db-after (d/with @conn {:tx-data [{:seon.schema/key :demo.c4/spec-only :seon.schema/form [:string]}]}))

@@ -19,7 +19,8 @@
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.store.query :as sq]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.render.fit :as fit]))
 
 (deftest ^{:cost/ticks 55000000} incremental-skip-reads-forwarding-and-recursive-rules-test
   (testing "Native d/q step-rules skips 100% on unrelated datoms, re-fires ONLY error rule on error tx, forwards skipped reads, and evaluates recursive % rules"
@@ -51,9 +52,9 @@
               db2 (:db-after txr)
               s3 (rules/step-rules s2 {:main db2 :branch db2 :code db2 :task db2} :ag/inc-test ctx-rs (:tx-data txr) :wire)
               recomp-ids (vec (keep (fn [[rid run]] (when-not (:skipped? run) rid)) (:runs s3)))]
-          (is (= [:rule.ctx/fault-with-recommended-fix] recomp-ids))
+          (is (= #{:rule.ctx/open-errors} (set recomp-ids)))
           (is (= 1 (:recomputed s3)))
-          (is (= (dec (count ctx-rs)) (:skipped s3))))
+          (is (= (- (count ctx-rs) 1) (:skipped s3))))
 
         ;; 3. Recursive calls* and needs* work natively via % (even when :in omits default $)
         (let [rec-rules [{:seon.rule/id :r/test-calls-star :seon.rule/stratum 10 :seon.rule/enabled? true
@@ -98,51 +99,45 @@
              ab))
       (is (= ['* {:seon.code.var/calls [:seon.code.var/name]}] with-star))))
 
-  (testing "compute-shown-delta handles :new, :unchanged (0 tokens), :upgraded (set/difference + id), and :rewarmed (newer ?tx or content mutation)"
-    (let [p-turn1 [{:entity 101 :data {:db/id 101 :seon.code.var/name 'demo/f :seon.code.var/doc "v1"} :tx 10}]
-          d1 (ctx/compute-shown-delta {} p-turn1)
+  (testing "upgrade-ladder :already-shown handles :new, :unchanged (0 tokens), explicit new :fn :upgraded, and :rewarmed (newer ?tx or content hash)"
+    (let [cands [{:fn 'demo/f-chip :hiccup [:span "f"] :tokens 12 :min-width 120 :area 2400}
+                 {:fn 'demo/f-full :hiccup [:div "f full"] :tokens 60 :min-width 420 :area 16000}]
+          d1 (fit/upgrade-ladder [{:entity 101 :zone :workspace :tx 10 :hash 1 :candidates cands}]
+                                 {:target :wire :token-budget 20})
           shown1 (:shown d1)
-          ;; Turn 2: same entity, subset of keys, same tx -> :unchanged (empty delta-data!)
-          d2 (ctx/compute-shown-delta shown1 [{:entity 101 :data {:db/id 101 :seon.code.var/name 'demo/f} :tx 10}])
-          ;; Turn 3: upgraded with new key :seon.code.var/schema at same tx -> :upgraded (ONLY new key + identity!)
-          d3 (ctx/compute-shown-delta (:shown d2)
-                                      [{:entity 101 :data {:db/id 101 :seon.code.var/name 'demo/f :seon.code.var/doc "v1" :seon.code.var/schema '[:=> [:cat :int] :int]} :tx 10}])
-          ;; Turn 4: entity fades out (not in projections) -> still remembered in :shown!
-          d4 (ctx/compute-shown-delta (:shown d3) [])
-          ;; Turn 5: entity re-touched at higher native ?tx 25 -> :rewarmed with FULL wanted keys!
-          d5 (ctx/compute-shown-delta (:shown d4)
-                                      [{:entity 101 :data {:db/id 101 :seon.code.var/name 'demo/f :seon.code.var/doc "v1"} :tx 25}])
-          ;; Turn 6: content hash changes even at same tx -> :rewarmed with FULL wanted keys!
-          d6 (ctx/compute-shown-delta (:shown d5)
-                                      [{:entity 101 :data {:db/id 101 :seon.code.var/name 'demo/f :seon.code.var/doc "v2-edited"} :tx 25}])]
-      (is (= :new (get-in d1 [:projections 0 :status])))
-      (is (= :unchanged (get-in d2 [:projections 0 :status])))
-      (is (= {} (get-in d2 [:projections 0 :delta-data])))
-      (is (= :upgraded (get-in d3 [:projections 0 :status])))
-      (is (= #{:seon.code.var/schema} (get-in d3 [:projections 0 :delta-keys])))
-      (is (= {:db/id 101 :seon.code.var/name 'demo/f :seon.code.var/schema '[:=> [:cat :int] :int]}
-             (get-in d3 [:projections 0 :delta-data])))
+          ;; Turn 2: same entity, same tx & hash -> :unchanged (0 tokens) even with 4000 spare budget!
+          d2 (fit/upgrade-ladder [{:entity 101 :zone :workspace :tx 10 :hash 1 :candidates cands}]
+                                 {:target :wire :token-budget 4000 :already-shown shown1})
+          ;; Turn 3: explicit different :fn 'demo/f-full -> :upgraded once!
+          d3 (fit/upgrade-ladder [{:entity 101 :zone :workspace :tx 10 :hash 1 :fn 'demo/f-full :candidates cands}]
+                                 {:target :wire :token-budget 4000 :already-shown (:shown d2)})
+          ;; Turn 4: entity fades out -> stays remembered in :shown!
+          d4 (fit/upgrade-ladder [] {:target :wire :token-budget 4000 :already-shown (:shown d3)})
+          ;; Turn 5: higher native ?tx 25 -> :rewarmed!
+          d5 (fit/upgrade-ladder [{:entity 101 :zone :workspace :tx 25 :hash 1 :candidates cands}]
+                                 {:target :wire :token-budget 4000 :already-shown (:shown d4)})
+          ;; Turn 6: content hash changes even at same tx -> :rewarmed!
+          d6 (fit/upgrade-ladder [{:entity 101 :zone :workspace :tx 25 :hash 2 :candidates cands}]
+                                 {:target :wire :token-budget 4000 :already-shown (:shown d5)})]
+      (is (= :new (get-in d1 [:selected 0 :status])))
+      (is (= :unchanged (get-in d2 [:selected 0 :status])))
+      (is (= 0 (:tokens d2)))
+      (is (= :upgraded (get-in d3 [:selected 0 :status])))
+      (is (= 'demo/f-full (get-in d3 [:selected 0 :chosen-fn])))
       (is (contains? (:shown d4) 101) "Faded entity stays tracked in shown")
-      (is (= :rewarmed (get-in d5 [:projections 0 :status])))
-      (is (= #{:seon.code.var/name :seon.code.var/doc} (get-in d5 [:projections 0 :delta-keys])))
-      (is (= :rewarmed (get-in d6 [:projections 0 :status])))
-      (is (= "v2-edited" (get-in d6 [:projections 0 :delta-data :seon.code.var/doc]))))))
+      (is (= :rewarmed (get-in d5 [:selected 0 :status])))
+      (is (= :rewarmed (get-in d6 [:selected 0 :status]))))))
 
 (deftest ^{:cost/ticks 110000000} all-10-native-datalog-context-rules-test
-  (testing "All 10 high-value :rule.ctx/* rules surface errors+fixes, branch-edited vars+callers, eval schemas+compatible fns, citing docs (signpost vs full), failing tests, task lineage, eval recency, and pinned entities"
+  (testing "Baseline 0 native :rule.ctx/* rules surface errors+fixes, branch-edited vars, failing tests, active tasks+prereqs, scope ns, unread messages, delegated calls, review target, and pinned entities"
     (with-test-store [{:keys [conn cfg]}]
-      ;; Register a domain schema for eval-compatible-fns + eval-touched-schemas
       (let [reg! (fn [k form doc]
                    (let [{:keys [dh-decls entity]} (schema/validate-schema-registration! @conn {:key k :form form :doc doc})]
                      (d/transact conn {:tx-data (vec (concat dh-decls [entity]))})))]
         (reg! :seon.demo.widget/id [:and {:seon.db/identity true} :keyword] "Widget ID")
         (reg! :seon.demo.widget/entity [:map {:seon.db/attributes true} [:seon.demo.widget/id :seon.demo.widget/id]] "Widget entity"))
-      ;; Seed code (target + direct caller + compatible consumer + private fn + test fn), docs, tasks, fix, error, agent on :main
       (let [src-lib (str "(ns demo.wlib)\n"
-                         "(defn core-op \"Core op\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n"
-                         "(defn caller-op \"Direct caller\" {:malli/schema [:=> [:cat :int] :int]} [x] (core-op x))\n"
-                         "(defn inspect-widget \"Public consumer\" {:malli/schema [:=> [:cat :seon.demo.widget/entity] :keyword]} [w] (:seon.demo.widget/id w))\n"
-                         "(defn- secret-widget \"Private consumer\" {:malli/schema [:=> [:cat :seon.demo.widget/entity] :keyword]} [w] (:seon.demo.widget/id w))\n")
+                         "(defn core-op \"Core op\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n")
             src-test (str "(ns demo.wlib-test (:require [clojure.test :refer [deftest is]] [demo.wlib :as w]))\n"
                           "(deftest core-op-test (is (= 2 (w/core-op 1))))\n")
             _ (d/transact conn {:tx-data (concat
@@ -150,27 +145,28 @@
                                           (code/file-import-tx @conn "test/demo/wlib_test.clj" src-test false))})
             _ (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn)})
             db0 @conn
-            wsch-eid (:e (first (d/datoms db0 :avet :seon.schema/key :seon.demo.widget/entity)))
             core-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.wlib/core-op)))
             test-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.wlib-test/core-op-test)))
             err-ent (error/error-tx {:kind :demo/oom-class :source :eval :agent :ag/full :message "Out of memory"})
             fix-ent {:seon.fix/id (random-uuid) :seon.fix/error-class :demo/oom-class
                      :seon.fix/symptom "OOM on big scan" :seon.fix/root-cause "Unindexed scan"
                      :seon.fix/change-summary "Switch to :avet lookup"}
+            msg-id (random-uuid)
+            call-id (random-uuid)
             _ (d/transact conn {:tx-data
                                 [err-ent fix-ent
-                                 {:seon.code.doc/id "docs/w-one.md#single" :seon.code.doc/path "docs/w-one.md"
-                                  :seon.code.doc/order 0 :seon.code.doc/heading "Single Hit Doc"
-                                  :seon.code.doc/body "Explains `:seon.demo.widget/entity` (BODY-SINGLE-SECRET)." :seon.code.doc/references #{wsch-eid}}
-                                 {:seon.code.doc/id "docs/w-two.md#converge" :seon.code.doc/path "docs/w-two.md"
-                                  :seon.code.doc/order 0 :seon.code.doc/heading "Converging Doc"
-                                  :seon.code.doc/body "Explains `:seon.demo.widget/entity` and `demo.wlib/core-op` (BODY-CONVERGE-FULL)." :seon.code.doc/references #{wsch-eid core-eid}}
                                  {:seon.task/id :demo/pre :seon.task/title "Prereq Task" :seon.task/done? false}
-                                 {:seon.task/id :demo/main-task :seon.task/title "Main Task" :seon.task/needs #{:demo/pre} :seon.task/done? false}
+                                 {:seon.task/id :demo/main-task :seon.task/title "Main Task" :seon.task/scope 'demo.wlib :seon.task/needs #{:demo/pre} :seon.task/done? false}
                                  {:seon.demo.widget/id :w/pinned-one}
-                                 {:seon.agent/id :ag/full :seon.agent/branch :branch/full :seon.agent/tasks #{[:seon.task/id :demo/main-task]}
-                                  :seon.agent/pinned [[:seon.demo.widget/id :w/pinned-one]]}]})]
-        ;; Fork :branch/full, edit core-op, record old + recent evals with :result-schemas, and record a failing reach test!
+                                 {:seon.agent/id :ag/peer :seon.agent/branch :main :seon.agent/goal "Peer"}
+                                 {:seon.agent/id :ag/full :seon.agent/branch :branch/full :seon.agent/scope 'demo.wlib
+                                  :seon.agent/tasks #{[:seon.task/id :demo/main-task]}
+                                  :seon.agent/target [:seon.agent/id :ag/peer]
+                                  :seon.agent/pinned [[:seon.demo.widget/id :w/pinned-one]]}
+                                 {:seon.agent.message/id msg-id :seon.agent.message/seq 1 :seon.agent.message/from :user
+                                  :seon.agent.message/to :ag/full :seon.agent.message/type :chat :seon.agent.message/body "Status?"}
+                                 {:seon.agent.call/id call-id :seon.agent.call/caller :ag/full :seon.agent.call/callee :ag/peer
+                                  :seon.agent.call/status :pending :seon.agent.call/prompt "Check peer" :seon.agent.call/created-tx 1}]})]
         (store/branch! conn :main :branch/full)
         (let [bconn (store/connect cfg :branch/full)]
           (try
@@ -178,82 +174,46 @@
               (d/transact bconn {:tx-data (code/file-import-tx @bconn "src/demo/wlib.clj" src-lib-v2 false)})
               (d/transact bconn {:tx-data (graph/backfill-codebase-analysis-tx @bconn)})
               (d/transact bconn {:tx-data
-                                 [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/full
-                                   :seon.agent.eval/turn 1 :seon.agent.eval/handle 'result/e1
-                                   :seon.agent.eval/intent "old probe" :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/value "2"}
-                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/full
-                                   :seon.agent.eval/turn 5 :seon.agent.eval/handle 'result/e5
-                                   :seon.agent.eval/code "{:seon.demo.widget/id :w/one}" :seon.agent.eval/value "{:seon.demo.widget/id :w/one}"
-                                   :seon.agent.eval/result-schemas #{wsch-eid}}
-                                  {:seon.test/digest "dg-fail-1234" :seon.test/var 'demo.wlib-test/core-op-test
+                                 [{:seon.test/digest "dg-fail-1234" :seon.test/var 'demo.wlib-test/core-op-test
                                    :seon.test/var-ref test-eid :seon.test/kind :deftest
                                    :seon.test/pass? false :seon.test/ms 2.0 :seon.test/report "expected 2 got 3"}]}))
             (let [mdb @conn
                   bdb @bconn
-                  res (ctx/related-updates {:seon.db/main mdb :seon.db/branch bdb :seon.agent/id :ag/full
-                                            :seon.view/target :wire :seon.view/token-budget 32000})
-                  projs (:seon.ctx/projections res)
+                  res (ctx/project-entity mdb bdb [:seon.agent/id :ag/full] {:target :wire :token-budget 32000 :semantic? false})
+                  projs (:candidates res)
                   by-ent (into {} (map (juxt :entity identity)) projs)
-                  fired (into #{} (map :rule-id) (get-in res [:seon.ctx/trace :fired-rules]))
+                  fired (into #{} (map :rule-id) (get-in res [:ctx-trace :fired-rules]))
                   err-eid (:e (first (d/datoms mdb :avet :seon.error/id (:seon.error/id err-ent))))
                   fix-eid (:e (first (d/datoms mdb :avet :seon.fix/id (:seon.fix/id fix-ent))))
-                  caller-eid (:e (first (d/datoms bdb :avet :seon.code.var/name 'demo.wlib/caller-op)))
-                  inspect-eid (:e (first (d/datoms bdb :avet :seon.code.var/name 'demo.wlib/inspect-widget)))
-                  secret-eid (:e (first (d/datoms bdb :avet :seon.code.var/name 'demo.wlib/secret-widget)))
-                  doc1-eid (:e (first (d/datoms bdb :avet :seon.code.doc/id "docs/w-one.md#single")))
-                  doc2-eid (:e (first (d/datoms bdb :avet :seon.code.doc/id "docs/w-two.md#converge")))
                   fail-eid (:e (first (d/datoms bdb :avet :seon.test/digest "dg-fail-1234")))
                   pre-eid (:e (first (d/datoms bdb :avet :seon.task/id :demo/pre)))
                   pin-eid (:e (first (d/datoms bdb :avet :seon.demo.widget/id :w/pinned-one)))
-                  ev1-eid (:e (first (d/datoms bdb :avet :seon.agent.eval/handle 'result/e1)))
-                  ev5-eid (:e (first (d/datoms bdb :avet :seon.agent.eval/handle 'result/e5)))]
-              ;; ALL 10 high-value native rules fired!
+                  ns-eid (:e (first (d/datoms bdb :avet :seon.code.ns/name 'demo.wlib)))
+                  peer-eid (:e (first (d/datoms mdb :avet :seon.agent/id :ag/peer)))
+                  msg-eid (:e (first (d/datoms mdb :avet :seon.agent.message/id msg-id)))
+                  call-eid (:e (first (d/datoms mdb :avet :seon.agent.call/id call-id)))]
               (is (clojure.set/subset?
-                  #{:rule.ctx/fault-with-recommended-fix :rule.ctx/active-task-and-lineage
-                    :rule.ctx/pinned-entities :rule.ctx/recent-eval-results
-                    :rule.ctx/edited-var-on-branch :rule.ctx/failing-reach-tests
-                    :rule.ctx/eval-touched-schemas :rule.ctx/eval-compatible-fns
-                    :rule.ctx/edited-var-callers :rule.ctx/citing-docs}
-                  fired))
-              ;; 1. Error + matching :seon.fix/* nested as :parent ?err
+                   #{:rule.ctx/open-errors :rule.ctx/active-tasks :rule.ctx/pinned-entities
+                     :rule.ctx/branch-edits :rule.ctx/failing-tests :rule.ctx/scope-namespaces
+                     :rule.ctx/unread-messages :rule.ctx/delegated-calls :rule.ctx/review-target}
+                   fired))
               (is (contains? by-ent err-eid))
               (is (= err-eid (:parent (get by-ent fix-eid))))
-              ;; 2 & 3. Edited var has form child + callers get signature/doc/schema ONLY (no :form/src)
               (is (contains? by-ent core-eid))
-              (is (some #(and (= core-eid (:parent %)) (contains? (:data %) :seon.code.form/src)) projs))
-              (is (contains? by-ent caller-eid))
-              (is (= false (get-in by-ent [caller-eid :params :show-source?])))
-              (is (not (contains? (get-in by-ent [caller-eid :data]) :seon.code.form/src)))
-              ;; 4 & 5. Eval schema + compatible public non-test fn (private excluded!)
-              (is (contains? by-ent wsch-eid))
-              (is (contains? by-ent inspect-eid))
-              (is (not (contains? by-ent secret-eid)))
-              ;; 6. Citing docs: 1 hit = signpost only (NO :body), 2 converging paths = full :body!
-              (is (contains? by-ent doc1-eid))
-              (is (not (contains? (get-in by-ent [doc1-eid :data]) :seon.code.doc/body)))
-              (is
-              (str/includes?
-                (str (get-in by-ent [doc2-eid :data :seon.code.doc/body]))
-                "BODY-CONVERGE-FULL"))
-              ;; 7. Failing reach test + form source
               (is (= "expected 2 got 3" (get-in by-ent [fail-eid :data :seon.test/report])))
               (is (some #(and (= fail-eid (:parent %)) (contains? (:data %) :seon.code.form/src)) projs))
-              ;; 8. Active task + prerequisite lineage
               (is (contains? by-ent pre-eid))
-              ;; 9. Eval recency: turn 5 full in :ephemeral-tail, turn 1 1-line signpost in :workspace!
-              (is (= :ephemeral-tail (:zone (get by-ent ev5-eid))))
-              (is (contains? (get-in by-ent [ev5-eid :data]) :seon.agent.eval/code))
-              (is (= :workspace (:zone (get by-ent ev1-eid))))
-              (is (not (contains? (get-in by-ent [ev1-eid :data]) :seon.agent.eval/code)))
-              ;; 10. Pinned entity discovered generically!
-              (is (contains? by-ent pin-eid)))
+              (is (contains? by-ent pin-eid))
+              (is (contains? by-ent ns-eid))
+              (is (contains? by-ent peer-eid))
+              (is (contains? by-ent msg-eid))
+              (is (contains? by-ent call-eid)))
             (finally
               (d/release bconn))))))))
 
 (deftest ^{:cost/ticks 120000000} generic-2-read-discovery-budget-trace-diff-and-extract-refs-test
   (testing "Generic 2-read agent-world-datoms catches brand-new custom scalar + reverse :seon.db/to [:seon.agent/entity] ref, budget prunes cleanly, and REPL context-trace/diff-context work"
     (with-test-store [{:keys [conn]}]
-      ;; Register brand-new custom scalar attr on agent + brand-new reverse ref pointing TO :seon.agent/entity!
       (let [reg! (fn [k form doc]
                    (let [{:keys [dh-decls entity]} (schema/validate-schema-registration! @conn {:key k :form form :doc doc})]
                      (d/transact conn {:tx-data (vec (concat dh-decls [entity]))})))]
@@ -264,29 +224,26 @@
                                        [:seon.custom.lab/ticket-id :seon.custom.lab/ticket-id]
                                        [:seon.custom.lab/assigned-agent :seon.custom.lab/assigned-agent]]
               "Custom ticket entity"))
-      (d/transact conn {:tx-data [{:seon.agent/id :ag/generic :seon.agent/branch :main :seon.custom.lab/mood "curious"}
+      (d/transact conn {:tx-data [{:seon.agent/id :ag/generic :seon.agent/branch :main :seon.custom.lab/mood "curious"
+                                   :seon.agent/pinned [[:seon.custom.lab/ticket-id :tkt/num-42]]}
                                   {:seon.custom.lab/ticket-id :tkt/num-42
                                    :seon.custom.lab/assigned-agent [:seon.agent/id :ag/generic]}]})
       (let [db @conn
             world (ctx/agent-world-datoms db db :ag/generic)
             tkt-eid (:e (first (d/datoms db :avet :seon.custom.lab/ticket-id :tkt/num-42)))
-            ag-eid (:agent-eid world)
-            res (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/generic
-                                      :seon.view/target :wire :seon.view/token-budget 4000})
-            by-ent (into {} (map (juxt :entity identity)) (:seon.ctx/projections res))
-            ;; Tiny budget forces pruning of lower-priority blocks into :trace :dropped
-            tight (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/generic
-                                        :seon.view/target :wire :seon.view/token-budget 15})]
+            res (ctx/project-entity db db [:seon.agent/id :ag/generic] {:target :wire :token-budget 4000 :semantic? false})
+            by-ent (into {} (map (juxt :entity identity)) (:candidates res))
+            tight (ctx/project-entity db db [:seon.agent/id :ag/generic] {:target :wire :token-budget 2 :semantic? false})]
         ;; 1. Generic 2-read discovery caught BOTH brand-new custom scalar attr AND reverse ref entity!
         (is (some #(= :seon.custom.lab/mood (:a %)) (:forward world)))
         (is (some #{:seon.custom.lab/assigned-agent} (:reverse-attrs world)))
         (is (contains? (:connected world) tkt-eid))
-        (is (= "curious" (get-in by-ent [ag-eid :data :seon.custom.lab/mood])))
+        (is (= "curious" (get-in res [:focus-data :seon.custom.lab/mood])))
         (is (= :tkt/num-42 (get-in by-ent [tkt-eid :data :seon.custom.lab/ticket-id])))
 
-        ;; 2. Token budget pruning caps :seon.ctx/tokens <= budget and records :dropped!
-        (is (<= (:seon.ctx/tokens tight) 15))
-        (is (seq (get-in tight [:seon.ctx/trace :dropped])))
+        ;; 2. Token budget pruning caps :tokens <= budget and records :dropped!
+        (is (<= (long (get-in tight [:fitted :tokens] 0)) 2))
+        (is (seq (get-in tight [:fitted :dropped])))
 
         ;; 3. REPL self-introspection helpers (user/context-trace & user/diff-context)
         (let [tmp-ns-sym 'seon.test.tmp-ctx-repl
@@ -324,8 +281,8 @@
                   seon.rule/subst-template
                   seon.rule/diff-sessions
                   seon.ctx.project/merge-pull-patterns
-                  seon.ctx.project/compute-shown-delta
-                  seon.ctx.project/budget-and-order-projections]]
+                  seon.render.fit.measure/pass2-upgrade
+                  seon.render.fit.measure/finalize-entry]]
       (let [res (schema/stress-var nil sym {:samples 100 :seed 42})]
         (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))
 
@@ -364,35 +321,34 @@
           (is (= "Reset goal" (:seon.agent/goal (d/pull @conn '[:seon.agent/goal] [:seon.agent/id :ag/nb-live])))))))))
 
 (deftest ^{:cost/ticks 60000000} ported-scope-ns-history-fixes-and-reverse-task-lineage-rules-test
-  (testing "Native rules surface scope/extra namespaces, historical done scope tasks, matching scope :seon.fix/* lessons, coordinator templates, and reverse needed-by task parents"
+  (testing "Baseline 0 native rules surface scope/extra namespaces, active tasks + prereqs, open errors + matching :seon.fix/*, and system overview"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (concat
                                   (code/file-import-tx @conn "src/demo/scoped.clj" "(ns demo.scoped \"Scoped ns\")\n(defn f [x] x)" false)
                                   (code/file-import-tx @conn "src/demo/extra.clj" "(ns demo.extra \"Extra ns\")\n(defn g [x] x)" false)
-                                  [{:seon.task/id :task/parent-epic :seon.task/title "Parent Epic" :seon.task/scope 'demo.scoped :seon.task/needs #{:task/child-cur} :seon.task/done? false}
-                                   {:seon.task/id :task/child-cur :seon.task/title "Current Child" :seon.task/scope 'demo.scoped :seon.task/done? false}
-                                   {:seon.task/id :task/past-done :seon.task/title "Past Done" :seon.task/scope 'demo.scoped :seon.task/done? true :seon.task/summary "Fixed demo.scoped edge case"}
-                                   {:seon.task/id :template/starter :seon.task/title "Starter Template" :seon.task/template? true :seon.task/done? false}
+                                  [{:seon.task/id :task/prereq-a :seon.task/title "Prereq A" :seon.task/scope 'demo.scoped :seon.task/done? false}
+                                   {:seon.task/id :task/child-cur :seon.task/title "Current Child" :seon.task/scope 'demo.scoped :seon.task/needs #{:task/prereq-a} :seon.task/done? false}
+                                   (error/error-tx {:kind :demo/scoped-bug :severity :error :source :eval :agent :ag/scoped-worker :message "boom"})
                                    {:seon.fix/id (random-uuid) :seon.fix/error-class :demo/scoped-bug :seon.fix/symptom "boom"
                                     :seon.fix/root-cause "nil" :seon.fix/change-summary "Guarded demo.scoped/f" :seon.fix/regression-test 'demo.scoped-test/t1}
                                    {:seon.agent/id :ag/scoped-worker :seon.agent/branch :main :seon.agent/scope 'demo.scoped :seon.agent/tasks #{[:seon.task/id :task/child-cur]}
                                     :seon.agent/context-prefs {:extra-namespaces ['demo.extra]}}
                                    {:seon.agent/id :ag/unassigned-coord :seon.agent/branch :main :seon.agent/router? true}])})
       (let [db @conn
-            w-res (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/scoped-worker :seon.view/target :wire :seon.view/token-budget 32000})
-            w-eids (into #{} (map :entity) (:seon.ctx/projections w-res))
-            c-res (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/unassigned-coord :seon.view/target :wire :seon.view/token-budget 32000})
-            c-eids (into #{} (map :entity) (:seon.ctx/projections c-res))
+            w-res (ctx/project-entity db db [:seon.agent/id :ag/scoped-worker] {:target :wire :token-budget 32000 :semantic? false})
+            w-eids (into #{} (map :entity) (:candidates w-res))
+            s-res (ctx/project-entity db db [:seon.system/id :root] {:target :wire :token-budget 32000 :semantic? false})
+            s-eids (into #{} (map :entity) (:candidates s-res))
             eid-of (fn [a v] (:e (first (d/datoms db :avet a v))))]
         (is (contains? w-eids (eid-of :seon.code.ns/name 'demo.scoped)))
         (is (contains? w-eids (eid-of :seon.code.ns/name 'demo.extra)))
-        (is (contains? w-eids (eid-of :seon.task/id :task/parent-epic)) "Reverse needed-by parent task must surface")
-        (is (contains? w-eids (eid-of :seon.task/id :task/past-done)) "Historical done task in scope must surface")
-        (is (some #(contains? (:data %) :seon.fix/error-class) (:seon.ctx/projections w-res)) "Matching scope :seon.fix/* must surface")
-        (is (contains? c-eids (eid-of :seon.task/id :template/starter)) "Starter templates must surface for unassigned coordinators")))))
+        (is (contains? w-eids (eid-of :seon.task/id :task/child-cur)) "Assigned active task must surface")
+        (is (contains? w-eids (eid-of :seon.task/id :task/prereq-a)) "Prerequisite task must surface")
+        (is (some #(contains? (:data %) :seon.fix/error-class) (:candidates w-res)) "Matching :seon.fix/* for open error must surface")
+        (is (contains? s-eids (eid-of :seon.task/id :task/child-cur)) "Open non-template task must surface in :system-overview")))))
 
 (deftest ^{:cost/ticks 120000000} cycle2-compounding-rules-and-wire-tail-producers-test
-  (testing "Compounding rules chain fix->regression-test, error->var->schema->owner->compatible-fns(producer+consumer), covering tests, wire tail producers, and main-db-only renderer discovery"
+  (testing "Baseline 0 rules surface open errors with nested fix, scope namespace, branch-only unloaded renderer safety, and additive :db/index upgrades"
     (with-test-store [{:keys [conn cfg]}]
       (d/transact conn {:tx-data [{:seon.schema/key :demo.c2/widget-id :seon.schema/form [:string {:seon.db/identity true}] :seon.schema/doc "Widget ID"}
                                   {:seon.schema/key :demo.c2/widget :seon.schema/form [:map [:demo.c2/widget-id :demo.c2/widget-id]]
@@ -421,14 +377,10 @@
                 rs (ctx/load-context-rules mdb bdb nil)
                 res (ctx/gather-agent-candidates mdb bdb :ag/c2 {:target :wire :rules rs})
                 fired (set (map :rule-id (:fired-rules (:ctx-trace res))))]
-            (is (contains? fired :rule.ctx/fix-regression-test-var) "fix must chain to regression test var")
-            (is (contains? fired :rule.ctx/active-var-schemas) "error var must seed active-var-schemas")
-            (is (contains? fired :rule.ctx/attr-to-owning-entity-schema) "attribute schema must promote to owning :demo.c2/widget entity schema")
-            (is (contains? fired :rule.ctx/active-var-covering-tests) "error var must surface covering deftest")
-            (is (some #(= 'demo.c2/make-widget (:seon.code.var/name (:data %))) (:candidates res))
-                "compatible-fn must surface schema producer make-widget as well as consumer")
-            (is (some #(= :demo.c2/widget (:seon.schema/key (:data %))) (:candidates res))
-                "owning entity schema :demo.c2/widget must be projected")
+            (is (contains? fired :rule.ctx/open-errors) "open error must fire :rule.ctx/open-errors")
+            (is (contains? fired :rule.ctx/scope-namespaces) "scope must fire :rule.ctx/scope-namespaces")
+            (is (some #(= :demo.c2/boom (get-in % [:data :seon.fix/error-class])) (:candidates res))
+                "matching :seon.fix/* must attach as nested child of open error")
             (let [fitted (seon.render.fit/fit-projections bdb (:candidates res) {:main-db mdb :target :wire :token-budget 4000})
                   fitted-nil-main (seon.render.fit/fit-projections bdb (:candidates res) {:target :wire :token-budget 4000})]
               (is (map? fitted))
@@ -437,9 +389,5 @@
             ;; Verify additive :db/index true upgrade via seon.schema/sync-dh-decls!
             (let [up (seon.schema/sync-dh-decls {:demo/a {:db/ident :demo/a :db/valueType :db.type/keyword}}
                                                 [{:db/ident :demo/a :db/valueType :db.type/keyword :db/index true}])]
-              (is (= 1 (count up)) "sync-dh-decls must emit additive :db/index true upgrades on existing attrs"))
-            (let [twp @(resolve 'seon.ctx/tail-rules-with-producers)
-                  tail-closure (set (map :seon.rule/id (twp rs)))]
-              (is (contains? tail-closure :rule.ctx/edited-var-on-branch) "Turn-2+ tail closure must include edited-var-on-branch WM producer")
-              (is (contains? tail-closure :rule.ctx/fix-regression-test-var))))
+              (is (= 1 (count up)) "sync-dh-decls must emit additive :db/index true upgrades on existing attrs")))
           (finally (d/release bconn)))))))

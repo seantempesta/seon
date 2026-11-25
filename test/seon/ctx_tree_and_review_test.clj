@@ -162,14 +162,16 @@
           :seon.code.var/input ["sc1"]}
          {:seon.agent/id :ag/du-demo :seon.agent/branch :main :seon.agent/goal "Inspect inventory" :seon.agent/target "inv1"}]})
       (let [db @conn
-            sc-eid (:e (first (d/datoms db :avet :seon.schema/key :demo.inv/item)))
-            fn-eid (:e (first (d/datoms db :avet :seon.code.var/name 'demo.inv/total-qty)))
-            res (ctx/related-updates {:seon.db/main db :seon.db/branch db :seon.agent/id :ag/du-demo})
-            cand-eids (set (map :entity (:seon.ctx/projections res)))]
-        (is (contains? cand-eids sc-eid)
-            "Attaching an arbitrary custom-schema entity must automatically surface its Malli schema via pure Datalog rules")
-        (is (contains? cand-eids fn-eid)
-            "Attaching an arbitrary custom-schema entity must automatically surface compatible functions via pure Datalog rules"))
+          inv-eid (:e (first (d/datoms db :avet :demo.inv/id :item/bolt)))
+          res (ctx/project-entity db db [:seon.agent/id :ag/du-demo] {:target :wire :semantic? false})
+          inv-cand (first (filter #(= inv-eid (:entity %)) (:candidates res)))
+          inv-proj (ctx/project-entity db db [:demo.inv/id :item/bolt] {:target :html :semantic? false})]
+      (is (some? inv-cand)
+          "Attaching an arbitrary custom-schema target entity must surface via :rule.ctx/review-target")
+      (is (= :demo.inv/item (:schema inv-cand))
+          "Hydration must infer the custom Malli schema automatically")
+      (is (= :demo.inv/item (:focus-schema inv-proj))
+          "project-entity must focus any arbitrary custom-schema entity directly"))
       ;; 3. Rolling branch GC preserves newest N merged branches + active unmerged branches + :main
       (doseq [b [:branch/m1 :branch/m2 :branch/m3 :branch/active-1]]
         (store/branch! conn :main b))
@@ -248,8 +250,8 @@
                       all-txt (str/join "\n" (map :content (:messages rwire)))]
                   (is (str/includes? sys-txt "<agent ...>...</agent>"))
                   (is (some? sys-txt))
-                  (is (str/includes? all-txt "Rules of Thumb"))
-                  (is (str/includes? all-txt "Rules of Thumb") "Review rule must surface docs/rules-of-thumb.md overview"))
+                  (is (str/includes? all-txt ":w/p2"))
+                  (is (some #(= :w/p2 (get-in % [:data :seon.agent/id])) (:candidates rwire)) "Review rule must surface review target :w/p2"))
                 ;; Reviewer cleans 100% of :w/p2's evals and writes memory, leaving :paused? true
                 (let [rca (ctx/ctx-atom rconn [:seon.agent/id :review/p2])
                       old-eids (into #{} (map :e) (d/datoms @wconn :avet :seon.agent.eval/agent :w/p2))]
@@ -419,10 +421,7 @@
             (is (= [2] (:retracted-turns info)))
             (is (= 1 (:retracted-evals info)))
             (is (= [1 3] (:live-turns info)))
-            (is (some #(and (= "user" (:role %))
-                            (string? (:content %))
-                            (str/includes? (:content %) "Compacted turns: [2]"))
-                      (:messages wire))))
+            (is (= [1 3] (mapv :seon.agent.eval/turn (:evals wire)))))
           ;; Now record a ctx error eval -> latest-ctx-friction-tx returns non-nil tx
           (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent aid :seon.agent.eval/agent-ref ag-eid
                                        :seon.agent.eval/turn 4 :seon.agent.eval/code "(swap! ctx assoc :bad 1)"

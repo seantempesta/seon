@@ -286,9 +286,9 @@
           (is (= "Verified split plan" (:seon.agent/summary (d/pull @conn '[:seon.agent/summary] [:seon.agent/id :w/tr1]))))))
       ;; 2. gather-branch-status-data inherits parent's :last-proofs when reviewer has none
       (let [db @conn
-            ag (d/pull db '[*] [:seon.agent/id :rev/tr1])
-            bs ((requiring-resolve 'seon.render.wire/gather-branch-status-data) db db ag [{:seon.agent.eval/turn 1}])]
-        (is (= {:ok? false :failures [{:var 'foo/bar}]} (:last-proofs bs))))
+          proj ((requiring-resolve 'seon.ctx/project-entity) db db [:seon.agent/id :rev/tr1] {:target :wire :semantic? false})
+          parent-c (first (filter #(= :w/tr1 (get-in % [:data :seon.agent/id])) (:candidates proj)))]
+      (is (= {:ok? false :failures [{:var 'foo/bar}]} (get-in parent-c [:data :seon.agent/last-proofs]))))
       ;; 3. make-reexport-src emits :seon.code/reexport and stress-var follows it transparently
       (let [src ((requiring-resolve 'seon.code.rewrite.move/make-reexport-src) 'demo.from/adder 'child "(defn adder {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))" false 'demo.child)]
         (is (str/includes? src ":seon.code/reexport 'demo.child/adder"))))))

@@ -233,7 +233,7 @@
       (let [db1 @conn
             w1 (rwire/build-live-wire-request db1 db1 :agent/root {:conn conn :token-budget 16000})
             w2 (rwire/build-live-wire-request db1 db1 :agent/root {:conn conn :token-budget 16000 :already-shown (:shown w1)})
-            w-tight (rwire/build-live-wire-request db1 db1 :agent/root {:conn conn :token-budget 220})
+            w-tight (rwire/build-live-wire-request db1 db1 :agent/root {:conn conn :token-budget 50})
             ctx-txt (rwire/render-agent-context db1 db1 :agent/root {:token-budget 16000})
             roles (mapv :role (:messages w1))]
         (is (= "system" (first roles)))
@@ -300,22 +300,22 @@
           (is (str/includes? live-html "Message at tx5"))
           (is (str/includes? live-html "History ·")))))))
 
-(deftest ^{:cost/ticks 60000000} pure-surface-and-tail-renderers-seed42-generative-test
+(deftest ^{:cost/ticks 100000000} pure-surface-and-tail-renderers-seed42-generative-test
   (testing "Pure helpers in seon.render.surface, seon.render.entities tails, and seon.model.wire pass 100-sample seed=42 generative checks"
     (with-test-store [{:keys [conn]}]
       (let [db @conn]
         (doseq [sym '[seon.render.surface/windowed-history-indices
-                      seon.render.surface/render-surface-timeline
-                      seon.render.tails/render-branch-status-tail
-                      seon.render.tails/render-scoped-health-tail
-                      seon.render.tails/render-activity-tail
-                      seon.render.tails/render-inbox-tail
-                      seon.render.tails/render-system-health-tail
-                      seon.render.tails/render-viewport-tail
-                      seon.model.wire/format-eval-output
-                      seon.render/datastar-patch-signals
-                      seon.render.walk/discrete-view-transition?
-                      seon.render.surface/canvas-live-progress]]
+                     seon.render.surface/render-surface-timeline
+                     seon.render.entities.infra/render-form-chip
+                     seon.render.entities.infra/render-form-card
+                     seon.render.entities.infra/render-message-chip
+                     seon.render.entities.infra/render-message-card
+                     seon.render.entities.work/render-health-report
+                     seon.render.entities.work/render-summary-card
+                     seon.model.wire/format-eval-output
+                     seon.render/datastar-patch-signals
+                     seon.render.walk/discrete-view-transition?
+                     seon.render.surface/canvas-live-progress]]
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))))
 

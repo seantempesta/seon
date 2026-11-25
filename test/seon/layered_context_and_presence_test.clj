@@ -4,7 +4,6 @@
             [datahike.api :as d]
             [datahike.reads :as reads]
             [seon.ctx.frontier :as frontier]
-            [seon.ctx.project :as proj]
             [seon.ctx.touches :as ctouches]
             [seon.render.fit :as fit]
             [seon.render.surface.presence :as presence]
@@ -12,7 +11,9 @@
             [seon.signals :as sig]
             [seon.store :as store]
             [seon.test-fixture :refer [with-test-store]]
-            [seon.fork.worker-support :as wsup]))
+            [seon.fork.worker-support :as wsup]
+            [seon.code :as code]
+            [seon.ctx :as ctx]))
 
 (defn demo-reactive-canvas
   "Sample pure reactive canvas renderer `(fn [db agent])` used by Stage 4 test."
@@ -66,10 +67,14 @@
 
 (deftest ^{:cost/ticks 60000000} stage3-error-schema-rule-and-live-wire-tail-test
   (with-test-store [{:keys [conn cfg]}]
-    (testing "fast-skip-rule-ids never skips scope-and-extra-namespaces when agent has tasks"
-      (let [db @conn
-            skips (proj/fast-skip-rule-ids db db {:seon.agent/id :agent/t1 :seon.agent/tasks #{[:seon.task/id :t/x]}} true)]
-        (is (not (contains? skips :rule.ctx/scope-and-extra-namespaces)))))
+    (testing "project-entity surfaces :rule.ctx/scope-namespaces when agent task has a scope"
+    (d/transact conn {:tx-data (concat (code/file-import-tx @conn "src/demo/t1.clj" "(ns demo.t1)\n(defn f [x] x)" false)
+                                       [{:seon.task/id :t/x :seon.task/title "T1" :seon.task/scope 'demo.t1 :seon.task/done? false}
+                                        {:seon.agent/id :agent/t1 :seon.agent/branch :main :seon.agent/tasks #{[:seon.task/id :t/x]}}])})
+    (let [db @conn
+          res (ctx/project-entity db db [:seon.agent/id :agent/t1] {:target :wire :semantic? false})
+          fired (into #{} (map :rule-id) (get-in res [:ctx-trace :fired-rules]))]
+      (is (contains? fired :rule.ctx/scope-namespaces))))
     (testing "Failing eval triggers :turn/error-schema on Turn 2+ live wire tail with 0 KV-cache prefix bust"
       (d/transact conn {:tx-data [{:seon.schema/key :test.demo/item
                                    :seon.schema/form [:map [:test.demo/id :int]]

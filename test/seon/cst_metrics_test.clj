@@ -357,21 +357,20 @@
       (is (clojure.string/includes? s "NEVER `:number`")))))
 
 (deftest render-agent-context-parity-test
-  (testing "render-agent-context renders <walk-context> (ctx, task, ns + Requires) and <ephemeral-tail>"
+  (testing "render-agent-context renders <walk-context> with assigned task and scope namespace through Baseline 0 project-entity"
     (tf/with-test-store [{:keys [conn]}]
       (let [db0 @conn
-            _ (d/transact conn {:tx-data (into [{:seon.agent/id :repl/demo :seon.agent/branch :branch/demo :seon.agent/interactive? true}
-                                                {:seon.task/id :seon.demo/t1 :seon.task/scope 'seon.demo
-                                                 :seon.task/title "Demo task" :seon.task/plan "Do demo" :seon.task/done? false}]
+            _ (d/transact conn {:tx-data (into [{:seon.task/id :seon.demo/t1 :seon.task/scope 'seon.demo
+                                                 :seon.task/title "Demo task" :seon.task/plan "Do demo" :seon.task/done? false}
+                                                {:seon.agent/id :repl/demo :seon.agent/branch :branch/demo :seon.agent/interactive? true
+                                                 :seon.agent/tasks #{[:seon.task/id :seon.demo/t1]}}]
                                                (code/file-import-tx nil "src/seon/demo.clj"
                                                  "(ns seon.demo (:require [clojure.string :as str]))\n(defn hi [x] (str/upper-case (str x)))\n" false))})
             db1 @conn
             out (rwire/render-agent-context db0 db1 :repl/demo {:task :seon.demo/t1})]
         (is (clojure.string/includes? out "<walk-context>"))
-        (is (clojure.string/includes? out "(user/context"))
         (is (clojure.string/includes? out "Demo task"))
-        (is (clojure.string/includes? out "Requires: [clojure.string :as str]"))
-        (is (clojure.string/includes? out "<ephemeral-tail>"))))))
+        (is (clojure.string/includes? out "seon.demo"))))))
 
 (deftest eval-summary-by-agent-test
   (testing "unknown agent yields a fully zeroed summary (no scan, no throw)"
