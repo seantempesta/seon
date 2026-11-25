@@ -328,16 +328,7 @@
                     [:div {:class "pill-row"}
                      (when (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny strong"))
                      (badge (if pinned? "amber" "muted") (if pinned? "rule pinned :fn" "auto-fit"))]
-                    (list (when-let [rsn (:reason win)] (mut rsn))
-                    (when (seq (:variations it))
-                      [:details {:class "activity-fold"}
-                       [:summary {:class "mono tiny muted"} (str "Variations (" (count (:variations it)) ")")]
-                       [:div {:class "pill-row" :style {:margin-top "4px"}}
-                        (for [v (:variations it)]
-                          [:span {:class (str "pill mono tiny" (when (:chosen? v) " strong"))}
-                           (some-> (:fn v) name) " · " (:tokens v 0) " tok"
-                           (when (and (pos? (long (or (:w v) 0))) (pos? (long (or (:h v) 0))))
-                             (str " " (:w v) "×" (:h v)))])]]))
+                    (when-let [rsn (:reason win)] (mut rsn))
                     (when (seq (:variations it))
                       [:details {:class "activity-fold"}
                        [:summary {:class "mono tiny muted"} (str "Variations (" (count (:variations it)) ")")]
