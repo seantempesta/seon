@@ -26,7 +26,8 @@
             [seon.test-fixture :refer [with-test-store]]
             [seon.transactor.merge :as tmerge]
             [seon.web :as web]
-            [seon.web.actions :as actions]))
+            [seon.web.actions :as actions]
+            [clojure.java.io :as io]))
 
 (deftest ^{:cost/ticks 60000000} nasa-liveness-model-checker-proof-and-negative-detection-test
   (testing "Live seon.reconciler.policy/decide-agent-step has 0 livelocks, 0 orphan-pauses, 0 wedged-inflight, 0 crashed-auto-merges, 0 stranded-ready"
@@ -355,7 +356,7 @@
 
   (testing "seon.health.coverage/detect-rule-holes catches synthetic holes and passes clean on fixed starter rules + docs"
     (with-test-store [{:keys [conn]}]
-      (let [doc-tx (code/file-import-tx @conn "docs/primers.md" (slurp "docs/primers.md") false)
+      (let [doc-tx (code/file-import-tx @conn "docs/primers.md" (slurp (io/file store/checkout-root "docs/primers.md")) false)
             live-tx (code/file-import-tx @conn "src/seon/demo/cov_helper.clj" "(ns seon.demo.cov-helper)
 (defn ok? {:malli/schema [:=> [:cat :any] :boolean]} [x] (some? x))
 " false)

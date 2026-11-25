@@ -382,3 +382,94 @@
             (swap! overview-anchor-cache assoc ak entry)
             (when (and outer (seq rs)) (swap! outer into rs))
             rows))))))
+
+(defn active-task-rows
+  "Zero-planner indexed rows `[task-eid prereq-eid-or-nil tx]` for `:rule.ctx/active-tasks`: collects focal agent's `:seon.agent/tasks` across `branch-db`/`main-db` and walks transitive `:seon.task/needs` prerequisites."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:vector [:tuple :int :any :int]]]
+   :cost/ticks 5000000}
+  [main-db branch-db agent-id]
+  (if-not (and agent-id (or main-db branch-db))
+    []
+    (let [bdb (or branch-db main-db)
+          mdb (or main-db branch-db)
+          same? (identical? mdb bdb)
+          dbs (if same? [bdb] [bdb mdb])
+          tasks (reduce (fn [acc db]
+                          (if-let [ae (when ((db-schema db) :seon.agent/id)
+                                        (:e (first (d/datoms db :avet :seon.agent/id agent-id))))]
+                            (reduce (fn [m dt]
+                                      (let [te (:v dt) tx (long (:tx dt))]
+                                        (if (> tx (long (get m te -1))) (assoc m te tx) m)))
+                                    acc (when ((db-schema db) :seon.agent/tasks)
+                                          (d/datoms db :eavt ae :seon.agent/tasks)))
+                            acc))
+                        {} dbs)
+          need-db (if ((db-schema bdb) :seon.task/needs) bdb mdb)
+          has-needs? (and ((db-schema need-db) :seon.task/needs) ((db-schema need-db) :seon.task/id))
+          prereqs-of (fn [root-te]
+                       (if-not has-needs?
+                         []
+                         (loop [q (conj clojure.lang.PersistentQueue/EMPTY root-te)
+                                seen #{root-te}
+                                out []]
+                           (if-let [cur (peek q)]
+                             (let [q' (pop q)
+                                   nids (map :v (d/datoms need-db :eavt cur :seon.task/needs))
+                                   nxt (keep (fn [tid]
+                                               (when (keyword? tid)
+                                                 (when-let [pe (:e (first (d/datoms need-db :avet :seon.task/id tid)))]
+                                                   (when-not (contains? seen pe) pe))))
+                                             nids)]
+                               (recur (into q' nxt) (into seen nxt) (into out nxt)))
+                             out))))]
+      (vec (mapcat (fn [[te tx]]
+                     (let [ps (prereqs-of te)]
+                       (if (seq ps)
+                         (mapv (fn [pe] [te pe tx]) ps)
+                         [[te :seon.rule/nil tx]])))
+                   tasks)))))
+
+(defn scope-ns-rows
+  "Zero-planner indexed rows `[ns-eid tx]` for `:rule.ctx/scope-namespaces`: resolves focal agent's `:seon.agent/scope`, assigned tasks' `:seon.task/scope`, and `$wm` `:world/extra-ns` facts. Optional trailing keyword args declare read `$wm` attrs for incremental skipping."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] :any [:maybe :keyword] [:* :keyword]] [:vector [:tuple :int :int]]]
+   :cost/ticks 5000000}
+  [main-db branch-db wm-facts agent-id & _wm-attrs]
+  (if-not (and agent-id (or main-db branch-db))
+    []
+    (let [bdb (or branch-db main-db)
+          mdb (or main-db branch-db)
+          same? (identical? mdb bdb)
+          dbs (if same? [bdb] [bdb mdb])
+          scopes (reduce (fn [acc db]
+                           (let [sch (db-schema db)]
+                             (if-let [ae (when (sch :seon.agent/id)
+                                           (:e (first (d/datoms db :avet :seon.agent/id agent-id))))]
+                               (let [acc1 (if (sch :seon.agent/scope)
+                                            (into acc (map :v) (d/datoms db :eavt ae :seon.agent/scope))
+                                            acc)]
+                                 (if (and (sch :seon.agent/tasks) (sch :seon.task/scope))
+                                   (reduce (fn [s tdt]
+                                             (into s (map :v) (d/datoms db :eavt (:v tdt) :seon.task/scope)))
+                                           acc1 (d/datoms db :eavt ae :seon.agent/tasks))
+                                   acc1))
+                               acc)))
+                         #{} dbs)
+          out (volatile! {})
+          add! (fn [e tx]
+                 (when (integer? e)
+                   (let [txl (long (or tx 0))]
+                     (when (> txl (long (get @out e -1)))
+                       (vswap! out assoc e txl)))))]
+      (doseq [sc scopes]
+        (if-let [dt (when ((db-schema bdb) :seon.code.ns/name)
+                      (first (d/datoms bdb :avet :seon.code.ns/name sc)))]
+          (add! (:e dt) (:tx dt))
+          (when-let [dt (when (and (not same?) ((db-schema mdb) :seon.code.ns/name))
+                          (first (d/datoms mdb :avet :seon.code.ns/name sc)))]
+            (add! (:e dt) (:tx dt)))))
+      (when (seq wm-facts)
+        (let [tx-by-e (reduce (fn [m [e a v]] (if (= a :world/tx) (assoc m e v) m)) {} wm-facts)]
+          (doseq [[e a v] wm-facts]
+            (when (and (= a :world/extra-ns) (true? v))
+              (add! e (get tx-by-e e 0))))))
+      (vec (sort-by first @out)))))

@@ -14,7 +14,11 @@
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.transactor.spawn :as spawn]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx]
+            [seon.bench.golden :as bgolden]
+            [seon.bench.helpers :as bhelpers]
+            [seon.bench.lab :as blab]
+            [seon.server :as server]))
 
 (def ^:private baseline0-core-rules
   #{:rule.ctx/active-tasks :rule.ctx/agent-prefix-sessions :rule.ctx/pinned-entities
@@ -314,3 +318,52 @@
         ;; 3. Generative checks for new pure helpers
         (is (:ok? (schema/stress-var nil 'seon.ctx.tree/neighborhood-node-key {:samples 50 :seed 42})))
         (is (:ok? (schema/stress-var nil 'seon.ctx.tree/candidates->neighborhood {:samples 50 :seed 42})))))))
+
+(deftest ^{:cost/ticks 120000000} tool-ergonomics-deftype-replace-timeout-and-diagnostics-test
+  (testing "REPL deftype replaces in-place without duplicates, caller timeout overrides task default, failure diagnostics persist, and explore-scope works"
+    (with-test-store [{:keys [conn]}]
+      ;; 1. In-place deftype replacement in persist-forms-by-ns (zero duplicate #expr# forms, preserves order!)
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/box.clj"
+                                                      "(ns demo.box)\n(deftype MyBox [x])\n(defn make-box [x] (MyBox. x))\n" false)})
+      (let [tx2 (code/persist-forms-by-ns @conn {'demo.box ["(deftype MyBox [x y])"]} {})]
+        (d/transact conn {:tx-data tx2})
+        (let [fs (code/ns-forms @conn 'demo.box)
+              exprs (filter #(clojure.string/includes? (:seon.code.form/key %) "#expr#") fs)
+              mk (first (filter #(= "demo.box/make-box" (:seon.code.form/key %)) fs))]
+          (is (= 1 (count exprs)) "Redefining deftype must replace old #expr# form rather than duplicating it")
+          (is (= "(deftype MyBox [x y])" (:seon.code.form/src (first exprs))))
+          (is (< (:seon.code.form/order (first exprs)) (:seon.code.form/order mk))
+              "Replaced deftype must keep its original order before make-box")))
+
+      ;; 2. build-ab-tasks honors explicit caller :timeout-ms over task-level default :timeout-ms
+      (let [built (bgolden/build-ab-tasks
+                   [{:id :t/slow :timeout-ms 180000 :task {:id :t/slow :title "Slow" :plan "Do it."}}]
+                   [[:cold {:seon.config/max-tool-turns 24}]]
+                   {:timeout-ms 240000})]
+        (is (= 240000 (:timeout-ms (first built))) "Caller :timeout-ms must win over task default"))
+
+      ;; 3. trial-telemetry preserves :error-samples and :failing-tests
+      (let [tel (bhelpers/trial-telemetry :schema-proof
+                                          {:eval-errors 2
+                                           :error-samples [{:turn 3 :code "(bad)" :error "boom"}]
+                                           :failing-tests [{:var 'demo.box-test/t1 :report "expected 1 got 2"}]})]
+        (is (= 1 (count (:error-samples tel))))
+        (is (= 1 (count (:failing-tests tel)))))
+
+      ;; 4. explore-scope returns structured subtree view
+      (let [sv (server/explore-scope @conn 'demo.box)]
+        (is (= 'demo.box (:ns sv)))
+        (is (some #(= 'demo.box/make-box (:seon.code.var/name %)) (:vars sv))))
+
+      ;; 5. summarize-bench-run + generative seed=42 checks for new pure helpers
+      (let [sum (blab/summarize-bench-run
+                 {:seon.bench.run/id (random-uuid) :seon.bench.run/title "R" :seon.bench.run/status :partial
+                  :seon.bench.run/passed 1 :seon.bench.run/failed 1 :seon.bench.run/total 2
+                  :seon.bench.run/started-ms 1000 :seon.bench.run/finished-ms 11000
+                  :seon.bench.run/proxy-stats {:prompt-tokens 1000 :cache-hit-tokens 850}
+                  :seon.bench.run/trials [{:id :t/1 :status :failed :error-samples [{:turn 1 :error "e"}]}]})]
+        (is (= 10.0 (:elapsed-s sum)))
+        (is (= 85.0 (:kv-hit-pct sum)))
+        (is (= 1 (count (:error-samples (first (:trials sum)))))))
+      (is (:ok? (schema/stress-var nil 'seon.code.parse/named-expr-sig {:samples 50 :seed 42})))
+      (is (:ok? (schema/stress-var nil 'seon.bench.lab/summarize-bench-run {:samples 50 :seed 42}))))))

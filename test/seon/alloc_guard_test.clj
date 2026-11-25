@@ -17,11 +17,12 @@
             [seon.repl :as repl]
             [seon.code.reach :as reach]
             [seon.fork.calls :as fcalls]
-            [seon.ctx.touches :as ctouches]))
+            [seon.ctx.touches :as ctouches]
+            [clojure.java.io :as io]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
-    (let [raw-src (slurp "src/seon/vector.clj")
+    (let [raw-src (slurp (io/file store/checkout-root "src/seon/vector.clj"))
           sample-src (str/replace-first raw-src "(ns seon.vector" "(ns seon.alloc-guard-sample")
           edited-src (str/replace-first sample-src "(def default-shortlist 64)" "(def default-shortlist 128)")
           sample-path "src/seon/alloc_guard_sample.clj"]

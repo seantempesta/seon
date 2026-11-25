@@ -2,7 +2,9 @@
   (:require [clojure.core.async :as a]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [seon.bench.cluster :as cluster]))
+            [seon.bench.cluster :as cluster]
+            [datahike.api :as d]
+            [seon.store :as store]))
 
 (defn- ^:seon.flow/edge eval-edn [inst code]
   (let [res (cluster/instance-op! inst {:op :eval :agent :repl/lab-probe :branch :branch/lab-probe :code code})]
@@ -117,17 +119,12 @@
           (>= (System/currentTimeMillis) deadline) {:outcome :intervene :reason :timeout :status wstatus :detail det}
           :else (recur))))))
 
-(defn ^:seon.flow/edge run-supervisor-cycle!
-  "Live Pause-and-Fork Supervisor Lab: runs cold Worker on `:task`, intervenes with `:template/tune-context` on error/stall/miss, verifies rollback + context diff + corpus, and resumes Worker."
-  {:seon.repl/export true
-   :malli/schema [:=> [:cat :map] :map]
-   :seon.eval/budget-override {:ticks 2000000000 :bytes 1073741824}}
-  [{:keys [task timeout-ms tuner-timeout-ms resume-timeout-ms seed-store keep-dir?
-           max-tool-turns tuner-max-turns trigger-on-errors trigger-on-empty-turns force-tune-after-turns]
-    :or {timeout-ms 180000 tuner-timeout-ms 210000 resume-timeout-ms 180000 seed-store "runs/store"
-         keep-dir? false max-tool-turns 20 tuner-max-turns 14 trigger-on-errors 2 trigger-on-empty-turns 8}
-    :as opts}]
-  (let [inner (if (map? (:task task)) (:task task) (or task opts))
+(defn- execute-supervisor-cycle! [opts]
+  (let [{:keys [task timeout-ms tuner-timeout-ms resume-timeout-ms seed-store keep-dir?
+                max-tool-turns tuner-max-turns trigger-on-errors trigger-on-empty-turns force-tune-after-turns]
+         :or {timeout-ms 180000 tuner-timeout-ms 210000 resume-timeout-ms 180000 seed-store "runs/store"
+              keep-dir? false max-tool-turns 20 tuner-max-turns 14 trigger-on-errors 2 trigger-on-empty-turns 8}} opts
+        inner (if (map? (:task task)) (:task task) (or task opts))
         tid (or (:id inner) :lab/task)
         slug (str/replace (name tid) #"[^A-Za-z0-9._-]" "-")
         worker-id (keyword "bench" (str "w-" slug))
@@ -156,3 +153,113 @@
                                    {:tuner-timeout-ms tuner-timeout-ms :resume-timeout-ms resume-timeout-ms :tuner-max-turns tuner-max-turns} t0)))
       (finally
         (cluster/stop-instance! inst {:keep-dir? keep-dir?})))))
+
+(defn- publish-lab-run! [coord-url run-id title tid started-ms status trial-map finished-ms]
+  (let [ent (cond-> {:seon.bench.run/id run-id
+                     :seon.bench.run/title title
+                     :seon.bench.run/suite-id :lab/supervisor-cycle
+                     :seon.bench.run/status status
+                     :seon.bench.run/started-ms (long started-ms)
+                     :seon.bench.run/updated-ms (System/currentTimeMillis)
+                     :seon.bench.run/total 1
+                     :seon.bench.run/passed (if (= :passed status) 1 0)
+                     :seon.bench.run/failed (if (= :failed status) 1 0)
+                     :seon.bench.run/trials [(assoc trial-map :pair-id tid :arm :supervised)]}
+              finished-ms (assoc :seon.bench.run/finished-ms (long finished-ms)))]
+    (try (cluster/instance-op! {:base-url coord-url}
+                               {:op :transact :tx-data [ent] :reason [:lab-run run-id]})
+         (catch Throwable _ nil))))
+
+(defn ^:seon.flow/edge run-supervisor-cycle!
+  "Live Pause-and-Fork Supervisor Lab: runs cold Worker on `:task`, intervenes with `:template/tune-context` on error/stall/miss, verifies rollback + context diff + corpus, and resumes Worker. Pass `:sync? false` to run asynchronously and stream progress to `:seon.bench.run/entity` (inspectable with `(user/bench-run run-id)`)."
+  {:seon.repl/export true
+   :malli/schema [:=> [:cat :map] :map]
+   :seon.eval/budget-override {:ticks 2000000000 :bytes 1073741824}}
+  [opts]
+  (if (false? (:sync? opts))
+    (let [inner (if (map? (:task (:task opts))) (:task (:task opts)) (or (:task opts) opts))
+          tid (or (:id inner) :lab/task)
+          run-id (random-uuid)
+          started-ms (System/currentTimeMillis)
+          title (or (:title opts) (str "Supervisor Cycle: " tid))
+          port (or (:coordinator-port opts) (System/getenv "SEON_PORT") 9998)
+          coord-url (str "http://127.0.0.1:" port)]
+      (publish-lab-run! coord-url run-id title tid started-ms :running
+                        {:id tid :status :booting :evals 0 :elapsed-ms 0 :merged? false :health-ok? false :alive? true}
+                        nil)
+      (a/thread
+        (try
+          (let [res (execute-supervisor-cycle! opts)
+                ok? (boolean (:ok? res))
+                ms (long (* 1000.0 (double (or (:elapsed-s res) 0.0))))]
+            (publish-lab-run! coord-url run-id title tid started-ms (if ok? :passed :failed)
+                              (assoc res :id tid :status (if (:merged? res) :merged :failed)
+                                     :elapsed-ms ms :alive? false)
+                              (System/currentTimeMillis)))
+          (catch Throwable ex
+            (publish-lab-run! coord-url run-id title tid started-ms :failed
+                              {:id tid :status :failed :last-error (or (.getMessage ex) (str ex))
+                               :merged? false :health-ok? false :alive? false :elapsed-ms (- (System/currentTimeMillis) started-ms)}
+                              (System/currentTimeMillis)))))
+      {:ok? true :run-id run-id :status :running :task tid :title title})
+    (execute-supervisor-cycle! opts)))
+
+(defn summarize-bench-run
+  "Formats a `:seon.bench.run/*` entity map into a crisp summary with KV hit %, per-trial outcomes, `:error-samples`, and `:failing-tests`."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :map]]
+   :cost/ticks 2000000}
+  [r]
+  (when (map? r)
+    (let [raw-ts (:seon.bench.run/trials r)
+          ts (if (string? raw-ts) (try (edn/read-string raw-ts) (catch Throwable _ [])) (or raw-ts []))
+          px (:seon.bench.run/proxy-stats r)
+          pt (long (or (:prompt-tokens px) 0))
+          ht (long (or (:cache-hit-tokens px) 0))
+          s-ms (:seon.bench.run/started-ms r)
+          f-ms (:seon.bench.run/finished-ms r)]
+      {:id (:seon.bench.run/id r)
+       :title (:seon.bench.run/title r)
+       :suite-id (:seon.bench.run/suite-id r)
+       :status (:seon.bench.run/status r)
+       :passed (:seon.bench.run/passed r)
+       :failed (:seon.bench.run/failed r)
+       :total (:seon.bench.run/total r)
+       :elapsed-s (when (and s-ms f-ms) (/ (Math/round (/ (double (- f-ms s-ms)) 100.0)) 10.0))
+       :kv-hit-pct (when (pos? pt) (/ (Math/round (* 1000.0 (/ (double ht) pt))) 10.0))
+       :proxy px
+       :trials (mapv #(select-keys % [:id :pair-id :arm :status :merged? :turns :evals :elapsed-ms
+                                      :health-ok? :eval-errors :total-kv-hit-pct :last-error
+                                      :error-samples :failing-tests :phase :trigger :tuner-merged? :rolled-back-evals?])
+                     ts)})))
+
+(defn ^:seon.flow/edge bench-run
+  "Inspects live `:seon.bench.run/*` runs directly from `:main` (never a stale branch snapshot). Pass no args/`:latest` for the newest run, a UUID for a specific run, or `:list` for the last 10 runs."
+  {:seon.repl/export true
+   :malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any]]
+   :cost/ticks 10000000}
+  ([] (bench-run :latest))
+  ([which]
+   (let [ctx (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)
+         conn (:conn ctx)
+         mdb (when conn (or (store/head conn :main) @conn))]
+     (when (and mdb (contains? (:schema mdb) :seon.bench.run/id))
+       (cond
+         (uuid? which)
+         (summarize-bench-run (d/pull mdb '[*] [:seon.bench.run/id which]))
+
+         (= :list which)
+         (->> (d/datoms mdb :aevt :seon.bench.run/id)
+              (map #(d/pull mdb '[:seon.bench.run/id :seon.bench.run/title :seon.bench.run/status
+                                  :seon.bench.run/passed :seon.bench.run/failed :seon.bench.run/total
+                                  :seon.bench.run/started-ms :seon.bench.run/finished-ms] (:e %)))
+              (sort-by #(long (or (:seon.bench.run/started-ms %) 0)) >)
+              (take 10)
+              vec)
+
+         :else
+         (let [latest (->> (d/datoms mdb :aevt :seon.bench.run/id)
+                           (map #(d/pull mdb '[:seon.bench.run/id :seon.bench.run/started-ms] (:e %)))
+                           (sort-by #(long (or (:seon.bench.run/started-ms %) 0)) >)
+                           first)]
+           (when (:seon.bench.run/id latest)
+             (summarize-bench-run (d/pull mdb '[*] [:seon.bench.run/id (:seon.bench.run/id latest)])))))))))

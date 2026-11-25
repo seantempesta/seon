@@ -482,3 +482,29 @@
      :src (:seon.code.form/src f-ent)
      :order (:seon.code.form/order f-ent)
      :lead (:seon.code.form/lead f-ent)}))
+
+(defn reconcile-named-exprs
+  "Matches newly persisted `#expr#` `(deftype/defrecord/definterface Name ...)` forms against existing `#expr#` forms with the same `[head name]`, returning `{:by-key map :retracts [op ...]}` so they replace in place at their original order."
+  {:malli/schema [:=> [:cat [:sequential :map] [:sequential :map]] :map]
+   :cost/ticks 2000000}
+  [existing kept-forms]
+  (let [by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
+        expr-by-sig (reduce (fn [m f]
+                              (let [k (:seon.code.form/key f "")]
+                                (if (str/includes? k "#expr#")
+                                  (if-let [sig (parse/named-expr-sig (:seon.code.form/src f))]
+                                    (assoc m sig f)
+                                    m)
+                                  m)))
+                            {} existing)]
+    (reduce (fn [{:keys [by-key retracts] :as acc} f]
+              (let [k (:seon.code.form/key f "")]
+                (if (and (str/includes? k "#expr#") (not (contains? by-key k)))
+                  (if-let [old (some-> (parse/named-expr-sig (:seon.code.form/src f)) expr-by-sig)]
+                    (let [old-k (:seon.code.form/key old)]
+                      {:by-key (-> by-key (dissoc old-k) (assoc k old))
+                       :retracts (conj retracts [:db/retractEntity [:seon.code.form/key old-k]])})
+                    acc)
+                  acc)))
+            {:by-key by-key :retracts []}
+            kept-forms)))

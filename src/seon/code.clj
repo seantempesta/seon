@@ -341,7 +341,7 @@
           placed))))))
 
 (defn persist-forms-by-ns
-  "Persists newly defined or updated top-level Clojure forms `{nsym [src ...]}` into Datahike tx-data with topo reordering and ns-header sync."
+  "Persists newly defined or updated top-level Clojure forms `{nsym [src ...]}` into Datahike tx-data with topo reordering, in-place named-expr replacement, and ns-header sync."
   {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :any]]}
   [db ns-entries ir-refs-by-var]
   (vec
@@ -359,7 +359,7 @@
             reparsed (read-clj (ns->default-path target-ns) (str header (str/join "\n" srcs)) existing-local-defs)
             kept-forms (if has-ns-form? (:forms reparsed) (vec (rest (:forms reparsed))))
             kept-vars (enrich-reparsed-vars db target-ns reparsed ir-refs-by-var)
-            by-key (into {} (map (juxt :seon.code.form/key identity)) existing)
+            {:keys [by-key retracts]} (cio/reconcile-named-exprs existing kept-forms)
             max-ord (reduce max -1 (map :seon.code.form/order existing))
             ns-chain (ns-parent-chain-tx target-ns)
             ns-ent (build-ns-entry db target-ns ns-chain reparsed has-ns-form?)
@@ -367,7 +367,7 @@
             form-txs (reorder-form-txs by-key (assign-form-orders existing by-key max-ord kept-forms))
             stale-form-deps (retract-stale-many-ops db :seon.code.form/key [:seon.code.form/deps] (filter :seon.code.form/src form-txs))
             stale-var-refs (analyze/stale-var-edge-retracts db kept-vars)]
-        (vec (concat stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
+        (vec (concat retracts stale-ns-reqs stale-form-deps stale-var-refs (pop ns-chain) [ns-ent] form-txs kept-vars))))
     ns-entries)))
 
 (defn- eval-single-form

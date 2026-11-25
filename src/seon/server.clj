@@ -319,6 +319,43 @@
     (reply! reply-ch ans)
     {:clojure.core.async.flow/report [(str "[:server] started live benchmark run " (:run-id ans) " (" (:total ans) " tasks)")]}))
 
+(defn explore-scope
+  "Returns structured subtree scope view (`:ns`, `:namespaces`, `:vars`, `:schemas`) for namespace `ns-sym`."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :map]]
+   :cost/ticks 10000000}
+  [db ns-sym]
+  (when (symbol? ns-sym)
+    (let [pfx (str ns-sym)
+          in-sub? (fn [s] (or (= s pfx) (str/starts-with? s (str pfx "."))))
+          nss (->> (when (contains? (:schema db) :seon.code.ns/name)
+                     (d/datoms db :aevt :seon.code.ns/name))
+                   (filter #(in-sub? (str (:v %))))
+                   (map #(d/pull db '[:seon.code.ns/name :seon.code.ns/path :seon.code.ns/doc] (:e %)))
+                   (sort-by #(str (:seon.code.ns/name %)))
+                   vec)
+          vars (->> nss
+                    (mapcat (fn [{:seon.code.ns/keys [name]}]
+                              (when (contains? (:schema db) :seon.code.var/ns)
+                                (map #(d/pull db '[:seon.code.var/name :seon.code.var/private? :seon.code.var/schema :seon.code.var/doc] (:e %))
+                                     (d/datoms db :avet :seon.code.var/ns name)))))
+                    (sort-by #(str (:seon.code.var/name %)))
+                    vec)
+          schemas (->> (when (contains? (:schema db) :seon.schema/key)
+                         (d/datoms db :aevt :seon.schema/key))
+                       (filter #(when-let [n (namespace (:v %))] (in-sub? n)))
+                       (map #(d/pull db '[:seon.schema/key :seon.schema/doc] (:e %)))
+                       (sort-by #(str (:seon.schema/key %)))
+                       vec)]
+      (when (or (seq nss) (seq vars) (seq schemas))
+        {:ns ns-sym :namespaces nss :vars vars :schemas schemas}))))
+
+(defn- handle-explore-op! [db op req reply-ch]
+  (let [[k v miss] (case op
+                     :explore-var [:var (explore-var db (:var req)) (str "Var not found: " (:var req))]
+                     :explore-schema [:schema (explore-schema db (:key req)) (str "Schema not found: " (:key req))]
+                     :explore-scope [:scope (explore-scope db (:ns req)) (str "Scope not found: " (:ns req))])]
+    (reply! reply-ch (if v {:ok? true k v} {:ok? false :error miss}))))
+
 (defn server-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
   ([] {:params {:in-ch "External request channel `{:req map :reply-ch chan}`"
@@ -365,15 +402,8 @@
            (do (agent-context-reply! st req reply-ch)
                [st' nil])
 
-           :explore-var
-           (let [v (explore-var @(:conn st) (:var req))]
-             (reply! reply-ch (if v {:ok? true :var v} {:ok? false :error (str "Var not found: " (:var req))}))
-             [st' nil])
-
-           :explore-schema
-           (let [s (explore-schema @(:conn st) (:key req))]
-             (reply! reply-ch (if s {:ok? true :schema s} {:ok? false :error (str "Schema not found: " (:key req))}))
-             [st' nil])
+           (:explore-var :explore-schema :explore-scope)
+           (do (handle-explore-op! @(:conn st) op req reply-ch) [st' nil])
 
            :health
            (do (reply! reply-ch (health/report @(:conn st)))

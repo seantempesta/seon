@@ -157,10 +157,39 @@
                    (assoc :err (subs (str (:seon.agent.eval/error e))
                                      0 (min 120 (count (str (:seon.agent.eval/error e))))))))))))
 
+(defn- clip-str [s max-n]
+  (let [t (str/trim (str (or s "")))]
+    (if (> (count t) max-n) (str (subs t 0 max-n) "…") t)))
+
+(defn- pull-failure-diagnostics [conn main-db brs aid br]
+  (let [dbx (if (and br (contains? brs br)) (store/head conn br) main-db)
+        sch (db-schema dbx)
+        err-samples (if (sch :seon.agent.eval/agent)
+                      (->> (d/datoms dbx :avet :seon.agent.eval/agent aid)
+                           (map #(d/pull dbx '[:seon.agent.eval/turn :seon.agent.eval/code :seon.agent.eval/error] (:e %)))
+                           (filter #(not (str/blank? (str (:seon.agent.eval/error %)))))
+                           (sort-by #(long (or (:seon.agent.eval/turn %) 0)))
+                           (take 6)
+                           (mapv (fn [e]
+                                   {:turn (long (or (:seon.agent.eval/turn e) 0))
+                                    :code (clip-str (:seon.agent.eval/code e) 110)
+                                    :error (clip-str (:seon.agent.eval/error e) 200)})))
+                      [])
+        fail-tests (if (sch :seon.test/pass?)
+                     (->> (d/datoms dbx :avet :seon.test/pass? false)
+                          (map #(d/pull dbx '[:seon.test/var :seon.test/report :seon.test/digest] (:e %)))
+                          (filter :seon.test/var)
+                          (take 5)
+                          (mapv (fn [v]
+                                  {:var (:seon.test/var v)
+                                   :report (clip-str (:seon.test/report v) 220)})))
+                     [])]
+    {:error-samples err-samples :failing-tests fail-tests}))
+
 (defn ^:seon.flow/edge trial-audit-summary
   "Runs inside an isolated trial instance before teardown: combines `seon.health.metrics/agent-friction-summary`
-   for `agent-id` with honest end-to-end roll-ups across all forked/child agents (e.g. Refiners), worker
-   backward-walk row count, and newly added scope/test var counts on isolated `:main`."
+   for `agent-id` with honest end-to-end roll-ups across all forked/child agents, worker backward-walk row count,
+   newly added scope/test var counts on isolated `:main`, and compact `:error-samples` + `:failing-tests` diagnostics."
   {:malli/schema [:=> [:cat :any :any :keyword [:? [:maybe :map]]] :map]}
   ([conn main-db agent-id] (trial-audit-summary conn main-db agent-id nil))
   ([conn main-db agent-id opts]
@@ -207,6 +236,7 @@
                          (long (count (filter #(> (long (:tx %)) after-mtx)
                                               (d/datoms main-db :avet :seon.code.var/test? true))))
                          0)
+         diag (pull-failure-diagnostics conn main-db brs agent-id br)
          compact-evs (when (:include-trace? o)
                        {:worker (pull-compact-evals conn main-db brs agent-id br)
                         :children (mapv (fn [cid cr] {:id cid :merged? (boolean (:merged? cr))
@@ -226,6 +256,8 @@
                     :backward-walk-rows bw-rows
                     :new-scope-vars new-scope-vars
                     :new-test-vars new-test-vars)
+       (seq (:error-samples diag)) (assoc :error-samples (:error-samples diag))
+       (seq (:failing-tests diag)) (assoc :failing-tests (:failing-tests diag))
        compact-evs (assoc :eval-trace compact-evs)))))
 
 (def telemetry-numeric-pairs
@@ -240,7 +272,7 @@
    [:backward-walk-rows :backward-walk-rows] [:new-scope-vars :new-scope-vars] [:new-test-vars :new-test-vars]])
 
 (defn trial-telemetry
-  "Projects optional per-trial friction & multi-agent audit telemetry from `trace` and `category`."
+  "Projects optional per-trial friction, failure diagnostics & multi-agent audit telemetry from `trace` and `category`."
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :map]] :map] :cost/ticks 400}
   [category trace]
   (let [trace-map (if (map? trace) trace {})]
@@ -252,6 +284,8 @@
               (boolean? (:turn-overrun? trace-map)) (assoc :turn-overrun? (:turn-overrun? trace-map))
               (boolean? (:child-merged? trace-map)) (assoc :child-merged? (:child-merged? trace-map))
               (number? (:total-kv-hit-pct trace-map)) (assoc :total-kv-hit-pct (double (:total-kv-hit-pct trace-map)))
+              (seq (:error-samples trace-map)) (assoc :error-samples (:error-samples trace-map))
+              (seq (:failing-tests trace-map)) (assoc :failing-tests (:failing-tests trace-map))
               (map? (:eval-trace trace-map)) (assoc :eval-trace (:eval-trace trace-map)))
             telemetry-numeric-pairs)))
 
