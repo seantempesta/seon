@@ -17,8 +17,7 @@ This document tracks what is shipped on `main` and what is next, kept synchroniz
 - [x] Official Harbor `0.26.0` Host-Bridge integration (`7/9` genuine TB2.1 passes @ `87–96%` KV cache).
 - [x] Compounding Live DeepSeek Waves 1–4 (`Round 7`): **`9/9` consecutive auto-merges across Waves 2–4**, `0` OOMs on Wave 4, `13`-turn double-monolith record, `:large-function` cut `15 -> 5` (`-67%`).
 
-## Phase 3 — Active Priorities (Codebase Unification & Recursive Self-Improvement)
-
+Phase 3 — Active Priorities (Codebase Unification & Recursive Self-Improvement)
 - [x] **End-of-Eval Auto-Proofs & Trace Class Fixes (Wave D3 + E0):** Non-blocking `run-fast-auto-proofs!` honoring `^:seon.flow/edge`, `24k` verbatim eval/stdout cap, target-ns `::alias/kw` parsing in `add-fn!`/`set-meta!`, `:ex-data` Malli sub-schema hints, `@(user/db)` recovery hints, +1 wrap-up grace turn.
 - [x] **Accretive `:db.type/ref` Domain Graph & Unified Entity Context Kernel:** `:seon.agent/parent-ref`, `:seon.agent.call/{caller,callee,task}-ref`, `seon.ctx/project-entity`, Baseline 0 minimal rule kernel (`resources/seon/rules.edn`), and strict zero-repetition `<context-delta>` (`seon.render.fit`, `seon.render.wire`).
 - [x] **Declarative `^:seon.repl/export` REPL Helper Registry (Audit Wave E2-A):** Replaced imperative `install-*-helpers!` closures with `30` directly inspectable `^:seon.repl/export` vars (`seon.fork.helpers`).
@@ -27,6 +26,7 @@ This document tracks what is shipped on `main` and what is next, kept synchroniz
 - [ ] **Graph Density & Turn-0 Predictive Recall (`45% -> 80%+`):** Replace opaque `:map` signatures with named `:seon.*/*` schemas and wire EmbeddingGemma-2 (`seon.vector`) into Turn-0 candidate ranking.
 - [ ] **Autonomous Trace-to-Fix Meta-Loop & Multi-File Delegation Benchmarks:** Run scheduled meta-diagnosis over `:learning-metrics` + chronological traces, verify fixes via isolated A/B `seon.bench.cluster` trials, and benchmark hierarchical `:agent/root` -> `:ns/*` cross-namespace features.
 - [ ] **Eliminate Remaining `:oversized-namespace` & `:large-function` Warnings** across `src/` so full `(user/health :all)` hits `0` size advisories.
+- [x] **Recursive Proof-Driven Refinement, Native Paired A/B Bench (`user/run-ab!`), NASA Coverage & Cockpit `<session-budget>`:** Shipped decoupled Rule A -> Rule B -> Refiner RED-TDD -> Auto-Anchor -> zero-conflict fork-merge (`seon.task.refine`), NASA completeness matrix + 12-scenario corpus (`seon.health.{coverage,corpus}`), `seon.bench.golden/run-ab!` with honest 0-edit rejection & Refiner+Worker roll-ups, `:fork-review` / forked-agent KV prefix anchors, and ephemeral `<session-budget>` gauge (`seon.render.wire`). Measured across 5 paired tasks (`[M]`): Control `4/5 (80%, 86.4% KV)` beat cold 2-agent auto-refinement `2/5 (40%, 74.4% KV)` — keeping `:auto-refine-tasks? false` by default while targeting native `(in-ns 'new-test)` auto-ns seeding and Warm-Continuation Refinement next.
 ## Phase 4 — Deferred
 
 - [ ] Cross-platform embedded browser parity (`tauri-apps/wry` for Windows `WebView2` / Linux `WebKitGTK` — macOS `WKWebView` already works).
