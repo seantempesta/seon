@@ -7,7 +7,9 @@
             [seon.ctx :as ctx]
             [seon.store :as store]
             [seon.render.data :as rdata]
-            [seon.health.coverage]))
+            [seon.health.coverage]
+            [seon.render.sanitize :as sanitize]
+            [seon.render.fit :as fit]))
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -488,18 +490,20 @@
               :turns (when turn-set (vec (sort turn-set))) :memories-saved (count notes)})))))))
 
 (defn ^:seon.flow/edge set-canvas!
-  "Paints live Canvas with Hiccup `[:div ...]` or `'ns/fn` (`(fn [db agent])` or 1-arg `:seon.ui/hiccup`), returning immediate `:visual-ok?` / `:visual-defects` / `:dropped` / `:eval-error` feedback."
+  "Paints live Canvas with Hiccup `[:div ...]` or `'ns/fn` (`(fn [db agent])` or 1-arg `:seon.ui/hiccup`),
+   returning fast factual sanitizer/resolution feedback (zero browser calls)."
   {:seon.repl/export true
    :malli/schema [:function [:=> [:cat [:or [:vector :any] :qualified-symbol]] [:maybe :map]]
                   [:=> [:cat [:or [:vector :any] :qualified-symbol] [:maybe :map]] [:maybe :map]]]}
   ([hiccup-or-fn] (set-canvas! hiccup-or-fn nil))
-  ([hiccup-or-fn opts]
+  ([hiccup-or-fn _opts]
    (when-let [{:keys [conn agent-id]} *agent-ctx*]
      (let [db @conn
            aeid (:e (first (d/datoms db :avet :seon.agent/id agent-id)))
            cur (when aeid (d/pull db (quote [:seon.agent/canvas-hiccup :seon.agent/canvas-fn]) aeid))
+           vec? (vector? hiccup-or-fn)
            tx (cond
-                (vector? hiccup-or-fn)
+                vec?
                 (cond-> [{:seon.agent/id agent-id :seon.agent/canvas-hiccup hiccup-or-fn}]
                   (and aeid (some? (:seon.agent/canvas-fn cur))) (conj [:db/retract aeid :seon.agent/canvas-fn (:seon.agent/canvas-fn cur)]))
                 (qualified-symbol? hiccup-or-fn)
@@ -507,9 +511,11 @@
                   (and aeid (some? (:seon.agent/canvas-hiccup cur))) (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])))
            r (d/transact conn {:tx-data tx})
            _ (ctx/refresh-active! (:db-after r) (:tx-data r))
-           aud ((requiring-resolve (quote seon.browser.preview/audit-canvas-entry!)) (:db-after r) agent-id hiccup-or-fn opts)]
-       (merge {:ok? true :agent-id agent-id :mode (if (vector? hiccup-or-fn) :hiccup :fn) :tx (:max-tx (:db-after r))}
-              (select-keys aud [:visual-checked? :visual-ok? :visual-defects :dropped :eval-error]))))))
+           dropped (when vec? (:dropped (sanitize/sanitize-hiccup-with-report hiccup-or-fn {:allow-seon-actions? true})))
+           unresolved? (and (qualified-symbol? hiccup-or-fn) (nil? (fit/resolve-renderer-var hiccup-or-fn)))]
+       (cond-> {:ok? true :agent-id agent-id :mode (if vec? :hiccup :fn) :tx (:max-tx (:db-after r))}
+         (seq dropped) (assoc :dropped (vec dropped))
+         unresolved? (assoc :warning "Renderer var not resolved yet"))))))
 
 (defn ^:seon.flow/edge clear-canvas!
   "Clears custom `:seon.agent/canvas-hiccup` / `:seon.agent/canvas-fn` override."

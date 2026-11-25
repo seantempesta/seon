@@ -115,29 +115,6 @@
 
 (def ^:private svg-open-re #"(?i)^<svg(?:\s|>|/)")
 
-(defn svg-static-defects
-  "Pure static defect checks on `raw-svg` vs `sanitized-svg`, returning `{:defects [...] :svg-normalized? bool}`."
-  {:malli/schema [:=> {:examples [[["<svg><script>x()</script></svg>" "<svg></svg>"]
-                                   {:defects ["SVG contained <script> (stripped by sanitizer)"] :svg-normalized? true}]
-                                  [["<div>nope</div>" nil]
-                                   {:defects ["SVG rejected by sanitizer (must start with <svg ...>)"] :svg-normalized? true}]
-                                  [["<svg viewBox=\"0 0 10 10\"><rect width=\"5\" height=\"5\"/></svg>"
-                                    "<svg viewBox=\"0 0 10 10\"><rect width=\"5\" height=\"5\"/></svg>"]
-                                   {:defects [] :svg-normalized? false}]]}
-                  [:cat [:maybe :string] [:maybe :string]]
-                  [:map [:defects [:vector :string]] [:svg-normalized? :boolean]]]
-   :cost/ticks 500000 :cost/bytes 131072}
-  [raw-svg sanitized-svg]
-  (let [raw-s (when (string? raw-svg) (str/trim raw-svg))
-        san-s (when (string? sanitized-svg) (str/trim sanitized-svg))
-        defs (cond-> []
-               (and (seq raw-s) (empty? san-s)) (conj "SVG rejected by sanitizer (must start with <svg ...>)")
-               (and (seq raw-s) (re-find #"(?i)<script\b" raw-s)) (conj "SVG contained <script> (stripped by sanitizer)")
-               (and (seq raw-s) (re-find #"(?i)\son[a-z]+\s*=" raw-s)) (conj "SVG contained inline event handler (stripped by sanitizer)")
-               (and (seq raw-s) (re-find #"(?i)(?:cx|cy|x|y|x1|y1|x2|y2|width|height|r|rx|ry|d|points)\s*=\s*[\"'][^\"']*-?\d+/\d+" raw-s))
-               (conj "SVG contained Clojure ratio literal(s) (auto-normalized to decimals)"))]
-    {:defects defs :svg-normalized? (boolean (and (seq raw-s) (not= raw-s san-s)))}))
-
 (defn contains-unevaluated-form?
   "True when parsed EDN Hiccup `node` contains unevaluated Clojure code lists (e.g. `(for ...)`, `(let ...)`)."
   {:malli/schema [:=> {:examples [[[[ :div "ok"]] false]
@@ -333,34 +310,6 @@
    :cost/ticks 2500000 :cost/bytes 4194304}
   ([node] (:hiccup (sanitize-hiccup-with-report node nil)))
   ([node opts] (:hiccup (sanitize-hiccup-with-report node opts))))
-
-(defn ^:seon.flow/edge eval-and-sanitize-canvas
-  "Safely evaluates a Live Agent Canvas vector or renderer symbol (`(fn [db agent])` or 1-arg `:seon.ui/hiccup`)
-   and runs `sanitize-hiccup-with-report` (`:allow-seon-actions? true`)."
-  {:malli/schema [:=> [:cat :any :map :any] :map]
-   :cost/ticks 10000000}
-  [db agent hiccup-or-fn]
-  (let [ev (cond
-             (vector? hiccup-or-fn) {:ok? true :node hiccup-or-fn}
-             (qualified-symbol? hiccup-or-fn)
-             (let [v (try (or (when-let [n (find-ns (symbol (namespace hiccup-or-fn)))]
-                                (ns-resolve n (symbol (name hiccup-or-fn))))
-                              (requiring-resolve hiccup-or-fn))
-                          (catch Throwable _ nil))]
-               (if-not (and (var? v) (bound? v))
-                 {:ok? false :eval-error (str "Unresolved canvas fn: " hiccup-or-fn)}
-                 (try
-                   (let [als (:arglists (meta v))
-                         raw (if (and (seq als) (every? #(= 1 (count %)) als))
-                               (@v {:seon.agent/entity agent :db db})
-                               (@v db agent))]
-                     {:ok? true :node (if (and (map? raw) (contains? raw :seon.ui/hiccup)) (:seon.ui/hiccup raw) raw)})
-                   (catch Throwable ex {:ok? false :eval-error (or (.getMessage ex) (str ex))}))))
-             :else {:ok? false :eval-error (str "Unsupported canvas target: " (type hiccup-or-fn))})]
-    (if-not (:ok? ev)
-      {:ok? false :eval-error (:eval-error ev) :hiccup nil :dropped []}
-      (let [{:keys [hiccup dropped]} (sanitize-hiccup-with-report (:node ev) {:allow-seon-actions? true})]
-        {:ok? true :hiccup hiccup :dropped (vec dropped)}))))
 
 (defn adapt-svg-theme-colors
   "Rewrites hardcoded bright-white SVG card fills (`#fff`/`#f8fafc`/`white`) to `var(--base-900)`

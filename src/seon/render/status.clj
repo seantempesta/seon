@@ -423,8 +423,8 @@
 
 (defn ^:seon.flow/edge set-status!
   "Upserts the active agent's live `:seon.ui.status/entity` on its branch, mirrors to `:main`,
-   sanitizes/normalizes `:svg`, and returns visual audit feedback."
-  {:malli/schema [:=> [:cat :map] :map] :cost/ticks 35000000}
+   and sanitizes/normalizes optional `:svg`."
+  {:malli/schema [:=> [:cat :map] :map] :cost/ticks 15000000}
   [spec]
   (let [{:keys [conn agent-id]} fcalls/*agent-ctx*
         aid (or (:agent spec) (:seon.ui.status/agent spec) agent-id :agent/repl)
@@ -438,14 +438,8 @@
                   (let [r (d/transact conn {:tx-data [ent]})]
                     (ctx/refresh-active! (:db-after r) (:tx-data r))
                     r))
-        main-r (sync-main-tx! [ent] [:ui-status aid] spec)
-        audit (when (and raw-svg (not (str/blank? raw-svg)))
-                ((requiring-resolve (quote seon.browser.preview/audit-svg-visual!))
-                 raw-svg san-svg
-                 (select-keys spec [:audit? :browser-audit? :render-fn :widths :theme :port :url :direct?])))]
-    (merge {:ok? true :status ent :tx (when local-r (:max-tx (:db-after local-r))) :main-synced? (boolean (:ok? main-r))
-            :visual-ok? true :visual-defects [] :svg-normalized? false}
-           (when audit (select-keys audit [:visual-checked? :visual-ok? :visual-defects :svg-normalized?])))))
+        main-r (sync-main-tx! [ent] [:ui-status aid] spec)]
+    {:ok? true :status ent :tx (when local-r (:max-tx (:db-after local-r))) :main-synced? (boolean (:ok? main-r))}))
 
 (defn ^:seon.flow/edge install-user-helpers!
   "Installs `user/set-status!` and `user/clear-status!` into `u`."

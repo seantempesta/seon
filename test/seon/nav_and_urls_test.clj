@@ -314,93 +314,48 @@
     (is (= "" (browser/headless-url "")))))
 
 (deftest ^{:cost/ticks 90000000} browser-snapshot-enrichment-and-auto-recover-test
-  (testing "browser-proc :snapshot chains :snapshot-enrich-dom, falls back on timeout, auto-recovers Missing #seon-app, and restores size on :clear"
+  (testing "browser-proc :snapshot returns fast directly, :measure-dom auto-recovers missing #seon-app once, and :render-hiccup-frames restores size on :clear"
     (let [mk-mock (fn []
                     (let [sent (atom [])
                           st0 (browser/browser-proc {:port 0 :width 1280 :height 820})]
                       [(assoc st0 :url "http://127.0.0.1:9998/#seon-headless"
                                   :handle {:send! (fn [cmd] (swap! sent conj cmd) true) :stop! (fn [] nil)})
                        sent]))]
-      ;; 1. Enriched snapshot merges visual defects & preserves Obj-C :dom keys
+      ;; 1. Fast direct :snapshot returns immediately via finish-snapshot with 0 extra eval_js
       (let [[st sent] (mk-mock)
             rch (a/chan 1)
             [st1 _] (browser/browser-proc st :req {:op :snapshot :req-id :r1 :agent-id :agent/root :reply-ch rch})
             c1 (first @sent)
             _ (is (= "snapshot" (:op c1)))
-            [st2 out-mid] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :mime "image/jpeg" :width 1280 :height 820
-                                                         :base64 "SNAP1" :dom {:viewing ":agent/root" :mode "canvas" :theme "dark"
-                                                                               :overflowX false :svgCount 2 :url "/"}})
-            c2 (last @sent)
-            _ (is (nil? out-mid))
-            _ (is (= "eval_js" (:op c2)))
-            _ (is (str/includes? (:code c2) "visual-defects"))
-            [st3 out3] (browser/browser-proc st2 :ipc {:id (:id c2) :ok true
-                                                       :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
-                                                               :elements [{:selector "#seon-header" :w 1280 :h 48 :scroll-w 1280 :scroll-h 48 :client-w 1280 :client-h 48 :overflow-x? false :overflow-y? false :scrollable-y? false}]
-                                                               :visual-defects []}})
+            [st2 out2] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :mime "image/jpeg" :width 1280 :height 820
+                                                       :base64 "SNAP1" :dom {:viewing ":agent/root" :mode "canvas" :theme "dark"
+                                                                             :overflowX false :svgCount 2 :url "/"}})
             ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)
             dom (get-in ans [:snapshot :dom])]
+        (is (= 1 (count @sent)) "Fast :snapshot must not chain extra eval_js")
         (is (true? (:ok? ans)))
         (is (= "SNAP1" (get-in ans [:snapshot :base64])))
         (is (= ":agent/root" (:viewing dom)))
         (is (= "dark" (:theme dom)))
         (is (= 2 (:svgCount dom)))
-        (is (true? (:visual-ok? dom)))
-        (is (= [] (:visual-defects dom)))
-        (is (= 0 (:clipped-count dom)))
-        (is (string? (:summary dom)))
-        (is (= 1 (:snap-count st3)))
-        (is (= (:snapshot ans) (:last-snap st3)))
-        (is (= (:snapshot ans) (get-in out3 [:agents-res 0 :snapshot])))
-        (is (= (:snapshot ans) (get-in out3 [:web-snap 0 :snapshot])))
-        (is (nil? (:verify st3))))
+        (is (= 1 (:snap-count st2)))
+        (is (= (:snapshot ans) (:last-snap st2)))
+        (is (= (:snapshot ans) (get-in out2 [:agents-res 0 :snapshot])))
+        (is (= (:snapshot ans) (get-in out2 [:web-snap 0 :snapshot])))
+        (is (nil? (:verify st2))))
 
-      ;; 2. Enrichment timeout gracefully returns original snapshot
-      (let [[st sent] (mk-mock)
-            rch (a/chan 1)
-            [st1 _] (browser/browser-proc st :req {:op :snapshot :req-id :r2 :agent-id :agent/root :reply-ch rch})
-            c1 (first @sent)
-            [st2 _] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :mime "image/jpeg" :width 1280 :height 820
-                                                   :base64 "SNAP2" :dom {:url "/chat" :theme "dark"}})
-            c2 (last @sent)
-            [st3 out3] (browser/browser-proc st2 :timer {:ev :timeout :id (:id c2)})
-            ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)]
-        (is (true? (:ok? ans)))
-        (is (= "SNAP2" (get-in ans [:snapshot :base64])))
-        (is (= {:url "/chat" :theme "dark"} (get-in ans [:snapshot :dom])))
-        (is (= 1 (:snap-count st3)))
-        (is (= (:snapshot ans) (get-in out3 [:web-snap 0 :snapshot]))))
-
-      ;; 3. Missing #seon-app triggers background verify in both :snapshot-enrich-dom and :measure-dom (once)
-      (let [[st sent] (mk-mock)
-            rch (a/chan 1)
-            [st1 _] (browser/browser-proc st :req {:op :snapshot :reply-ch rch})
-            c1 (first @sent)
-            [st2 _] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true :base64 "BOOT503" :dom {:url "/"}})
-            c2 (last @sent)
-            [st3 out3] (browser/browser-proc st2 :ipc {:id (:id c2) :ok true
-                                                       :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
-                                                               :elements []
-                                                               :visual-defects ["Missing #seon-app root (page may still be booting)"]}})
-            ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)
-            c3 (last @sent)]
-        (is (true? (:ok? ans)))
-        (is (false? (get-in ans [:snapshot :dom :visual-ok?])))
-        (is (some? (:verify st3)))
-        (is (= "eval_js" (:op c3)))
-        (is (str/includes? (:code c3) "seon-app"))
-        (is (seq (:clojure.core.async.flow/report out3))))
-
+      ;; 2. :measure-dom with {:app false} triggers background verify ONCE
       (let [[st sent] (mk-mock)
             rch (a/chan 1)
             [st1 _] (browser/browser-proc st :req {:op :measure-dom :reply-ch rch})
             c1 (first @sent)
             [st2 out2] (browser/browser-proc st1 :ipc {:id (:id c1) :ok true
                                                        :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
-                                                               :elements []
-                                                               :visual-defects ["Missing #seon-app root (page may still be booting)"]}})
+                                                               :app false
+                                                               :elements []}})
             ans (a/alt!! rch ([v] v) (a/timeout 500) :hung)]
         (is (false? (:ok? ans)))
+        (is (false? (:app? ans)))
         (is (some? (:verify st2)))
         (is (seq (:clojure.core.async.flow/report out2)))
         (let [n0 (count @sent)
@@ -409,13 +364,13 @@
               c2 (last @sent)
               [st4 out4] (browser/browser-proc st3 :ipc {:id (:id c2) :ok true
                                                          :value {:viewport {:innerWidth 1280 :innerHeight 820 :docScrollW 1280 :docScrollH 820 :overflowX false}
-                                                                 :elements []
-                                                                 :visual-defects ["Missing #seon-app root (page may still be booting)"]}})]
+                                                                 :app false
+                                                                 :elements []}})]
           (is (= (:verify st2) (:verify st4)))
           (is (nil? out4))
           (is (= (+ n0 1) (count @sent)))))
 
-      ;; 4. :render-hiccup-frames :clear phase restores WKWebView size
+      ;; 3. :render-hiccup-frames :clear phase restores WKWebView size
       (let [[st sent] (mk-mock)
             rch (a/chan 1)
             [st1 _] (browser/browser-proc st :req {:op :render-hiccup-frames :html "<div>x</div>" :widths [360] :reply-ch rch})
