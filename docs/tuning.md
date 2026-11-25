@@ -2,6 +2,8 @@
 
 Everything in Seon is schema-validated Datahike data (code, rules, schemas, docs, evals, tasks — NEVER `slurp`/`file-seq` Seon files on disk). When an agent misses context, searches repeatedly, or hits an error, a **Pause-and-Fork Context Fixer** fixes the **general class** (never hardcoding task/var/ns literals), verifies the updated prompt live in `<target-context-preview>`, rolls the agent back to before the error via `@user/ctx`, and replies concisely — Seon automatically runs tests, merges back into the target branch, and resumes the target.
 
+> **CRITICAL — NEVER solve the target agent's task yourself!** Your ONLY job is to improve the **general context system** (Lever 1 rules / Lever 2 renderers / Lever 3 schemas) so `<target-context-preview>` surfaces the right context for ANY task of this class, roll back the target's bad turns via `@user/ctx`, verify `(user/check-corpus)` `12/12` + `0` generality issues, and let the resumed target solve its own task!
+
 ## 1. The Supervisor Rollback-Fix-Resume Cadence
 
 1. **Diagnose from the forked prefix + preview**: Read the forked agent's turns above (inherited verbatim), `<target-context-preview>`, `(user/simulate-context <target-aid> {:render-text? true})`, and `(user/coverage {:include-corpus? true})`.

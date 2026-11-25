@@ -13,7 +13,8 @@
             [seon.reconciler :as rec]
             [seon.schema :as schema]
             [seon.store :as store]
-            [seon.transactor.spawn :as spawn]))
+            [seon.transactor.spawn :as spawn]
+            [seon.ctx :as ctx]))
 
 (def ^:private baseline0-core-rules
   #{:rule.ctx/active-tasks :rule.ctx/agent-prefix-sessions :rule.ctx/pinned-entities
@@ -251,3 +252,65 @@
           (finally
             (d/release wconn)
             (d/release cconn)))))))
+
+(deftest ^{:cost/ticks 120000000} turn0-scoped-recall-and-bounded-ctx-atom-test
+  (testing "Turn-0 scoped recall surfaces entity schemas, scope vars & sibling tests before any edit, and CtxAtom advances/rolls back cleanly via commit-delta-datoms"
+    (with-test-store [{:keys [conn]}]
+      (let [e1 (random-uuid) e2 (random-uuid) e3 (random-uuid)]
+        (d/transact conn {:tx-data (concat
+                                     (code/file-import-tx @conn "src/demo/ren.clj"
+                                                          "(ns demo.ren)\n(defn render-task-chip {:malli/schema [:=> [:cat :map] :map]} [m] m)\n(defn render-card {:malli/schema [:=> [:cat :map] :map]} [m] (render-task-chip m))\n" false)
+                                     (code/file-import-tx @conn "test/demo/ren_test.clj"
+                                                          "(ns demo.ren-test (:require [clojure.test :refer [deftest is]] [demo.ren :as r]))\n(deftest render-card-test (is (= {} (r/render-card {}))))\n" true)
+                                     [{:seon.schema/key :seon.test.run/entity
+                                       :seon.schema/form "[:map [:seon.test.run/id :uuid]]"
+                                       :seon.schema/doc "Test run entity"}
+                                      {:seon.task/id :task/turn0-ren
+                                       :seon.task/title "Add renderers for :seon.test.run/entity"
+                                       :seon.task/plan "Add compact and detail renderers in demo.ren for :seon.test.run/entity following render-task-chip conventions."
+                                       :seon.task/scope 'demo.ren
+                                       :seon.task/done? false}
+                                      {:seon.agent/id :ag/turn0
+                                       :seon.agent/branch :main
+                                       :seon.agent/tasks [[:seon.task/id :task/turn0-ren]]}
+                                      {:seon.agent/id :ag/tuner0
+                                       :seon.agent/branch :main
+                                       :seon.agent/forked-from [:seon.agent/id :ag/turn0]}
+                                      {:seon.agent.eval/id e1 :seon.agent.eval/agent :ag/turn0
+                                       :seon.agent.eval/agent-ref [:seon.agent/id :ag/turn0]
+                                       :seon.agent.eval/turn 1 :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/thought "t1"}
+                                      {:seon.agent.eval/id e2 :seon.agent.eval/agent :ag/turn0
+                                       :seon.agent.eval/agent-ref [:seon.agent/id :ag/turn0]
+                                       :seon.agent.eval/turn 2 :seon.agent.eval/code "bad" :seon.agent.eval/thought "t2"}
+                                      {:seon.agent.eval/id e3 :seon.agent.eval/agent :ag/turn0
+                                       :seon.agent.eval/agent-ref [:seon.agent/id :ag/turn0]
+                                       :seon.agent.eval/turn 3 :seon.agent.eval/code "bad2" :seon.agent.eval/thought "t3"}])})
+        ;; 1. Turn-0 projection for scoped worker surfaces schema + scoped vars + sibling test ns before any edits
+        (let [proj (ctx/project-entity @conn @conn [:seon.agent/id :ag/turn0] {:target :wire})
+              refs (set (map :ref (:candidates proj)))]
+          (is (contains? refs [:seon.task/id :task/turn0-ren]) "Task must be surfaced on Turn 0")
+          (is (contains? refs [:seon.schema/key :seon.test.run/entity]) "Referenced entity schema must be surfaced on Turn 0")
+          (is (contains? refs [:seon.code.var/name 'demo.ren/render-task-chip]) "Scoped convention var must be surfaced on Turn 0")
+          (is (contains? refs [:seon.code.var/name 'demo.ren/render-card]) "Scoped var must be surfaced on Turn 0")
+          (is (contains? refs [:seon.code.ns/name 'demo.ren-test]) "Sibling -test ns must be surfaced on Turn 0"))
+
+        ;; 2. CtxAtom deref + unrelated tx commit-delta advance + swap! rollback of target evals
+        (let [ca (ctx/ctx-atom conn [:seon.agent/id :ag/tuner0])
+              v0 @ca
+              _ (d/transact conn {:tx-data [{:seon.task/id :task/unrelated :seon.task/title "Other" :seon.task/done? true}]})
+              v1 @ca
+              _ (swap! ca update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref]
+                       (fn [evs] (filterv #(< (:seon.agent.eval/turn %) 2) evs)))
+              v2 @ca
+              remaining-turns (mapv :seon.agent.eval/turn
+                                    (get-in v2 [:seon.agent/forked-from :seon.agent.eval/_agent-ref]))]
+          (is (= 3 (count (get-in v0 [:seon.agent/forked-from :seon.agent.eval/_agent-ref]))))
+          (is (= 3 (count (get-in v1 [:seon.agent/forked-from :seon.agent.eval/_agent-ref]))))
+          (is (= [1] remaining-turns) "Core Clojure swap! rollback must cleanly retract target evals 2 & 3")
+          (is (nil? (:db/id (d/pull @conn [:db/id] [:seon.agent.eval/id e2]))))
+          (is (nil? (:db/id (d/pull @conn [:db/id] [:seon.agent.eval/id e3]))))
+          (is (integer? (:db/id (d/pull @conn [:db/id] [:seon.agent.eval/id e1])))))
+
+        ;; 3. Generative checks for new pure helpers
+        (is (:ok? (schema/stress-var nil 'seon.ctx.tree/neighborhood-node-key {:samples 50 :seed 42})))
+        (is (:ok? (schema/stress-var nil 'seon.ctx.tree/candidates->neighborhood {:samples 50 :seed 42})))))))

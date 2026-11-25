@@ -130,9 +130,7 @@
   '[[(calls* ?a ?b) [?a :seon.code.var/calls ?b]]
     [(calls* ?a ?c) [?a :seon.code.var/calls ?b] (calls* ?b ?c)]
     [(needs* ?t1 ?t2) [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2]]
-    [(needs* ?t1 ?t2) [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _]]
     [(needs* ?t1 ?t3) [?t1 :seon.task/needs ?tid2] [?t2 :seon.task/id ?tid2] (needs* ?t2 ?t3)]
-    [(needs* ?t1 ?t3) [?t1 :seon.task/needs ?t2] [(integer? ?t2)] [?t2 :seon.task/id _] (needs* ?t2 ?t3)]
     [(compatible-fn ?s ?f) [?f :seon.code.var/input ?s] (not [?f :seon.code.var/private? true]) (not [?f :seon.code.var/test? true])]
     [(compatible-fn ?s ?f) [?f :seon.code.var/output ?s] (not [?f :seon.code.var/private? true]) (not [?f :seon.code.var/test? true])]
     [(render-fn ?s ?f) [?f :seon.code.var/input ?s] [?f :seon.code.var/output ?u] [?u :seon.schema/key :seon.ui/hiccup]]
@@ -349,12 +347,10 @@
        []
        (if-let [args (resolve-query-inputs eff-ins wm dbs agent-id focus-ref focus-eid)]
          (if direct-fn-call
-         (rq/eval-direct-fn-call direct-fn-call args)
-         (if direct-fn-call
-         (rq/eval-direct-fn-call direct-fn-call args)
-         (rows->envs pq (if db-fn-call?
-                          (binding [dq/*query-result-cache?* false] (apply d/q eff-q args))
-                          (apply d/q eff-q args)))))
+           (rq/eval-direct-fn-call direct-fn-call args)
+           (rows->envs pq (if db-fn-call?
+                            (binding [dq/*query-result-cache?* false] (apply d/q eff-q args))
+                            (apply d/q eff-q args))))
          [])))))
 
 (defn- step-one-rule [state r stratum dbs aid fref feid prev-state tx-datoms dirty-attrs recomputed skipped]

@@ -325,8 +325,40 @@
               (add! sib 84))))
         (vec (sort-by (fn [[e _ pri _]] [(- (long pri)) (long e)]) (vals @best)))))))
 
+(defn- recall-matching-schemas!
+  "O(k log N) indexed `:avet` lookup of schemas explicitly named in `goal-txt` (plus `<scope>/entity` conventions), avoiding any O(N) `:aevt` schema scan."
+  [bdb add! scopes goal-txt]
+  (when (dh-has? bdb :seon.schema/key)
+    (let [kw-strs (re-seq #":[a-z][a-z0-9._-]*/[a-z0-9._-]+" (or goal-txt ""))
+          explicit-ks (into [] (comp (map #(keyword (subs % 1)))
+                                     (mapcat (fn [k]
+                                               (let [ns-s (namespace k)]
+                                                 (if (and ns-s (not= "entity" (name k)))
+                                                   [k (keyword ns-s "entity")]
+                                                   [k])))))
+                            kw-strs)
+          scope-ks (mapcat (fn [sc]
+                             (let [s (str sc)]
+                               [(keyword s "entity")]))
+                           (take 2 scopes))
+          cand-ks (distinct (concat explicit-ks scope-ks))]
+      (doseq [k (take 6 cand-ks)]
+        (when-let [se (first (avet-eids bdb :seon.schema/key k))]
+          (add! se (if (= "entity" (name k)) 86 83)))))))
+
+(defn- add-turn0-var-neighborhood! [bdb add! ve]
+  (doseq [se (concat (eav-vals bdb ve :seon.code.var/input) (eav-vals bdb ve :seon.code.var/output))]
+    (add! se 82))
+  (doseq [de (take 2 (doc-atoms-for-eid bdb ve))] (add! de 81))
+  (let [callers (remove #(or (= % ve) (contains? test-harness-nss (eav1 bdb % :seon.code.var/ns)))
+                        (avet-eids bdb :seon.code.var/calls ve))
+        t-callers (take 3 (filter #(true? (eav1 bdb % :seon.code.var/test?)) callers))
+        p-callers (take 4 (remove #(true? (eav1 bdb % :seon.code.var/test?)) callers))]
+    (doseq [tc t-callers] (add! tc 84))
+    (doseq [pc p-callers] (add! pc 80))))
+
 (defn goal-lexical-rows
-  "When an agent has a vague goal/task with no concrete scope and no proofs yet, recalls top matching docs (by id/heading) and vars (by name/doc) by lexical token overlap."
+  "General Turn-0 recall: for scoped open non-template tasks (with no proofs yet), uses O(1) indexed `:avet` lookups to recall named entity schemas, lexically relevant public vars in scope (plus 1-hop I/O schemas, callers & reaching tests for top matches; falling back to top 4 public vars only on Turn 0 before any evals/pins), and sibling `-test` ns; for vague unscoped goals, recalls matching docs & vars."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:tuple :int :any :int :int]]]
    :cost/ticks 20000000}
   [main-db branch-db agent-id]
@@ -336,50 +368,95 @@
           mdb (or main-db branch-db)
           ag (rdata/pull-agent-entity mdb bdb agent-id)
           tids (vec (distinct (concat (rdata/agent-task-ids bdb ag) (rdata/agent-task-ids mdb ag))))
-          has-scope? (let [sc (:seon.agent/scope ag)] (and (symbol? sc) (not= 'seon sc)))
+          ag-sc (let [sc (:seon.agent/scope ag)] (when (and (symbol? sc) (not= 'seon sc)) sc))
           task-ents (vec (keep (fn [tid]
                                  (let [tdb (if (first (avet-eids bdb :seon.task/id tid)) bdb mdb)
                                        te (first (avet-eids tdb :seon.task/id tid))]
-                                   (when (and te (not (true? (eav1 tdb te :seon.task/done?))))
-                                     {:db tdb :eid te
-                                      :scope (eav1 tdb te :seon.task/scope)
+                                   (when (and te (not (true? (eav1 tdb te :seon.task/done?)))
+                                              (not (true? (eav1 tdb te :seon.task/template?))))
+                                     {:scope (let [s (eav1 tdb te :seon.task/scope)] (when (and (symbol? s) (not= 'seon s)) s))
                                       :title (eav1 tdb te :seon.task/title)
                                       :plan (eav1 tdb te :seon.task/plan)
                                       :has-proofs? (boolean (seq (task-proof-var-eids bdb te)))})))
                                tids))
-          any-scope? (or has-scope? (boolean (some #(and (symbol? (:scope %)) (not= 'seon (:scope %))) task-ents)))
-          any-proof? (boolean (some :has-proofs? task-ents))]
-      (if (or any-scope? any-proof?)
-        []
-        (let [toks (tokenize-goal (str (:seon.agent/goal ag) " "
-                                       (str/join " " (map #(str (:title %) " " (:plan %)) task-ents))))]
-          (if (empty? toks)
-            []
-            (let [score-txt (fn [s]
-                              (if (str/blank? (str s)) 0
-                                  (let [low (str/lower-case (str s))]
-                                    (reduce + 0 (map #(if (str/includes? low %) 1 0) toks)))))
-                  doc-hits (when (dh-has? bdb :seon.code.doc/id)
-                             (->> (d/datoms bdb :aevt :seon.code.doc/id)
-                                  (keep (fn [dt]
-                                          (let [e (:e dt)
-                                                id-sc (score-txt (:v dt))
-                                                hd-sc (if (pos? id-sc) (score-txt (eav1 bdb e :seon.code.doc/heading)) 0)
-                                                sc (+ (* 2 id-sc) (* 2 hd-sc))]
-                                            (when (>= sc 2) [e sc]))))
-                                  (sort-by (fn [[e sc]] [(- sc) e]))
-                                  (take 4)))
-                  var-hits (when (dh-has? bdb :seon.code.var/name)
-                             (->> (d/datoms bdb :aevt :seon.code.var/name)
-                                  (keep (fn [dt]
-                                          (let [e (:e dt)
-                                                nm-sc (score-txt (str (:v dt)))
-                                                sc (if (pos? nm-sc) (+ (* 2 nm-sc) (score-txt (eav1 bdb e :seon.code.var/doc))) 0)]
-                                            (when (>= sc 2) [e sc]))))
-                                  (sort-by (fn [[e sc]] [(- sc) e]))
-                                  (take 6)))]
-              (vec (concat (map (fn [[e _]] [e :seon.rule/nil 84 (entity-max-tx bdb e)]) doc-hits)
-                           (map (fn [[e _]] [e :seon.rule/nil 83 (entity-max-tx bdb e)]) var-hits))))))))))
+          scopes (vec (distinct (remove nil? (cons ag-sc (map :scope task-ents)))))
+          any-proof? (boolean (some :has-proofs? task-ents))
+          has-pins? (boolean (seq (:seon.agent/pinned ag)))
+          has-evals? (boolean (first (avet-eids bdb :seon.agent.eval/agent agent-id)))
+          goal-txt (str (:seon.agent/goal ag) " " (str/join " " (map #(str (:title %) " " (:plan %)) task-ents)))
+          low-goal (str/lower-case (or goal-txt ""))
+          toks (tokenize-goal goal-txt)
+          score-txt (fn [s]
+                      (if (str/blank? (str s)) 0
+                          (let [low (str/lower-case (str s))]
+                            (reduce + 0 (map #(if (str/includes? low %) 1 0) toks)))))
+          best (volatile! {})
+          add! (fn [eid pri]
+                 (when (integer? eid)
+                   (let [cur (get @best eid)]
+                     (when (or (nil? cur) (> (long pri) (long (nth cur 2))))
+                       (vswap! best assoc eid [eid :seon.rule/nil (long pri) (entity-max-tx bdb eid)])))))]
+      (cond
+        ;; 1. Scoped open non-template task (no proofs yet): O(1) indexed recall of named schemas, matching scope vars + 1-hop neighborhood, and sibling -test ns!
+        (and (seq scopes) (seq task-ents) (not any-proof?))
+        (do
+          (recall-matching-schemas! bdb add! scopes goal-txt)
+          (doseq [sc (take 2 scopes)]
+            (when-let [tnse (first (avet-eids bdb :seon.code.ns/name (symbol (str sc "-test"))))]
+              (add! tnse 79))
+            (let [pub-vars (filterv #(not (true? (eav1 bdb % :seon.code.var/private?)))
+                                    (avet-eids bdb :seon.code.var/ns sc))
+                  scored (->> pub-vars
+                              (map (fn [ve]
+                                     (let [vn (eav1 bdb ve :seon.code.var/name)
+                                           vlocal (when vn (str/lower-case (name vn)))
+                                           vfull (when vn (str/lower-case (str vn)))
+                                           exact? (boolean (or (and vfull (str/includes? low-goal vfull))
+                                                               (and vlocal (>= (count vlocal) 4) (str/includes? low-goal vlocal))))
+                                           nm-sc (if vlocal (score-txt vlocal) 0)
+                                           doc-sc (if (pos? nm-sc) (score-txt (eav1 bdb ve :seon.code.var/doc)) 0)
+                                           sc-val (+ (if exact? 10 0) (* 2 nm-sc) doc-sc)]
+                                       [ve sc-val exact?])))
+                              (sort-by (fn [[ve sc-val _]] [(- sc-val) ve])))
+                  matched (filterv #(pos? (second %)) scored)
+                  chosen (cond
+                           (seq matched) (take 6 matched)
+                           (and (not has-pins?) (not has-evals?)) (take 4 scored)
+                           :else [])]
+              (doseq [[ve sc-val exact?] chosen]
+                (add! ve (cond exact? 89 (>= sc-val 2) 85 :else 78)))
+              (doseq [[ve _ _] (take 2 (filter #(>= (second %) 2) matched))]
+                (add-turn0-var-neighborhood! bdb add! ve))))
+          (vec (sort-by (fn [[e _ pri _]] [(- (long pri)) (long e)]) (vals @best))))
+
+        ;; 2. Unscoped vague goal/task: recall top matching docs, vars, and named schemas!
+        (and (empty? scopes) (not any-proof?) (seq toks))
+        (do
+          (recall-matching-schemas! bdb add! nil goal-txt)
+          (when (dh-has? bdb :seon.code.doc/id)
+            (doseq [[e _] (->> (d/datoms bdb :aevt :seon.code.doc/id)
+                               (keep (fn [dt]
+                                       (let [e (:e dt)
+                                             id-sc (score-txt (:v dt))
+                                             hd-sc (if (pos? id-sc) (score-txt (eav1 bdb e :seon.code.doc/heading)) 0)
+                                             sc (+ (* 2 id-sc) (* 2 hd-sc))]
+                                         (when (>= sc 2) [e sc]))))
+                               (sort-by (fn [[e sc]] [(- sc) e]))
+                               (take 4))]
+              (add! e 84)))
+          (when (dh-has? bdb :seon.code.var/name)
+            (doseq [[e _] (->> (d/datoms bdb :aevt :seon.code.var/name)
+                               (keep (fn [dt]
+                                       (let [e (:e dt)
+                                             nm-sc (score-txt (str (:v dt)))
+                                             sc (if (pos? nm-sc) (+ (* 2 nm-sc) (score-txt (eav1 bdb e :seon.code.var/doc))) 0)]
+                                         (when (>= sc 2) [e sc]))))
+                               (sort-by (fn [[e sc]] [(- sc) e]))
+                               (take 6))]
+              (add! e 83)))
+          (vec (sort-by (fn [[e _ pri _]] [(- (long pri)) (long e)]) (vals @best))))
+
+        :else []))))
 
 (defn referenced-doc-rows
   "Surfaces `:seon.code.doc/entity` atoms referencing `agent-id`'s pinned entities or branch-edited vars."
