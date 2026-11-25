@@ -294,7 +294,21 @@
 
 (defn- apply-live-var-meta! [db0 k m]
 (when-let [v (and (string? k) (str/includes? k "/") (find-var (symbol k)))]
-  (alter-meta! v merge m) (when (contains? m :malli/schema) (schema/arm-var! db0 v)) {:account nil}))
+  (letfn [(unquote-ex [node]
+            (cond
+              (and (seq? node) (= 2 (count node)) (= 'quote (first node))) (second node)
+              (map? node) (reduce-kv (fn [a mk mv] (assoc a mk (unquote-ex mv))) {} node)
+              (vector? node) (mapv unquote-ex node)
+              :else node))
+          (norm-m [node]
+            (cond
+              (map? node) (reduce-kv (fn [a mk mv] (assoc a mk (if (contains? #{:examples :malli/examples} mk) (unquote-ex mv) (norm-m mv)))) {} node)
+              (vector? node) (mapv norm-m node)
+              :else node))]
+    (let [m' (if (or (contains? m :malli/schema) (contains? m :malli/examples)) (norm-m m) m)]
+      (alter-meta! v merge m')
+      (when (contains? m' :malli/schema) (schema/arm-var! db0 v))
+      {:account nil}))))
 
 (defn set-meta!
   "Merges metadata into `(defn ...)` attr-map(s), validating `:malli/schema` upfront."

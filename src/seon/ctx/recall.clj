@@ -78,17 +78,28 @@
       (add! se pri)))))
 
 (defn add-turn0-var-neighborhood!
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn :int] :any]}
-  [bdb add! ve]
-  (doseq [se (concat (eav-vals bdb ve :seon.code.var/input) (eav-vals bdb ve :seon.code.var/output))]
-    (add! se 82))
-  (doseq [de (take 2 (doc-atoms-for-eid bdb ve))] (add! de 81))
-  (let [callers (remove #(or (= % ve) (contains? test-harness-nss (eav1 bdb % :seon.code.var/ns)))
-                        (avet-eids bdb :seon.code.var/calls ve))
-        t-callers (take 3 (filter #(true? (eav1 bdb % :seon.code.var/test?)) callers))
-        p-callers (take 4 (remove #(true? (eav1 bdb % :seon.code.var/test?)) callers))]
-    (doseq [tc t-callers] (add! tc 84))
-    (doseq [pc p-callers] (add! pc 80))))
+{:malli/schema [:=> [:cat :seon.host/db :seon.host/fn :int] :any]}
+[bdb add! ve]
+(doseq [se (concat (eav-vals bdb ve :seon.code.var/input) (eav-vals bdb ve :seon.code.var/output))]
+  (add! se 82))
+(doseq [de (take 2 (doc-atoms-for-eid bdb ve))] (add! de 81))
+(let [vns (str (or (eav1 bdb ve :seon.code.var/ns) ""))
+      callees (->> (eav-vals bdb ve :seon.code.var/calls)
+                   (remove #(= % ve))
+                   (sort-by (fn [ce]
+                              (let [cns (str (or (eav1 bdb ce :seon.code.var/ns) ""))]
+                                [(cond (and (not (str/blank? vns)) (str/starts-with? cns (str vns "."))) 0
+                                       (= cns vns) 1
+                                       :else 2)
+                                 cns (str (or (eav1 bdb ce :seon.code.var/name) ""))])))
+                   (take 3))
+      callers (remove #(or (= % ve) (contains? test-harness-nss (eav1 bdb % :seon.code.var/ns)))
+                      (avet-eids bdb :seon.code.var/calls ve))
+      t-callers (take 3 (filter #(true? (eav1 bdb % :seon.code.var/test?)) callers))
+      p-callers (take 4 (remove #(true? (eav1 bdb % :seon.code.var/test?)) callers))]
+  (doseq [ce callees] (add! ce 81))
+  (doseq [tc t-callers] (add! tc 84))
+  (doseq [pc p-callers] (add! pc 80))))
 
 (defn semantic-recall-rows!
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :any :seon.host/fn] :any]}

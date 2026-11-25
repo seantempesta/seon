@@ -541,4 +541,12 @@
   :seon.fix/error-class :seon.model/corrupt-media-image-http400,
   :seon.fix/root-cause "collect-media-candidates-from-val scraped :seon.media/base64 from arbitrary schema/form metadata maps; normalize-media-image accepted non-image MIMEs and non-positive dims; openai-stream-chat! sent unvalidated base64 image_url payloads and multimodal-unsupported-error? missed 'uploaded an unsupported'.",
   :seon.fix/regression-test seon.alloc-guard-test/wave14b-media-image-validation-and-wire-sanitizer-test,
-  :seon.fix/id #uuid "84c7d677-0408-4fe0-9097-9a35fe37894d"}]
+  :seon.fix/id #uuid "84c7d677-0408-4fe0-9097-9a35fe37894d"}
+ {:seon.fix/created-ms 1795634926940,
+  :seon.fix/symptom "Wave 16A Supervisor Cycle passed strictly (0 errors, 0 OOMs), but Worker burned 7 turns debugging quote-form asymmetry on symbol-bearing :examples; docs/malli.md repeated itself 2x wasting ~800 Turn-0 tokens; Tuner invented callee-surfacing in add-turn0-var-neighborhood!; run-tuner-intervention! reported :tuner-merged? false when fork-merged tuner had :status :paused + :merged-tx > 0.",
+  :seon.fix/change-summary "Added quote-examples-for-src in seon.code.cst.ns/set-defn-meta-src and unquote-ex in seon.code.edit/apply-live-var-meta!; adopted Tuner's forward callee surfacing in seon.ctx.recall/add-turn0-var-neighborhood!; fixed tuner-merged? in seon.bench.lab; retracted duplicate docs/malli.md section (~800 Turn-0 tokens saved); cleaned :seon.media/{mime,label,base64} examples.",
+  :seon.fix/before-after "Wave 16A Supervisor Cycle passed strictly (16w+14t=30t, 0 errs, 0 OOMs) -> Wave 16B eliminates 7t quote-asymmetry trap, adopts Tuner's Turn-0 callee recall, and cuts docs/malli.md Turn-0 footprint 50%.",
+  :seon.fix/error-class :seon.code/examples-quote-parity-and-turn0-callees,
+  :seon.fix/root-cause "set-defn-meta-src printed raw symbols in :examples unquoted while apply-live-var-meta! skipped unquoting; add-turn0-var-neighborhood! only walked reverse callers; docs/malli.md had a duplicate entity docs/malli.md#section; handle-fork-merge-back! sets both :paused? true and :merged-tx.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave16b-turn0-callees-examples-quote-parity-and-tuner-merged-test,
+  :seon.fix/id #uuid "b1901c0e-59ab-4f8a-9238-09049e49d232"}]

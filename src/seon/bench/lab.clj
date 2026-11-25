@@ -187,7 +187,7 @@
         final-det (probe-agent-detail inst worker-id worker-br)
         final-health (cluster/instance-op! inst {:op :health})
         verify-res (when verify-spec (cluster/instance-op! inst {:op :verify-task :spec (assoc verify-spec :after-main-tx (long (or after-main-tx 0)))}))
-        tuner-merged? (= :merged (:status tuner-row))
+        tuner-merged? (boolean (or (= :merged (:status tuner-row)) (pos? (long (or (:merged-tx tuner-det) 0)))))
         rolled-back? (< (long (:evals post-tune-w 0)) (long (:evals pre-det 0)))
         tuner-eff? (boolean (and tuner-merged? (or rolled-back? (seq (:new-rules post-tune-ctx)) (seq (:upserted-forms post-tune-ctx)))))
         merged? (= :merged (:status final-row))

@@ -694,3 +694,23 @@
         (let [res (seon.bench.helpers/trial-audit-summary conn @conn :w/bounce-test {:after-main-tx t0})]
           (is (= 1 (count (:bounce-messages res))))
           (is (= :merge-conflict (:type (first (:bounce-messages res))))))))))
+
+(deftest wave16b-turn0-callees-examples-quote-parity-and-tuner-merged-test
+  (testing "set-defn-meta-src quotes symbol-bearing :examples so source compiles without Unable to resolve symbol"
+    (let [src "(defn f [q] q)"
+          res (seon.code.cst.ns/set-defn-meta-src src {:malli/schema [:=> {:examples [[[[':find '?e]] {:find ['?e]}]]} [:cat :any] :map]})]
+      (is (:ok? res))
+      (is (clojure.string/includes? (:src res) "(quote"))
+      (let [form (read-string (:src res))
+            attr (nth form 2)]
+        (is (= [[[:find '?e]] {:find ['?e]}] (first (:examples (second (:malli/schema (eval attr))))))))))
+  (testing "add-turn0-var-neighborhood! surfaces delegation-target callees alongside callers"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data [{:db/id "target" :seon.code.var/name 'demo.ns.impl/helper :seon.code.var/ns 'demo.ns.impl}
+                                  {:db/id "wrap" :seon.code.var/name 'demo.ns/helper :seon.code.var/ns 'demo.ns :seon.code.var/calls #{"target"}}]})
+      (let [db @conn
+            we (:e (first (d/datoms db :avet :seon.code.var/name 'demo.ns/helper)))
+            te (:e (first (d/datoms db :avet :seon.code.var/name 'demo.ns.impl/helper)))
+            seen (atom [])]
+        (seon.ctx.recall/add-turn0-var-neighborhood! db (fn [e pri] (swap! seen conj [e pri])) we)
+        (is (some #(= te (first %)) @seen))))))
