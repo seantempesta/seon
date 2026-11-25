@@ -299,7 +299,7 @@
          ctx (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)
          conn (:conn ctx)
          main-db (when conn (or (store/head conn :main) @conn))
-         base-tasks (or (seq (:tasks o)) (select-golden-tasks o))
+         base-tasks (or (seq (:tasks o)) (seq (:base-tasks o)) (select-golden-tasks o))
          arms (or (:arms o) [[:control {:seon.config/auto-refine-tasks? false :seon.config/max-tool-turns 24}]
                              [:treatment {:seon.config/auto-refine-tasks? true :seon.config/max-tool-turns 24}]])
          trials (build-ab-tasks base-tasks arms o)
@@ -314,7 +314,7 @@
                                        :seed-store "runs/store" :suite-id suite-id
                                        :title (or (:title o) (str "Paired A/B (" (count base-tasks) " tasks × " (count arms) " arms)"))
                                        :max-os-procs 3 :max-test-workers 2}
-                                      (dissoc o :tasks :arms :only :ids :categories :sync? :by-pair? :publish-fn :include-trace?))
+                                      (dissoc o :tasks :base-tasks :arms :only :ids :categories :sync? :by-pair? :publish-fn :include-trace?))
                          git-sha (assoc :git-commit (str git-sha))
                          main-tx (assoc :main-tx (long main-tx))
                          model-name (assoc :model (str model-name)))]

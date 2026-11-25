@@ -26,7 +26,8 @@
             [seon.ctx.touches :as ctouches]
             [seon.error :as serr]
             [seon.code.persist :as persist]
-            [seon.store.config :as store-cfg]))
+            [seon.store.config :as store-cfg]
+            [seon.code.cst :as cst]))
 
 (def ^:private ticks-fn (scm/eval-string "(lambda () (jolt-ticks))"))
 
@@ -423,7 +424,13 @@
             (reduce
              (fn [acc f] (eval-single-form db code-str f ir-by-var touched-all called-all ticks-cap bytes-cap acc))
              {:ok? true :value nil :final-ns (ns-name start-ns) :by-ns (array-map)}
-             (get-in parsed [:parsed :forms]))))
+             (mapcat (fn [f]
+               (let [s (:seon.code.form/src f)
+                     subs (cst/flatten-top-level-do-srcs s)]
+                 (if (and (= 1 (count subs)) (= (first subs) s))
+                   [f]
+                   (mapv #(assoc f :seon.code.form/src %) subs))))
+             (get-in parsed [:parsed :forms])))))
         outcome (realize-eval-outcome db raw-outcome ticks-cap bytes-cap)
         dk (max 0 (- (ticks-fn) k0))
         dbytes (max 0 (- (alloc-fn) b0))
