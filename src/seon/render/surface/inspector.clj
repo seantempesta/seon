@@ -313,11 +313,13 @@
               (when (pos? more)
                 [:span {:class "mono tiny muted"} (str "+" more " more")])]])]]))))
 
-(defonce ^:private explain-fit-cache (store/lru-cache 32))
+(defonce ^:private ^:seon.flow/edge explain-fit-cache (store/lru-cache 32))
+
+(defonce ^:private ^:seon.flow/edge inspector-world-cache (store/lru-cache 32))
 
 (defn render-inspector-body
   "Perspective-aware General Entity Browser over the ONE `seon.ctx/project-entity` pipeline."
-  {:malli/schema [:=> [:cat :map] [:vector :any]] :cost/ticks 45000000}
+  {:malli/schema [:=> [:cat :map] [:vector :any]], :cost/ticks 45000000, :seon.flow/edge true}
   [{:keys [main-db branch-db viewing-id agent inspect-ref lab-prefs slot-budget branch-feedback]}]
   (if-not (or main-db branch-db)
     [:div {:id "seon-inspector-unit" :class "card muted"} "No database connected."]
@@ -330,10 +332,17 @@
           pib (:per-item-budget slot-budget)
           stack? (< aw 720)
           dh (db-schema main-db)
-          world (entity-world-candidates main-db bdb ref
-                  (cond-> {:target :html :avail-w aw :area-budget ab :max-items 12
-                           :perspective-agent viewing-id :agent agent :include-unmatched? true}
-                    pib (assoc :per-item-budget pib)))
+          mc (store/live-cid main-db)
+          bc (store/live-cid bdb)
+          w-opts (cond-> {:target :html :avail-w aw :area-budget ab :max-items 12
+                          :perspective-agent viewing-id :agent agent :include-unmatched? true}
+                   pib (assoc :per-item-budget pib))
+          wk (when (and mc bc (not (:as-of-tx lp)))
+               [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb)
+                ref viewing-id aw ab pib (boolean (:minimal? lp)) (:disabled-rules lp)])
+          world (if wk
+                  (store/lru-get! inspector-world-cache 32 wk #(entity-world-candidates main-db bdb ref w-opts))
+                  (entity-world-candidates main-db bdb ref w-opts))
           ex-opts {:target (:inspect-target lp) :token-budget (:inspect-budget lp) :avail-w (:inspect-width lp)
                    :main-db main-db :area-budget (* (long (:inspect-width lp)) 1200)
                    :fallback-renderers rwire/fallback-entity-renderers}

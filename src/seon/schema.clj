@@ -468,7 +468,7 @@
 
 (defn stress-var
   "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets. Usage: `(user/stress-var 'ns/fn)` or `(user/stress-var 'ns/fn {:samples 100 :seed 42})`."
-  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :any :map] [:maybe :map]]], :seon.flow/edge true}
+  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :any :map] [:maybe :map]]], :seon.flow/edge true, :seon.eval/budget-override {:ticks 500000000, :bytes 1073741824}}
   ([fn-sym] (stress-var (live-branch-db) fn-sym {}))
   ([a b] (if (or (qualified-symbol? a) (var? a) (string? a))
            (if (map? b) (stress-var (live-branch-db) a b)
