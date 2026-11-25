@@ -60,7 +60,13 @@
   [["get-else: nil default value is not supported"]
    "Hint: Datahike `get-else` rejects `nil` as the 3rd arg — use a non-nil sentinel like `:none` or `:missing`, or pull optional attrs via `(d/pull db '[...] eid)`."]
   [["Character cannot be cast to class java.util.Map$Entry"]
-   "Hint: You passed a String to a map fn (`keys`/`vals`/`merge`) — `(user/source 'ns)` and `(user/source 'ns/var)` return source strings directly (use `(user/ns-outline 'ns)` for a map/vector of vars)."]])
+   "Hint: You passed a String to a map fn (`keys`/`vals`/`merge`) — `(user/source 'ns)` and `(user/source 'ns/var)` return source strings directly (use `(user/ns-outline 'ns)` for a map/vector of vars)."]
+  [["Can't take value of a macro:"]
+   "Hint: A bare symbol resolved to a Clojure macro (e.g. `ns`, `defn`, `let`) — quote symbol literals in `:examples` (e.g. `'ns`) or wrap the `:examples` vector in a single outer quote `'[[...]]`."]
+  [["Unable to resolve symbol: thrown?"]
+   "Hint: `thrown?` is valid ONLY inside `(clojure.test/is (thrown? ExClass expr))`, or use `(try ... (catch Throwable e ...))`."]
+  [["contains? not supported on type: malli.registry"]
+   "Hint: Malli registries are not Clojure maps — check schemas via `(malli.core/schema key {:registry reg})` or `(contains? (:forms (seon.schema/entity-index db)) key)`."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
