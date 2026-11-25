@@ -141,7 +141,7 @@
                          :else :failed)
         err-text (or (:last-error result-row) (:error result-row))
         telemetry-keys (into [:category :arm :pair-id :turn-overrun? :child-merged? :total-kv-hit-pct
-                              :error-samples :failing-tests :eval-trace :verify-ok? :verify-reason]
+                              :error-samples :failing-tests :bounce-messages :eval-trace :verify-ok? :verify-reason]
                              (map second bh/telemetry-numeric-pairs))]
     (merge
       (cond-> {:id (:id result-row) :status row-status :port (:port result-row)

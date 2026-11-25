@@ -29,24 +29,6 @@
     (when (seq km) (alter-meta! v merge km))
     v))
 
-(defn autofix-health!
-  "Executes `:fix` actions from `seon.health/report` (`:ns`, `:class`, `:dry-run?`)."
-  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :map] [:maybe :map]]], :seon.flow/edge true}
-  ([] (autofix-health! {}))
-  ([{:keys [ns class dry-run?]}]
-   (when-let [{:keys [conn]} *agent-ctx*]
-     (let [targets (filterv #(and (:fix %) (or (nil? ns) (= ns (:ns %)) (health/ns-in-scope? ns (:ns %))) (or (nil? class) (= class (:class %)))) (:problems (health/report @conn)))
-           results (mapv (fn [p]
-                           (let [{:keys [fn args]} (:fix p) f (or (try (resolve fn) (catch Throwable _ nil)) (try (requiring-resolve fn) (catch Throwable _ nil)))]
-                             (if-not f
-                               {:ok? false :class (:class p) :subject (:subject p) :error :fix-fn-not-found :fn fn}
-                               (try
-                                 (let [r (apply f (if dry-run? (concat args [{:dry-run? true}]) args))]
-                                   {:ok? (boolean (:ok? r true)) :class (:class p) :subject (:subject p) :changed? (boolean (:changed? r true)) :result (dissoc r :diff)})
-                                 (catch Throwable ex {:ok? false :class (:class p) :subject (:subject p) :error (or (.getMessage ex) (str ex))})))))
-                         targets)]
-       {:ok? (every? :ok? results) :dry-run? (boolean dry-run?) :count (count results) :results results}))))
-
 (defn save-example!
   "Snapshots a completed agent session into `:example/<name>` for `resources/seon/agents/examples.edn`."
   {:malli/schema [:function [:=> [:cat :keyword :keyword] [:maybe :map]] [:=> [:cat :keyword :keyword :map] [:maybe :map]]] :seon.flow/edge true}
@@ -195,7 +177,7 @@
 
 (defn health
   "Scoped branch health (<15 MB) by default; pass `:all`, `:main`, or `'ns`."
-  {:malli/schema [:function [:=> [:cat] [:maybe :seon.health/report]] [:=> [:cat [:maybe [:or :keyword :symbol :map]]] [:maybe :seon.health/report]]], :seon.eval/budget-override {:ticks 600000000, :bytes 1073741824}, :seon.flow/edge true}
+  {:malli/schema [:function [:=> [:cat] [:maybe :seon.health/report]] [:=> [:cat [:maybe [:or :keyword :symbol :map]]] [:maybe :seon.health/report]]], :seon.eval/budget-override {:ticks 600000000, :bytes 2147483648}, :seon.flow/edge true}
   ([] (health nil))
   ([which]
    (when-let [{:keys [conn agent-id branch]} *agent-ctx*]
@@ -204,6 +186,27 @@
          (= which :main) (health/report mdb)
          (or (= which :all) (and (nil? which) (= branch :main))) (health/report bdb)
          :else (scoped-branch-health conn mdb bdb branch agent-id (when (symbol? which) which)))))))
+
+(defn autofix-health!
+  "Executes `:fix` actions from `health` (scoped on feature branches, full on `:main` or `:ns :all`)."
+  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :map] [:maybe :map]]]
+   :seon.eval/budget-override {:ticks 600000000 :bytes 2147483648}
+   :seon.flow/edge true}
+  ([] (autofix-health! {}))
+  ([{:keys [ns class dry-run?]}]
+   (when *agent-ctx*
+     (let [rep (health ns)
+           targets (filterv #(and (:fix %) (or (nil? ns) (= ns :all) (= ns (:ns %)) (health/ns-in-scope? ns (:ns %))) (or (nil? class) (= class (:class %)))) (:problems rep))
+           results (mapv (fn [p]
+                           (let [{:keys [fn args]} (:fix p) f (or (try (resolve fn) (catch Throwable _ nil)) (try (requiring-resolve fn) (catch Throwable _ nil)))]
+                             (if-not f
+                               {:ok? false :class (:class p) :subject (:subject p) :error :fix-fn-not-found :fn fn}
+                               (try
+                                 (let [r (apply f (if dry-run? (concat args [{:dry-run? true}]) args))]
+                                   {:ok? (boolean (:ok? r true)) :class (:class p) :subject (:subject p) :changed? (boolean (:changed? r true)) :result (dissoc r :diff)})
+                                 (catch Throwable ex {:ok? false :class (:class p) :subject (:subject p) :error (or (.getMessage ex) (str ex))})))))
+                         targets)]
+       {:ok? (every? :ok? results) :dry-run? (boolean dry-run?) :count (count results) :results results}))))
 
 (defn- branch-merge-base-cid [mdb bdb branch]
   (when (and (not= branch :main) mdb bdb (get-in bdb [:config :commit-graph?] true))
@@ -260,7 +263,7 @@
                          (concat (keep :seon.code.form/ns (:upserts ops)) tlist))]
     (vec (sort-by (fn [s] [(if (contains? direct-nss (namespace s)) 0 1) (str s)]) test-syms))))
 
-(defn- resolve-run-tests-targets [bdb ops target more]
+(defn- resolve-run-tests-targets [bdb mdb ops target more]
   (let [raw (if (seq more) (cons target more) [target])
         [pos-args kw-args] (split-with (complement keyword?) raw)
         kw-map (when (and (seq kw-args) (even? (count kw-args))) (apply hash-map kw-args))
@@ -268,15 +271,22 @@
         tlist (if-let [vs (or (:only opt-m) (:vars opt-m) (:tests opt-m))]
                 (if (coll? vs) (vec vs) [vs])
                 (vec (mapcat #(cond (or (nil? %) (map? %) (keyword? %)) nil (coll? %) % :else [%]) pos-args)))
+        ns-test-vars (fn [db s]
+                       (keep #(let [v (d/pull db '[:seon.code.var/name :seon.code.var/test?] (:e %))]
+                                (when (:seon.code.var/test? v) (:seon.code.var/name v)))
+                             (d/datoms db :avet :seon.code.var/ns s)))
         test-syms (if (seq tlist)
                     (->> tlist
                          (mapcat (fn [x]
                                    (let [s (if (string? x) (symbol x) x)]
-                                     (cond (namespace s) (if (:seon.code.var/test? (d/pull bdb '[:seon.code.var/test?] [:seon.code.var/name s]))
-                                                           [s] (code/reaching-tests bdb (symbol (namespace s))))
+                                     (cond (namespace s)
+                                           (if (or (:seon.code.var/test? (d/pull bdb '[:seon.code.var/test?] [:seon.code.var/name s]))
+                                                   (and mdb (not= mdb bdb) (:seon.code.var/test? (d/pull mdb '[:seon.code.var/test?] [:seon.code.var/name s]))))
+                                             [s] (code/reaching-tests bdb (symbol (namespace s))))
                                            (str/ends-with? (name s) "-test")
-                                           (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))] (when (:seon.code.var/test? v) (:seon.code.var/name v)))
-                                                 (d/datoms bdb :avet :seon.code.var/ns s))
+                                           (or (seq (ns-test-vars bdb s))
+                                               (when (and mdb (not= mdb bdb)) (seq (ns-test-vars mdb s)))
+                                               [])
                                            :else (code/reaching-tests bdb s)))))
                          distinct sort vec)
                     (->> (distinct (keep :seon.code.form/ns (:upserts ops))) (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
@@ -315,11 +325,13 @@
      (let [t0 (System/nanoTime) bdb @conn mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
            base-cid (branch-merge-base-cid mdb bdb branch)
            ops (when base-cid (code/changed-form-ops conn base-cid (d/commit-id bdb)))
+           branch-dirty? (boolean (or (seq (:upserts ops)) (seq (:retracted-keys ops)) (seq (:schema-keys ops))))
+           eff-db (if (or (= branch :main) branch-dirty?) bdb mdb)
            _ (when (or (seq (:upserts ops)) (seq (:retracted-keys ops))) (wsup/apply-form-overlay! bdb (select-keys ops [:upserts :retracted-keys])))
-           {:keys [ordered-tests gen-vars]} (resolve-run-tests-targets bdb ops target more)
+           {:keys [ordered-tests gen-vars]} (resolve-run-tests-targets eff-db mdb ops target more)
            b0 (code/alloc-bytes) soft-byte-cap 4294967296
            {:keys [results skipped-by-budget gen-results]}
-           (wsup/call-with-candidate-overrides bdb
+           (wsup/call-with-candidate-overrides eff-db
              (fn [_]
                (let [[ran-res skipped]
                      (loop [rem ordered-tests acc []]
@@ -327,12 +339,12 @@
                          [acc 0]
                          (if (and (seq acc) (> (- (code/alloc-bytes) b0) soft-byte-cap))
                            [acc (count rem)]
-                           (recur (rest rem) (conj acc (binding [fcalls/*agent-ctx* nil] (wsup/run-single-test-var bdb (first rem) (str "local:" (first rem)))))))))]
+                           (recur (rest rem) (conj acc (binding [fcalls/*agent-ctx* nil] (wsup/run-single-test-var eff-db (first rem) (str "local:" (first rem)))))))))]
                  {:results ran-res
                   :skipped-by-budget skipped
                   :gen-results (vec (keep (fn [vsym]
                                  (when (< (- (code/alloc-bytes) b0) soft-byte-cap)
-                                   (when-let [r (schema/stress-var bdb vsym {:samples 100 :seed 42 :measure-fn code/measure-call})]
+                                   (when-let [r (schema/stress-var eff-db vsym {:samples 100 :seed 42 :measure-fn code/measure-call})]
                                      (when-not (:skipped? r)
                                        {:seon.test/var vsym :seon.test/kind :generative :seon.test/pass? (boolean (:ok? r))
                                         :seon.test/ms (double (:ms r 0.0)) :seon.test/report (or (:reason r) "PASS")}))))

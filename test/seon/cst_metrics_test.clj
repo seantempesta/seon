@@ -10,7 +10,11 @@
             [seon.render.entities.work :as rwork]
             [seon.render.links :as rlinks]
             [seon.render.wire :as rwire]
-            [seon.test-fixture :as tf]))
+            [seon.test-fixture :as tf]
+            [clojure.string]
+            [seon.bench.trial]
+            [seon.code.errors]
+            [seon.repl]))
 
 (deftest patch-form-source-test
   (testing "single + round-trip preserves unrelated source"
@@ -437,3 +441,53 @@
       (is (clojure.string/includes? h1 "(user/schema \"term\")"))
       (is (clojure.string/includes? h2 "bare integer entity ID"))
       (is (clojure.string/includes? h3 "unquoted symbol")))))
+
+(deftest wave18b-ns-require-sync-autofix-budget-and-bounce-storage-test
+  (testing "add-require-src merges missing :as and :refer into existing lib specs idempotently"
+    (let [s0 "(ns demo.t\n  (:require [clojure.test :refer [deftest is]]\n            [seon.test-fixture]))"
+          r1 (cstns/add-require-src s0 '[[clojure.test :refer [testing]] [seon.test-fixture :as tf]])
+          r2 (cstns/add-require-src (:src r1) '[[clojure.test :refer [testing]] [seon.test-fixture :as tf]])]
+      (is (:ok? r1))
+      (is (:changed? r1))
+      (is (clojure.string/includes? (:src r1) "[clojure.test :refer [deftest is testing]]"))
+      (is (clojure.string/includes? (:src r1) "[seon.test-fixture :as tf]"))
+      (is (false? (:changed? r2)))))
+  (testing "sync-ns-requires-for-srcs upgrades existing bare/partial requires and adds bare qualified libs on non-blank ns"
+    (let [ex "(ns demo.t\n  (:require [clojure.test :refer [deftest is]]\n            [seon.test-fixture]))"
+          upd (cstns/sync-ns-requires-for-srcs
+                'demo.t ex
+                ["(deftest t1 (testing \"x\" (tf/with-test-store [{:keys [conn]}] (seon.server/explore-scope @conn 'seon))))"]
+                {'tf 'seon.test-fixture}
+                {'testing 'clojure.test}
+                #{'seon.server})]
+      (is (string? upd))
+      (is (clojure.string/includes? upd "[clojure.test :refer [deftest is testing]]"))
+      (is (clojure.string/includes? upd "[seon.test-fixture :as tf]"))
+      (is (clojure.string/includes? upd "[seon.server]"))))
+  (testing "sync-ns-requires-for-live-ns syncs unquoted loaded qualified ns on non-blank header and skips quoted symbols"
+    (let [ex "(ns demo.live-t\n  (:require [clojure.test :refer [deftest is]]))"
+          upd (cstns/sync-ns-requires-for-live-ns
+                'demo.live-t ex
+                ["(deftest t1 (is (= 1 (clojure.edn/read-string \"1\"))) (is (= 'seon.main/start-flow-instance! 'seon.main/start-flow-instance!)))"])]
+      (is (string? upd))
+      (is (clojure.string/includes? upd "[clojure.edn]"))
+      (is (not (clojure.string/includes? upd "seon.main")))))
+  (testing "split-leading-ns-src & persist-forms-by-ns sync bare loaded qualified refs even when (ns ...) accompanies body"
+    (is (= ["(ns a.b)" "\n(defn f [] 1)"] (cstns/split-leading-ns-src "(ns a.b)\n(defn f [] 1)")))
+    (seon.test-fixture/with-test-store [{:keys [conn]}]
+      (let [tx (seon.code/persist-forms-by-ns @conn
+                 {'demo.combo-t ["(ns demo.combo-t (:require [clojure.test :refer [deftest is]]))\n(deftest c1 (is (= 1 (clojure.edn/read-string \"1\"))))"]}
+                 {})
+            ns-form (some #(when (= "demo.combo-t#ns" (:seon.code.form/key %)) (:seon.code.form/src %)) tx)]
+        (is (string? ns-form))
+        (is (clojure.string/includes? ns-form "[clojure.edn]")))))
+  (testing "result->stored-trial preserves :bounce-messages"
+    (let [st (seon.bench.trial/result->stored-trial {:id :t/b :ok? false :bounce-messages [{:turn 2 :msg "fail"}]})]
+      (is (= [{:turn 2 :msg "fail"}] (:bounce-messages st)))))
+  (testing "autofix-health! and health carry >= 2 GB eval budget override"
+    (is (>= (get-in (meta #'seon.repl/autofix-health!) [:seon.eval/budget-override :bytes] 0) 2147483648))
+    (is (>= (get-in (meta #'seon.repl/health) [:seon.eval/budget-override :bytes] 0) 2147483648)))
+  (testing "Wave 18A static error hints fire cleanly"
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Expected number or lookup ref for entity id, got #datahike/Datom [1 :a 2]" {}) "(:e dt)"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Alias d already exists in namespace repl, aliasing datahike.api" {}) "pre-aliased"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "No such namespace: seon.db" {}) "(d/q"))))

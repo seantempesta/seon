@@ -66,7 +66,13 @@
   [["Unable to resolve symbol: thrown?"]
    "Hint: `thrown?` is valid ONLY inside `(clojure.test/is (thrown? ExClass expr))`, or use `(try ... (catch Throwable e ...))`."]
   [["contains? not supported on type: malli.registry"]
-   "Hint: Malli registries are not Clojure maps — check schemas via `(malli.core/schema key {:registry reg})` or `(contains? (:forms (seon.schema/entity-index db)) key)`."]])
+   "Hint: Malli registries are not Clojure maps — check schemas via `(malli.core/schema key {:registry reg})` or `(contains? (:forms (seon.schema/entity-index db)) key)`."]
+  [["Expected number or lookup ref for entity id, got #datahike/Datom"]
+   "Hint: Pass `(:e dt)` (the integer entity ID), not the Datom record itself, to `(d/pull db '[...] (:e dt))`."]
+  [["Alias d already exists in namespace repl" "Alias str already exists in namespace repl"]
+   "Hint: `d` (`datahike.api`), `str` (`clojure.string`), `fs` (`jolt.fs`), and `proc` (`jolt.process`) are pre-aliased in `user`/`repl` — pick a distinct alias (e.g. `:as diag`)."]
+  [["No such namespace: seon.db"]
+   "Hint: There is no `seon.db` namespace — query Datahike with `(d/q ... (user/db))` or `(d/datoms (user/db) :avet :attr val)` (`datahike.api` is pre-aliased as `d`)."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))

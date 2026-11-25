@@ -242,7 +242,15 @@
                               (code/file-import-tx @conn path
                                                    (str (subs file-src 0 idx) new-fsrc (subs file-src (+ idx (count src))))
                                                    false)))
-                          (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res)))]
+                          (let [db-cur @conn
+                              ns-src0 (when (and eval? (nil? eval-err))
+                                        (:seon.code.form/src (d/pull db-cur '[:seon.code.form/src] [:seon.code.form/key (str ns "#ns")])))
+                              synced-ns (when ns-src0 (cst-ns/sync-ns-requires-for-live-ns ns ns-src0 [new-fsrc]))
+                              f-tx (single-form-upsert-tx db-cur ns key path order lead new-fsrc (:account ev-res)
+                                                          (when synced-ns {:ns-src synced-ns}))]
+                          (if synced-ns
+                            (into (code/persist-forms-by-ns db-cur {ns [synced-ns]} {}) f-tx)
+                            f-tx)))]
                  (if-not tx
                    {:ok? false :error :source-sync-mismatch :target target :key key}
                    (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)

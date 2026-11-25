@@ -11,6 +11,13 @@
   :seon.fix/id #uuid "269efac2-ee2d-4d95-b1b2-3a761e17daca",
   :seon.fix/root-cause "file-import-and-transact-allocation-budget-test and rule-audit-single-source-and-tail-eviction-test called CWD-relative (slurp \"...\") instead of (io/file store/checkout-root \"...\").",
   :seon.fix/symptom "Isolated benchmark trials running with cwd=/tmp/seon-bench-* failed with FileNotFoundException on src/seon/vector.clj and docs/primers.md."}
+ {:seon.fix/before-after "Before: 2/5 seed=115 COW test fails + 256MB autofix OOM + lost :bounce-messages. After: auto-synced requires on add-fn!/edit-fn!/persist-forms-by-ns, scoped <15MB autofix-health! + 2GB cap, persisted :bounce-messages.",
+  :seon.fix/change-summary "Merge missing :as/:refer in add-require-src, always sync unquoted loaded bare qualified ns refs across sync-ns-requires-for-live-ns/persist-forms-by-ns/edit-fn!, scope autofix-health! with 2 GB budget, add mdb fallback in run-tests!, preserve :bounce-messages in result->stored-trial, and add 3 Wave 18A error hints.",
+  :seon.fix/error-class :cow-test-missing-require-and-autofix-oom,
+  :seon.fix/id #uuid "6e20f314-bdd6-4254-9e34-b1eaf43aa388",
+  :seon.fix/regression-test seon.cst-metrics-test/wave18b-ns-require-sync-autofix-budget-and-bounce-storage-test,
+  :seon.fix/root-cause "sync-ns-requires-for-live-ns skipped bare qualified libs when existing-ns-src was non-blank, persist-forms-by-ns skipped sync when raw-ns? was true, add-require-src dropped :as/:refer upgrades on already-required libs, autofix-health! ran full 600MB health/report under 256MB cap, and result->stored-trial omitted :bounce-messages.",
+  :seon.fix/symptom "Wave 18A seed=115: 2/5 failures passed local run-tests! on T23 then failed isolated COW merge-gate tests due to missing test ns requires; autofix-health! hit 256MB OOM; :bounce-messages dropped on storage."}
  {:seon.fix/before-after "4 GB hard ceiling (MDB_MAP_FULL at 170 branches) -> 1 TB sparse Malli-defaulted config + rolling 16-branch retention + 954,075 dead blocks reclaimed",
   :seon.fix/change-summary "Added Malli-defaulted configs (:seon.config/store-map-bytes 1 TB sparse, :gc-keep-merged-branches 16, :gc-history-hours 168), rolling post-merge branch pruning, single-writer :op :gc-store protecting active branch merge-bases, and nil-safe branch-delta-info fallback.",
   :seon.fix/error-class :mdb-map-full,
