@@ -464,13 +464,13 @@
   :seon.task/title "Tighten Malli schemas on public pure functions in seon.health"}
  {:seon.task/done? false,
   :seon.task/id :template/discover-and-plan,
-  :seon.task/plan "1. **Discover first:** Inspect `@seon.ctx/ctx`, `<task-chain>`, `<historical-tasks>`, schemas (`:seon.schema/key`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` so your parent and future agents see the concrete plan.\n3. **Execute & prove:** Edit via CST tools (`user/edit-fn!`, `user/add-fn!`), verify `(user/run-tests!)` + `(user/health)`, record distilled findings via `(user/update-task! {:summary \"...\"})`, then mark `(user/ready!)`.",
+  :seon.task/plan "1. **Discover first:** Inspect `@user/ctx`, `<walk-context>`, schemas (`user/schema`), callers (`user/callers`), and existing tests before designing changes.\n2. **Refine the plan:** Update your task's `:plan` and `:tests` via `(user/update-task! {:plan \"...\" :tests [...]})` if needed.\n3. **Execute & prove:** Edit using standard Clojure `(in-ns 'ns) (defn ...)` / `(deftest ...)` (attaching `:malli/schema` to pure fns), verify `(user/run-tests!)` + `(user/health)` green, and reply concisely in Markdown (no tool calls) — Seon automatically tests and merges your branch!",
   :seon.task/scope seon,
   :seon.task/template? true,
   :seon.task/title "Discover existing code/data/history, refine task plan, prove & merge"}
  {:seon.task/done? false,
   :seon.task/id :template/hygiene-cleanup,
-  :seon.task/plan "1. **Inspect curated refs first:** Read the curated var(s)/namespace(s), callers (`user/callers`), and reaching tests (`user/tests-for`) before changing code.\n2. **Refactor cleanly at the root:** Consolidate duplicate helpers onto one canonical var, migrate raw Java filesystem/process calls to `jolt.fs` / `jolt.process`, or split oversized namespaces/functions without breaking public contracts or introducing require cycles.\n3. **Prove & ship:** Verify `(user/run-tests!)` and `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), record a concise `:summary` via `(user/update-task! {:summary \"...\"})`, and call `(user/ready!)`.",
+  :seon.task/plan "1. **Inspect curated refs first:** Read curated var(s)/ns, `user/callers`, and `user/tests-for`.\n2. **Refactor cleanly at the root:** Consolidate duplicates, migrate raw Java IO/process to `jolt.fs`/`jolt.process`, or split oversized code cleanly without breaking contracts.\n3. **Prove & ship:** Verify `(user/run-tests!)` + `(user/health)` (0 errors, 0 `:unused-require`, 0 `:silent-catch-all`), then reply concisely in Markdown (no tool calls) — Seon automatically tests and merges your branch!",
   :seon.task/scope seon,
   :seon.task/template? true,
   :seon.task/title "Consolidate duplicates, retire raw Java IO, or split oversized code cleanly"}
@@ -504,7 +504,7 @@
   :seon.task/title "Discover system state, customize a task template, and orchestrate work"}
  {:seon.task/done? false,
   :seon.task/id :template/subtask-code,
-  :seon.task/plan "1. Inspect `<task-chain>`, `<historical-tasks>`, scope vars/callers, schemas, and covering tests first.\n2. Refine your subtask plan via `(user/update-task! {:plan \"...\" :tests [...]})` if discoveries change the design.\n3. Make minimal CST edits on your branch (attach `:malli/schema` to new public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`, record `:summary` via `(user/update-task! {:summary \"...\"})`, settle with `(user/answer! call-id result)`, and call `(user/ready!)`.",
+  :seon.task/plan "1. Inspect scope vars/callers, schemas, and covering tests first.\n2. Make minimal standard-Clojure edits on your branch (attach `:malli/schema` to pure public `defn`s), prove green via `(user/run-tests!)` + `(user/health)`.\n3. Settle any incoming call with `(user/answer! call-id result)` and reply concisely in Markdown (no tool calls) — Seon automatically tests and merges your branch!",
   :seon.task/scope seon,
   :seon.task/template? true,
   :seon.task/title "Implement scoped code/schema/test change on branch, prove green & answer parent"}
@@ -537,29 +537,25 @@
                    {:db/id 1107271651566967543}
                    {:db/id 1134849665331851523}],
   :seon.task/scope seon.ctx,
-  :seon.task/title "Pause-and-Fork Context Tuner: diagnose miss, edit general rules/renderers/policies, prove corpus green, finish-review!",
+  :seon.task/title "Pause-and-Fork Context Tuner: diagnose miss, edit general rules/renderers/policies, prove corpus green, roll back & resume",
   :seon.task/id :template/tune-context,
-  :seon.task/ref-order ["new/seon.code.doc/id/docs/tuning.md#1-the-supervisor-rollback-fix-resume-cadence"
-                        "new/seon.code.doc/id/docs/tuning.md#2-recall-vs-precision-general-datalog-rules"
-                        "new/seon.code.doc/id/docs/tuning.md#3-multi-footprint-pure-hiccup-renderers"
-                        "new/seon.code.doc/id/docs/tuning.md#4-schemas-refs-core-clojure-user-ctx-data-recipes"
-                        "new/seon.code.doc/id/docs/tuning.md#context-tuning-supervisor-rollback-field-guide"
+  :seon.task/ref-order [[:seon.code.doc/id
+                         "docs/tuning.md#context-tuning-supervisor-rollback-field-guide"]
+                        [:seon.code.doc/id
+                         "docs/tuning.md#1-the-supervisor-rollback-fix-resume-cadence"]
+                        [:seon.code.doc/id
+                         "docs/tuning.md#2-recall-vs-precision-general-datalog-rules"]
+                        [:seon.code.doc/id "docs/tuning.md#3-multi-footprint-pure-hiccup-renderers"]
+                        [:seon.code.doc/id
+                         "docs/tuning.md#4-schemas-refs-core-clojure-user-ctx-data-recipes"]
                         [:seon.schema/key :seon.agent/forked-from]
                         [:seon.schema/key :seon.rule/id]
-                        [:seon.schema/key :seon.rule/category]
-                        [:seon.schema/key :seon.rule/stratum]
-                        [:seon.schema/key :seon.rule/target]
-                        [:seon.schema/key :seon.rule/enabled?]
                         [:seon.schema/key :seon.rule/query]
                         [:seon.schema/key :seon.rule/assert]
-                        [:seon.schema/key :seon.rule/doc]
                         [:seon.schema/key :seon.ui/hiccup]
-                        [:seon.code.ns/name seon.render.entities.work]
-                        [:seon.schema/key :seon.schema/context-policy]
                         [:seon.code.ns/name seon.ctx.graph]
-                        [:seon.schema/key :seon.agent.eval/turn]
-                        [:seon.schema/key :seon.agent/tasks]
-                        [:seon.schema/key :seon.task/plan]],
+                        [:seon.code.ns/name seon.render.entities.work]
+                        [:seon.schema/key :seon.schema/context-policy]],
   :seon.task/template? true,
   :seon.task/done? false,
-  :seon.task/plan "You are a Pause-and-Fork Context Tuner forked off a struggling agent (`:seon.agent/forked-from`). Everything in Seon is schema-validated Datahike data — edit data cleanly with standard Clojure + `@user/ctx`, observe `<target-context-preview>` on your very next turn, and iterate until the target's context is crisp and GENERAL (NEVER hardcode agent/task/var/ns literals in rules!).\n\n1. **Diagnose**: Read the forked agent's session above + `<target-context-preview>` (or `(user/simulate-context <target-aid> {:render-text? true})` and `(user/coverage {:include-corpus? true})`) to see what the target agent missed and why.\n2. **Fix the GENERAL CLASS via the 3 Levers (standard Clojure, zero thin wrappers)**:\n   - **Lever 1 (Rules)**: Transact/update general `:seon.rule/*` Datalog entities via `(user/transact! [{:seon.rule/id :rule.ctx/... :seon.rule/category :context :seon.rule/stratum 16 :seon.rule/target :any :seon.rule/enabled? true :seon.rule/query '[...] :seon.rule/assert '[...] :seon.rule/doc \"...\"}])`.\n   - **Lever 2 (Renderers)**: Author/refine multi-footprint pure `:seon.ui/hiccup` renderers via `(in-ns 'seon.render.entities.work) (defn render-foo {:malli/schema [:=> [:cat [:map [:ns/ent :ns/ent]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [{:ns/keys [ent]}] {:seon.ui/hiccup [...]})`.\n   - **Lever 3 (Schemas / Graph)**: Add `:seon.schema/context-policy` or `:db.type/ref` edges via `(user/register-schema! ...)`, or refine general graph walk helpers in `(in-ns 'seon.ctx.graph)`.\n   - **Direct session/task cleanup via `@user/ctx`** (when also cleaning up the forked agent's state using core Clojure `swap!`):\n     - Prune noisy turns: `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] #(remove (fn [e] (#{2 3} (:seon.agent.eval/turn e))) %))`\n     - Pin/update task: `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent/tasks] (fn [ts] (mapv #(assoc % :seon.task/plan \"...\") ts)))`\n3. **Inspect live feedback & iterate**: After each edit, read `<target-context-preview>` on your next turn (and `(user/simulate-context <target-aid> {:render-text? true})`) to confirm the target's generated context improved cleanly, AND run `(user/check-corpus)` to prove `(:ok? (:delta-vs-main ...))` = `true`, `0` `:generality-issues`, and `0` `:redundant-rules`.\n4. **Prove green & resume target**: Verify `(user/run-tests!)` + `(user/health)` (0 errors, every ns < 8k tok), then call `(user/finish-review! \"Concise summary of root class fixed, corpus delta, and tests verified\")`."}]
+  :seon.task/plan "You are a Pause-and-Fork Context Tuner forked off a struggling agent (`:seon.agent/forked-from`). Everything in Seon is schema-validated Datahike data (NEVER `slurp`/`file-seq` Seon files on disk). Edit data with standard Clojure + `@user/ctx`, observe `<target-context-preview>` on your next turn, and iterate until the target's context is crisp and GENERAL (ZERO hardcoded agent/task/var/ns literals in rules!).\n\n1. **Diagnose**: Read the forked agent's turns above + `<target-context-preview>` (or `(user/simulate-context <target-aid> {:render-text? true})` and `(user/coverage {:include-corpus? true})`) to classify the miss (Recall vs Precision vs Schema).\n2. **Fix the GENERAL CLASS via the 3 Levers**:\n   - **Lever 1 (Rules)**: Query existing rules with `(user/rule-atlas)`. Transact general `:seon.rule/*` Datalog entities via `(user/transact! [{:seon.rule/id :rule.ctx/... :seon.rule/category :context :seon.rule/stratum 16 :seon.rule/target :any :seon.rule/enabled? true :seon.rule/query '[...] :seon.rule/assert '[...] :seon.rule/doc \"...\"}])`.\n   - **Lever 2 (Renderers)**: Author multi-footprint pure `:seon.ui/hiccup` renderers via `(in-ns 'seon.render.entities.work) (defn render-foo ...)`.\n   - **Lever 3 (Schemas / Graph)**: Add `:seon.schema/context-policy` / `:db.type/ref` via `(user/register-schema! ...)`, or refine general graph helpers in `(in-ns 'seon.ctx.graph)`.\n   - **Roll back / steer target via core Clojure `@user/ctx`**:\n     `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] #(filterv (fn [e] (< (long (:seon.agent.eval/turn e 0)) err-turn)) %))`\n3. **Verify live feedback**: Inspect `<target-context-preview>` on your next turn and run `(user/check-corpus)` (`12/12`, `0` `:generality-issues`, `0` regressions) + `(user/run-tests!)` + `(user/health)`.\n4. **Finish**: Simply reply concisely in Markdown (NO tool calls) summarizing the general fix, corpus delta, rollback turn, and tests — Seon automatically tests, merges back into the target branch, and resumes the target!"}]

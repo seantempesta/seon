@@ -1,11 +1,11 @@
 # Context Tuning & Supervisor Rollback Field Guide
 
-Everything in Seon is schema-validated Datahike data. When an agent misses context, searches repeatedly, or hits an error, a **Pause-and-Fork Context Fixer** fixes the **general class** (never hardcoding task/var/ns literals), verifies the updated prompt live in `<target-context-preview>`, rolls the agent back to before the error via `@user/ctx`, and resumes it.
+Everything in Seon is schema-validated Datahike data (code, rules, schemas, docs, evals, tasks — NEVER `slurp`/`file-seq` Seon files on disk). When an agent misses context, searches repeatedly, or hits an error, a **Pause-and-Fork Context Fixer** fixes the **general class** (never hardcoding task/var/ns literals), verifies the updated prompt live in `<target-context-preview>`, rolls the agent back to before the error via `@user/ctx`, and replies concisely — Seon automatically runs tests, merges back into the target branch, and resumes the target.
 
 ## 1. The Supervisor Rollback-Fix-Resume Cadence
 
 1. **Diagnose from the forked prefix + preview**: Read the forked agent's turns above (inherited verbatim), `<target-context-preview>`, `(user/simulate-context <target-aid> {:render-text? true})`, and `(user/coverage {:include-corpus? true})`.
-2. **Classify the miss**:
+2. **Classify the miss (Recall vs Precision)**:
    - **Recall miss** (right entity never entered candidates): add or refine a general `:seon.rule/*` Datalog rule or `seon.ctx.graph` walker.
    - **Precision / budget miss** (right entity dropped or bloated): add a compact pure `:seon.ui/hiccup` renderer or a stratum-20 `:rank/boost` / `:rank/suppress` rule.
    - **Schema / ref miss** (missing graph edge or policy): add `:db.type/ref` or `:seon.schema/context-policy` via `(user/register-schema! ...)`.
@@ -16,11 +16,11 @@ Everything in Seon is schema-validated Datahike data. When an agent misses conte
    (swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref]
           #(filterv (fn [e] (< (long (:seon.agent.eval/turn e 0)) err-turn)) %))
    ```
-5. **Prove green & resume**: Run `(user/run-tests!)` + `(user/health)` (0 errors, every ns < 8k tok), then call `(user/finish-review! "Summary of general class fixed, corpus delta, rollback turn, and tests verified")`.
+5. **Prove green & finish**: Run `(user/run-tests!)` + `(user/health)` (0 errors, every ns < 8k tok), then **simply reply concisely in Markdown (NO tool calls)** summarizing the general class fixed, corpus delta, rollback turn, and test results. Seon automatically tests, merges back into the target's branch, delivers your summary as `:review-note`, and resumes the target!
 
 ## 2. Recall vs Precision: General Datalog Rules
 
-Transact `:seon.rule/*` entities directly as data (`user/transact!`). Rules are validated by Malli and checked by `seon.health.coverage/lint-rule-generality` (ZERO hardcoded agent, task, var, or ns literals in `:where`):
+Query existing rules via `(user/rule-atlas)` or `(datahike.api/datoms (user/db) :aevt :seon.rule/id)` (never `slurp` disk files). Transact `:seon.rule/*` entities directly as data (`user/transact!`). Rules are validated by Malli and checked by `seon.health.coverage/lint-rule-generality` (ZERO hardcoded agent, task, var, or ns literals in `:where`):
 
 ```clojure
 ;; Example Recall rule (stratum 16, projects graph neighbors into :workspace):
@@ -62,6 +62,8 @@ The Upgrade Ladder (`seon.render.fit`) automatically chooses the richest pure re
 
 - **Pin an entity onto the forked target**:
   `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent/pinned] (fnil conj #{}) [:seon.code.var/name 'ns/v])`
+- **Roll back bad turns (strictly before `err-turn`)**:
+  `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] #(filterv (fn [e] (< (long (:seon.agent.eval/turn e 0)) err-turn)) %))`
 - **Prune specific noisy turns**:
   `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] #(remove (fn [e] (#{2 3} (:seon.agent.eval/turn e))) %))`
 - **Update the forked agent's task plan/summary**:

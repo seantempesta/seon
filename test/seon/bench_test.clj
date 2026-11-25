@@ -199,8 +199,8 @@
     (is (= {:task-map {:id :seon.task/x :title "Do it" :scope :seon.x}
             :task-id :seon.task/x :scope :seon.x :goal "Do it" :body "go"}
            (cluster/trial-task-plan {:task {:id :seon.task/x :title "Do it" :scope :seon.x} :body "go"})))
-    (is (= "Work your assigned task, prove it green, and call (user/ready!)."
-           (:body (cluster/trial-task-plan {:task :seon.task/y})))))
+    (is (= "Work your assigned task, verify your changes pass tests and health, then reply concisely with your summary."
+    (:body (cluster/trial-task-plan {:task :seon.task/y})))))
   (testing "trial-spawn-op and trial-message-op build op payloads"
     (is (= {:op :spawn-agent :id :bench/t1 :branch :branch/t1 :goal "G"}
     (cluster/trial-spawn-op :bench/t1 :branch/t1 {:goal "G"})))

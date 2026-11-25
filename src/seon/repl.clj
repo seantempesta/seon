@@ -17,7 +17,8 @@
             [seon.bench.golden :as bgolden]
             [seon.health.liveness :as hliveness]
             [seon.render.wire]
-            [seon.bench.helpers :as bhelpers]))
+            [seon.bench.helpers :as bhelpers]
+            [seon.bench.lab :as blab]))
 
 (defn- intern-doc! [u sym f]
   (let [v (intern u sym (if (var? f) (fn [& args] (apply @f args)) f))
@@ -384,7 +385,9 @@
              ms (or (:misses o) (when db (filterv #(= aid (:agent %)) ((requiring-resolve 'seon.health.coverage/detect-trace-misses) mdb db))))
              g (or (:goal o) (str "Tune context for " aid (when-let [m (first ms)] (str " (missed " (pr-str (:missed-ref m)) ")")) "."))
              ptx [{:seon.agent/id aid :seon.agent/paused? true}]
-             sop {:op :spawn-agent :agent-id tid :forked-from ref :merge-target ref :tasks [:template/tune-context] :auto-merge? true :pause-parent? true :goal g}
+             sop (cond-> {:op :spawn-agent :id tid :forked-from ref :merge-target ref :tasks [:template/tune-context] :auto-merge? true :pause-parent? true :goal g}
+                   (:branch o) (assoc :branch (:branch o))
+                   (map? (:config o)) (assoc :config (:config o)))
              plan {:ok? true :target aid :tuner-id tid :goal g :misses (vec ms) :pause-tx ptx :spawn-op sop :ops [{:op :transact :tx-data ptx} sop]}]
          (cond
            (:dry-run? o) (assoc plan :dispatched? false)
@@ -409,5 +412,7 @@
                  ['create-task! #'create-task!] ['metrics #'metrics]
                  ['simulate-context #'simulate-context] ['check-corpus #'check-corpus] ['tune-context! #'tune-context!]
                  ['friction #'hmetrics/repl-friction] ['golden-scoreboard #'bgolden/repl-golden-scoreboard]
-                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['run-ab! #'bgolden/run-ab!] ['summarize-ab #'bgolden/summarize-ab] ['sample-random-tasks #'bhelpers/repl-sample-random-tasks] ['liveness #'hliveness/check-liveness]]]
+                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['run-ab! #'bgolden/run-ab!] ['summarize-ab #'bgolden/summarize-ab]
+                 ['sample-random-tasks #'bhelpers/repl-sample-random-tasks] ['run-supervisor-cycle! #'blab/run-supervisor-cycle!]
+                 ['liveness #'hliveness/check-liveness]]]
     (intern-doc! u s v)))

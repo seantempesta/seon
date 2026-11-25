@@ -131,17 +131,17 @@
    :timeout-ms (or (:boot-timeout-ms opts) 60000)})
 
 (defn trial-task-plan
-  "Resolves a trial's inline task map, task-entity id, scope, goal, and body text."
+  "Resolves a trial inline task map, task-entity id, scope, goal, and body text."
   {:malli/schema [:=> [:cat :map] [:map [:task-map [:maybe :map]] [:task-id [:maybe :keyword]]
                                    [:scope [:maybe :any]] [:goal :string] [:body [:maybe :string]]]] :cost/ticks 300}
   [task]
   (let [task-map (when (map? (:task task)) (:task task))
         task-id (or (:id task-map) (when (keyword? (:task task)) (:task task)))]
     (cond-> {:task-map task-map :task-id task-id :scope (or (:scope task) (:scope task-map))
-           :goal (str (or (:goal task) (:title task-map) "Complete assigned task."))
-           :body (or (:body task) (when task-id "Work your assigned task, prove it green, and call (user/ready!)."))}
-    (map? (:config task)) (assoc :config (:config task))
-    (some? (:auto-merge? task)) (assoc :auto-merge? (boolean (:auto-merge? task))))))
+             :goal (str (or (:goal task) (:title task-map) "Complete assigned task."))
+             :body (or (:body task) (when task-id "Work your assigned task, verify your changes pass tests and health, then reply concisely with your summary."))}
+      (map? (:config task)) (assoc :config (:config task))
+      (some? (:auto-merge? task)) (assoc :auto-merge? (boolean (:auto-merge? task))))))
 
 (defn trial-spawn-op
   "Builds the `/op {:op :spawn-agent}` payload for a trial worker."

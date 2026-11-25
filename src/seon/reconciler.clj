@@ -239,35 +239,20 @@
 
 (defn- tx-instant-ms [db tx]
   (when (and db (integer? tx) (pos? (long tx)))
-    (when-let [inst (:v (first (d/datoms db :eavt (long tx) :db/txInstant)))]
-      (cond
-        (instance? java.util.Date inst) (.getTime ^java.util.Date inst)
-        (number? inst) (long inst)
-        :else nil))))
+    (when-let [i (:v (first (d/datoms db :eavt (long tx) :db/txInstant)))]
+      (cond (instance? java.util.Date i) (.getTime ^java.util.Date i) (number? i) (long i) :else nil))))
 
 (defn- pull-agent-inbox-and-evals [main-db branch-db agent-id]
   (let [seen (store/agent-seen-message-ids branch-db agent-id)
         inbox (->> (d/datoms main-db :avet :seon.agent.message/to agent-id)
-                   (map (fn [dt]
-                          (assoc (d/pull main-db (quote [:seon.agent.message/id :seon.agent.message/seq
-                                                         :seon.agent.message/from :seon.agent.message/type
-                                                         :seon.agent.message/body]) (:e dt))
-                                 :tx (:tx dt)
-                                 :tx-inst (tx-instant-ms main-db (:tx dt)))))
-                   (sort-by :seon.agent.message/seq)
-                   vec)
+                   (map #(assoc (d/pull main-db '[:seon.agent.message/id :seon.agent.message/seq :seon.agent.message/from :seon.agent.message/type :seon.agent.message/body] (:e %))
+                                :tx (:tx %) :tx-inst (tx-instant-ms main-db (:tx %))))
+                   (sort-by :seon.agent.message/seq) vec)
         unread (filterv #(not (contains? seen (:seon.agent.message/id %))) inbox)
         eval-ents (->> (d/datoms branch-db :avet :seon.agent.eval/agent agent-id)
-                       (map (fn [dt]
-                              (assoc (d/pull branch-db (quote [:seon.agent.eval/turn :seon.agent.eval/call-index
-                                                               :seon.agent.eval/call-id :seon.agent.eval/code
-                                                               :seon.agent.eval/thought :seon.agent.eval/error
-                                                               :seon.agent.eval/seen-messages]) (:e dt))
-                                     :db/id (:e dt)
-                                     :tx (:tx dt)
-                                     :tx-inst (tx-instant-ms branch-db (:tx dt)))))
-                       (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0)))
-                       vec)]
+                       (map #(assoc (d/pull branch-db '[:seon.agent.eval/turn :seon.agent.eval/call-index :seon.agent.eval/call-id :seon.agent.eval/code :seon.agent.eval/thought :seon.agent.eval/error :seon.agent.eval/seen-messages] (:e %))
+                                    :db/id (:e %) :tx (:tx %) :tx-inst (tx-instant-ms branch-db (:tx %))))
+                       (sort-by (juxt #(or (:seon.agent.eval/turn %) 0) #(or (:seon.agent.eval/call-index %) 0))) vec)]
     {:seen seen :inbox inbox :unread unread :eval-ents eval-ents}))
 
 (defn- config-long [main-db agent-id k dflt]
@@ -276,40 +261,41 @@
 
 (defn- build-policy-input
   [main-db branch-db ma ba ready-dt unread act live-entry awaiting-blocked? gate-ok? testing-set merging-set gate-notified-set seen inbox eval-ents]
-  (let [aid (:seon.agent/id ma) b (:seon.agent/branch ma) head-tx (:max-tx branch-db)
-        same-db? (or (identical? main-db branch-db) (= b :main) (nil? b))
-        ready-tx (or (:tx ready-dt) 0) ready-inst (tx-instant-ms branch-db (:tx ready-dt))
-        raw-ready? (boolean (:seon.agent/ready? ba)) waiting? (boolean (:seon.agent/waiting? ba))
-        max-tt (config-long main-db aid :seon.config/max-tool-turns policy/default-max-tool-turns)
-        max-b (config-long main-db aid :seon.config/max-bounces policy/default-max-bounces)
-        max-tot (config-long main-db aid :seon.config/max-total-turns (if (pos? max-tt) (+ max-tt 8) policy/default-max-total-turns))
-        ext-unread (filterv #(not (policy/system-bounce-type? (:seon.agent.message/type %))) unread)
-        ext-insts (keep #(when (integer? (:tx-inst %)) (long (:tx-inst %))) ext-unread)
-        under-tt? (or (<= max-tt 0) (< (:tool-streak act) max-tt))
-        has-tgt? (and (str/blank? (str (:seon.agent/summary ba))) (boolean (or (:seon.agent/target ma) (:seon.agent/forked-from ma))))]
+  (let [aid (:seon.agent/id ma) b (:seon.agent/branch ma) htx (:max-tx branch-db)
+        same? (or (identical? main-db branch-db) (= b :main) (nil? b))
+        rtx (or (:tx ready-dt) 0) rr? (boolean (:seon.agent/ready? ba)) w? (boolean (:seon.agent/waiting? ba))
+        mtt (config-long main-db aid :seon.config/max-tool-turns policy/default-max-tool-turns)
+        mb (config-long main-db aid :seon.config/max-bounces policy/default-max-bounces)
+        mtot (config-long main-db aid :seon.config/max-total-turns (if (pos? mtt) (+ mtt 8) policy/default-max-total-turns))
+        ext (filterv #(not (policy/system-bounce-type? (:seon.agent.message/type %))) unread)
+        einst (keep #(when (integer? (:tx-inst %)) (long (:tx-inst %))) ext)
+        ed (when (and (not same?) (not rr?) (:last-was-prose? act) (empty? unread))
+             (gate/branch-latest-edit-info main-db branch-db ma))]
     {:branch b :paused? (boolean (:seon.agent/paused? ma))
      :busy? (boolean (if (map? live-entry) (:busy? live-entry) live-entry))
-     :awaiting-blocked? awaiting-blocked? :waiting? waiting? :raw-ready? raw-ready?
-     :ready-tx ready-tx :ready-inst ready-inst :tested-tx (:seon.agent/tested-tx ma)
-     :merged-tx (:seon.agent/merged-tx ma) :head-tx head-tx :same-db? same-db?
-     :auto-merge? (if (some? (:seon.agent/auto-merge? ma))
-                    (boolean (:seon.agent/auto-merge? ma))
-                    (boolean (store/config-val main-db aid :seon.config/auto-merge?)))
+     :awaiting-blocked? awaiting-blocked? :waiting? w? :raw-ready? rr?
+     :ready-tx rtx :ready-inst (tx-instant-ms branch-db (:tx ready-dt)) :tested-tx (:seon.agent/tested-tx ma)
+     :merged-tx (:seon.agent/merged-tx ma) :head-tx htx :same-db? same?
+     :auto-merge? (if (some? (:seon.agent/auto-merge? ma)) (boolean (:seon.agent/auto-merge? ma)) (boolean (store/config-val main-db aid :seon.config/auto-merge?)))
      :gate-ok? gate-ok? :has-merge-target? (some? (:seon.agent/merge-target ma))
-     :in-testing? (contains? testing-set [aid head-tx]) :in-merging? (contains? merging-set [aid head-tx])
-     :review-notified? (contains? gate-notified-set [aid head-tx :review])
-     :has-unread? (boolean (seq unread)) :has-external-unread? (boolean (seq ext-unread))
+     :in-testing? (contains? testing-set [aid htx]) :in-merging? (contains? merging-set [aid htx])
+     :review-notified? (contains? gate-notified-set [aid htx :review])
+     :has-unread? (boolean (seq unread)) :has-external-unread? (boolean (seq ext))
      :has-unread-failure? (boolean (some #(contains? policy/failure-bounce-types (:seon.agent.message/type %)) unread))
-     :newest-external-unread-tx (when (seq ext-unread) (reduce max 0 (keep #(when (integer? (:tx %)) (long (:tx %))) ext-unread)))
-     :newest-external-unread-inst (when (seq ext-insts) (reduce max ext-insts))
+     :newest-external-unread-tx (when (seq ext) (reduce max 0 (keep #(when (integer? (:tx %)) (long (:tx %))) ext)))
+     :newest-external-unread-inst (when (seq einst) (reduce max einst))
      :latest-failure-tx (:latest-failure-tx act) :latest-failure-inst (:latest-failure-inst act)
-     :post-ready-reply? (needs-post-ready-reply? raw-ready? waiting? (:last-was-tool? act) under-tt? ready-tx seen inbox eval-ents has-tgt?)
+     :latest-block-tx (:latest-block-tx act) :latest-block-inst (:latest-block-inst act)
+     :has-branch-edits? (boolean (:has-edits? ed)) :last-edit-tx (:last-edit-tx ed) :last-edit-inst (:last-edit-inst ed)
+     :last-was-prose? (boolean (:last-was-prose? act))
+     :post-ready-reply? (needs-post-ready-reply? rr? w? (:last-was-tool? act) (or (<= mtt 0) (< (:tool-streak act) mtt)) rtx seen inbox eval-ents
+                          (and (str/blank? (str (:seon.agent/summary ba))) (boolean (or (:seon.agent/target ma) (:seon.agent/forked-from ma)))))
      :has-pending-review-ops? false :last-was-tool? (:last-was-tool? act)
      :tool-streak (:tool-streak act) :turns-since-external (:turns-since-external act)
      :bounce-streak (:bounce-streak act) :trailing-model-errors (:trailing-model-errors act)
      :last-err-tx (:last-err-tx act) :last-err-inst (:last-err-inst act)
      :non-retryable-model-error? (:non-retryable-model-error? act)
-     :max-tool-turns max-tt :max-bounces max-b :max-total-turns max-tot}))
+     :max-tool-turns mtt :max-bounces mb :max-total-turns mtot}))
 
 (defn derive-agent-status
   {:malli/schema [:function

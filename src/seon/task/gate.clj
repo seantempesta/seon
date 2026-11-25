@@ -131,27 +131,33 @@
       (when (seq fixable)
         {:op :send-message :from :reconciler :to agent-id :type :gate-blocked
          :body (str "Merge gate blocked at branch tx " head-tx
-                    " — fix these required proof blocker(s) and call (user/ready!) again:\n"
+                    " — fix these required proof blocker(s) and reply concisely when done:\n"
                     (str/join "\n" (map format-gate-blocker fixable)))}))))
 
+(def ^:private target-session-attrs
+  #{:seon.agent/pinned :seon.agent/curated :seon.agent/context-prefs :seon.agent/summary})
+
+(def ^:private domain-edit-attrs
+  [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+   :seon.code.var/name :seon.code.ns/name :seon.code.doc/id :seon.code.doc/body
+   :seon.code.file/path :seon.schema/key :seon.schema/form
+   :seon.rule/id :seon.rule/query :seon.rule/assert :seon.rule/enabled?
+   :seon.task/plan :seon.task/proofs :seon.task/tests :seon.task/summary])
+
+(defn ^:seon.flow/edge branch-latest-edit-info
+  "Delegates to `seon.ctx.diff/branch-latest-edit-info`."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :map]
+                            [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :map]] :map]]
+   :cost/ticks 6000000}
+  ([main-db branch-db] (diff/branch-latest-edit-info main-db branch-db nil))
+  ([main-db branch-db ma] (diff/branch-latest-edit-info main-db branch-db ma)))
+
 (defn ^:seon.flow/edge branch-has-code-edits?
-  "True when `branch-db` contains code, doc, or schema edits relative to its merge-base with `main-db`."
+  "True when `branch-db` contains domain/rule/schema/task edits relative to merge-base with `main-db`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :boolean]
-   :cost/ticks 5000000}
+   :cost/ticks 6000000}
   [main-db branch-db]
-  (boolean
-   (when (and main-db branch-db (not (identical? main-db branch-db)))
-     (try
-       (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)]
-         (when (and mc bc (not= mc bc))
-           (when-let [base (diff/fast-merge-base main-db branch-db)]
-           (when (not= base bc)
-             (let [kws [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
-                        :seon.code.var/name :seon.code.ns/name :seon.code.doc/id
-                        :seon.code.file/path :seon.schema/key]
-                   attrs (into (set kws) (keep #(get-in branch-db [:ident-ref-map %])) kws)]
-               (boolean (some #(contains? attrs (:a %)) (d/changes branch-db base bc))))))))
-       (catch Throwable _ false)))))
+  (boolean (:has-edits? (diff/branch-latest-edit-info main-db branch-db nil))))
 
 (defn wrapup-grace-notify-op
   "Returns a `:turn-cap-wrapup` message op when a branch hits its turn limit with unmerged edits."
@@ -167,7 +173,7 @@
                       inbox)]
       (when (and (not sent?) (branch-has-code-edits? main-db branch-db))
         {:op :send-message :from :reconciler :to agent-id :type :turn-cap-wrapup
-         :body "Turn limit reached with unmerged edits on branch. Run final test check if needed and call (user/ready!) now."}))))
+         :body "Turn limit reached with unmerged edits on branch. Run final test check if needed and reply concisely (no tool calls) to trigger tests & merge."}))))
 
 (defn has-active-reviewer?
   "True when `agent-eid` has an unarchived, unpaused, unmerged reviewer pointing at it via `:seon.agent/forked-from` or `:seon.agent/target`."

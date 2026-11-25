@@ -323,3 +323,54 @@
                  (lru-put! branch-changes-lru 64 ck ds))
                (do (lru-put! branch-changes-lru 64 ck ::none)
                    nil)))))))))
+
+(def ^:private domain-edit-attrs
+  #{:seon.code.form/key :seon.code.form/src :seon.code.form/hash
+    :seon.code.var/name :seon.code.ns/name :seon.code.doc/id :seon.code.doc/body
+    :seon.code.file/path :seon.schema/key :seon.schema/form
+    :seon.rule/id :seon.rule/query :seon.rule/assert :seon.rule/enabled?})
+
+(def ^:private target-session-attrs
+  #{:seon.agent/pinned :seon.agent/curated :seon.agent/context-prefs :seon.agent/summary
+    :seon.task/plan :seon.task/proofs :seon.task/tests :seon.task/summary})
+
+(defn ^:seon.flow/edge branch-latest-edit-info
+  "Returns `{:has-edits? :last-edit-tx :last-edit-inst}` for domain/rule/schema/task (and forked target-session) changes on `branch-db` since base."
+  {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :map]
+                            [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :map]] :map]]
+   :cost/ticks 6000000}
+  ([main-db branch-db] (branch-latest-edit-info main-db branch-db nil))
+  ([main-db branch-db ma]
+   (let [none {:has-edits? false :last-edit-tx nil :last-edit-inst nil}]
+     (if-not (and (instance? datahike.db.DB main-db) (instance? datahike.db.DB branch-db) (not (identical? main-db branch-db)))
+       none
+       (let [mc (d/commit-id main-db) bc (d/commit-id branch-db)
+             fc (:seon.agent/fork-commit ma)
+             forked? (boolean (or fc (:seon.agent/forked-from ma) (:seon.agent/target ma) (:seon.agent/merge-target ma)))
+             base (cond
+                    (and fc bc (not= fc bc) (ancestor-within? branch-db fc bc 256)) fc
+                    (and mc bc (not= mc bc)) (fast-merge-base main-db branch-db)
+                    :else nil)]
+         (if-not (and base bc (not= base bc))
+           none
+           (let [dh (or (:schema branch-db) {})
+                 res-a #(if (keyword? %) % (or (get-in branch-db [:ref-ident-map %]) %))
+                 aid (:seon.agent/id ma)
+                 self-eid (when (and aid (contains? dh :seon.agent/id)) (:e (first (d/datoms branch-db :avet :seon.agent/id aid))))
+                 max-tx (reduce
+                          (fn [mx dt]
+                            (let [a (res-a (:a dt)) e (:e dt) added? (boolean (:added dt))
+                                  hit? (or (contains? domain-edit-attrs a)
+                                           (and forked?
+                                                (or (and (not added?) (= a :seon.agent.eval/agent) (not= (:v dt) aid))
+                                                    (and (not added?) (= a :seon.error/id))
+                                                    (and added? (= a :seon.error/status) (= :resolved (:v dt)))
+                                                    (and added? (contains? target-session-attrs a) (not= e self-eid)))))]
+                              (if hit? (max mx (long (or (:tx dt) 0))) mx)))
+                          0 (d/changes branch-db base bc))]
+             (if (pos? max-tx)
+               (let [inst (:v (first (d/datoms branch-db :eavt max-tx :db/txInstant)))
+                     ms (cond (instance? java.util.Date inst) (.getTime ^java.util.Date inst)
+                              (number? inst) (long inst) :else nil)]
+                 {:has-edits? true :last-edit-tx max-tx :last-edit-inst ms})
+               none))))))))

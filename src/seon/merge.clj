@@ -445,36 +445,29 @@
    {:tx-data [] :touched-paths #{} :entity-diffs [] :conflicts []}
    ordered-keys))
 
-(defn- bind-new-ref-tempids
-  "Rewrites lookup-refs for new entities to tempids and drops dangling ref-set entries deleted on `ours-db`."
-  [ours-db tx-data identity-attrs]
+(defn- bind-new-ref-tempids [ours-db tx-data identity-attrs]
   (let [id-set (set identity-attrs) dh (:schema ours-db)
-        new-lrefs (into {} (keep (fn [op] (when (map? op) (some (fn [ida] (when-let [v (get op ida)] (when-not (lookup-datom ours-db ida v) [[ida v] (str "new/" (namespace ida) "/" (name ida) "/" v)]))) identity-attrs)))) tx-data)
-        lref? (fn [x] (and (vector? x) (= 2 (count x)) (contains? id-set (first x))))
-        live? (fn [lr] (or (contains? new-lrefs lr) (some? (lookup-datom ours-db (first lr) (second lr)))))
-        rw (fn rw [v ref?]
-             (cond (lref? v) (get new-lrefs v v)
-                   (set? v) (into #{} (keep #(when (or (not ref?) (not (lref? %)) (live? %)) (rw % ref?))) v)
-                   (vector? v) (into [] (keep #(when (or (not ref?) (not (lref? %)) (live? %)) (rw % ref?))) v)
+        new-lr (into {} (keep (fn [op] (when (map? op) (some (fn [ida] (when-let [v (get op ida)] (when-not (lookup-datom ours-db ida v) [[ida v] (str "new/" (namespace ida) "/" (name ida) "/" v)]))) identity-attrs)))) tx-data)
+        lref? #(and (vector? %) (= 2 (count %)) (contains? id-set (first %)))
+        live? #(or (contains? new-lr %) (some? (lookup-datom ours-db (first %) (second %))))
+        rw (fn rw [v r?]
+             (cond (and r? (lref? v)) (get new-lr v v)
+                   (and r? (set? v)) (into #{} (keep #(when (or (not (lref? %)) (live? %)) (rw % true))) v)
+                   (and r? (vector? v)) (into [] (keep #(when (or (not (lref? %)) (live? %)) (rw % true))) v)
                    :else v))]
     (into [] (keep (fn [op]
                      (cond
                        (map? op)
-                       (let [tid (some #(when-let [v (get op %)] (get new-lrefs [% v])) identity-attrs)
-                             m' (reduce-kv (fn [a k v]
-                                             (let [r? (= :db.type/ref (get-in dh [k :db/valueType])) v' (rw v r?)]
-                                               (if (and r? (or (set? v') (vector? v')) (empty? v')) a (assoc a k v'))))
-                                           {} op)]
-                         (cond-> m' tid (assoc :db/id tid)))
+                       (let [tid (some #(when-let [v (get op %)] (get new-lr [% v])) identity-attrs)
+                             m1 (reduce-kv (fn [a k v] (let [r? (= :db.type/ref (get-in dh [k :db/valueType])) v1 (rw v r?)] (if (and r? (or (set? v1) (vector? v1)) (empty? v1)) a (assoc a k v1)))) {} op)]
+                         (cond-> m1 tid (assoc :db/id tid)))
                        (vector? op)
                        (let [[cmd e a v] op]
                          (if (= cmd :db/retractEntity)
-                           [cmd (rw e false)]
+                           [cmd (rw e true)]
                            (let [r? (= :db.type/ref (get-in dh [a :db/valueType]))]
-                             (when (or (not= cmd :db/add) (not r?) (not (lref? v)) (live? v))
-                               [cmd (rw e false) a (rw v r?)]))))
-                       :else op)))
-          tx-data)))
+                             (when (or (not= cmd :db/add) (not r?) (not (lref? v)) (live? v)) [cmd (rw e true) a (rw v r?)]))))
+                       :else op))) tx-data)))
 
 (defn three-way
   {:malli/schema [:function

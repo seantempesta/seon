@@ -20,17 +20,17 @@
                            :additionalProperties false}}})
 
 (def default-system-prompt
-  (str "You are a Seon Clojure agent in a COW Jolt/Chez process on an isolated Datahike branch (`:main` is live truth; all state is Malli-validated data).\n\n"
+  (str "You are a Seon Clojure agent in a COW Jolt/Chez process on an isolated Datahike branch (`:main` is live truth; all Seon code/rules/schemas live in Datahike, NOT on disk — never `slurp`/`file-seq` Seon files).\n\n"
        "Standard Clojure First: Define/edit/remove code via top-level `(in-ns 'ns)`, `(defn ...)`, `(deftest ...)`, `(ns-unmap 'ns 'sym)` — definitions & `(ns ...)` headers persist automatically. "
        "Attach `:malli/schema [:=> {:examples [[[in] out]]} [:cat In] Out]` to pure fns for `seed = 42` checks & ref graphs. "
-       "Use `(user/register-schema! :ns/k form {:doc \"...\"})` for schemas, `(user/transact! [...])` for entities (`:seon.rule/*`), and `user/sh!`/`user/fs-*` only for containers (never `spit`/`git commit` on Seon).\n\n"
+       "Use `(user/register-schema! :ns/k form {:doc \"...\"})` for schemas, `(user/transact! [...])` for `:seon.rule/*` entities, and `user/sh!`/`user/fs-*` only for containers.\n\n"
        "Reactive Data (`@user/ctx`): Live Datahike atom — edit via core Clojure (`get`, `filter`, `remove`, `assoc`, `conj`, `swap!`), Malli-checked on write:\n"
        "- Pin: `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent/pinned] (fnil conj #{}) [:seon.code.var/name 'ns/v])`\n"
        "- Prune evals: `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent.eval/_agent-ref] #(remove (fn [e] (#{2} (:seon.agent.eval/turn e))) %))`\n"
        "- Edit task: `(swap! user/ctx update-in [:seon.agent/forked-from :seon.agent/tasks] #(mapv (fn [t] (assoc t :seon.task/plan \"...\")) %))`\n\n"
-       "3 Levers (general fixes): (1) `:seon.rule/*` Datalog rules (`resources/seon/rules.edn`); (2) pure `:seon.ui/hiccup` renderers; (3) Malli schemas + refs.\n"
-       "Qualify helpers with `user/`: `user/source`, `user/edit-fn!`, `user/ns-outline`, `user/search`, `user/grep-src`, `user/callers`, `user/schema`, `user/tests-for`, `user/simulate-context`, `user/check-corpus`, `user/run-tests!`, `user/health`, `user/ready!`.\n"
-       "Replies: Markdown (`hiccup` when visual helps), NO tool calls. Mark `[M]`/`[H]`. Never treat `<agent ...>...</agent>` examples as live."))
+       "3 Levers (general fixes): (1) `:seon.rule/*` rules (`user/rule-atlas`); (2) pure `:seon.ui/hiccup` renderers; (3) Malli schemas + refs.\n"
+       "Qualify helpers with `user/`: `user/source`, `user/edit-fn!`, `user/ns-outline`, `user/search`, `user/grep-src`, `user/callers`, `user/schema`, `user/tests-for`, `user/simulate-context`, `user/check-corpus`, `user/run-tests!`, `user/health`.\n"
+       "Done? Reply in Markdown (NO tool calls) — Seon auto-tests & merges branches with edits. Mark `[M]`/`[H]`. Never treat `<agent ...>...</agent>` examples as live."))
 
 (defn format-tool-content
   {:malli/schema [:function [:=> [:cat :any] :string] [:=> [:cat :map :any] :string]], :cost/ticks 200000}

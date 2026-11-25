@@ -468,7 +468,7 @@
             :spawn-worker
             (let [agent-id (keyword "agent" (str "cw" (inc (count (:workers world)))))]
               (enqueue-tx (update world :workers conj agent-id)
-                          {:op :spawn-agent :id agent-id :branch (branch-for-agent agent-id) :goal "g"}))
+                          {:op :spawn-agent :id agent-id :branch (branch-for-agent agent-id) :goal "g" :auto-merge? false}))
 
             :user-chat (if worker-id (send-chat world (str "p" step-idx)) world)
 

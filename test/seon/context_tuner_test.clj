@@ -8,7 +8,12 @@
             [seon.repl :as repl]
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.merge :as merge]
+            [seon.reconciler :as rec]
+            [seon.schema :as schema]
+            [seon.store :as store]
+            [seon.transactor.spawn :as spawn]))
 
 (def ^:private baseline0-core-rules
   #{:rule.ctx/active-tasks :rule.ctx/agent-prefix-sessions :rule.ctx/pinned-entities
@@ -158,3 +163,91 @@
         ;; Backwards compatibility: 1-arg map delegates cleanly to seon.fork.calls/tune-context!
         (binding [fcalls/*agent-ctx* nil]
           (is (nil? (repl/tune-context! {:pin [[:seon.task/id :sim/t1]]}))))))))
+
+(deftest ^{:cost/ticks 120000000} data-derived-auto-completion-ref-order-and-supervisor-lab-test
+  (testing "Prose completion with branch edits auto-triggers :testing without ready!, guards 0-edit chat & post-edit failures, preserves non-ref ref-order on merge, and tune-context! spawns via :id"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (concat
+                                   (code/file-import-tx @conn "src/demo/ac.clj"
+                                                        "(ns demo.ac)\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n" false)
+                                   [{:seon.task/id :template/tune-context :seon.task/template? true :seon.task/done? false
+                                     :seon.task/scope 'seon.ctx :seon.task/title "Tuner" :seon.task/plan "Tune."}
+                                    {:seon.agent/id :ag/auto-w :seon.agent/branch :branch/auto-w :seon.agent/auto-merge? true}
+                                    {:seon.agent/id :ag/chat-only :seon.agent/branch :branch/chat-only :seon.agent/auto-merge? true}])})
+      (store/branch! conn :main :branch/auto-w)
+      (store/branch! conn :main :branch/chat-only)
+      (let [wconn (store/connect cfg :branch/auto-w)
+            cconn (store/connect cfg :branch/chat-only)]
+        (try
+          ;; 1. Read-only chat agent replying in prose (0 branch edits) -> stays :waiting (no empty merge!)
+          (d/transact cconn {:tx-data [{:seon.agent/id :ag/chat-only :seon.agent/waiting? true}
+                                       {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/chat-only
+                                        :seon.agent.eval/turn 1 :seon.agent.eval/code "" :seon.agent.eval/thought "Answered your question."}]})
+          (let [sc (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} :ag/chat-only)]
+            (is (= :waiting (:status sc)))
+            (is (false? (:needs-test? sc))))
+
+          ;; 2. Worker edits code & replies in prose (NO ready! call!) -> auto-triggers :testing!
+          (d/transact wconn {:tx-data (concat
+                                        (code/file-import-tx @wconn "src/demo/ac.clj"
+                                                             "(ns demo.ac)\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n" false)
+                                        [{:seon.agent/id :ag/auto-w :seon.agent/waiting? true}
+                                         {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/auto-w
+                                          :seon.agent.eval/turn 1 :seon.agent.eval/code "" :seon.agent.eval/thought "Updated demo.ac/f and verified."}])})
+          (let [sw1 (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} :ag/auto-w)]
+            (is (= :testing (:status sw1)) "Prose reply with branch edits must auto-trigger :testing without ready!")
+            (is (true? (:needs-test? sw1))))
+
+          ;; 3. If :test-failure arrives after the edit and agent stops in prose WITHOUT new edit -> stays :waiting (no loop!)
+          (Thread/sleep 5)
+          (let [fmid (random-uuid)]
+            (d/transact conn {:tx-data [{:seon.agent.message/id fmid :seon.agent.message/seq 1 :seon.agent.message/from :test
+                                         :seon.agent.message/to :ag/auto-w :seon.agent.message/type :test-failure :seon.agent.message/body "Failed"}]})
+            (d/transact wconn {:tx-data [{:seon.agent/id :ag/auto-w :seon.agent/waiting? true}
+                                         {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/auto-w
+                                          :seon.agent.eval/turn 2 :seon.agent.eval/code "" :seon.agent.eval/thought "Need help."
+                                          :seon.agent.eval/seen-messages #{fmid}}]})
+            (let [sw2 (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} :ag/auto-w)]
+              (is (= :waiting (:status sw2)) "Prose reply without newer edit after failure must NOT re-trigger :testing")
+              (is (false? (:needs-test? sw2)))))
+
+          ;; 4. Newer edit after failure + prose reply -> auto-triggers :testing again!
+          (Thread/sleep 5)
+          (d/transact wconn {:tx-data (concat
+                                        (code/file-import-tx @wconn "src/demo/ac.clj"
+                                                             "(ns demo.ac)\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))\n" false)
+                                        [{:seon.agent/id :ag/auto-w :seon.agent/waiting? true}
+                                         {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/auto-w
+                                          :seon.agent.eval/turn 3 :seon.agent.eval/code "" :seon.agent.eval/thought "Fixed and green."}])})
+          (let [sw3 (rec/derive-agent-status @conn (:store @conn) {} #{} #{} #{} :ag/auto-w)]
+            (is (= :testing (:status sw3)))
+            (is (true? (:needs-test? sw3))))
+
+          ;; 5. tune-context! emits :id (not :agent-id) and spawns cleanly via handle-spawn-agent!
+          (let [dry (repl/tune-context! :ag/auto-w {:db @wconn :main-db @conn :dry-run? true})
+                sop (:spawn-op dry)
+                st {:conn conn :cfg cfg :msg-seq 1 :writes 0 :commit-git? false}
+                _ (spawn/handle-spawn-agent! st sop (d/commit-id @conn))
+                tuner (d/pull @conn '[:seon.agent/id :seon.agent/branch {:seon.agent/forked-from [:seon.agent/id]}]
+                              [:seon.agent/id (:tuner-id dry)])]
+            (is (= (:tuner-id dry) (:id sop)) "tune-context! must emit :id for handle-spawn-agent!")
+            (is (= (:tuner-id dry) (:seon.agent/id tuner)))
+            (is (= :ag/auto-w (get-in tuner [:seon.agent/forked-from :seon.agent/id]))))
+
+          ;; 6. merge/three-way preserves lookup-ref vectors inside non-ref :seon.task/ref-order when created with new doc
+          (d/transact wconn {:tx-data [{:seon.code.doc/id "docs/new-guide.md#s1" :seon.code.doc/path "docs/new-guide.md"
+                                        :seon.code.doc/heading "## S1" :seon.code.doc/body "Guide." :seon.code.doc/order 1}
+                                       {:seon.task/id :task/with-doc :seon.task/title "T" :seon.task/done? false
+                                        :seon.task/refs #{[:seon.code.doc/id "docs/new-guide.md#s1"]}
+                                        :seon.task/ref-order [[:seon.code.doc/id "docs/new-guide.md#s1"]]}]})
+          (let [plan (merge/three-way conn cfg :branch/auto-w {:skip-health? true})
+                top (some #(when (and (map? %) (= :task/with-doc (:seon.task/id %))) %) (:tx-data plan))]
+            (is (true? (:ok? plan)))
+            (is (= [[:seon.code.doc/id "docs/new-guide.md#s1"]] (:seon.task/ref-order top))
+                "Non-ref :seon.task/ref-order vectors must NOT be rewritten to tempid strings"))
+
+          ;; 7. seon.bench.lab/should-intervene? passes seed=42 generative checks
+          (is (:ok? (schema/stress-var nil 'seon.bench.lab/should-intervene? {:samples 50 :seed 42})))
+          (finally
+            (d/release wconn)
+            (d/release cconn)))))))
