@@ -14,8 +14,7 @@
             [seon.signals.touches :as touches]
             [seon.store :as store]
             [seon.render.surface.cockpit :as cockpit]
-            [seon.ctx.project :as cproj]
-            [seon.render.text :refer [round2]]))
+            [seon.ctx.project :as cproj]))
 
 (defonce ^:private ^:seon.flow/edge context-lab-cache (store/lru-cache 32))
 
@@ -34,8 +33,6 @@
 (defn- code-pre [s] [:pre {:class "code-box tiny"} s])
 
 (defn- trunc [s n] (if (> (count s) n) (str (subs s 0 n) "…") s))
-
-(defn- r2 [x] (round2 x))
 
 (defn- pct1 [x] (if (number? x) (/ (Math/round (* (double x) 1000.0)) 10.0) 0.0))
 

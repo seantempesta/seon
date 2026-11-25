@@ -11,7 +11,10 @@
             [seon.render.fit :as rfit]
             [seon.render.text :as rtext]
             [seon.schema :as schema]
-            [seon.test-fixture :refer [with-test-store]]))
+            [seon.test-fixture :refer [with-test-store]]
+            [seon.bench.ab]
+            [seon.code.errors]
+            [seon.render.fit.measure]))
 
 (def ^:private expected-golden-ids
   [:golden/v1-split-calls
@@ -315,3 +318,22 @@
         (is (true? (:ok? r-pass)))
         (is (false? (:ok? r-fail)))
         (is (= :all (:kind r-fail)))))))
+
+(deftest wave19b-ab-bare-arms-empty-guard-and-hints-test
+  (testing "build-ab-tasks accepts bare keyword arms and run-ab! rejects empty trials cleanly"
+    (let [tasks [{:id :t/demo :scope 'seon.render.text :title "Demo" :plan "Demo plan."}]
+          expanded (seon.bench.ab/build-ab-tasks tasks [:control :treatment] {:timeout-ms 60000})
+          bad-res (seon.bench.golden/run-ab! {:tasks tasks :arms []})]
+      (is (= 2 (count expanded)))
+      (is (= [:control :treatment] (mapv :arm expanded)))
+      (is (false? (:ok? bad-res)))
+      (is (= :no-trials (:error bad-res)))))
+  (testing "consolidated fmeas/clamp01 handles bounds and nil"
+    (is (= 0.0 (seon.render.fit.measure/clamp01 -2.5)))
+    (is (= 0.5 (seon.render.fit.measure/clamp01 0.5)))
+    (is (= 1.0 (seon.render.fit.measure/clamp01 4.2)))
+    (is (= 0.0 (seon.render.fit.measure/clamp01 nil))))
+  (testing "Wave 19A static error hints fire cleanly"
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Don't know how to create ISeq from: malli.registry$composite_registry" {}) "malli.core/schema"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Wrong number of args (3) passed to: datahike.impl.entity/entity" {}) "[:attr val]"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Wrong number of args (2) passed to: malli.core/schema?" {}) "takes 1 arg"))))

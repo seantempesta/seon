@@ -86,6 +86,13 @@
   :seon.fix/regression-test seon.cycle4-perf-test/transactor-commit-res-explicit-nil-optional-args-test,
   :seon.fix/root-cause "Hand-written intern closures bypassed var metadata, batch set-meta! looped per-item d/transact, and Malli [:? :map] requires [:? [:maybe :map]] for explicit nil args.",
   :seon.fix/symptom "278L install-agent-helpers! and 257L install-call-and-ui-helpers! dropped :doc/:arglists on user/* helpers; batched set-meta! ran N transactions; armed commit-res [:? :map] rejected explicit nil."}
+ {:seon.fix/before-after "Before: :arms [:control] stored 0/0 :passed run; seon.bench.golden at 7,904 tok; 4 duplicate private helpers. After: bare keyword arms expand cleanly, empty trials fail fast, seon.bench.golden ~5.0k tok, 4 duplicates removed.",
+  :seon.fix/change-summary "Normalized bare keyword arms in build-ab-tasks, added :no-trials guard in run-ab!, extracted seon.bench.ab from seon.bench.golden, consolidated clamp01 & deleted 3 redundant r2 wrappers, and added 3 Wave 19A error recovery hints.",
+  :seon.fix/error-class :ab-empty-arms-and-wave19a-error-hints,
+  :seon.fix/id #uuid "d3eab7a6-a2fb-41b2-ae41-3bfda26d12bb",
+  :seon.fix/regression-test seon.bench-golden-test/wave19b-ab-bare-arms-empty-guard-and-hints-test,
+  :seon.fix/root-cause "build-ab-tasks only accepted [arm cfg] pairs in sequential :arms and run-ab! lacked an empty-trials guard; duplicate clamp01 and r2 helpers remained across render namespaces.",
+  :seon.fix/symptom "Passing bare keyword :arms [:control] to run-ab! silently produced 0 trials and stored a bogus :passed 0/0 run; Wave 19A agents also hit malli.registry ISeq, 3-arg d/entity, and 2-arg m/schema? errors; seon.bench.golden was at 7,904 tok."}
  {:seon.fix/created-ms 1795246303675,
   :seon.fix/symptom "Un-Rigged Round 3 failed :task-split-md with 'Unable to resolve symbol: activity-fold-summary' on :main tests and failed :task-eval-summary health gate with :minified-form (1896 chars on 1 line).",
   :seon.fix/change-summary "Updated seon.code.edit/add-fn! to auto-format 1-line strings (>= 200 chars, no newlines) via pp/code-dispatch and run (reorder-ns-forms! conn nsym) automatically after every persist.",

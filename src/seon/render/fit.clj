@@ -23,9 +23,6 @@
 
 (defonce ^:private ^:seon.flow/edge validator-cache (store/lru-cache 256))
 
-(defn- clamp01 [x]
-  (max 0.0 (min 1.0 (fmeas/finite-double x 0.0))))
-
 (defn cached-registry-info
   "Returns commit-anchored `schema/registry-for-db` enriched with `:reg-sig`, replaying `datahike.reads`."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db]] :map] :cost/ticks 2000000}
@@ -84,7 +81,7 @@
 
 (defn- candidate-semantic [c]
   (let [v (or (:semantic c) (:semantic/score c) (:ctx.match/score c))]
-    (when (number? v) (clamp01 v))))
+    (when (number? v) (fmeas/clamp01 v))))
 
 (defn- candidate-boost [c]
   (let [v (or (:rank/boost c) (get-in c [:params :rank/boost]))]
@@ -92,7 +89,7 @@
 
 (defn- candidate-suppress [c]
   (let [v (or (:rank/suppress c) (get-in c [:params :rank/suppress]))]
-    (if (number? v) (clamp01 v) 0.0)))
+    (if (number? v) (fmeas/clamp01 v) 0.0)))
 
 (defn rank-candidates
   "Pure 4-signal self-balancing rank over candidate entity maps: urgency/anchor, native `?tx`/turn
@@ -126,7 +123,7 @@
                      sem (double (or (nth sems idx) 0.0))
                      boost (candidate-boost c) supp (candidate-suppress c)
                      base (/ (+ (* wu u) (* wr r) (* wc cv) (* wsem sem)) w-sum)
-                     score (rtext/round4 (clamp01 (+ base boost (- supp))))
+                     score (rtext/round4 (fmeas/clamp01 (+ base boost (- supp))))
                      sigs (cond-> {:urgency (rtext/round4 u) :recency (rtext/round4 r) :convergence (rtext/round4 cv)}
                             has-sem? (assoc :semantic (rtext/round4 sem)))]
                  (cond-> (assoc c :rank/score score :rank/signals sigs :rank/weights ws)

@@ -19,8 +19,6 @@
 
 (defonce ^:private ^:seon.flow/edge preview-html-cache (store/lru-cache 128))
 
-(defn- r2 [x] (round2 x))
-
 (defn- lvl-cls [lvl] (case lvl :hot "sig-hot" :warm "sig-warm" "sig-calm"))
 
 (defn- format-wire-projection [ref world focal-fit fitted]
@@ -390,7 +388,7 @@
                  [:div {:class "pill-row"}
                   (for [rk (take 2 (filter qualified-keyword? (:rules it)))]
                     (ent-link [:seon.rule/id rk] (name rk) "badge blue tiny mono"))]
-                 (mut (str "score " (r2 (:rank/score it)) " · U" (r2 (:urgency s)) " R" (r2 (:recency s)) " C" (r2 (:convergence s))))]
+                 (mut (str "score " (round2 (:rank/score it)) " · U" (round2 (:urgency s)) " R" (round2 (:recency s)) " C" (round2 (:convergence s))))]
                 [:td [:div {:class "stack-xs"}
                       [:div {:class "pill-row"}
                        (when (qualified-symbol? cfn) (ent-link [:seon.code.var/name cfn] (name cfn) "mono tiny strong"))
