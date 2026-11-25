@@ -9,7 +9,8 @@
             [seon.render.data :as rdata]
             [seon.health.coverage]
             [seon.render.sanitize :as sanitize]
-            [seon.render.fit :as fit]))
+            [seon.render.fit :as fit]
+            [seon.task.refine :as refine]))
 
 (def ^:dynamic *agent-ctx* nil)
 
@@ -162,17 +163,11 @@
                         parent-cid (assoc :parent-call parent-cid)))))))
 
 (defn ^:seon.flow/edge update-task!
-  "Updates `:plan`, `:summary`, `:tests`, or `:done?` on your active `:seon.task/*` (or `:id` in `spec`)."
-  {:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [spec]
-  (when-let [{:keys [conn agent-id]} *agent-ctx*]
-    (let [tid (or (:id spec)
-                  (some #(when-let [eid (if (map? %) (:db/id %) %)] (:seon.task/id (d/pull @conn '[:seon.task/id] eid))) (:seon.agent/tasks (d/pull @conn '[:seon.agent/tasks] [:seon.agent/id agent-id])))
-                  (some #(when-let [eid (if (map? %) (:db/id %) %)] (:seon.task/id (d/pull (store/head conn :main) '[:seon.task/id] eid))) (:seon.agent/tasks (d/pull (store/head conn :main) '[:seon.agent/tasks] [:seon.agent/id agent-id])))
-                  (some #(when-let [eid (if (map? %) (:db/id %) %)] (:seon.task/id (d/pull (store/head conn :main) '[:seon.task/id] eid))) (:seon.agent/tasks (d/pull @conn '[:seon.agent/tasks] [:seon.agent/id agent-id]))))]
-      (if-not tid
-        {:ok? false :error "No active :seon.agent/tasks on your agent; pass {:id :ns/task ...} or create one via (user/create-task! ...)."}
-        (tx-main-sync! (assoc spec :op :update-task :id tid))))))
+"Updates `:plan`, `:summary`, `:tests`, `:proofs`, `:test-vars`, `:needs`, or `:done?` on your active `:seon.task/*` (or `:id` in `spec`)."
+{:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
+[spec]
+(when *agent-ctx*
+  (refine/apply-update-task! *agent-ctx* spec ctx/refresh-active! tx-main-sync!)))
 
 (defn ^:seon.flow/edge assign-task!
 "Assigns `:seon.task/id` `task-id` (and its `:scope`) to the active agent, preserving any existing `:seon.agent/tasks`."

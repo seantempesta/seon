@@ -11,7 +11,8 @@
             [seon.merge :as merge]
             [seon.store :as store]
             [seon.code.reach :as reach]
-            [seon.test.lpt :as lpt]))
+            [seon.test.lpt :as lpt]
+            [seon.task.refine :as refine]))
 
 (defn- reply! [ch val]
   (when ch
@@ -267,6 +268,7 @@
                [:parents parent-id]
                {:reply-ch reply-ch,
                 :boot-affected? boot-affected?, :fork-relative? (:fork-relative? plan false),
+                :expected-red-vars (:expected-red-vars plan #{}),
                 :deferred-slow deferred-slow,
                 :agent-id agent-id,
                 :cached-count cached-n,
@@ -350,99 +352,6 @@
          (count slow)
          " slow shard(s)")]}]))
 
-(defn- test-fork-finish
-  [st1 parent-id pinfo]
-  (let [results (attach-var-refs @(:conn st1) (:results pinfo))
-        gen-fails (:gen-failures pinfo)
-        all-pass? (and
-                    (every? :seon.test/pass? results)
-                    (empty? gen-fails))
-        short-circuited? (and
-                           (not all-pass?)
-                           (boolean (seq (:deferred-slow pinfo))))
-        failures (filterv (complement :seon.test/pass?) results)
-        ans {:ok? all-pass?,
-             :cached (:cached-count pinfo 0),
-             :short-circuited? short-circuited?,
-             :boot-affected? (:boot-affected? pinfo false),
-             :skipped-slow
-             (if short-circuited? (count (:deferred-slow pinfo)) 0),
-             :generative-failures gen-fails,
-             :worker-pids (:worker-pids pinfo),
-             :branch (:branch pinfo),
-             :platform-tests-reached (:platform-tests pinfo []),
-             :ran (count results),
-             :results results}
-        fail-summary (when-not all-pass?
-                       (str/join
-                         "\n"
-                         (map
-                           #(str
-                             (:seon.test/var %)
-                             " ["
-                             (name (:seon.test/kind % :deftest))
-                             "]: "
-                             (:seon.test/report %))
-                           failures)))
-        tx-ops (cond->
-                 [{:reply-ch (:reply-ch pinfo),
-                  :cached (:cached-count pinfo 0),
-                  :agent-id (when all-pass? (:agent-id pinfo)),
-                  :reply-val ans,
-                  :op :record-test-results,
-                  :commit (:commit pinfo),
-                  :tested-tx (when all-pass? (:tested-tx pinfo)),
-                  :branch (:branch pinfo),
-                  :ran (count results),
-                  :results (if (:fork-relative? pinfo) [] results)}]
-                 (and (not all-pass?) (:agent-id pinfo))
-                 (conj
-                   {:op :send-message,
-                    :from :test,
-                    :to (:agent-id pinfo),
-                    :type :test-failure,
-                    :body
-                    (str
-                      fail-summary
-                      (when short-circuited?
-                        (str
-                          "\n(Short-circuited before "
-                          (count (:deferred-slow pinfo))
-                          " slow shard(s))")))}))
-        st2 (-> st1
-             (update :parents dissoc parent-id)
-             (update :completed inc))]
-    [st2
-     {:tx tx-ops,
-      :clojure.core.async.flow/report
-      [(str
-         "[:test] "
-         (if all-pass? "PASS" (if short-circuited? "FAIL-FAST" "FAIL"))
-         " "
-         parent-id
-         " ("
-         (count (:worker-pids pinfo))
-         " fork(s), "
-         (count results)
-         " ran, "
-         (:cached-count pinfo 0)
-         " cached)")]}]))
-
-(defn- test-fork-batch-done [st sub-id parent-id f]
-  (if-let [p0 (get-in st [:parents parent-id])]
-    (let [pinfo (-> p0
-                    (update :pending-subs disj sub-id)
-                    (update :results into (:results f))
-                    (update :gen-failures into (:generative-failures f))
-                    (update :worker-pids conj (:worker-pid f)))
-          st1 (-> st (update :active-subs dissoc sub-id) (assoc-in [:parents parent-id] pinfo) drain-sub-queue)]
-      (cond
-        (seq (:pending-subs pinfo)) [st1 nil]
-        (and (every? :seon.test/pass? (:results pinfo)) (empty? (:gen-failures pinfo)) (seq (:deferred-slow pinfo)))
-        (test-fork-slow-tier st1 parent-id pinfo)
-        :else (test-fork-finish st1 parent-id pinfo)))
-    [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil]))
-
 (defn- branch-cand-reach [conn db reach b plan]
   (let [tdb (d/branch-as-db (:store db) b)
         cand-db (candidate-merged-db db tdb plan)
@@ -523,7 +432,8 @@
                   (let [runtime-plan (if fpt
                                        (merge/three-way conn (:cfg st) b {:skip-health? true :exclude-agent (:agent-id fpt)})
                                        merge-plan)
-                        plan (test-batch-plan st conn db b runtime-plan vars force? fpt)]
+                        expected-red (if (and fpt agent-id) (refine/expected-red-proof-vars db (d/branch-as-db (:store db) b) agent-id) #{})
+                        plan (assoc (test-batch-plan st conn db b runtime-plan vars force? fpt) :expected-red-vars expected-red)]
                     (test-batch-run st plan agent-id branch-tx reply-ch))))
               (finally (when tconn (d/release tconn)))))))
       (catch Throwable ex
@@ -564,24 +474,6 @@
              (assoc ::flow/error [{:proc :test :batch-id sub-id :error err-msg}]))])
     [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil]))
 
-(defn- test-fork-child-frame
-  [st f]
-  (let [sub-id (:batch-id f)
-        parent-id (get-in st [:active-subs sub-id])]
-    (cond
-      (nil? parent-id) [st nil]
-      (= (:ev f) :child-exception) (test-fork-child-exception
-                                     st
-                                     sub-id
-                                     parent-id
-                                     (:error f))
-      (= (:ev f) :test-batch-done) (test-fork-batch-done
-                                     st
-                                     sub-id
-                                     parent-id
-                                     f)
-      :else [st nil])))
-
 (defn- test-fork-refused [st msg]
   (let [sub-id (:batch-id msg)
         pids (if (some? sub-id)
@@ -606,13 +498,6 @@
                   [s out]))
               [st {}] pids))))
 
-(defn- test-fork-ev [st msg]
-  (case (:ev msg)
-    :child-frame (test-fork-child-frame st (:frame msg))
-    :child-exited (test-fork-child-exited st msg)
-    :fork-refused (test-fork-refused st msg)
-    [st nil]))
-
 (defn- reach-relevant-tx? [db tx-data]
   (let [rm (:ref-ident-map db)]
     (boolean
@@ -622,6 +507,131 @@
                  (let [ns (str (namespace kw))]
                    (or (str/starts-with? ns "seon.code.") (= ns "seon.schema") (= ns "seon.rule"))))))
            tx-data))))
+
+(defn- result-ok? [expected-red-vars r]
+  (or (:seon.test/pass? r)
+      (and (= :deftest (:seon.test/kind r :deftest))
+           (contains? expected-red-vars (:seon.test/var r)))))
+
+(defn- test-fork-finish
+  [st1 parent-id pinfo]
+  (let [results (attach-var-refs @(:conn st1) (:results pinfo))
+        gen-fails (:gen-failures pinfo)
+        all-pass? (and
+                  (every? #(result-ok? (:expected-red-vars pinfo #{}) %) results)
+                  (empty? gen-fails))
+        short-circuited? (and
+                           (not all-pass?)
+                           (boolean (seq (:deferred-slow pinfo))))
+        failures (filterv #(not (result-ok? (:expected-red-vars pinfo #{}) %)) results)
+        ans (let [exp-red (:expected-red-vars pinfo #{})
+                exp-hit (vec (sort (keep #(when (and (not (:seon.test/pass? %)) (result-ok? exp-red %)) (:seon.test/var %)) results)))]
+            (cond-> {:ok? all-pass?,
+                     :cached (:cached-count pinfo 0),
+                     :short-circuited? short-circuited?,
+                     :boot-affected? (:boot-affected? pinfo false),
+                     :skipped-slow (if short-circuited? (count (:deferred-slow pinfo)) 0),
+                     :generative-failures gen-fails,
+                     :worker-pids (:worker-pids pinfo),
+                     :branch (:branch pinfo),
+                     :platform-tests-reached (:platform-tests pinfo []),
+                     :ran (count results),
+                     :results results}
+              (seq exp-hit) (assoc :expected-red exp-hit)))
+        fail-summary (when-not all-pass?
+                       (str/join
+                         "\n"
+                         (map
+                           #(str
+                             (:seon.test/var %)
+                             " ["
+                             (name (:seon.test/kind % :deftest))
+                             "]: "
+                             (:seon.test/report %))
+                           failures)))
+        tx-ops (cond->
+                 [{:reply-ch (:reply-ch pinfo),
+                  :cached (:cached-count pinfo 0),
+                  :agent-id (when all-pass? (:agent-id pinfo)),
+                  :reply-val ans,
+                  :op :record-test-results,
+                  :commit (:commit pinfo),
+                  :tested-tx (when all-pass? (:tested-tx pinfo)),
+                  :branch (:branch pinfo),
+                  :ran (count results),
+                  :results (if (:fork-relative? pinfo) [] results)}]
+                 (and (not all-pass?) (:agent-id pinfo))
+                 (conj
+                   {:op :send-message,
+                    :from :test,
+                    :to (:agent-id pinfo),
+                    :type :test-failure,
+                    :body
+                    (str
+                      fail-summary
+                      (when short-circuited?
+                        (str
+                          "\n(Short-circuited before "
+                          (count (:deferred-slow pinfo))
+                          " slow shard(s))")))}))
+        st2 (-> st1
+             (update :parents dissoc parent-id)
+             (update :completed inc))]
+    [st2
+     {:tx tx-ops,
+      :clojure.core.async.flow/report
+      [(str
+         "[:test] "
+         (if all-pass? "PASS" (if short-circuited? "FAIL-FAST" "FAIL"))
+         " "
+         parent-id
+         " ("
+         (count (:worker-pids pinfo))
+         " fork(s), "
+         (count results)
+         " ran, "
+         (:cached-count pinfo 0)
+         " cached)")]}]))
+
+(defn- test-fork-batch-done [st sub-id parent-id f]
+  (if-let [p0 (get-in st [:parents parent-id])]
+    (let [pinfo (-> p0
+                    (update :pending-subs disj sub-id)
+                    (update :results into (:results f))
+                    (update :gen-failures into (:generative-failures f))
+                    (update :worker-pids conj (:worker-pid f)))
+          st1 (-> st (update :active-subs dissoc sub-id) (assoc-in [:parents parent-id] pinfo) drain-sub-queue)]
+      (cond
+        (seq (:pending-subs pinfo)) [st1 nil]
+        (and (every? #(result-ok? (:expected-red-vars pinfo) %) (:results pinfo)) (empty? (:gen-failures pinfo)) (seq (:deferred-slow pinfo)))
+        (test-fork-slow-tier st1 parent-id pinfo)
+        :else (test-fork-finish st1 parent-id pinfo)))
+    [(-> st (update :active-subs dissoc sub-id) drain-sub-queue) nil]))
+
+(defn- test-fork-child-frame
+  [st f]
+  (let [sub-id (:batch-id f)
+        parent-id (get-in st [:active-subs sub-id])]
+    (cond
+      (nil? parent-id) [st nil]
+      (= (:ev f) :child-exception) (test-fork-child-exception
+                                     st
+                                     sub-id
+                                     parent-id
+                                     (:error f))
+      (= (:ev f) :test-batch-done) (test-fork-batch-done
+                                     st
+                                     sub-id
+                                     parent-id
+                                     f)
+      :else [st nil])))
+
+(defn- test-fork-ev [st msg]
+  (case (:ev msg)
+    :child-frame (test-fork-child-frame st (:frame msg))
+    :child-exited (test-fork-child-exited st msg)
+    :fork-refused (test-fork-refused st msg)
+    [st nil]))
 
 (defn test-proc
   {:malli/schema

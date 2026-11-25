@@ -10,7 +10,8 @@
             [seon.task.gate :as gate]
             [clojure.string :as str]
             [seon.error :as err]
-            [seon.ctx.touches :as ctouches]))
+            [seon.ctx.touches :as ctouches]
+            [seon.task.refine :as refine]))
 
 (defn reply!
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -376,17 +377,20 @@
         (handle-merge-conflict! st msg prev-cid branch agent-id plan))
     (let [b-db (safe-branch-head conn branch @conn)
           eff-btx (or (:branch-tx msg) (:max-tx b-db))
+          gate-res (when agent-id (gate/evaluate-agent-gate @conn b-db agent-id))
+          done-tasks (refine/passed-non-template-tasks @conn (:passed-tasks gate-res))
           s-tx (vec (:schema-tx plan))
           tx-ops (vec (:tx-data plan))
-          has-edits? (boolean (or (seq s-tx) (seq tx-ops)))
+          has-edits? (boolean (or (seq s-tx) (seq tx-ops) (seq done-tasks)))
           _ (try
               (when has-edits?
-                (let [[schema-ops rest-ops] (split-schema-ops tx-ops)
-                      tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
-                             :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
-                  (when (seq s-tx) (d/transact tconn {:tx-data s-tx}))
-                  (when (seq schema-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data schema-ops})))
-                  (when (seq rest-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data rest-ops})))))
+                (let [[schema-ops raw-rest] (split-schema-ops tx-ops)
+                    rest-ops (mark-passed-tasks-done raw-rest done-tasks)
+                    tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
+                           :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
+                (when (seq s-tx) (d/transact tconn {:tx-data s-tx}))
+                (when (seq schema-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data schema-ops})))
+                (when (seq rest-ops) (binding [store/*tx-meta* tmeta] (d/transact tconn {:tx-data rest-ops})))))
               (finally (d/release tconn)))
           db0 @conn
           summary (when (contains? (:schema b-db) :seon.agent/summary)
@@ -402,13 +406,14 @@
           mid (random-uuid)
           ta-paused? (true? (:seon.agent/paused? (d/pull db0 '[:seon.agent/paused?] [:seon.agent/id target-id])))
           main-tx (cond-> (vec (concat resolved-errs
-                                       [(cond-> {:seon.agent/id agent-id :seon.agent/ready? true}
-                                          eff-btx (assoc :seon.agent/tested-tx (long eff-btx) :seon.agent/merged-tx (long eff-btx))
-                                          (and summary (contains? (:schema db0) :seon.agent/summary)) (assoc :seon.agent/summary summary))
-                                        {:seon.agent.message/id mid :seon.agent.message/seq mseq
-                                         :seon.agent.message/from agent-id :seon.agent.message/to target-id
-                                         :seon.agent.message/type :review-note :seon.agent.message/body note-body}]))
-                    ta-paused? (conj {:seon.agent/id target-id :seon.agent/paused? false}))
+                                     [(cond-> {:seon.agent/id agent-id :seon.agent/ready? true}
+                                        eff-btx (assoc :seon.agent/tested-tx (long eff-btx) :seon.agent/merged-tx (long eff-btx))
+                                        (and summary (contains? (:schema db0) :seon.agent/summary)) (assoc :seon.agent/summary summary))
+                                      {:seon.agent.message/id mid :seon.agent.message/seq mseq
+                                       :seon.agent.message/from agent-id :seon.agent.message/to target-id
+                                       :seon.agent.message/type :review-note :seon.agent.message/body note-body}]))
+                  ta-paused? (conj {:seon.agent/id target-id :seon.agent/paused? false})
+                  (seq done-tasks) (into (map (fn [tid] {:seon.task/id tid :seon.task/done? true}) done-tasks)))
           r (d/transact conn {:tx-data main-tx})
           db (:db-after r)
           cid (d/commit-id db)
