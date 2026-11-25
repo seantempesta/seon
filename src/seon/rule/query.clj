@@ -241,7 +241,7 @@
               ins-set (set raw-ins)
               fn-syms (vec (distinct (keep #(when (and (seq? %) (qualified-symbol? (first %))) (first %))
                                            (tree-seq coll? seq ws))))
-              _ (doseq [s fn-syms] (try (requiring-resolve s) (catch Throwable _ nil)))
+              
               wm-v? #(and (vector? %) (>= (count %) 3) (= '$wm (nth % 0)) (keyword? (nth % 2)))
               wm-attrs (if-not (ins-set '$wm) #{}
                          (reduce (fn [a n]
@@ -295,8 +295,7 @@
 
 (defn eval-direct-fn-call
 "Zero-planner execution for single-fn-call Datalog rules `[(ns/fn args...) [[?v1 ...]]]` with exact `d/q` set parity."
-{:malli/schema [:=> [:cat :map [:vector :any]] [:vector :map]]
- :cost/ticks 15000000}
+{:malli/schema [:=> [:cat :map [:vector :any]] [:vector :map]], :cost/ticks 15000000, :seon.flow/edge true}
 [{:keys [sym arg-specs bind-vars find-vars]} args]
 (if-let [f (when (qualified-symbol? sym)
              (or (resolve sym) (try (requiring-resolve sym) (catch Throwable _ nil))))]

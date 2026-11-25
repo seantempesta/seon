@@ -244,7 +244,7 @@
 
 (defn sync-conn-to-latest-branch-head!
   "Lazily syncs a warm agent worker on wake: adopts external branch moves via `store/adopt-head!` BEFORE `:main` schema sync (no dual-move rollback race), then loads deltas."
-  {:malli/schema [:=> [:cat :seon.host/conn :keyword :any :any] :any]}
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :any :any] :any], :seon.flow/edge true}
   [conn branch last-cid last-main-cid]
   (let [latest-db (store/head conn branch)
         latest-cid (d/commit-id latest-db)

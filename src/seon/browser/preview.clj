@@ -112,7 +112,9 @@
                         (and (valid-db? db) (integer? %)) (:seon.schema/key (d/pull db (quote [:seon.schema/key]) %))))
            distinct vec))))
 
-(defn- pull-live-entity-for-schema [db reg-info sk]
+(defn- pull-live-entity-for-schema
+  {:seon.flow/edge true}
+  [db reg-info sk]
   (when (and (valid-db? db) (qualified-keyword? sk))
     (let [dh (store/db-schema db) ix (:entity-index reg-info) forms (:forms reg-info) reg (:registry reg-info)
           id-a (or (get-in ix [:schema-identities sk]) (first (filter #(contains? dh %) (get-in ix [:required-keys sk]))) (when (contains? dh sk) sk))
@@ -122,7 +124,9 @@
                  (when (and (map? norm) (seq (dissoc norm :db/id)) (valid? norm)) norm))
               (take 8 (d/datoms db :aevt id-a)))))))
 
-(defn- sample-from-db [db reg-info var-ent cat-form cat-args]
+(defn- sample-from-db
+  {:seon.flow/edge true}
+  [db reg-info var-ent cat-form cat-args]
   (when (valid-db? db)
     (let [reg (:registry reg-info) in-ks (resolve-var-input-keys db var-ent)
           ok? #(or (nil? cat-form) (try (boolean (m/validate cat-form % {:registry reg})) (catch Throwable _ false)))
@@ -146,7 +150,9 @@
              (some (fn [ex] (when (and (vector? ex) (seq ex) (vector? (first ex))) (first ex))) %))
           (keep :examples (cons tp (map (comp :props arity-parts) arities))))))
 
-(defn- sample-from-generator [reg-info ar cat-form]
+(defn- sample-from-generator
+  {:seon.flow/edge true}
+  [reg-info ar cat-form]
   (when (and ar cat-form (schema/generatable-function-schema? ar))
     (try
       (let [reg (:registry reg-info) g (mg/generate (m/schema cat-form {:registry reg}) {:registry reg :seed 42 :size 4})]

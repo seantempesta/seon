@@ -314,8 +314,7 @@
 (defn system-overview-rows
   "Commit-anchored O(1) incremental balanced top-K overview rows `[eid rfn pri tx]` for `[:seon.system/id :root]`
    with zero N+1 eavt lookups, zero truncation caps, and sound `datahike.reads` forwarding."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector [:tuple :int :any :int :int]]]
-   :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector [:tuple :int :any :int :int]]], :cost/ticks 15000000, :seon.flow/edge true}
   [db]
   (let [watch #{:seon.error/status :seon.error/kind :seon.fix/error-class :seon.agent.call/status
                 :seon.agent/id :seon.agent/archived? :seon.agent/entry?

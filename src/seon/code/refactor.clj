@@ -387,9 +387,17 @@
           (let [{:keys [from-ns-hdr full-from-reqs inherited-reqs stub-refers-by-ns moved-forms remaining-forms
                       remaining-var-syms re-exported-priv all-stubbed referred-syms]} plan
               from-env (:from-env plan)
-              eff-alias (or (when alias (symbol (name alias)))
-                            (get (:ns->alias from-env) to)
-                            alias-sym)
+              eff-alias (let [cand (or (when alias (symbol (name alias)))
+                                     (get (:ns->alias from-env) to)
+                                     alias-sym)
+                            taken (get (:alias->ns from-env) cand)]
+                        (if (and taken (not= taken to))
+                          (let [segs (str/split (name to) #"\.")
+                                alt (symbol (str/join "-" (take-last 2 segs)))]
+                            (if (and (get (:alias->ns from-env) alt) (not= to (get (:alias->ns from-env) alt)))
+                              (symbol (str (name alt) "2"))
+                              alt))
+                          cand))
               extra-clauses (when (empty? existing-to-forms) (move/extract-ns-extra-clauses (:seon.code.form/src from-ns-hdr "")))
               must-promote (into re-exported-priv referred-syms)
               promoted-privs (->> moved-forms
@@ -459,14 +467,15 @@
                                all-from-forms)
             [errs1 errs2]
             (if reload?
-              (do
-                (when-let [from-ns-obj (find-ns from)]
-                  (doseq [vsym (:moved res)
-                          :when (not (contains? re-exp-set vsym))]
-                    (try (ns-unmap from-ns-obj vsym) (catch Throwable _))))
-                [(code/apply-overlay! db-after {:upserts delta-to-forms :retracted-keys #{}} true)
-                 (code/apply-overlay! db-after {:upserts delta-from-forms :retracted-keys #{}} true)])
-              [[] []])]
+            (let [retracted-keys (into #{} (keep (fn [vsym]
+                                                   (when-not (contains? re-exp-set vsym)
+                                                     (str (name from) "/" (name vsym)))))
+                                       (:moved res))
+                  delta (code/expand-overlay-rebinds db-after
+                          {:upserts (vec (concat delta-to-forms delta-from-forms))
+                           :retracted-keys retracted-keys})]
+              [(code/apply-overlay! db-after delta true) []])
+            [[] []])]
         (-> (dissoc res :tx-data :delta-from-keys :delta-to-keys)
             (assoc :tx (:max-tx db-after)
                    :load-errors (vec (concat errs1 errs2))))))))

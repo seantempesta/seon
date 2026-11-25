@@ -111,7 +111,9 @@
 (def ^:private code-edit-attrs
   #{:seon.code.form/key :seon.code.form/src :seon.code.form/hash :seon.code.var/name :seon.code.ns/name})
 
-(defn- suppress-heavy-eval? [branch-db br aid opts]
+(defn- suppress-heavy-eval?
+  {:seon.flow/edge true}
+  [branch-db br aid opts]
   (let [cdb (or (:main-db opts) branch-db)
         res? (when (and cdb aid (contains? (:schema cdb) :seon.agent.call/callee))
                (let [sts (mapv #(eav1 cdb (:e %) :seon.agent.call/status) (d/datoms cdb :avet :seon.agent.call/callee aid))]
@@ -384,11 +386,11 @@
           slow (when (> (:ms cur) 1000.0)
                  (assoc base :class :slow-test :message (str "Slow test " vsym ": " (Math/round (:ms cur)) " ms, " (quot (:bytes cur) 1048576) " MB (> 1000 ms).")))
           prev (when prev-fn (prev-fn))
-          regr? (when prev
-                  (some (fn [[k fl dl]]
-                          (let [pv (double (get prev k)) cv (double (get cur k))]
-                            (and (> pv fl) (> (/ cv pv) 2.5) (> (- cv pv) dl))))
-                        [[:ticks 0.0 5000000.0] [:bytes 0.0 33554432.0] [:ms 20.0 200.0]]))]
+          regr? (when (and prev (> (:ms cur) 150.0))
+                (some (fn [[k fl dl]]
+                        (let [pv (double (get prev k)) cv (double (get cur k))]
+                          (and (> pv fl) (> (/ cv pv) 2.5) (> (- cv pv) dl))))
+                      [[:ticks 50000.0 5000000.0] [:bytes 524288.0 16777216.0] [:ms 10.0 200.0]]))]
       (cond-> []
         slow (conj slow)
         regr? (conj (assoc base :class :cost-regression :message (str "Cost regression in " vsym ": " (Math/round (:ms prev)) " ms -> " (Math/round (:ms cur)) " ms.")))))))

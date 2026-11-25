@@ -73,7 +73,9 @@
           (>= (System/currentTimeMillis) deadline) {:outcome :intervene :reason :timeout :status wstatus :detail det}
           :else (recur))))))
 
-(defn- publish-lab-run! [coord-url run-id title tid started-ms status trial-map finished-ms]
+(defn- publish-lab-run!
+  {:seon.flow/edge true}
+  [coord-url run-id title tid started-ms status trial-map finished-ms]
   (let [ent (cond-> {:seon.bench.run/id run-id
                      :seon.bench.run/title title
                      :seon.bench.run/suite-id :lab/supervisor-cycle

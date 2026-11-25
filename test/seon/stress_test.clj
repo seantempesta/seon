@@ -530,7 +530,7 @@
       (is (= 'seon.store/point (:var err))))
     (let [err2 (try (store/config-val "not-a-db" :seon.config/port) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
       (is (= :seon.schema/contract-violation (:error err2)))
-      (is (= 'seon.store/config-val (:var err2))))
+      (is (contains? '#{seon.store/config-val seon.store.config/config-val} (:var err2))))
     (let [err3 (try (merge/three-way "not-a-conn" {} :main) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
       (is (= :seon.schema/contract-violation (:error err3)))
       (is (= 'seon.merge/three-way (:var err3))))))

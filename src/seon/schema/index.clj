@@ -491,8 +491,7 @@
 
 (defn shrink-failing-args
   "Deterministically shrinks failing argument vector `args` while `(fails? cand)` remains truthy."
-  {:malli/schema [:=> [:cat [:vector :any] :seon.host/fn [:? pos-int?]] [:vector :any]]
-   :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat [:vector :any] :seon.host/fn [:? pos-int?]] [:vector :any]], :cost/ticks 15000000, :seon.flow/edge true}
   ([args fails?] (shrink-failing-args args fails? 24))
   ([args fails? max-steps]
    (loop [cur (vec args) steps 0]

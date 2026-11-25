@@ -42,7 +42,7 @@
 
 (defn unused-requires
   "AST-accurate analysis of used vs unused `:require` specs in namespace `nsym`."
-  {:malli/schema [:=> [:cat :any] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :any] [:maybe :map]], :seon.flow/edge true}
   [nsym]
   (when-let [{:keys [conn branch]} *agent-ctx*]
     (let [s (if (string? nsym) (symbol nsym) nsym)

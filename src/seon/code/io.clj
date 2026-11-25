@@ -429,8 +429,7 @@
 
 (defn merged-ns-src
   "Returns the 3-way merged source of `nsym` combining `main`, `branch`, and their merge-base."
-  {:malli/schema [:=> [:cat :seon.host/conn :keyword :symbol] :string]
-   :cost/ticks 15000000}
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :symbol] :string], :cost/ticks 15000000, :seon.flow/edge true}
   [conn branch nsym]
   (let [bdb @conn
         mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))

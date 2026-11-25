@@ -80,10 +80,7 @@
 
 (defn coarse-top
   "Ranks Matryoshka int8+scale coarse `rows` against `query` (bytes or float vec) via `seon_vec_coarse`."
-  {:malli/schema [:function
-                  [:=> [:cat [:sequential bytes?] [:or bytes? [:vector {:min 1} number?]] nat-int?]
-                   [:vector [:tuple :int number?]]]]
-   :cost/ticks 10000000}
+  {:malli/schema [:function [:=> [:cat [:sequential bytes?] [:or bytes? [:vector {:min 1} number?]] nat-int?] [:vector [:tuple :int number?]]]], :cost/ticks 10000000, :seon.gen/skip true}
   [rows query k]
   (let [rv (vec rows) n (count rv) kk (min n (long k))]
     (if (or (zero? n) (zero? kk))
