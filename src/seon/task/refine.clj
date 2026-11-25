@@ -334,17 +334,18 @@
       (let [wm (:wm (rules/step-rules nil {:main main-db :branch main-db :code main-db :task main-db} {} trig-rs nil :any))
             refine-facts (for [[e a v] (:facts wm) :when (= :trigger/refine-task a)] [e v])
             spawn-facts  (for [[e a v] (:facts wm) :when (= :trigger/spawn-prereq a)] [e v])
-            refine-ops (vec (mapcat (fn [[tid _]]
-                                      (let [txd (instantiate-refinement-task-tx main-db tid)]
-                                        [{:op :transact :tx-data txd :reason [:trigger/refine-task tid]}]))
+            refine-ops (vec (mapcat (fn [[tid {:keys [agent]}]]
+                                    (let [txd (instantiate-refinement-task-tx main-db tid)]
+                                      [(cond-> {:op :transact :tx-data txd :reason [:trigger/refine-task tid]}
+                                         agent (assoc :defer-agent agent))]))
                                     (sort-by (comp str first) refine-facts)))
             spawn-ops (vec (mapcat (fn [[rtid {:keys [parent-agent parent-task]}]]
                                      (let [rid (keyword "refine" (str (name parent-agent) "-" (name rtid)))]
                                        [{:op :transact :tx-data [{:seon.agent/id parent-agent :seon.agent/paused? true}]
-                                         :reason [:trigger/pause-for-prereq parent-agent rtid]}
+                                        :reason [:trigger/pause-for-prereq parent-agent rtid] :defer-agent parent-agent}
                                         {:op :spawn-agent :id rid :parent parent-agent :forked-from parent-agent
                                          :merge-target [:seon.agent/id parent-agent] :tasks [rtid] :auto-merge? true
-                                         :config {:seon.config/max-tool-turns 10}
+                                         :config {:seon.config/max-tool-turns 14}
                                          :goal (str "Refine & write failing proofs for " parent-task " (" rtid ")")}]))
                                    (sort-by (comp str first) spawn-facts)))]
         (into refine-ops spawn-ops)))))
@@ -360,3 +361,27 @@
                :seon.agent/merged-tx :seon.config/auto-refine-tasks?]
           attrs (into (set kws) (keep #(get-in main-db [:ident-ref-map %])) kws)]
       (boolean (some #(contains? attrs (:a %)) ds)))))
+
+(defn defer-triggered-agents
+  "Removes agent IDs with pending `:trigger/refine-task` or `:trigger/pause-for-prereq` ops from `cands` so workers never race ahead of their Refiner."
+  {:malli/schema [:=> [:cat [:set :any] [:maybe [:sequential :map]]] [:set :any]]
+   :cost/ticks 200000}
+  [cands trigs]
+  (if (or (empty? cands) (empty? trigs))
+    cands
+    (let [defer (into #{} (keep :defer-agent) trigs)]
+      (if (empty? defer) cands (into #{} (remove defer) cands)))))
+
+(defn aborted-refiner-cleanup-tx
+  "When a `:template/refine-task-proofs` Refiner aborts without merging, marks its unfinished `:refine/*` prereq `:done? true` with abort summary so the parent worker is never permanently deadlocked."
+  {:malli/schema [:=> [:cat :seon.host/db :map :string] [:vector :map]]
+   :cost/ticks 2000000}
+  [main-db ma reason-txt]
+  (let [tids (keep :seon.task/id (:seon.agent/tasks ma))]
+    (vec (keep (fn [tid]
+                 (when-let [te (eid-of main-db :seon.task/id tid)]
+                   (when (and (= :template/refine-task-proofs (eav1 main-db te :seon.task/template))
+                              (not (true? (eav1 main-db te :seon.task/done?))))
+                     (cond-> {:seon.task/id tid :seon.task/done? true}
+                       (dh-has? main-db :seon.task/summary)
+                       (assoc :seon.task/summary (str "Refinement aborted (" reason-txt "); unblocked parent worker.")))))) tids))))

@@ -470,8 +470,9 @@
                st1 (prune-reconciler-sets st1 mdb (:store mdb) ds)
                trigs (when (and (= cid :db) (refine/trigger-attrs-touched? mdb ds))
                        (refine/compute-trigger-ops mdb))]
+           (let [cands (refine/defer-triggered-agents cands trigs)]
            (if (and (empty? cands) (empty? trigs))
              [st1 nil]
              (let [[st2 outs] (if (seq cands) (reconcile-candidates st1 mdb (:store mdb) cands) [st1 {}])
                    outs' (if (seq trigs) (update outs :tx #(vec (concat % trigs))) outs)]
-               [st2 (when (seq outs') outs')]))))))))
+               [st2 (when (seq outs') outs')])))))))))

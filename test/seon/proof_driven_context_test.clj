@@ -22,7 +22,8 @@
             [seon.task.refine :as refine]
             [seon.test-fixture :refer [with-test-store]]
             [seon.transactor.merge :as tmerge]
-            [seon.transactor.spawn :as tspawn]))
+            [seon.transactor.spawn :as tspawn]
+            [seon.schema.index :as six]))
 
 (deftest ^{:cost/ticks 90000000} bidirectional-ordered-doc-atoms-and-task-refs-test
   (testing "ordered-citations and resolve-doc-refs preserve appearance order of exact :seon.code.doc/id atoms and wire var/schema doc-refs"
@@ -300,3 +301,32 @@
           ;; t7: 3-way merge worker branch -> :main succeeds with ZERO conflicts!
           (let [plan (merge/three-way conn cfg worker-branch {:skip-health? true})]
             (is (true? (:ok? plan)) (str "Worker -> :main 3-way merge must have 0 conflicts: " (pr-str (:conflicts plan))))))))))
+
+(deftest ^{:cost/ticks 90000000} live-refiner-ergonomics-and-zero-race-deferral-test
+  (testing "lookup-schemas, defer-triggered-agents, aborted-refiner-cleanup-tx, and Turn-0 unproven scope walk"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/erg.clj"
+                                                      "(ns demo.erg)\n(defn f-pub {:malli/schema [:=> [:cat :int] :int] :cost/ticks 1000} [x] (inc x))\n" false)})
+      (d/transact conn {:tx-data (code/file-import-tx @conn "test/demo/erg_test.clj"
+                                                      "(ns demo.erg-test (:require [clojure.test :refer [deftest is]]))\n(deftest erg-smoke-test (is true))\n" false)})
+      (let [reg (schema/validate-schema-registration! @conn {:key :seon.erg/sample :form [:map [:x :int]] :doc "Sample doc-refs test schema."})]
+        (d/transact conn {:tx-data [(:entity reg)
+                                    {:seon.task/id :template/refine-task-proofs :seon.task/title "Refine" :seon.task/template? true :seon.task/done? false}
+                                    {:seon.task/id :refine/demo-erg :seon.task/title "Refine erg" :seon.task/scope 'demo.erg :seon.task/template :template/refine-task-proofs :seon.task/done? false}
+                                    {:seon.agent/id :refine/erg-1 :seon.agent/branch :branch/erg-1 :seon.agent/tasks #{[:seon.task/id :refine/demo-erg]}}]}))
+      (let [db @conn]
+        (is (contains? (set (six/lookup-schemas db)) :seon.erg/sample))
+        (is (= :seon.erg/sample (:seon.schema/key (six/lookup-schemas db :seon.erg/sample))))
+        (is (contains? (six/lookup-schemas db "doc-refs") :seon.erg/sample))
+        (is (= #{:w/b} (refine/defer-triggered-agents #{:w/a :w/b} [{:defer-agent :w/a}])))
+        (let [cleanup (refine/aborted-refiner-cleanup-tx db {:seon.agent/tasks [{:seon.task/id :refine/demo-erg}]} "cutoff")]
+          (is (= 1 (count cleanup)))
+          (is (true? (:seon.task/done? (first cleanup)))))
+        (let [rows (cgraph/proof-backward-rows db db :refine/erg-1)
+              eids (set (map first rows))
+              ns-e (:e (first (d/datoms db :avet :seon.code.ns/name 'demo.erg)))
+              tns-e (:e (first (d/datoms db :avet :seon.code.ns/name 'demo.erg-test)))
+              v-e (:e (first (d/datoms db :avet :seon.code.var/name 'demo.erg/f-pub)))]
+          (is (contains? eids ns-e) "Unproven/refiner Turn-0 walk must surface scope ns")
+          (is (contains? eids tns-e) "Unproven/refiner Turn-0 walk must surface matching -test ns")
+          (is (contains? eids v-e) "Unproven/refiner Turn-0 walk must surface scope public vars"))))))

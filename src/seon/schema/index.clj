@@ -533,3 +533,32 @@
     (let [args-form (if (map? (second sch)) (nth sch 2 nil) (second sch))]
       (not (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
                  (tree-seq coll? seq args-form))))))
+
+(defn lookup-schemas
+  "Pure schema inspector: `(lookup-schemas db)` lists all sorted `:seon.schema/key` keywords; `(lookup-schemas db :k)` pulls full schema entity; `(lookup-schemas db \"substr\" | #\"re\")` searches keys & docs."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :qualified-keyword]] [:=> [:cat :seon.host/db :any] :any]]
+   :cost/ticks 5000000}
+  ([db]
+   (if (and db (contains? (:schema db) :seon.schema/key))
+     (vec (sort (map :v (d/datoms db :aevt :seon.schema/key))))
+     []))
+  ([db query]
+   (cond
+     (nil? query) (lookup-schemas db)
+     (keyword? query)
+     (let [m (when (and db (contains? (:schema db) :seon.schema/key))
+               (d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc :seon.schema/examples] [:seon.schema/key query]))]
+       (if (:seon.schema/key m)
+         m
+         (let [sp (get (:schema db) query)]
+           (if sp {:db/ident query :datomic-schema sp} {:error :schema-not-found :key query}))))
+     (or (string? query) (instance? java.util.regex.Pattern query))
+     (let [pat (if (string? query) (re-pattern (str "(?i)" (java.util.regex.Pattern/quote query))) query)
+           all-ks (lookup-schemas db)]
+       (into (sorted-map)
+             (keep (fn [k]
+                     (let [m (d/pull db '[:seon.schema/key :seon.schema/form :seon.schema/doc] [:seon.schema/key k])]
+                       (when (or (re-find pat (str k)) (and (:seon.schema/doc m) (re-find pat (str (:seon.schema/doc m)))))
+                         [k (dissoc m :seon.schema/key)]))))
+             all-ks))
+     :else {:error :invalid-schema-query :query query})))
