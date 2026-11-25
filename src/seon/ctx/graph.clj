@@ -423,7 +423,9 @@
         ;; 1. Scoped open non-template task (no proofs yet): O(1) indexed recall of named schemas, matching scope vars + 1-hop neighborhood, and sibling -test ns!
         (and (seq scopes) (not any-proof?) (or (seq task-ents) (and (empty? (rules/edited-form-eids mdb bdb)) (not (str/blank? (str (:seon.agent/goal ag)))))))
         (do
-          (recall-matching-schemas! bdb add! scopes goal-txt)
+          (do (recall-matching-schemas! bdb add! scopes goal-txt)
+          (when (and (not has-pins?) (not has-evals?))
+            (recall/recall-matching-docs! bdb add! goal-txt 2 80 2)))
           (doseq [sc (take 2 scopes)]
             (when-let [tnse (first (avet-eids bdb :seon.code.ns/name (symbol (str sc "-test"))))]
               (add! tnse 79))
@@ -457,27 +459,8 @@
         (do
         (recall-matching-schemas! bdb add! nil goal-txt)
         (when-not (semantic-recall-rows! mdb bdb agent-id task-ents add!)
-          (when (dh-has? bdb :seon.code.doc/id)
-            (doseq [[e _] (->> (d/datoms bdb :aevt :seon.code.doc/id)
-                               (keep (fn [dt]
-                                       (let [e (:e dt)
-                                             id-sc (score-txt (:v dt))
-                                             hd-sc (score-txt (eav1 bdb e :seon.code.doc/heading))
-                                             sc (+ (* 2 id-sc) (* 2 hd-sc))]
-                                         (when (>= sc 2) [e sc]))))
-                               (sort-by (fn [[e sc]] [(- sc) e]))
-                               (take 4))]
-              (add! e 84)))
-          (when (dh-has? bdb :seon.code.var/name)
-            (doseq [[e _] (->> (d/datoms bdb :aevt :seon.code.var/name)
-                               (keep (fn [dt]
-                                       (let [e (:e dt)
-                                             nm-sc (score-txt (str (:v dt)))
-                                             sc (if (pos? nm-sc) (+ (* 2 nm-sc) (score-txt (eav1 bdb e :seon.code.var/doc))) 0)]
-                                         (when (>= sc 2) [e sc]))))
-                               (sort-by (fn [[e sc]] [(- sc) e]))
-                               (take 6))]
-              (add! e 83))))
+        (recall/recall-matching-docs! bdb add! goal-txt 4 84 1)
+        (recall/recall-matching-vars! bdb add! toks 6 83))
         (vec (sort-by (fn [[e _ pri _]] [(- (long pri)) (long e)]) (vals @best))))
 
         :else []))))

@@ -14,13 +14,12 @@ All stored Datahike attributes, runtime write checks, and `seed = 42` generative
 - Register or update schemas via `seon.fork.helpers/register-schema!` (`(user/register-schema! :seon.foo/bar [:map ...] {:doc "..." :examples [...]})`) backed by `seon.schema/register-schema!`. Updating an existing key preserves `:seon.schema/doc`, `:seon.schema/examples`, and `:seon.schema/context-policy` when omitted.
 - Datahike derivation tags on `:seon.schema/form` props: `:seon.db/attributes true` (on `:map` entity schemas), `:seon.db/identity true`, `:seon.db/index true`, `:seon.db/to [:seon.other/entity]`, `:seon.db/storable true`.
 
-## Pure Function Contracts & `seed = 42` Generative Checks
-
-- Every pure public `defn` (`:seon.code.var/entity`) carries `:malli/schema` + `:cost/ticks`, e.g. `{:malli/schema [:=> [:cat :int :string] [:map [:ok? :boolean]]] :cost/ticks 500000}`.
+## Pure Function Contracts, Examples & `seed = 42` Generative Checks
+- Every pure public `defn` (`:seon.code.var/entity`) carries `:malli/schema` + `:cost/ticks`, e.g. `{:malli/schema [:=> [:cat :int :string] [:map {:closed true} [:ok? :boolean] [:label {:optional true} :string]]] :cost/ticks 500000}`.
+- Tighten loose `:map` returns with explicit keys and `{:closed true}` when the returned map keys are fixed; mark optional keys `[:k {:optional true} T]`.
 - Multi-arity functions use `[:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]]`. `seon.schema.index/generatable-function-schema?` automatically stresses both single-arity `:=>` and concrete multi-arity `[:function ...]` schemas.
 - Mark functions that perform I/O, mutate state, or call `^:seon.flow/edge` helpers with `^:seon.flow/edge` (or accept `:seon.host/db` / `:seon.host/conn`).
-- Attach `:examples [[[arg1 arg2] expected] ...]` on `:=>` props so `seon.schema/stress-var` verifies edge cases before 100 `seed = 42` generated samples.
-
+- Attach `:examples [[[arg1 arg2] expected] ...]` inside `:=>` properties (`[:=> {:examples [[[1 "a"] {:ok? true}]]} [:cat :int :string] [:map [:ok? :boolean]]]`; for 0-arg use `[[] expected]`) so `(user/stress-var 'ns/fn)` and `(user/run-tests! 'ns-test)` verify concrete examples before 100 `seed = 42` generated samples.
 ## Fixing Malli Errors
 
 - `:malli.core/invalid-input` (`:input-contract`): your call passed the wrong shape — inspect the expected `:seon.schema/entity` form and examples.

@@ -506,36 +506,42 @@
           (reduce check1 ex-out (map (fn [a] [:sample a nil]) batches)))))))
 
 (defn stress-var
-  "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets."
-  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :qualified-symbol :map] [:maybe :map]]], :seon.flow/edge true}
+  "Deterministically exercises `fn-sym` (single `:=>` or multi-arity `:function`) with `:examples`, guards, `seed = 42` inputs, shrinking, and `:cost/*` budgets. Usage: `(user/stress-var 'ns/fn)` or `(user/stress-var 'ns/fn {:samples 100 :seed 42})`."
+  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]] [:=> [:cat [:maybe :seon.host/db] :any :map] [:maybe :map]]], :seon.flow/edge true}
   ([fn-sym] (stress-var (live-branch-db) fn-sym {}))
-  ([a b] (if (qualified-symbol? a) (stress-var (live-branch-db) a (if (map? b) b {})) (stress-var a b {})))
+  ([a b] (if (or (qualified-symbol? a) (var? a) (string? a))
+           (if (map? b) (stress-var (live-branch-db) a b)
+               {:ok? false :error :invalid-stress-var-args :hint "Usage: (user/stress-var 'ns/fn) or (user/stress-var 'ns/fn {:samples 50 :seed 42})"})
+           (stress-var a b {})))
   ([db fn-sym {:keys [samples seed measure-fn] :or {samples 100 seed 42}}]
-   (when-let [v (or (resolve fn-sym) (try (requiring-resolve fn-sym) (catch Throwable _ nil)))]
-     (let [m0 (meta v)
-           v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)) (not= (:seon.code/reexport m0) fn-sym))
-               (or (resolve (:seon.code/reexport m0)) v) v)
-           m (meta v) sch-form (:malli/schema m)
-           skip-reason (stress-skip-reason db fn-sym m)]
-       (cond
-         skip-reason {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
-         (generatable-function-schema? sch-form)
-         (let [{:keys [registry]} (registry-for-db db) opts {:registry registry}
-               fn-sch (m/schema sch-form opts) target-fn (or (:seon/raw-fn m) @v)
-               budgets {:ticks-budget (:cost/ticks m) :bytes-budget (:cost/bytes m) :ms-budget (:cost/ms m)}
-               t0 (System/nanoTime)
-               arities (if (= :function (m/type fn-sch))
-                         (filterv #(generatable-function-schema? (m/form %)) (m/children fn-sch))
-                         [fn-sch])
-               top-ex (vec (or (:examples (m/properties fn-sch)) (:malli/examples m)))
-               per (max 1 (quot (long samples) (max 1 (count arities))))
-               out (reduce (fn [acc [i ar]]
-                             (let [exs (vec (concat (when (zero? i) top-ex) (when (not= ar fn-sch) (:examples (m/properties ar)))))
-                                   r (stress-arity fn-sym target-fn opts registry ar exs per (+ (long seed) i) measure-fn budgets)]
-                               (if (:ok? r)
-                                 (-> acc (update :ran + (:ran r 0)) (update :max-ticks max (:max-ticks r 0)) (update :max-bytes max (:max-bytes r 0)))
-                                 (reduced r))))
-                           {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0}
-                           (map-indexed vector arities))
-               ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
-           (assoc out :ms (double ms))))))))
+   (let [fn-sym (cond (qualified-symbol? fn-sym) fn-sym (var? fn-sym) (symbol fn-sym) (and (string? fn-sym) (str/includes? fn-sym "/")) (symbol fn-sym) :else nil)]
+     (if-not fn-sym
+       {:ok? false :error :invalid-stress-var-sym :hint "Pass a qualified var symbol like 'ns/fn."}
+       (when-let [v (or (resolve fn-sym) (try (requiring-resolve fn-sym) (catch Throwable _ nil)))]
+         (let [m0 (meta v)
+               v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)) (not= (:seon.code/reexport m0) fn-sym))
+                   (or (resolve (:seon.code/reexport m0)) v) v)
+               m (meta v) sch-form (:malli/schema m)
+               skip-reason (stress-skip-reason db fn-sym m)]
+           (cond
+             skip-reason {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
+             (generatable-function-schema? sch-form)
+             (let [{:keys [registry]} (registry-for-db db) opts {:registry registry}
+                   fn-sch (m/schema sch-form opts) target-fn (or (:seon/raw-fn m) @v)
+                   budgets {:ticks-budget (:cost/ticks m) :bytes-budget (:cost/bytes m) :ms-budget (:cost/ms m)}
+                   t0 (System/nanoTime)
+                   arities (if (= :function (m/type fn-sch))
+                             (filterv #(generatable-function-schema? (m/form %)) (m/children fn-sch))
+                             [fn-sch])
+                   top-ex (vec (or (:examples (m/properties fn-sch)) (:malli/examples m)))
+                   per (max 1 (quot (long samples) (max 1 (count arities))))
+                   out (reduce (fn [acc [i ar]]
+                                 (let [exs (vec (concat (when (zero? i) top-ex) (when (not= ar fn-sch) (:examples (m/properties ar)))))
+                                       r (stress-arity fn-sym target-fn opts registry ar exs per (+ (long seed) i) measure-fn budgets)]
+                                   (if (:ok? r)
+                                     (-> acc (update :ran + (:ran r 0)) (update :max-ticks max (:max-ticks r 0)) (update :max-bytes max (:max-bytes r 0)))
+                                     (reduced r))))
+                               {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0}
+                               (map-indexed vector arities))
+                   ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
+               (assoc out :ms (double ms))))))))))

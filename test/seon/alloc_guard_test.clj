@@ -396,3 +396,26 @@
           (is (false? (:ok? r)))
           (is (map? (clojure.edn/read-string (pr-str r)))))
         (finally (when (find-ns ns-sym) (remove-ns ns-sym)))))))
+
+(deftest eval-forms-catches-lazy-seq-and-stress-var-args-test
+  (testing "lazy-seq exception and infinite lazy-seq are caught inside eval-forms under run-interruptible"
+    (with-test-store [{:keys [conn]}]
+      (let [db @conn
+            r-err (code/eval-forms db {:agent-id :repl/lazy-test :turn 1}
+                                   "(map (fn [_] (seq (fn [] 1))) [1])")
+            r-inf (code/eval-forms db {:agent-id :repl/lazy-test :turn 1
+                                       :tick-budget 2000000 :byte-budget 16777216}
+                                   "(range)")]
+        (is (false? (:ok? r-err)))
+        (is (str/includes? (str (:error r-err)) "ISeq"))
+        (is (false? (:ok? r-inf)))
+        (is (true? (:interrupted? r-inf))))))
+  (testing "stress-var guards non-map/non-symbol args cleanly and is exported as user/stress-var"
+    (let [bad-2 (schema/stress-var 'seon.ctx.recall/tokenize-goal 42)
+          bad-sym (schema/stress-var nil 42 {})
+          ok-v (schema/stress-var nil #'seon.ctx.recall/tokenize-goal {:samples 5 :seed 42})]
+      (is (false? (:ok? bad-2)))
+      (is (= :invalid-stress-var-args (:error bad-2)))
+      (is (false? (:ok? bad-sym)))
+      (is (= :invalid-stress-var-sym (:error bad-sym)))
+      (is (true? (:ok? ok-v))))))

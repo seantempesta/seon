@@ -163,7 +163,7 @@
   (let [t (str/trim (str (or s "")))]
     (if (> (count t) max-n) (str (subs t 0 max-n) "…") t)))
 
-(defn- pull-failure-diagnostics [conn main-db brs aid br]
+(defn- pull-failure-diagnostics [conn main-db brs aid br after-mtx]
   (let [dbx (if (and br (contains? brs br)) (store/head conn br) main-db)
         sch (db-schema dbx)
         err-samples (if (sch :seon.agent.eval/agent)
@@ -177,8 +177,10 @@
                                     :code (clip-str (:seon.agent.eval/code e) 110)
                                     :error (clip-str (:seon.agent.eval/error e) 200)})))
                       [])
+        amtx (long (or after-mtx 0))
         fail-tests (if (sch :seon.test/pass?)
                      (->> (d/datoms dbx :avet :seon.test/pass? false)
+                          (filter #(or (not (pos? amtx)) (> (long (:tx % 0)) amtx)))
                           (map #(d/pull dbx '[:seon.test/var :seon.test/report :seon.test/digest] (:e %)))
                           (filter :seon.test/var)
                           (take 5)
@@ -238,7 +240,7 @@
                          (long (count (filter #(> (long (:tx %)) after-mtx)
                                               (d/datoms main-db :avet :seon.code.var/test? true))))
                          0)
-         diag (pull-failure-diagnostics conn main-db brs agent-id br)
+         diag (pull-failure-diagnostics conn main-db brs agent-id br after-mtx)
          compact-evs (when (:include-trace? o)
                        {:worker (pull-compact-evals conn main-db brs agent-id br)
                         :children (mapv (fn [cid cr] {:id cid :merged? (boolean (:merged? cr))

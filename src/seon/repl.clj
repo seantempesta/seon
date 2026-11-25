@@ -323,7 +323,7 @@
   (doseq [[s v] [['add-fn! #'edit/add-fn!] ['edit-fn! #'edit/edit-fn!] ['add-require! #'edit/add-require!]
                  ['set-meta! #'edit/set-meta!] ['ns-requires #'edit/ns-requires] ['unused-requires #'edit/unused-requires]
                  ['prune-requires! #'edit/prune-requires!] ['diff #'edit/diff] ['grep-src #'search/grep-src]
-                 ['run-tests! #'run-tests!] ['health #'health] ['search #'search/search] ['help #'context/help]
+                 ['run-tests! #'run-tests!] ['stress-var #'schema/stress-var] ['health #'health] ['search #'search/search] ['help #'context/help]
                  ['autofix-health! #'autofix-health!] ['inspect-branch #'inspect-branch] ['save-example! #'save-example!]
                  ['create-task! #'create-task!] ['metrics #'metrics]
                  ['simulate-context #'context/simulate-context] ['check-corpus #'context/check-corpus] ['tune-context! #'context/tune-context!]
