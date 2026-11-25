@@ -71,6 +71,10 @@
    "Hint: Datahike index keywords are `:eavt`, `:aevt`, `:avet`, and `:vaet` (4 letters — `:avet`, not `:ave`)."]
   [["Lookup ref should contain 2 elements"]
    "Hint: Pass a bare integer `eid` directly to `(d/pull db '[...] eid)`, or a 2-element `[attr val]` lookup ref vector (never `[eid]`)."]
+  [["Unable to resolve symbol: testing in this context"]
+   "Hint: Add `[clojure.test :refer [deftest is testing]]` via `(user/add-require! 'ns-test '[clojure.test :refer [deftest is testing]])` or qualify `clojure.test/testing`."]
+  [["Unable to resolve symbol: doc in this context"]
+   "Hint: Use `(user/help)` or `(user/help 'fn-name)` (or `(clojure.repl/doc ...)`) to inspect helper docs and arglists."]
   [["Wrong number of args (3) passed to: datahike.impl.entity/entity"]
    "Hint: `d/entity` takes 2 args `(d/entity db eid-or-lookup-ref)` — wrap lookup refs in a vector: `(d/entity db [:attr val])`."]
   [["Wrong number of args (2) passed to: malli.core/schema?"]
@@ -139,6 +143,8 @@
       (vswap! hints conj "Hint: `(user/db)` and `(user/main-db)` ALREADY return immutable Datahike DB values — do NOT deref with `@`. Use `(user/db)` directly (or `@(user/conn)` for the connection)."))
     (when (and (str/includes? e "Cannot find entity") (re-find #"\((?:d|datahike\.api)/pull\b" c))
       (vswap! hints conj "Hint: `d/pull` requires a lookup ref vector `[:attr val]` or integer EID, not a bare keyword."))
+    (when (and (str/includes? e "cannot be cast to class clojure.lang.Named") (re-find #"class [a-zA-Z0-9_.]+\$" e))
+      (vswap! hints conj "Hint: Quote the symbol argument (e.g. `'seon.ns/fn` or `'user/edit-fn!`), not the unquoted function value."))
     (doseq [[needles hint] static-error-hints]
       (when (some #(str/includes? e %) needles) (vswap! hints conj hint)))
     (if (seq @hints) (str e "\n" (str/join "\n" (distinct @hints))) e)))
