@@ -124,7 +124,7 @@
   [{sb :seon.bench/scoreboard}]
   (let [{:keys [suite-id level summary runs-count merge-rate-pct overall-pass-rate-pct
                 median-turns-to-merge median-wall-s kv-cache-hit-pct upstream-errors
-                livelocks ooms delta-vs-prev history by-category]} sb
+                livelocks timeouts ooms delta-vs-prev history by-category]} sb
         deltas (when (map? delta-vs-prev)
                  (remove nil?
                          [(when (number? (:merge-rate-pct delta-vs-prev))
@@ -136,13 +136,16 @@
                           (when (number? (:ooms delta-vs-prev))
                             [:span {:class "pill-row tiny"} (rlinks/mut "ΔOOM") (fmt-delta (:ooms delta-vs-prev) "" true)])
                           (when (number? (:livelocks delta-vs-prev))
-                            [:span {:class "pill-row tiny"} (rlinks/mut "Δlive") (fmt-delta (:livelocks delta-vs-prev) "" true)])]))]
+                            [:span {:class "pill-row tiny"} (rlinks/mut "Δlive") (fmt-delta (:livelocks delta-vs-prev) "" true)])
+                          (when (number? (:timeouts delta-vs-prev))
+                            [:span {:class "pill-row tiny"} (rlinks/mut "Δtimeout") (fmt-delta (:timeouts delta-vs-prev) "" true)])]))]
     (box 460 "ent-scoreboard"
          [(rlinks/badge (tone level) (str "scoreboard · " (or suite-id :golden/v1)))
           (rlinks/badge (if (>= (double (or merge-rate-pct 0.0)) 80.0) "green" "amber")
                         (str (round1 (or merge-rate-pct 0.0)) "% merge"))
           (when (pos? (long (or ooms 0))) (rlinks/badge "red" (str ooms " OOM")))
-          (when (pos? (long (or livelocks 0))) (rlinks/badge "red" (str livelocks " livelock")))]
+          (when (pos? (long (or livelocks 0))) (rlinks/badge "red" (str livelocks " livelock")))
+          (when (pos? (long (or timeouts 0))) (rlinks/badge "amber" (str timeouts " timeout")))]
          (str (or runs-count 0) " runs")
          (when (and summary (not (str/blank? summary)))
            [:div {:class "sm-copy muted"} summary])
@@ -151,7 +154,7 @@
            ["median turns" (if (number? median-turns-to-merge) (str (round1 median-turns-to-merge) " t") "—")]
            ["median wall" (if (number? median-wall-s) (str (round1 median-wall-s) " s") "—")]
            ["KV cache hit %" (if (number? kv-cache-hit-pct) (str (round1 kv-cache-hit-pct) "%") "—")]
-           ["upstream / live / OOM" (str (or upstream-errors 0) " / " (or livelocks 0) " / " (or ooms 0))]])
+           ["upstream / live / to / OOM" (str (or upstream-errors 0) " / " (or livelocks 0) " / " (or timeouts 0) " / " (or ooms 0))]])
          (when (seq deltas)
            (into [:div {:class "pill-row tiny"} [:span {:class "kicker tiny muted"} "vs prev"]] deltas))
          (when (seq by-category)
@@ -167,11 +170,12 @@
             (into [:div {:class "stack-xs"}]
                   (for [h (reverse history)]
                     [:div {:class "pill-row tiny mono"}
-                     (rlinks/badge (case (:status h) :pass "green" :partial "amber" "red")
+                     (rlinks/badge (case (:status h) :passed "green" :partial "amber" "red")
                                    (or (short-sha (:git-commit h)) (str "tx" (or (:main-tx h) "?"))))
                      [:span (str (round1 (or (:merge-rate-pct h) 0.0)) "%m/" (round1 (or (:overall-pass-rate-pct h) 0.0)) "%p")]
                      (when (number? (:median-turns-to-merge h)) (rlinks/mut (str (round1 (:median-turns-to-merge h)) "t")))
                      (when (number? (:kv-cache-hit-pct h)) (rlinks/mut (str (round1 (:kv-cache-hit-pct h)) "%KV")))
                      (when (:model h) (rlinks/mut (one-line (:model h) 20)))
                      (when (pos? (long (or (:ooms h) 0))) (rlinks/badge "red" (str (:ooms h) " OOM")))
-                     (when (pos? (long (or (:livelocks h) 0))) (rlinks/badge "red" (str (:livelocks h) " live")))]))]))))
+                     (when (pos? (long (or (:livelocks h) 0))) (rlinks/badge "red" (str (:livelocks h) " live")))
+                     (when (pos? (long (or (:timeouts h) 0))) (rlinks/badge "amber" (str (:timeouts h) " to")))]))]))))

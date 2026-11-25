@@ -14,10 +14,8 @@
             [seon.store :as store]
             [seon.health.metrics :as hmetrics]
             [seon.repl.search :as search]
-            [seon.health.friction :as hfriction]
             [seon.bench.golden :as bgolden]
-            [seon.health.liveness :as hliveness]
-            [seon.health.closure :as hclosure]))
+            [seon.health.liveness :as hliveness]))
 
 (defn- intern-doc! [u sym f]
   (let [target (if (var? f) (fn [& args] (apply @f args)) f)
@@ -393,17 +391,6 @@
        :else
        {:error :unknown-helper :sym sym-or-str :available (vec (sort (keys vars)))}))))
 
-(defn closure
-  "Runs Flow + UI closed-world closure check (`seon.health.closure/check-closure`) on `(user/db)` (or optional `db`/`:main`)."
-  {:malli/schema [:function [:=> [:cat] [:maybe :map]] [:=> [:cat :any] [:maybe :map]]] :cost/ticks 80000000}
-  ([] (closure nil))
-  ([db-or-kw]
-   (let [db (cond
-              (= db-or-kw :main) (when-let [{:keys [conn]} *agent-ctx*] (or (store/head conn :main) @conn))
-              (some? db-or-kw) db-or-kw
-              :else (when-let [{:keys [conn]} *agent-ctx*] @conn))]
-     (when db (hclosure/check-closure db)))))
-
 (defn install-repl-helpers!
   "Interns `user/*` editing, inspection, test, health, search, diagnostics, benchmark, and task helpers into `u`."
   {:malli/schema [:=> [:cat :seon.host/ns] :any]}
@@ -414,6 +401,6 @@
                  ['run-tests! #'run-tests!] ['health #'health] ['search #'search/search] ['help #'help]
                  ['autofix-health! #'autofix-health!] ['inspect-branch #'inspect-branch] ['save-example! #'save-example!]
                  ['create-task! #'create-task!] ['metrics #'metrics]
-                 ['friction #'hfriction/repl-friction] ['golden-scoreboard #'bgolden/repl-golden-scoreboard]
-                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['liveness #'hliveness/check-liveness] ['closure #'closure]]]
+                 ['friction #'hmetrics/repl-friction] ['golden-scoreboard #'bgolden/repl-golden-scoreboard]
+                 ['run-golden-suite! #'bgolden/run-golden-suite!] ['liveness #'hliveness/check-liveness]]]
     (intern-doc! u s v)))

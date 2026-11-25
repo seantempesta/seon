@@ -202,8 +202,8 @@
     (is (= "Work your assigned task, prove it green, and call (user/ready!)."
            (:body (cluster/trial-task-plan {:task :seon.task/y})))))
   (testing "trial-spawn-op and trial-message-op build op payloads"
-    (is (= {:op :spawn-agent :id :bench/t1 :branch :branch/t1 :role :worker :goal "G"}
-           (cluster/trial-spawn-op :bench/t1 :branch/t1 {:goal "G"})))
+    (is (= {:op :spawn-agent :id :bench/t1 :branch :branch/t1 :goal "G"}
+    (cluster/trial-spawn-op :bench/t1 :branch/t1 {:goal "G"})))
     (is (= :seon.task/y
            (:task (cluster/trial-spawn-op :a :b {:goal "G" :scope :s :task-id :seon.task/y}))))
     (is (nil? (cluster/trial-message-op :a nil)))

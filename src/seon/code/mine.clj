@@ -9,10 +9,10 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [malli.core :as m]
-            [seon.ctx :as ctx]
+            [seon.health.efficiency :as efficiency]
             [seon.health.static :as static]
-            [seon.render.fit :as fit]
             [seon.schema :as schema]
+            [seon.signals.scoreboard :as scoreboard]
             [datahike.datom :as dd]
             [datahike.index.interface :as di]
             [konserve.core :as k]
@@ -162,13 +162,6 @@
      :pure-opaque-map (count (filter :map? pk)) :pure-opaque-any (count (filter :any? pk))
      :ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)}))
 
-(def ^:private id-attrs
-  [:seon.code.var/name :seon.code.ns/name :seon.code.doc/id :seon.schema/key :seon.task/id])
-
-(defn- entity-id [db e]
-  (when (integer? e)
-    (some #(:v (first (d/datoms db :eavt e %))) id-attrs)))
-
 (defn- modern-agent? [db aid]
   (and (qualified-keyword? aid)
        (not= "repl" (namespace aid))
@@ -185,66 +178,38 @@
            (map key)
            (take (or limit 3)))))
 
-(defn- eval-code-entities [db eids]
-  (let [sch (:schema db)
-        has? (fn [a v] (and (contains? sch a) (boolean (first (d/datoms db :avet a v)))))]
-    (into #{}
-          (mapcat (fn [e]
-                    (let [code (str (:v (first (d/datoms db :eavt e :seon.agent.eval/code))))]
-                      (concat
-                       (keep (fn [[_ s]]
-                               (let [i (str/index-of s "/")
-                                     sym (symbol (subs s 0 i) (subs s (inc i)))]
-                                 (when (has? :seon.code.var/name sym) sym)))
-                             (re-seq #"(?<![a-zA-Z0-9._/-])(seon\.[a-z0-9._-]+/[a-zA-Z0-9*+!_?<>=.-]+)" code))
-                       (keep (fn [[_ s]]
-                               (let [k (keyword (subs s 1))]
-                                 (when (has? :seon.schema/key k) k)))
-                             (re-seq #"(:seon\.[a-z0-9._-]+/[a-zA-Z0-9*+!_?<>=.-]+)" code))))))
-          eids)))
-
-(defn- agent-turn0 [db aid budget as-of?]
-  (let [dts (vec (d/datoms db :avet :seon.agent.eval/agent aid)) eids (mapv :e dts)
-        tx0 (when (seq dts) (reduce min (map :tx dts)))
-        t0 (if (and as-of? tx0 (not (instance? datahike.db.AsOfDB db))) (try (d/as-of db (dec (long tx0))) (catch Throwable _ db)) db)
-        ag (or (d/pull t0 '[:seon.agent/id :seon.agent/router? :seon.agent/tasks :seon.agent/scope :seon.agent/branch :seon.agent/pinned] [:seon.agent/id aid]) {:seon.agent/id aid})
-        ev? #(boolean (re-find #"eval|touch|error" (str %)))
-        cands (->> (:candidates (ctx/gather-agent-candidates t0 t0 aid {:agent ag :target :wire :include-evals? false :include-ctx-snapshot? false :enrich? false :situational? false :semantic? false :ru-budget budget}))
-                   (remove #(and (seq (:rules %)) (every? ev? (:rules %)))) vec)
-        shown (:selected (fit/upgrade-ladder (fit/rank-candidates cands nil) {:target :wire :strategy :breadth-first :token-budget budget}))
-        sids (into #{} (keep #(or (entity-id db (:entity %)) (:sym %))) shown)
-        st (if ((:schema db) :seon.agent.eval/touched)
-             (into #{} (comp (mapcat #(map :v (d/datoms db :eavt % :seon.agent.eval/touched))) (mapcat #(if (coll? %) % [%])) (keep #(entity-id db %))) eids) #{})
-        tids (into st (eval-code-entities db eids))
-        tnss (into #{} (keep #(when (and (symbol? %) (namespace %)) (symbol (namespace %)))) tids)
-        hits (count (filter #(or (tids %) (tnss %)) sids))
-        cov (count (filter #(or (sids %) (and (symbol? %) (namespace %) (sids (symbol (namespace %))))) tids))]
-    {:agent aid :evals (count eids) :shown (count sids) :touched (count tids) :hits hits :covered cov
-     :precision (if (pos? (count sids)) (/ (double hits) (count sids)) 0.0)
-     :recall (if (pos? (count tids)) (/ (double cov) (count tids)) 0.0)
-     :gaps (vec (remove #(or (sids %) (and (symbol? %) (namespace %) (sids (symbol (namespace %))))) tids))}))
-
 (defn turn0-recall-precision-report
-  "Turn-0 predictive Precision & Recall across recent modern agents (`opts`: `:agents`, else up to `:limit` (3)
-  recent non-`:repl/*` agents with task/scope and >= `:min-evals` (3) evals; `:token-budget` 16000; `:as-of?`
-  false for fast live-db replay with eval-rules stripped, or true for `d/as-of` pre-eval replay). Compares
-  Turn-0 projected entities against entities touched/referenced across the trajectory plus top `:recall-gap-items`."
+  "Thin wrapper over `seon.signals.scoreboard/context-scoreboard` computing per-agent Precision, Recall, and recall gaps."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] :map]
    :cost/ticks 5000000000}
   [db opts]
   (if-not (contains? (:schema db) :seon.agent.eval/agent)
     {:agents [] :precision 0.0 :recall 0.0 :recall-gap-items []}
-    (let [o (or opts {})
-          budget (long (or (:token-budget o) 16000))
-          as-of? (boolean (:as-of? o))
-          per (mapv #(agent-turn0 db % budget as-of?) (recent-agents db o))
-          sum (fn [k] (reduce + 0 (map k per)))
-          s-tot (sum :shown)
-          t-tot (sum :touched)]
-      {:agents (mapv #(dissoc % :gaps) per)
-       :precision (if (pos? s-tot) (/ (double (sum :hits)) s-tot) 0.0)
-       :recall (if (pos? t-tot) (/ (double (sum :covered)) t-tot) 0.0)
-       :recall-gap-items (->> (mapcat :gaps per) frequencies (sort-by (fn [[k n]] [(- n) (str k)])) (take 15) (mapv key))})))
+    (let [options (or opts {})
+          sb-opts {:token-budget (long (or (:token-budget options) 16000))}
+          scores (mapv #(scoreboard/context-scoreboard db db % sb-opts) (recent-agents db options))
+          rows (mapv (fn [sb]
+                       {:agent (:agent sb)
+                        :evals (:eval-count sb)
+                        :shown (:shown-count sb)
+                        :touched (max (long (or (:pool-touched-count sb) 0))
+                                      (long (or (:shown-touched-count sb) 0)))
+                        :hits (:shown-touched-count sb)
+                        :covered (:shown-touched-count sb)
+                        :precision (:precision sb)
+                        :recall (:recall sb)})
+                     scores)
+          total-shown (reduce + 0 (map :shown rows))
+          total-touched (reduce + 0 (map :touched rows))]
+      {:agents rows
+       :precision (if (pos? total-shown) (/ (double (reduce + 0 (map :hits rows))) total-shown) 0.0)
+       :recall (if (pos? total-touched) (/ (double (reduce + 0 (map :covered rows))) total-touched) 0.0)
+       :recall-gap-items (->> (mapcat :recall-gap-items scores)
+                              (keep #(or (:sym %) (:schema %) (:entity %)))
+                              frequencies
+                              (sort-by (fn [[item freq]] [(- freq) (str item)]))
+                              (take 15)
+                              (mapv key))})))
 
 (defn normalize-hygiene-slug
   "Lowercase kebab slug for `:hygiene/*` task IDs."
@@ -283,21 +248,22 @@
     "handle-req" "handle-ipc" "handle-timer" "call!" "record-summary!" "resolve-doc-refs"})
 
 (defn- scan-hygiene-index [db]
-  (let [sch (:schema db) foreign (static/foreign-nss db)
-        tests (java.util.HashSet. 512) edges (java.util.HashSet. 128)
-        f->k (java.util.HashMap. 2800) fk->fe (java.util.HashMap. 2800) f->h (java.util.HashMap. 2800)
-        svs (transient []) fe->v (java.util.HashMap. 2200)]
-    (when (sch :seon.code.var/test?) (doseq [dt (d/datoms db :aevt :seon.code.var/test?)] (when (:v dt) (.add tests (:e dt)))))
-    (when (sch :seon.code.var/flow-edge?) (doseq [dt (d/datoms db :aevt :seon.code.var/flow-edge?)] (when (:v dt) (.add edges (:e dt)))))
-    (when (sch :seon.code.form/key) (doseq [dt (d/datoms db :aevt :seon.code.form/key)] (.put f->k (:e dt) (:v dt)) (.put fk->fe (:v dt) (:e dt))))
-    (when (sch :seon.code.form/hash) (doseq [dt (d/datoms db :aevt :seon.code.form/hash)] (.put f->h (:e dt) (:v dt))))
-    (when (sch :seon.code.var/name)
-      (doseq [dt (d/datoms db :aevt :seon.code.var/name)
-              :let [e (:e dt) sym (:v dt) ns-s (when (symbol? sym) (namespace sym)) n (when ns-s (symbol ns-s))]
-              :when (and n (not (.contains tests e)) (not (foreign n)) (not (str/ends-with? ns-s "-test")))]
-        (let [fk (str sym) fe (.get fk->fe fk) v {:e e :sym sym :ns n :fk fk :hash (when fe (.get f->h fe)) :edge? (.contains edges e)}]
-          (conj! svs v) (when fe (.put fe->v fe v)))))
-    {:foreign foreign :vars (persistent! svs) :fe->v fe->v :f->k f->k}))
+(let [sch (:schema db) foreign (static/foreign-nss db)
+      tests (java.util.HashSet. 512) edges (java.util.HashSet. 128)
+      fk->fe (java.util.HashMap. 2800) form->hash (java.util.HashMap. 2800)
+      vars-acc (transient [])]
+  (when (sch :seon.code.var/test?) (doseq [dt (d/datoms db :aevt :seon.code.var/test?)] (when (:v dt) (.add tests (:e dt)))))
+  (when (sch :seon.code.var/flow-edge?) (doseq [dt (d/datoms db :aevt :seon.code.var/flow-edge?)] (when (:v dt) (.add edges (:e dt)))))
+  (when (sch :seon.code.form/key) (doseq [dt (d/datoms db :aevt :seon.code.form/key)] (.put fk->fe (:v dt) (:e dt))))
+  (when (sch :seon.code.form/hash) (doseq [dt (d/datoms db :aevt :seon.code.form/hash)] (.put form->hash (:e dt) (:v dt))))
+  (when (sch :seon.code.var/name)
+    (doseq [dt (d/datoms db :aevt :seon.code.var/name)
+            :let [eid (:e dt) sym (:v dt) ns-str (when (symbol? sym) (namespace sym)) nsym (when ns-str (symbol ns-str))]
+            :when (and nsym (not (.contains tests eid)) (not (foreign nsym)) (not (str/ends-with? ns-str "-test")))]
+      (let [fkey (str sym) form-eid (.get fk->fe fkey)]
+        (conj! vars-acc {:e eid :fe form-eid :sym sym :ns nsym :fk fkey
+                         :hash (when form-eid (.get form->hash form-eid)) :edge? (.contains edges eid)}))))
+  {:vars (persistent! vars-acc)}))
 
 (def ^:private raw-java-io-re
   #"(?:java\.io\.File\.|\(File\.|\(\.delete\b|ProcessBuilder\.|\(\.mkdirs\b)")
@@ -308,42 +274,6 @@
 (defn- mk-finding [kind slug scope title summary curated impact]
   {:id (keyword "hygiene" (normalize-hygiene-slug slug)) :kind kind :scope scope
    :title title :summary summary :curated curated :impact (long impact)})
-
-(defn- detect-io-and-size-findings [db {:keys [foreign fe->v f->k]}]
-  (let [ns->ch (java.util.HashMap. 160) io-ns (java.util.HashMap. 16) lf (transient [])
-        fk->ns (fn [^String k] (when k (let [i (.indexOf k "/") j (.indexOf k "#")]
-                                         (cond (pos? i) (symbol (subs k 0 i)) (pos? j) (symbol (subs k 0 j))))))
-        cnt-ln (fn [^String s] (loop [i 0 n 1] (let [j (.indexOf s "\n" i)] (if (neg? j) n (recur (inc j) (inc n))))))]
-    (when ((:schema db) :seon.code.form/src)
-      (binding [di/*read-key-attrs* #{}]
-        (doseq [dt (d/datoms db :aevt :seon.code.form/src)
-                :let [fe (:e dt) v (.get fe->v fe) fk (or (.get f->k fe) (:fk v)) n (or (:ns v) (fk->ns fk))]
-                :when (and n (not (foreign n)) (not (str/ends-with? (name n) "-test")))]
-          (let [raw (:v dt)
-                ^String s (if (dd/lazy-value? raw) (str (or (when-let [st (:store db)] (k/get st (dd/lazy-key raw) nil {:sync? true})) (dd/value-of raw))) (str raw))
-                ch (.length s)]
-            (.put ns->ch n (+ (long (or (.get ns->ch n) 0)) ch))
-            (when (and (string? fk) (not (str/includes? fk "#")) (or (.startsWith s "(defn ") (.startsWith s "(defn- ") (.startsWith (str/triml s) "(defn")))
-              (let [ln (cnt-ln s)]
-                (when (or (> ln 120) (> ch 7200))
-                  (let [vs (symbol fk)]
-                    (conj! lf (mk-finding :large-function (str "split-fn-" n "-" (name vs)) n (str "Split " vs " (" ln "L)")
-                                (str vs " is " ln "L (" ch " chars > 120L budget). Extract pure helpers.")
-                                [[:seon.code.var/name vs]] (+ 65 (min 40 (max (quot (max 0 (- ln 120)) 5) (quot (max 0 (- ch 7200)) 400))))))))))
-            (when (and v (not= 'seon.code.mine n) (not (and (:edge? v) (#{'seon.store 'seon.browser} n)))
-                       (or (.contains s "File.") (.contains s ".delete") (.contains s "ProcessBuilder.") (.contains s ".mkdirs"))
-                       (re-find raw-java-io-re s))
-              (.add ^java.util.ArrayList (or (.get io-ns n) (let [x (java.util.ArrayList. 4)] (.put io-ns n x) x)) (:sym v)))))))
-    (vec (concat
-          (for [^java.util.Map$Entry en (.entrySet io-ns) :let [n (.getKey en) ss (vec (distinct (sort ^java.util.ArrayList (.getValue en))))]]
-            (mk-finding :raw-java-io (str "java-io-" (name n)) n (str "Migrate raw Java IO/process in " n)
-              (str n " uses raw Java IO/process in " (str/join ", " (map str ss)) ". Migrate to jolt.fs / jolt.process.")
-              (mapv #(vector :seon.code.var/name %) ss) (+ 75 (* 8 (count ss)))))
-          (for [^java.util.Map$Entry en (.entrySet ns->ch) :let [n (.getKey en) tk (quot (long (.getValue en)) 4)] :when (> tk 8000)]
-            (mk-finding :oversized-namespace (str "split-ns-" (name n)) n (str "Split oversized ns " n " (~" tk " tok)")
-              (str n " is ~" tk " tokens (> 8k cap). Extract cohesive child namespace(s).")
-              [[:seon.code.ns/name n]] (+ 70 (min 40 (quot (- tk 8000) 100)))))
-          (persistent! lf)))))
 
 (defn- detect-ast-and-dup-findings [db vars]
   (let [hr? (boolean ((:schema db) :seon.code.var/refs))
@@ -417,6 +347,97 @@
                    (str n " has high efferent coupling (Ce " ce "). Trim deps or extract helper modules.")
                    [[:seon.code.ns/name n]] (+ 60 (min 35 (* 2 ce)))))]
       (dedupe-rank (concat cx ncd hots coup)))))
+
+(defonce ^:private ^:seon.flow/edge raw-io-form-cache (atom {}))
+
+(defn problem->hygiene-finding
+  "Maps a cached health warning (`:oversized-namespace`, `:large-function`, `:nested-db-scan`, `:silent-catch-all`) to a canonical hygiene finding, or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]
+   :cost/ticks 200000}
+  [{:keys [class ns var subject message]}]
+  (let [msg (str message)]
+    (case class
+      :oversized-namespace
+      (let [tokens (or (some-> (re-find #"~(\d+)\s+tokens" msg) second parse-long) 8500)]
+        (mk-finding :oversized-namespace (str "split-ns-" (name ns)) ns
+                    (str "Split oversized ns " ns " (~" tokens " tok)")
+                    (str ns " is ~" tokens " tokens (> 8k cap). Extract cohesive child namespace(s).")
+                    [[:seon.code.ns/name ns]]
+                    (+ 70 (min 40 (quot (max 0 (- tokens 8000)) 100)))))
+
+      :large-function
+      (when-let [var-sym (or var (when (string? subject) (symbol subject)))]
+        (let [[_ lines-str chars-str] (re-find #"\((\d+)L,\s*(\d+)\s+chars" msg)
+              lines (or (some-> lines-str parse-long) 121)
+              chars (or (some-> chars-str parse-long) 7201)]
+          (mk-finding :large-function (str "split-fn-" ns "-" (name var-sym)) ns
+                      (str "Split " var-sym " (" lines "L)")
+                      (str var-sym " is " lines "L (" chars " chars > 120L budget). Extract pure helpers.")
+                      [[:seon.code.var/name var-sym]]
+                      (+ 65 (min 40 (max (quot (max 0 (- lines 120)) 5)
+                                         (quot (max 0 (- chars 7200)) 400)))))))
+
+      :nested-db-scan
+      (mk-finding :nested-db-scan (str "nested-scan-" subject) ns
+                  (str "Fix scan " subject)
+                  (str "Nested full DB scan in " subject ". Hoist or use :avet.")
+                  [(if var [:seon.code.var/name var] [:seon.code.ns/name ns])]
+                  78)
+
+      :silent-catch-all
+      (when var
+        (mk-finding :silent-catch-all (str "silent-catch-" ns "-" (name var)) ns
+                    (str "Fix catch " var)
+                    (str "Replace silent broad catch in " var " with typed error data or ^:seon.flow/edge.")
+                    [[:seon.code.var/name var]]
+                    74))
+
+      nil)))
+
+(defn- raw-io-src? [^String src]
+  (boolean (and src
+                (or (.contains src "File.")
+                    (.contains src ".delete")
+                    (.contains src "ProcessBuilder.")
+                    (.contains src ".mkdirs"))
+                (re-find raw-java-io-re src))))
+
+(defn- resolve-raw-src [db raw]
+  (if (dd/lazy-value? raw)
+    (str (or (when-let [backing (:store db)] (k/get backing (dd/lazy-key raw) nil {:sync? true}))
+             (dd/value-of raw)))
+    (str raw)))
+
+(defn- ^:seon.flow/edge detect-io-and-size-findings [db {:keys [vars]}]
+  (let [eligible (when ((:schema db) :seon.code.form/src)
+                   (filterv #(and (:fe %) (not= 'seon.code.mine (:ns %))
+                                  (not (and (:edge? %) (#{'seon.store 'seon.browser} (:ns %)))))
+                            vars))
+        cached @raw-io-form-cache
+        missed (java.util.HashSet. 32)
+        _ (doseq [{:keys [fe hash]} eligible :when (not (and hash (contains? cached hash)))] (.add missed fe))
+        fetched (java.util.HashMap. (max 16 (.size missed)))
+        _ (when (pos? (.size missed))
+            (binding [di/*read-key-attrs* #{}]
+              (if (<= (.size missed) 150)
+                (doseq [fe missed] (when-let [dt (first (d/datoms db :eavt fe :seon.code.form/src))] (.put fetched fe (raw-io-src? (resolve-raw-src db (:v dt))))))
+                (doseq [dt (d/datoms db :aevt :seon.code.form/src) :let [fe (:e dt)] :when (.contains missed fe)]
+                  (.put fetched fe (raw-io-src? (resolve-raw-src db (:v dt))))))))
+        new-entries (volatile! {})
+        io-by-ns (reduce (fn [acc {:keys [fe ns sym hash]}]
+                           (let [hit? (if (and hash (contains? cached hash))
+                                        (get cached hash)
+                                        (let [found (boolean (.get fetched fe))] (when hash (vswap! new-entries assoc hash found)) found))]
+                             (if hit? (update acc ns (fnil conj []) sym) acc)))
+                         {} eligible)
+        _ (when (seq @new-entries) (swap! raw-io-form-cache #(let [m (into % @new-entries)] (if (> (count m) 4096) @new-entries m))))
+        io-findings (for [[nsym syms] io-by-ns :let [uniq (vec (distinct (sort syms)))]]
+                      (mk-finding :raw-java-io (str "java-io-" (name nsym)) nsym (str "Migrate raw Java IO/process in " nsym)
+                                  (str nsym " uses raw Java IO/process in " (str/join ", " (map str uniq)) ". Migrate to jolt.fs / jolt.process.")
+                                  (mapv #(vector :seon.code.var/name %) uniq) (+ 75 (* 8 (count uniq)))))
+        size-findings (keep #(when (#{:oversized-namespace :large-function} (:class %)) (problem->hygiene-finding %))
+                            (efficiency/static-efficiency-warnings db nil (static/form-meta-snapshot db)))]
+    (vec (concat io-findings size-findings))))
 
 (defn mine-hygiene-findings
   "O(N) indexed Datahike scan detecting `:ast-clone`, `:duplicate-helper`, `:raw-java-io`, `:oversized-namespace`, and `:large-function` findings ranked by `:impact`."
