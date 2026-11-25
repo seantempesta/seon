@@ -136,7 +136,7 @@
     (if (> (count s) 240) (str (subs s 0 237) "…") s)))
 
 (defn auto-close-subtask-op
-  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map :any] :any]}
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map :any] :any], :seon.flow/edge true}
   [conn db0 call result]
   (when-let [tid (call-subtask-id db0 call)]
     (let [t (d/pull db0 '[:seon.task/id :seon.task/done? :seon.task/tests :seon.task/test-vars]

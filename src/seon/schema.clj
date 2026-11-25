@@ -347,8 +347,12 @@
   ([v] (arm-var! nil v))
   ([db v]
    (when (and (var? v) (bound? v) (fn? @v))
-     (let [m (meta v)
-           sch-form (:malli/schema m)]
+     (let [m0 (meta v)
+          v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)))
+              (or (resolve (:seon.code/reexport m0)) v)
+              v)
+          m (meta v)
+          sch-form (:malli/schema m)]
        (when (and (vector? sch-form) (contains? #{:=> :function} (first sch-form)))
          (let [raw-fn (or (:seon/raw-fn m) @v)
                var-sym (symbol v)
@@ -469,7 +473,9 @@
     (sequential? x) (mapv edn-safe-ipc x)
     :else (pr-str x)))
 
-(defn- stress-arity [fn-sym target-fn opts registry ar-sch top-examples samples seed measure-fn budgets]
+(defn- stress-arity
+  {:seon.flow/edge true}
+  [fn-sym target-fn opts registry ar-sch top-examples samples seed measure-fn budgets]
   (let [[cat-s ret-s guard-s] (m/children ar-sch)
         valid-in? (m/validator cat-s opts) valid-ret? (m/validator ret-s opts)
         valid-guard? (when guard-s (m/validator guard-s opts))

@@ -340,7 +340,7 @@
        (count to-rebind-forms)))))
 
 (defn load-delta!
-  {:malli/schema [:function [:=> [:cat :seon.host/conn :any :any] :any] [:=> [:cat :seon.host/conn :any :any :boolean] :any]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/conn :any :any] :any] [:=> [:cat :seon.host/conn :any :any :boolean] :any]], :seon.flow/edge true}
   ([conn from-cid to-cid] (load-delta! conn from-cid to-cid false))
   ([conn from-cid to-cid tolerant?]
    (let [delta (changed-form-ops conn from-cid to-cid)
