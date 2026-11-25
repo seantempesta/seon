@@ -332,3 +332,82 @@
           (is (contains? eids ns-e) "Unproven/refiner Turn-0 walk must surface scope ns")
           (is (contains? eids tns-e) "Unproven/refiner Turn-0 walk must surface matching -test ns")
           (is (contains? eids v-e) "Unproven/refiner Turn-0 walk must surface scope public vars"))))))
+
+(deftest ^{:cost/ticks 180000000} r1-root-causes-zero-conflict-kv-anchor-and-edit-ergonomics-test
+  (testing "Refiner editing :refine/* plan causes zero 3-way conflict on worker merge, pauses Refiner, anchors branch-reset-tx on :fork-review, and keeps prefix-hash stable across branch task edits"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (rseed/starter-rules)})
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/kv.clj"
+                                                      "(ns demo.kv)\n(defn base-fn {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] x)\n" false)})
+      (d/transact conn {:tx-data (code/file-import-tx @conn "test/demo/kv_test.clj"
+                                                      "(ns demo.kv-test (:require [clojure.test :refer [deftest is]] [demo.kv :as kv]))\n(deftest base-kv-test (is (= 1 (kv/base-fn 1))))\n" false)})
+      (d/transact conn {:tx-data [{:seon.rule/id :rule.trigger/unproven-task :seon.rule/category :trigger
+                                   :seon.rule/stratum 26 :seon.rule/enabled? true :seon.rule/target :any
+                                   :seon.rule/query '[:find ?ag ?tid :in $main :where [(seon.task.refine/unproven-task-rows $main) [[?ag ?tid]]]]
+                                   :seon.rule/assert '[[?tid :trigger/refine-task {:agent ?ag}]]}
+                                  {:seon.rule/id :rule.trigger/spawn-unassigned-prereq :seon.rule/category :trigger
+                                   :seon.rule/stratum 27 :seon.rule/enabled? true :seon.rule/target :any
+                                   :seon.rule/query '[:find ?ag ?ptid ?rtid :in $main :where [(seon.task.refine/unassigned-prereq-rows $main) [[?ag ?ptid ?rtid]]]]
+                                   :seon.rule/assert '[[?rtid :trigger/spawn-prereq {:parent-agent ?ag :parent-task ?ptid}]]}
+                                  {:seon.task/id :template/refine-task-proofs :seon.task/title "Refine proofs"
+                                   :seon.task/template? true :seon.task/done? false :seon.task/plan "Write failing proof."}
+                                  {:seon.config/key :seon.config/root :seon.config/auto-refine-tasks? true}]})
+      (let [st0 {:conn conn :cfg cfg :msg-seq 0 :writes 0 :commit-git? false}
+            [st1 _] (tspawn/handle-create-task! st0 {:id :demo/kv-task :title "Add double fn"
+                                                     :plan "Add double-fn in demo.kv."
+                                                     :scope 'demo.kv :spawn-agent? true :agent-id :worker/kv}
+                                                (d/commit-id @conn))
+            ops1 (refine/compute-trigger-ops @conn)
+            _ (d/transact conn {:tx-data (:tx-data (first ops1))})
+            ops2 (refine/compute-trigger-ops @conn)
+            _ (d/transact conn {:tx-data (:tx-data (first (filter #(= :transact (:op %)) ops2)))})
+            spawn-op (first (filter #(= :spawn-agent (:op %)) ops2))
+            [st2 _] (tspawn/handle-spawn-agent! st1 spawn-op (d/commit-id @conn))
+            ref-aid (:id spawn-op)
+            ref-branch (:seon.agent/branch (d/pull @conn '[:seon.agent/branch] [:seon.agent/id ref-aid]))
+            ref-tid (refine/refinement-task-id :demo/kv-task)
+            worker-branch (:seon.agent/branch (d/pull @conn '[:seon.agent/branch] [:seon.agent/id :worker/kv]))]
+        (let [rconn (store/connect cfg ref-branch)]
+          (try
+            ;; Measure Refiner Turn-1 prefix-hash BEFORE updating task on branch
+            (let [rwire (requiring-resolve 'seon.render.wire/build-live-wire-request)
+                  w1 (rwire @conn @rconn ref-aid {:conn conn})
+                  p1 (:prefix-hash w1)]
+              (d/transact rconn {:tx-data (code/file-import-tx @rconn "src/demo/kv.clj"
+                                                               "(ns demo.kv)\n(defn base-fn {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] x)\n(defn double-fn {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] 0)\n" false)})
+              (d/transact rconn {:tx-data (code/file-import-tx @rconn "test/demo/kv_test.clj"
+                                                               "(ns demo.kv-test (:require [clojure.test :refer [deftest is]] [demo.kv :as kv]))\n(deftest base-kv-test (is (= 1 (kv/base-fn 1))))\n(deftest double-fn-proof-test (is (= 6 (kv/double-fn 3))))\n" false)})
+              ;; Deliberately update :refine/* plan directly (reproduces H2-Treatment failure!) + via apply-update-task!
+              (d/transact rconn {:tx-data [{:seon.task/id ref-tid :seon.task/plan "DIRECT MUTATION ON REFINE TASK"}]})
+              (let [res (refine/apply-update-task! {:conn rconn :branch ref-branch :agent-id ref-aid}
+                        {:id ref-tid :plan "API: demo.kv/double-fn"}
+                        (fn [_ _] nil) (fn [_] nil))]
+                (is (= :demo/kv-task (:task res)) "apply-update-task! must reroute Refiner :plan update onto parent task"))
+              (let [w2 (rwire @conn @rconn ref-aid {:conn conn})]
+                (is (= p1 (:prefix-hash w2)) "Updating task on branch must NOT bust frozen KV prefix-hash")))
+            (finally (d/release rconn))))
+        ;; Fork-merge Refiner -> worker branch
+        (tmerge/handle-merge-op! st2 {:op :merge :branch ref-branch :agent-id ref-aid} (d/commit-id @conn))
+        (is (true? (:seon.agent/paused? (d/pull @conn '[:seon.agent/paused?] [:seon.agent/id ref-aid])))
+            "Fork-merged Refiner must be paused so it never executes a post-merge zombie turn")
+        (let [wconn (store/connect cfg worker-branch)]
+          (try
+            (let [rstatus (requiring-resolve 'seon.render.status/branch-reset-tx)
+                  rwire (requiring-resolve 'seon.render.wire/build-live-wire-request)
+                  rtx (rstatus @wconn :worker/kv)
+                  ww (rwire @conn @wconn :worker/kv {:conn conn})]
+              (is (pos? rtx) "branch-reset-tx must recognize :seon.tx/merged :fork-review")
+              (let [proof-e (:e (first (d/datoms @wconn :avet :seon.code.var/name 'demo.kv-test/double-fn-proof-test)))]
+              (is (some #(= proof-e (:entity %)) (:tiles ww)) "Post-refinement Worker Turn 0 must anchor merged proof inside frozen prefix :tiles")
+              (is (< (long (or (get-in ww [:fit-trace :delta-tokens]) 0)) 150) "Post-refinement Worker Turn 0 must not leak proof context into uncached delta")))
+            ;; Worker implements double-fn and runs 3-way merge to :main -> MUST have 0 conflicts!
+            (d/transact wconn {:tx-data (code/file-import-tx @wconn "src/demo/kv.clj"
+                                                             "(ns demo.kv)\n(defn base-fn {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] x)\n(defn double-fn {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] (* 2 x))\n" false)})
+            (let [plan (merge/three-way conn cfg worker-branch {:exclude-agent :worker/kv})]
+              (is (true? (:ok? plan)) (str "Worker 3-way merge to :main must have zero :refine/* conflict: " (pr-str (:conflicts plan)))))
+            (finally (d/release wconn))))
+        (is (= [{:seon.code.var/name 'demo/f}]
+               (refine/strip-task-ops [{:seon.task/id :refine/x :seon.task/plan "p"}
+                                       [:db/add [:seon.task/id :refine/x] :seon.task/done? true]
+                                       {:seon.code.var/name 'demo/f}]
+                                      [:refine/x])))))))

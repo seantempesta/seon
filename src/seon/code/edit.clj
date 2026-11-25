@@ -40,98 +40,6 @@
        stale-var-ops (analyze/stale-var-edge-retracts db kept-vars {:preserve-analyzed? (nil? acct)})]
    (vec (concat stale-form-ops stale-var-ops kept-forms kept-vars)))))
 
-(defn edit-fn!
-  "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
-   via `seon.code.cst`), persists to Datahike, and live-evaluates in the target namespace.
-   Also supports batched multi-edit in ONE parse + compile:
-     `(edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` or `(edit-fn! 'ns/fn [[old1 new1] ...] opts)`."
-  {:malli/schema [:function
-                  [:=> [:cat :any [:vector :any]] [:maybe :map]]
-                  [:=> [:cat :any :any :any] [:maybe :map]]
-                  [:=> [:cat :any :any :any :map] [:maybe :map]]]
-   :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}}
-  ([target edits]
-   (if (and (vector? edits) (= 2 (count edits)) (not (vector? (first edits))))
-     (edit-fn! target (first edits) (second edits) {})
-     (edit-fn! target edits {})))
-  ([target a b]
-   (cond
-     (and (vector? a) (seq a) (vector? (first a)) (map? b)) (edit-fn! target a nil b)
-     (and (vector? a) (= 2 (count a)) (not (vector? (first a))) (map? b)) (edit-fn! target (first a) (second a) b)
-     :else (edit-fn! target a b {})))
-  ([target old-or-edits new-str {:keys [occurrence dry-run? eval?] :or {eval? true}}]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
-       (if (str/blank? (str src))
-         {:ok? false :error :form-not-found :target target :key key}
-         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false]
-                                                (let [clean (cst-ns/strip-reader-meta x)
-                                                      ps (pr-str clean)]
-                                                  (if (> (count ps) 90)
-                                                    (str/trim (with-out-str (pp/write clean :dispatch pp/code-dispatch)))
-                                                    ps)))))
-               pairs (if (and (nil? new-str) (vector? old-or-edits) (seq old-or-edits) (vector? (first old-or-edits)))
-                       old-or-edits
-                       [[old-or-edits new-str]])
-               str-pairs (mapv (fn [[o n]] [(to-src o) (to-src n)]) pairs)
-               raw-patched (cst/patch-form-source-batch src str-pairs {:occurrence occurrence})
-               patched (if (:ok? raw-patched)
-                       {:ok? true
-                        :cur-src (:src raw-patched)
-                        :first-line (:line raw-patched)
-                        :applied (:applied raw-patched)}
-                       (cond-> (assoc raw-patched :target target :key key)
-                         (and (str/ends-with? key "#ns") (= :no-match (:error raw-patched)))
-                         (assoc :hint "Target 'ns edits ONLY the (ns ...) header form. To edit a function, pass 'ns/fn; to add or replace a full defn, use (user/add-fn! 'ns \"(defn ...)\").")))]
-           (if-not (:ok? patched)
-             patched
-             (let [new-fsrc (:cur-src patched)
-                   udiff (cst/unified-diff src new-fsrc key)
-                   is-ns? (str/ends-with? key "#ns")]
-               (if dry-run?
-               {:ok? true :dry-run? true :target target :key key :line (:first-line patched) :applied (:applied patched) :diff udiff}
-               (let [ev-res (if eval?
-                            (analyze/eval-form-with-account! @conn ns new-fsrc is-ns?)
-                            {:account (when-not is-ns? (analyze/analyze-form-account ns new-fsrc false)) :error nil})
-                     eval-err (:error ev-res)
-                     tx (if is-ns?
-                          (let [file-src (cio/merged-ns-src conn branch ns)
-                                idx (.indexOf ^String file-src ^String src)]
-                            (when-not (neg? idx)
-                              (code/file-import-tx @conn path
-                                                   (str (subs file-src 0 idx) new-fsrc (subs file-src (+ idx (count src))))
-                                                   false)))
-                          (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res)))]
-                 (if-not tx
-                   {:ok? false :error :source-sync-mismatch :target target :key key}
-                   (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
-                                  :seon.tx/branch branch
-                                  :seon.tx/reason (str "edit-fn! " target)}
-                         r0 (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
-                         r (if-let [ord-tx (when-not is-ns?
-                                             (not-empty
-                                               (cst-ns/topo-order-ns-forms
-                                                 (code/ns-forms (:db-after r0) ns))))]
-                             (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data ord-tx}))
-                             r0)]
-                     (ctx/refresh-active! (:db-after r) (:tx-data r))
-                     (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
-                       (cond->
-                         {:ok? (nil? eval-err),
-                          :target target,
-                          :key key,
-                          :path path,
-                          :line (:first-line patched),
-                          :applied (:applied patched),
-                          :tx (:max-tx (:db-after r)),
-                          :diff udiff}
-                         eval-err
-                         (assoc :eval-error eval-err)
-                         defonce?
-                         (assoc
-                           :note
-                           "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
-
 (defn unused-requires
   "AST-accurate analysis of used vs unused `:require` specs in namespace `nsym`."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
@@ -368,7 +276,7 @@
 ([ns-sym form-src] (add-fn! ns-sym form-src {}))
 ([ns-sym form-src {:keys [eval?] :or {eval? true}}]
  (when-let [{:keys [conn]} *agent-ctx*]
-   (let [nsym (if (symbol? ns-sym) ns-sym (symbol (name ns-sym)))
+   (let [nsym (cond (and (symbol? ns-sym) (namespace ns-sym)) (symbol (namespace ns-sym)) (symbol? ns-sym) ns-sym :else (symbol (name ns-sym)))
          raw-src (if (string? form-src)
                    (str/trim form-src)
                    (binding [*print-meta* true *print-namespace-maps* false] (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta form-src) :dispatch pp/code-dispatch)))))]
@@ -427,6 +335,106 @@
                        multi? (assoc :vars vnames)
                        seed-ns-src (assoc :seeded-ns? true)
                        eval-err (assoc :eval-error eval-err))))))))))))))
+
+(defn edit-fn!
+  "Structurally replaces `old-str` with `new-str` inside `'ns/fn` or `'ns` (whitespace/comment-insensitive
+   via `seon.code.cst`), persists to Datahike, and live-evaluates in the target namespace.
+   Also supports batched multi-edit in ONE parse + compile:
+     `(edit-fn! 'ns/fn [[old1 new1] [old2 new2]])` or `(edit-fn! 'ns/fn [[old1 new1] ...] opts)`."
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] [:maybe :map]]
+                  [:=> [:cat :any :any :any] [:maybe :map]]
+                  [:=> [:cat :any :any :any :map] [:maybe :map]]]
+   :seon.eval/budget-override {:ticks 300000000, :bytes 536870912}}
+  ([target edits]
+  (cond
+    (and (symbol? target) (namespace target)
+         (or (and (seq? edits) (symbol? (first edits)) (str/starts-with? (name (first edits)) "def"))
+             (and (string? edits) (boolean (re-find #"^\s*\(\s*(?:[\w.-]+/)?def" edits)))))
+    ((requiring-resolve 'seon.code.edit/add-fn!) (symbol (namespace target)) edits)
+
+    (and (vector? edits) (= 2 (count edits)) (not (vector? (first edits))))
+    (edit-fn! target (first edits) (second edits) {})
+
+    :else
+    (edit-fn! target edits {})))
+  ([target a b]
+   (cond
+     (and (vector? a) (seq a) (vector? (first a)) (map? b)) (edit-fn! target a nil b)
+     (and (vector? a) (= 2 (count a)) (not (vector? (first a))) (map? b)) (edit-fn! target (first a) (second a) b)
+     :else (edit-fn! target a b {})))
+  ([target old-or-edits new-str {:keys [occurrence dry-run? eval?] :or {eval? true}}]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]
+       (if (str/blank? (str src))
+         {:ok? false :error :form-not-found :target target :key key}
+         (let [to-src (fn [x] (if (string? x) x (binding [*print-meta* true *print-namespace-maps* false]
+                                                (let [clean (cst-ns/strip-reader-meta x)
+                                                      ps (pr-str clean)]
+                                                  (if (> (count ps) 90)
+                                                    (str/trim (with-out-str (pp/write clean :dispatch pp/code-dispatch)))
+                                                    ps)))))
+               pairs (if (and (nil? new-str) (vector? old-or-edits) (seq old-or-edits) (vector? (first old-or-edits)))
+                       old-or-edits
+                       [[old-or-edits new-str]])
+               str-pairs (mapv (fn [[o n]] [(to-src o) (to-src n)]) pairs)
+               raw-patched (cst/patch-form-source-batch src str-pairs {:occurrence occurrence})
+               patched (if (:ok? raw-patched)
+                       {:ok? true
+                        :cur-src (:src raw-patched)
+                        :first-line (:line raw-patched)
+                        :applied (:applied raw-patched)}
+                       (cond-> (assoc raw-patched :target target :key key)
+                         (and (str/ends-with? key "#ns") (= :no-match (:error raw-patched)))
+                         (assoc :hint "Target 'ns edits ONLY the (ns ...) header form. To edit a function, pass 'ns/fn; to add or replace a full defn, use (user/add-fn! 'ns \"(defn ...)\").")))]
+           (if-not (:ok? patched)
+             patched
+             (let [new-fsrc (:cur-src patched)
+                   udiff (cst/unified-diff src new-fsrc key)
+                   is-ns? (str/ends-with? key "#ns")]
+               (if dry-run?
+               {:ok? true :dry-run? true :target target :key key :line (:first-line patched) :applied (:applied patched) :diff udiff}
+               (let [ev-res (if eval?
+                            (analyze/eval-form-with-account! @conn ns new-fsrc is-ns?)
+                            {:account (when-not is-ns? (analyze/analyze-form-account ns new-fsrc false)) :error nil})
+                     eval-err (:error ev-res)
+                     tx (if is-ns?
+                          (let [file-src (cio/merged-ns-src conn branch ns)
+                                idx (.indexOf ^String file-src ^String src)]
+                            (when-not (neg? idx)
+                              (code/file-import-tx @conn path
+                                                   (str (subs file-src 0 idx) new-fsrc (subs file-src (+ idx (count src))))
+                                                   false)))
+                          (single-form-upsert-tx @conn ns key path order lead new-fsrc (:account ev-res)))]
+                 (if-not tx
+                   {:ok? false :error :source-sync-mismatch :target target :key key}
+                   (let [tx-meta {:seon.tx/agent (or (:agent-id *agent-ctx*) :repl)
+                                  :seon.tx/branch branch
+                                  :seon.tx/reason (str "edit-fn! " target)}
+                         r0 (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data tx}))
+                         r (if-let [ord-tx (when-not is-ns?
+                                             (not-empty
+                                               (cst-ns/topo-order-ns-forms
+                                                 (code/ns-forms (:db-after r0) ns))))]
+                             (binding [store/*tx-meta* tx-meta] (d/transact conn {:tx-data ord-tx}))
+                             r0)]
+                     (ctx/refresh-active! (:db-after r) (:tx-data r))
+                     (let [defonce? (str/starts-with? (str/triml new-fsrc) "(defonce ")]
+                       (cond->
+                         {:ok? (nil? eval-err),
+                          :target target,
+                          :key key,
+                          :path path,
+                          :line (:first-line patched),
+                          :applied (:applied patched),
+                          :tx (:max-tx (:db-after r)),
+                          :diff udiff}
+                         eval-err
+                         (assoc :eval-error eval-err)
+                         defonce?
+                         (assoc
+                           :note
+                           "defonce keeps its existing runtime binding; use (reset! ...) or (alter-var-root ...) if testing a new initial value live.")))))))))))))))
 
 (defn- prep-meta-edit [conn db branch target meta-map]
   (let [{:keys [ns key path src order lead]} (resolve-form-target conn branch target)]

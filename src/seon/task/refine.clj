@@ -382,11 +382,11 @@
                       (:seon.agent/tasks (d/pull %2 '[:seon.agent/tasks] [:seon.agent/id agent-id])))
         raw-tid (or (:id spec) (pull-t bdb bdb) (pull-t mdb mdb) (pull-t mdb bdb))
         parent-fields? (boolean (some #(contains? spec %) [:proofs :test-vars :tests :plan]))
-        tid (if (and (nil? (:id spec)) raw-tid parent-fields?
-                     (let [re (or (eid-of bdb :seon.task/id raw-tid) (eid-of mdb :seon.task/id raw-tid))]
-                       (= :template/refine-task-proofs (or (eav1 bdb re :seon.task/template) (eav1 mdb re :seon.task/template)))))
-              (or (refiner-parent-task-id mdb bdb raw-tid) raw-tid)
-              raw-tid)]
+        tid (if (and raw-tid parent-fields?
+                   (let [re (or (eid-of bdb :seon.task/id raw-tid) (eid-of mdb :seon.task/id raw-tid))]
+                     (= :template/refine-task-proofs (or (eav1 bdb re :seon.task/template) (eav1 mdb re :seon.task/template)))))
+            (or (refiner-parent-task-id mdb bdb raw-tid) raw-tid)
+            raw-tid)]
     (if-not tid
       {:ok? false :error "No active :seon.agent/tasks on your agent; pass {:id :ns/task ...} or create one via (user/create-task! ...)."}
       (let [ag-m (when (first (d/datoms mdb :avet :seon.agent/id agent-id))
@@ -448,3 +448,24 @@
                            (contains? dh :seon.task/proofs) (assoc :seon.task/proofs (set lref-proofs))
                            (and (contains? dh :seon.task/refs) (seq lref-refs)) (assoc :seon.task/refs (set lref-refs)))))
                      ref-tids)))))))
+
+(defn strip-task-ops
+  "Removes transaction ops targeting any task ID in `task-ids` (both map upserts and vector lookup-ref ops)
+   so temporary prerequisite tasks marked done on `:main` never create `:base nil` 3-way conflicts on worker branches."
+  {:malli/schema [:=> {:examples [[[[{:seon.task/id :refine/a :seon.task/plan "x"}
+                                     {:seon.code.var/name 'demo/f}
+                                     [:db/add [:seon.task/id :refine/a] :seon.task/done? true]]
+                                    [:refine/a]]
+                                   [{:seon.code.var/name 'demo/f}]]]}
+                  [:cat [:sequential :any] [:maybe [:sequential :keyword]]] [:vector :any]]
+   :cost/ticks 500000}
+  [ops task-ids]
+  (let [tset (set task-ids)]
+    (if (empty? tset)
+      (vec ops)
+      (filterv (fn [op]
+                 (not (or (and (map? op) (contains? tset (:seon.task/id op)))
+                          (and (vector? op)
+                               (let [e (second op)]
+                                 (and (vector? e) (= :seon.task/id (first e)) (contains? tset (second e))))))))
+               ops))))

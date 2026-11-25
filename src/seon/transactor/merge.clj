@@ -386,7 +386,7 @@
           _ (try
               (when has-edits?
                 (let [[schema-ops raw-rest] (split-schema-ops tx-ops)
-                      rest-ops (mark-passed-tasks-done raw-rest done-tasks)
+                      rest-ops (refine/strip-task-ops raw-rest done-tasks)
                       tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
                              :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
                   (when (seq s-tx) (d/transact tconn {:tx-data s-tx}))
@@ -408,7 +408,7 @@
           mid (random-uuid)
           ta-paused? (true? (:seon.agent/paused? (d/pull db0 '[:seon.agent/paused?] [:seon.agent/id target-id])))
           main-tx (cond-> (vec (concat resolved-errs
-                                     [(cond-> {:seon.agent/id agent-id :seon.agent/ready? true}
+                                     [(cond-> {:seon.agent/id agent-id :seon.agent/ready? true :seon.agent/paused? true}
                                         eff-btx (assoc :seon.agent/tested-tx (long eff-btx) :seon.agent/merged-tx (long eff-btx))
                                         (and summary (contains? (:schema db0) :seon.agent/summary)) (assoc :seon.agent/summary summary))
                                       {:seon.agent.message/id mid :seon.agent.message/seq mseq
