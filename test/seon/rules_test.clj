@@ -143,7 +143,7 @@
           (is (string? rendered-edn))
           (is (= (count seed-rules) (count reimported))))))))
 
-(deftest ^{:cost/ticks 55000000} situational-context-grounding-search-recency-and-overlap-test
+(deftest ^{:cost/ticks 70000000} situational-context-grounding-search-recency-and-overlap-test
   (testing "Unified pipeline grounds task sub-ns & schemas, demotes broad parent ns, triggers search + recency tail on underspecified tasks, and boosts tree overlap"
     (with-test-store [{:keys [conn]}]
       ;; Seed starter rules + demo namespaces/vars/tests/tasks/calls

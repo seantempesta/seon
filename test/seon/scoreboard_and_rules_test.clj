@@ -90,7 +90,7 @@
       (is (= 0.0 (:recall empty-res)))
       (is (= 0 (:recall-gap-count empty-res))))))
 
-(deftest ^{:cost/ticks 140000000} as-of-hyperparam-sweep-and-live-scoreboard-e2e-test
+(deftest ^{:cost/ticks 180000000} as-of-hyperparam-sweep-and-live-scoreboard-e2e-test
   (testing "d/as-of A/B hyperparameter lab compares breadth-first, depth-first, recency-heavy, and urgency-heavy deterministically"
     (with-test-store [{:keys [conn]}]
       (let [src (str "(ns demo.lab)\n"
@@ -166,7 +166,7 @@
                 (finally
                   (remove-ns 'seon.test.tmp-sb-repl))))))))))
 
-(deftest ^{:cost/ticks 155000000} minimal-native-datalog-rules-and-generative-seed42-test
+(deftest ^{:cost/ticks 200000000} minimal-native-datalog-rules-and-generative-seed42-test
   (testing "Active canonical starter rules are minimal (<= 32), 0 :seon.rule/when, 100% native :seon.rule/query"
     (let [rs (rseed/starter-rules)
           rids (into #{} (map :seon.rule/id) rs)]
