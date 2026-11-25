@@ -247,7 +247,9 @@
     "install-user-helpers!" "install-agent-helpers!" "install-repl-helpers!" "install-ctx-helpers!"
     "handle-req" "handle-ipc" "handle-timer" "call!" "record-summary!" "resolve-doc-refs" "reply!"})
 
-(defn- scan-hygiene-index [db]
+(defn- scan-hygiene-index
+  {:seon.eval/budget-override {:ticks 600000000, :bytes 1073741824}}
+  [db]
 (let [sch (:schema db) foreign (static/foreign-nss db)
       tests (java.util.HashSet. 512) edges (java.util.HashSet. 128)
       fk->fe (java.util.HashMap. 2800) form->hash (java.util.HashMap. 2800)

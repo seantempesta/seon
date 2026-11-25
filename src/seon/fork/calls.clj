@@ -152,16 +152,19 @@
       {:unpinned item :count (count nxt)})))
 
 (defn ^:seon.flow/edge ask!
-  "Sends a structured Flow call to `callee` with a prompt string or task spec map."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat :keyword :any] [:maybe :map]] [:=> [:cat :keyword :any [:maybe :map]] [:maybe :map]]]}
+  "Sends a structured Flow call to `callee` with a prompt string or task spec map. Accepts optional opts map or keyword args (e.g. `:await? true :scope 'ns`)."
+  {:seon.repl/export true :malli/schema [:=> [:cat :keyword :any [:* :any]] [:maybe :map]]}
   ([callee prompt-or-spec] (ask! callee prompt-or-spec {}))
   ([callee prompt-or-spec opts]
    (when-let [{:keys [conn agent-id]} *agent-ctx*]
-     (let [spec (if (map? prompt-or-spec) (merge prompt-or-spec opts) (assoc opts :prompt (str prompt-or-spec)))
+     (let [o (if (map? opts) opts {})
+           spec (if (map? prompt-or-spec) (merge prompt-or-spec o) (assoc o :prompt (str prompt-or-spec)))
            pstr (str (or (:prompt spec) (:title spec) (:plan spec) ""))
            parent-cid (or (:parent-call spec) (active-incoming-call-id conn agent-id))]
        (tx-main-sync! (cond-> (merge {:op :create-call :caller agent-id :callee callee :prompt pstr} spec)
-                        parent-cid (assoc :parent-call parent-cid)))))))
+                        parent-cid (assoc :parent-call parent-cid))))))
+  ([callee prompt-or-spec k v & kvs]
+   (ask! callee prompt-or-spec (apply hash-map k v kvs))))
 
 (defn ^:seon.flow/edge update-task!
 "Updates `:plan`, `:summary`, `:tests`, `:proofs`, `:test-vars`, `:needs`, or `:done?` on your active `:seon.task/*` (or `:id` in `spec`)."
@@ -203,10 +206,11 @@
       (tx-main-sync! {:op :await-calls :caller agent-id :call-ids ids}))))
 
 (defn ^:seon.flow/edge call!
-  "Synchronous shorthand for `(ask! callee prompt (assoc opts :await? true))`."
-  {:seon.repl/export true :malli/schema [:function [:=> [:cat :keyword :any] [:maybe :map]] [:=> [:cat :keyword :any [:maybe :map]] [:maybe :map]]]}
+  "Synchronous shorthand for `(ask! callee prompt (assoc opts :await? true))`. Accepts opts map or keyword args."
+  {:seon.repl/export true :malli/schema [:=> [:cat :keyword :any [:* :any]] [:maybe :map]]}
   ([callee prompt] (call! callee prompt {}))
-  ([callee prompt opts] (ask! callee prompt (assoc opts :await? true))))
+  ([callee prompt opts] (ask! callee prompt (assoc (if (map? opts) opts {}) :await? true)))
+  ([callee prompt k v & kvs] (call! callee prompt (apply hash-map k v kvs))))
 
 (defn ^:seon.flow/edge answer!
   "Settles an incoming structured call `call-id` with `value`."

@@ -247,12 +247,16 @@
                       (:auto-merge? task) {:ok? false :error "worker-did-not-auto-merge" :touched-paths #{}}
                       :else (instance-op! inst-handle {:op :merge :branch branch :message (str "Bench trial " (name id))})))
             health-res (instance-op! inst-handle {:op :health})
-            verify-res (when (and (not timed-out?) (:verify-spec task))
-                         (let [sp (assoc (:verify-spec task) :after-main-tx (long (or (:after-main-tx baseline) 0)))
-                               vr (instance-op! inst-handle {:op :verify-task :spec sp})]
-                           (if (and (false? (:ok? vr)) (str/includes? (str (:error vr)) "Unknown server op"))
-                             (eval-probe-edn inst-handle (str "(seon.bench.helpers/verify-task-spec (user/main-db) '" (pr-str sp) ")"))
-                             vr)))
+            verify-res (cond
+                       (and timed-out? (:verify-spec task))
+                       {:ok? false :reason "skipped-due-to-timeout"}
+                       (:verify-spec task)
+                       (let [sp (assoc (:verify-spec task) :after-main-tx (long (or (:after-main-tx baseline) 0)))
+                             vr (instance-op! inst-handle {:op :verify-task :spec sp})]
+                         (if (and (false? (:ok? vr)) (str/includes? (str (:error vr)) "Unknown server op"))
+                           (eval-probe-edn inst-handle (str "(seon.bench.helpers/verify-task-spec (user/main-db) '" (pr-str sp) ")"))
+                           vr))
+                       :else nil)
             outcome (trial-outcome {:task task :ag-snap ag-snap :eval-res eval-res :agent-res agent-res
                                     :test-res test-res :merge-res merge-res :final-trace final-trace
                                     :health-res health-res :verify-res verify-res})

@@ -493,18 +493,20 @@
   (let [u (create-ns 'user)
         _ (intern u (with-meta 'ns-outline
                       {:doc "Return {:ns :total-tokens :form-count :forms [{:sym :key :lines :chars :tokens :private? :local-deps :callers}]} for nsym (or seq of nsyms)."
-                       :arglists '([nsym] [nsym & more])})
+                       :arglists '([] [nsym] [nsym & more])})
                   (fn
-                    ([nsym]
-                     (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                       (let [db @conn]
-                         (if (and (coll? nsym) (not (map? nsym)))
-                           (into {} (map (fn [n] [n (ns-form-outline db n)])) nsym)
-                           (ns-form-outline db nsym)))))
-                    ([nsym & more]
-                     (when-let [{:keys [conn]} (get-agent-ctx-fn)]
-                       (let [db @conn]
-                         (into {} (map (fn [n] [n (ns-form-outline db n)])) (cons nsym more)))))))
+                  ([] (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                        ((requiring-resolve 'seon.repl.search/ns-size-summary) @conn {})))
+                  ([nsym]
+                   (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                     (let [db @conn]
+                       (cond (map? nsym) ((requiring-resolve 'seon.repl.search/ns-size-summary) db nsym)
+                             (coll? nsym) (into {} (map (fn [n] [n (ns-form-outline db n)])) nsym)
+                             :else (ns-form-outline db nsym)))))
+                  ([nsym & more]
+                   (when-let [{:keys [conn]} (get-agent-ctx-fn)]
+                     (let [db @conn]
+                       (into {} (map (fn [n] [n (ns-form-outline db n)])) (cons nsym more)))))))
         mv (intern u (with-meta 'move-vars!
                        {:doc "Atomically move vars from :from ns to child :to ns. Spec: {:from 'ns :to 'ns.child :vars '[v1 v2] :alias 'child :doc \"...\" :include-deps? true :re-export-public? true :keep-private? :auto :dry-run? false}. Only moved private helpers still called by :from are promoted to defn."
                         :arglists '([spec])

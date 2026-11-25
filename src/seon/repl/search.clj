@@ -108,3 +108,63 @@
        {:vars (->> (concat (:vars h1) (:vars h2)) (filter in-ns?) distinct sort (take 25) vec)
         :schemas (->> (concat (:schemas h1) (:schemas h2)) (filter in-ns?) distinct sort (take 20) vec)
         :docs (->> (concat (:docs h1) (:docs h2)) distinct sort (take 20) vec)}))))
+
+(defn ns-size-summary
+  "O(N) zero-source summary of namespaces ranked by estimated token count (`{:ns :forms :vars :chars :tokens}`).
+   Opts: `:prefix` (string/symbol), `:include-tests?` (default false), `:limit`/`:top` (default 30)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db] [:vector :map]]
+                  [:=> [:cat :seon.host/db [:maybe :map]] [:vector :map]]]
+   :cost/ticks 25000000
+   :seon.eval/budget-override {:ticks 200000000 :bytes 536870912}}
+  ([db] (ns-size-summary db nil))
+  ([db opts]
+   (let [o (if (map? opts) opts {})
+         sm (:schema db)
+         pref (when-let [p (or (:prefix o) (:ns o))] (str/lower-case (if (symbol? p) (name p) (str p))))
+         inc-tests? (boolean (:include-tests? o))
+         lim (long (or (:limit o) (:top o) 30))]
+     (if-not (and db (contains? sm :seon.code.form/ns))
+       []
+       (let [fe->ns (java.util.HashMap. 4096)
+             forms-by-ns (volatile! {})
+             chars-by-ns (volatile! {})
+             vars-by-ns (volatile! {})]
+         (doseq [dt (d/datoms db :aevt :seon.code.form/ns)]
+           (let [nsym (:v dt)]
+             (.put fe->ns (:e dt) nsym)
+             (vswap! forms-by-ns update nsym (fnil inc 0))))
+         (when (contains? sm :seon.code.form/chars)
+           (doseq [dt (d/datoms db :aevt :seon.code.form/chars)]
+             (when-let [nsym (.get fe->ns (:e dt))]
+               (vswap! chars-by-ns update nsym (fnil + 0) (long (:v dt))))))
+         (when (contains? sm :seon.code.var/ns)
+           (doseq [dt (d/datoms db :aevt :seon.code.var/ns)]
+             (vswap! vars-by-ns update (:v dt) (fnil inc 0))))
+         (->> (keys @forms-by-ns)
+              (filter (fn [nsym]
+                        (let [ns-s (name nsym)]
+                          (and (or inc-tests? (not (str/ends-with? ns-s "-test")))
+                               (or (nil? pref) (str/includes? (str/lower-case ns-s) pref))))))
+              (map (fn [nsym]
+                     (let [ch (long (get @chars-by-ns nsym 0))]
+                       {:ns nsym
+                        :forms (long (get @forms-by-ns nsym 0))
+                        :vars (long (get @vars-by-ns nsym 0))
+                        :chars ch
+                        :tokens (quot ch 4)})))
+              (sort-by (fn [{:keys [tokens ns]}] [(- tokens) (str ns)]))
+              (take (max 1 lim))
+              vec))))))
+
+(defn ns-list
+  "Lists namespaces ranked by token size (`{:ns :forms :vars :chars :tokens}`). Pass optional substring/prefix or `{:prefix ... :include-tests? true :top 30}`."
+  {:malli/schema [:function [:=> [:cat] [:maybe [:vector :map]]] [:=> [:cat :any] [:maybe [:vector :map]]]]
+   :seon.eval/budget-override {:ticks 200000000 :bytes 536870912}}
+  ([] (ns-list {}))
+  ([filter-or-opts]
+   (when-let [{:keys [conn]} *agent-ctx*]
+     (let [opts (cond (map? filter-or-opts) filter-or-opts
+                      (or (string? filter-or-opts) (symbol? filter-or-opts)) {:prefix filter-or-opts :include-tests? true :limit 50}
+                      :else {})]
+       (ns-size-summary @conn opts)))))
