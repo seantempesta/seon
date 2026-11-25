@@ -511,7 +511,7 @@
                   (and aeid (some? (:seon.agent/canvas-hiccup cur))) (conj [:db/retract aeid :seon.agent/canvas-hiccup (:seon.agent/canvas-hiccup cur)])))
            r (d/transact conn {:tx-data tx})
            _ (ctx/refresh-active! (:db-after r) (:tx-data r))
-           dropped (when vec? (:dropped (sanitize/sanitize-hiccup-with-report hiccup-or-fn {:allow-seon-actions? true})))
+           dropped (when vec? (vec (remove #(= "Stripped forbidden tag :seon/fit" %) (:dropped (sanitize/sanitize-hiccup-with-report hiccup-or-fn {:allow-seon-actions? true})))))
            unresolved? (and (qualified-symbol? hiccup-or-fn) (nil? (fit/resolve-renderer-var hiccup-or-fn)))]
        (cond-> {:ok? true :agent-id agent-id :mode (if vec? :hiccup :fn) :tx (:max-tx (:db-after r))}
          (seq dropped) (assoc :dropped (vec dropped))

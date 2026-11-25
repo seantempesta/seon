@@ -18,7 +18,8 @@
             [seon.transactor.calls :as tcalls]
             [seon.vector :as vec]
             [seon.vector.flow :as vflow]
-            [seon.git.forks :as forks]))
+            [seon.git.forks :as forks]
+            [seon.render.fit :as fit]))
 
 (defn- reply! [ch val]
   (when ch
@@ -145,9 +146,14 @@
                                    :timeout-ms :settle-ms :binary-path])]
         (a/thread
           (let [ans (try (browser/render-hiccup-frames! url html opts)
-                         (catch Throwable ex
-                           {:ok? false :error (or (.getMessage ex) (str ex)) :frames []}))]
-            (reply! reply-ch ans))))
+                       (catch Throwable ex
+                         {:ok? false :error (or (.getMessage ex) (str ex)) :frames []}))]
+          (when (and (:ok? ans) (qualified-symbol? (:var-sym req)) (seq (:frames ans)))
+            (doseq [f (:frames ans) :when (number? (:seon.media/width f))]
+              (fit/record-browser-box! (:var-sym req) (:form-hash req) (long (:seon.media/width f))
+                                       (if (map? (:seon.media/dom f)) (:seon.media/dom f)
+                                           {:w (:seon.media/width f) :h (:seon.media/height f)}))))
+          (reply! reply-ch ans))))
 
       :measure-dom
       (let [opts (select-keys req [:width :height :selector :max-elements :snippets

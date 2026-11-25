@@ -414,7 +414,7 @@
             job {:html html :all-widths ws :rem-widths ws
                  :theme (:theme msg) :height (:height msg)
                  :quality (or (:quality msg) 0.78) :max-width (:max-width msg)
-                 :label-prefix (:label-prefix msg)
+                 :label-prefix (:label-prefix msg) :var-sym (:var-sym msg) :form-hash (:form-hash msg)
                  :step-timeout-ms (clamp (:step-timeout-ms msg) 3500 1000 10000)
                  :frames [] :reply-ch reply-ch :req-id req-id :agent-id agent-id}]
         [(stage-frame-cmd st job (first ws)) nil])
@@ -489,6 +489,12 @@
           frames (vec (:frames job))
           res (cond-> {:ok? (and (nil? err) (boolean (seq frames))) :widths (:all-widths job) :frames frames}
                 err (assoc :error err))]
+      (when (and (:ok? res) (qualified-symbol? (:var-sym job)) (seq frames))
+        (when-let [rec (requiring-resolve (quote seon.render.fit/record-browser-box!))]
+          (doseq [f frames :when (number? (:seon.media/width f))]
+            (rec (:var-sym job) (:form-hash job) (long (:seon.media/width f))
+                 (if (map? (:seon.media/dom f)) (:seon.media/dom f)
+                     {:w (:seon.media/width f) :h (:seon.media/height f)})))))
       (restore-size! st)
       (reply! reply-ch res)
       [st nil])

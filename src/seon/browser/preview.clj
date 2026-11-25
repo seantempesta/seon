@@ -193,7 +193,7 @@
   (try
     (let [resp (mwire/http-post! (str "http://127.0.0.1:" port "/op")
                                  [["Content-Type" "application/edn"]]
-                                 (pr-str (assoc cap-opts :op :render-hiccup-frames :html html :url url)))]
+                                 (pr-str (cond-> (assoc cap-opts :op :render-hiccup-frames :html html) url (assoc :url url))))]
       (when (= 200 (:status resp)) (edn/read-string (:body resp))))
     (catch Throwable _ nil)))
 
@@ -209,9 +209,10 @@
     (and (map? target) (:browser-ch target)) (browser/render-hiccup-frames! (:browser-ch target) html cap-opts)
     :else
     (let [port (or (when (map? target) (:port target)) (:port o) (System/getenv "SEON_PORT") 9998)
-          url (or (when (map? target) (:url target)) (:url o) (str "http://127.0.0.1:" port "/"))
-          via-op (when-not (:direct? o) (post-op-frames! port url html cap-opts))]
-      (if (and (map? via-op) (:ok? via-op) (seq (:frames via-op))) via-op (browser/render-hiccup-frames! url html cap-opts)))))
+        eu (or (when (map? target) (:url target)) (:url o))
+        url (or eu (str "http://127.0.0.1:" port "/"))
+        via-op (when-not (:direct? o) (post-op-frames! port eu html cap-opts))]
+    (if (and (map? via-op) (:ok? via-op) (seq (:frames via-op))) via-op (browser/render-hiccup-frames! url html cap-opts)))))
 
 (defn- var-input-schemas [db ve]
   (or (seq (resolve-var-input-keys db ve))
@@ -420,12 +421,12 @@ Rendered edited `:seon.ui/hiccup` component(s) in WKWebView (0 DB writes) — in
        (sequential? (:siblings m)) (assoc :siblings (vec (:siblings m)))))))
 
 (defn ^:seon.flow/edge render-var-preview-frames!
-  "Renders ephemeral multi-width preview frames for `var-sym` using `preview-lru` (0 DB writes) and records boxes in `seon.render.fit`."
+  "Renders ephemeral multi-width preview frames for `var-sym` (`preview-lru`, 0 DB writes) and caches boxes."
   {:malli/schema [:function [:=> [:cat :any [:maybe :seon.host/db] :qualified-symbol] :map] [:=> [:cat :any [:maybe :seon.host/db] :qualified-symbol [:maybe :map]] :map]]
    :cost/ticks 45000000}
   ([srv db var-sym] (render-var-preview-frames! srv db var-sym nil))
   ([srv db var-sym opts]
-   (let [o (if (map? opts) opts {}) ws (vec (or (seq (:widths o)) [360 640])) th (or (:theme o) :dark)
+   (let [o (if (map? opts) opts {}) ws (vec (or (seq (:widths o)) (when (valid-db? db) (store/config-val db :seon.config/preview-widths)) [360 640])) th (or (:theme o) :dark)
          ev (eval-renderer-preview db var-sym o) fh (:form-hash ev)
          mm (assoc (select-keys ev [:var :source :input-hash :form-hash :tokens :has-examples? :input-schemas :siblings]) :widths ws :theme th)
          rec! (fn [fs] (mapv #(fit/record-browser-box! var-sym fh (long (:width %)) (if (map? (:dom %)) (:dom %) {:w (:width %) :h (:height %)})) fs))]
@@ -434,7 +435,7 @@ Rendered edited `:seon.ui/hiccup` component(s) in WKWebView (0 DB writes) — in
        (let [ck [var-sym fh (:input-hash ev) ws th] hit (when-not (:no-cache? o) (lru-peek ck))]
          (if (and (not (:no-cache? o)) (not (identical? ::miss hit)))
            (assoc mm :ok? true :frames hit :boxes (rec! hit) :cached? true)
-           (let [co (merge {:widths ws :theme th :label-prefix (name var-sym)} (select-keys o [:height :quality :max-width :label-prefix :timeout-ms :settle-ms :binary-path]))
+           (let [co (merge {:widths ws :theme th :label-prefix (name var-sym) :var-sym var-sym :form-hash fh} (select-keys o [:height :quality :max-width :label-prefix :timeout-ms :settle-ms :binary-path]))
                  cap (capture-html-frames! srv (:html ev) co o)
                  fs (if (and (map? cap) (:ok? cap) (seq (:frames cap))) (mapv #(normalize-ephemeral-frame var-sym (:source ev) % ev) (:frames cap)) [])]
              (if (seq fs)
@@ -444,13 +445,13 @@ Rendered edited `:seon.ui/hiccup` component(s) in WKWebView (0 DB writes) — in
                (assoc mm :ok? false :frames [] :boxes [] :cached? false :error (or (:error cap) :render-preview-frames-failed))))))))))
 
 (defn ^:seon.flow/edge measure-schema-renderers!
-  "Measures ALL `:seon.ui/hiccup` renderers for `schema-key` in WKWebView at `[360 640]` on one shared input and caches browser boxes in `seon.render.fit`."
+  "Measures all `:seon.ui/hiccup` renderers for `schema-key` on one shared input and caches boxes in `fit`."
   {:malli/schema [:function [:=> [:cat :any [:maybe :seon.host/db] :qualified-keyword] :map]
                   [:=> [:cat :any [:maybe :seon.host/db] :qualified-keyword [:maybe :map]] :map]]
    :cost/ticks 60000000}
   ([srv db schema-key] (measure-schema-renderers! srv db schema-key nil))
   ([srv db schema-key opts]
-   (let [o (if (map? opts) opts {}) ws (vec (or (seq (:widths o)) [360 640])) th (or (:theme o) :dark)
+   (let [o (if (map? opts) opts {}) ws (vec (or (seq (:widths o)) (when (valid-db? db) (store/config-val db :seon.config/preview-widths)) [360 640])) th (or (:theme o) :dark)
          rsyms (vec (or (seq (:renderers o)) (when (valid-db? db) (fit/discover-renderers db schema-key))))]
      (if (empty? rsyms)
        {:ok? false :schema schema-key :error :no-renderers :widths ws :theme th :renderers [] :frames []}

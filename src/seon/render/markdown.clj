@@ -417,42 +417,36 @@
 
 (defn- render-seon-view-block [content opts]
   (let [raw (str (or content ""))
-        parsed (mdp/safe-read-edn raw)
-        spec (when (and (:ok? parsed) (map? (:val parsed))) (:val parsed))
+        p (mdp/safe-read-edn raw)
+        spec (when (and (:ok? p) (map? (:val p))) (:val p))
         rv (:var spec)
-        rv (if (and (seq? rv) (= (quote quote) (first rv))) (second rv) rv)
-        var-sym (when (qualified-symbol? rv) rv)
+        vs (when-let [s (if (and (seq? rv) (= (quote quote) (first rv))) (second rv) rv)] (when (qualified-symbol? s) s))
         ref (when (:ref spec) (rdata/normalize-inspect-ref (:ref spec)))
+        fit? (and spec (not vs) (or (:refs spec) (:items spec) ref))
+        exp? (if (contains? opts :expert-mode?) (boolean (:expert-mode? opts)) true)
         db (:db opts)
-        pulled (when (and db (instance? datahike.db.interface.ISearch db) ref)
-                 (try (not-empty (dissoc (d/pull db (quote [*]) ref) :db/id))
-                      (catch Throwable ex {:seon.view/error (or (.getMessage ex) (str ex))})))
-        valid-pull (when (and (map? pulled) (not (:seon.view/error pulled))) pulled)
-        head [:div {:class "md-live-head"}
-              [:div {:class "pill-row"}
-               [:span {:class "badge amber tiny mono"} "seon-view"]
-               (when var-sym (rlinks/ent-link [:seon.code.var/name var-sym] (str var-sym) "badge blue tiny mono"))]
-              (when ref (rlinks/ent-link ref (str "Inspect " (rdata/entity-short-label ref) " →") "mono tiny muted"))]]
-    [:div {:class "md-live-card md-seon-view-card"}
-     head
-     (cond
-       (not spec)
-       [:div {:class "notice red mono tiny"}
-        (if (:ok? parsed) "seon-view expects {:var ns/fn :data {...}} or {:ref [:attr val]}." (str "Invalid seon-view EDN: " (:error parsed)))]
-       (and var-sym (or (contains? spec :data) valid-pull))
-       (let [res (invoke-seon-view-var var-sym (if (contains? spec :data) (:data spec) valid-pull))]
-         (if (:ok? res) [:div {:class "md-live-body"} (:hiccup res)] [:div {:class "notice red mono tiny"} (:error res)]))
-       ref
-       [:div {:class "md-live-body stack-xs"}
-        (rlinks/ent-link ref (rdata/entity-short-label (or valid-pull ref)) "mono strong")
-        (when valid-pull [:div {:class "mono tiny muted"} (rdata/compact-entity-preview valid-pull 180)])]
-       var-sym
-       [:div {:class "md-live-body"} (rlinks/ent-link [:seon.code.var/name var-sym] (str var-sym) "mono strong")]
-       :else
-       [:div {:class "notice red mono tiny"} "seon-view requires :var and/or :ref."])
-     [:details {:class "md-live-source"}
-      [:summary {:class "mono tiny muted"} "View Spec"]
-      [:pre {:class "code-box tiny"} [:code {:class "language-clojure"} raw]]]]))
+        pulled (when (and db (instance? datahike.db.interface.ISearch db) ref (not fit?))
+                 (try (not-empty (dissoc (d/pull db (quote [*]) ref) :db/id)) (catch Throwable _ nil)))
+        body (cond
+               (not spec) [:div {:class "notice red mono tiny"} (if (:ok? p) "seon-view expects a map." (str "Invalid EDN: " (:error p)))]
+               fit? (if-let [rf (requiring-resolve (quote seon.render.surface.presence/render-fitted-spec))]
+                      (or (rf db (or (:branch-db opts) db) spec opts) [:div {:class "muted tiny mono"} "No matching entities."])
+                      [:div {:class "md-live-body"} (when ref (rlinks/ent-link ref (rdata/entity-short-label ref) "mono strong"))])
+               (and vs (or (contains? spec :data) pulled))
+               (let [r (invoke-seon-view-var vs (if (contains? spec :data) (:data spec) pulled))]
+                 (if (:ok? r) [:div {:class "md-live-body"} (:hiccup r)] [:div {:class "notice red mono tiny"} (:error r)]))
+               vs [:div {:class "md-live-body"} (rlinks/ent-link [:seon.code.var/name vs] (str vs) "mono strong")]
+               :else [:div {:class "notice red mono tiny"} "seon-view requires :var, :ref, :refs, or :items."])]
+    (if (and (not exp?) spec)
+      [:div {:class "md-seon-view-clean"} body]
+      [:div {:class "md-live-card md-seon-view-card"}
+       [:div {:class "md-live-head"}
+        [:div {:class "pill-row"} [:span {:class "badge amber tiny mono"} "seon-view"]
+         (when vs (rlinks/ent-link [:seon.code.var/name vs] (str vs) "badge blue tiny mono"))]
+        (when ref (rlinks/ent-link ref (str "Inspect " (rdata/entity-short-label ref) " →") "mono tiny muted"))]
+       body
+       [:details {:class "md-live-source"} [:summary {:class "mono tiny muted"} "View Spec"]
+        [:pre {:class "code-box tiny"} [:code {:class "language-clojure"} raw]]]])))
 
 (defn- render-code-block [{:keys [info content]} opts]
   (let [lang-raw (first (str/split (str/trim (str (or info ""))) #"\s+"))
