@@ -18,7 +18,8 @@
             [seon.health.liveness :as hliveness]
             [seon.render.wire]
             [seon.bench.helpers :as bhelpers]
-            [seon.bench.lab :as blab]))
+            [seon.bench.lab :as blab]
+            [seon.schema :as schema]))
 
 (defn- intern-doc! [u sym f]
   (let [v (intern u sym (if (var? f) (fn [& args] (apply @f args)) f))
@@ -170,9 +171,12 @@
   (let [ag-sc (when agent-id (:seon.agent/scope (d/pull bdb '[:seon.agent/scope] [:seon.agent/id agent-id])))
         known (or explicit-scope (when (and ag-sc (not= ag-sc 'seon)) ag-sc))
         {:keys [fkeys tnss skeys]} (branch-delta-info conn bdb branch known)
-        sc (or known (first tnss)) cnss (if sc [sc] [])
+        sc (or known (first tnss))
         alerts (health/fast-scoped-alerts mdb bdb (or sc 'seon) agent-id nil {})
         sforms (into {} (keep (fn [k] (when-let [f (:seon.schema/form (d/pull bdb '[:seon.schema/form] [:seon.schema/key k]))] [k f]))) skeys)
+        caused (if (and mdb (not= mdb bdb))
+                 (health/caused-by-branch mdb bdb sforms (when (seq tnss) tnss))
+                 (when (seq sforms) (health/schema-violations mdb sforms)))
         ctr-errs (if (seq fkeys)
                    (let [proj '[:seon.code.var/name :seon.code.var/ns :seon.code.var/private? :seon.code.var/macro? :seon.code.var/test? :seon.code.var/arglists :seon.code.var/schema]]
                      (vec (for [fk (take 24 fkeys) dt (d/datoms bdb :avet :seon.code.var/form fk)
@@ -183,14 +187,11 @@
                             {:class :missing-contract :severity :error :kind :static :ns n :var vn :subject (str vn)
                              :branch branch :message (str "Public fn " vn " is missing :malli/schema.")})))
                    [])
-        delta (fn [f] (when-let [cur (and (seq cnss) (seq (f bdb cnss)))]
-                        (let [b (into #{} (map :subject) (f mdb cnss))] (remove #(contains? b (:subject %)) cur))))
-        probs (vec (distinct (concat (when (seq sforms) (health/schema-violations mdb sforms))
-                                     ctr-errs (delta health/used-before-defined) (delta health/missing-ns-forms)
-                                     alerts (when (and sc (not= sc 'seon)) (health/static-efficiency-warnings bdb sc)))))]
+        probs (vec (distinct (concat caused ctr-errs alerts
+                                     (when (and sc (not= sc 'seon)) (health/static-efficiency-warnings bdb sc)))))]
     (with-meta {:ok? (not (some #(= :error (:severity %)) probs)) :branch branch :scoped? true :scope sc
                 :touched-nss tnss :counts (frequencies (map :class probs)) :problems probs
-                :note "Fast scoped branch health (<15 MB). Pass :all or :main for full DB health."}
+                :note "Scoped branch health (full caused-by-branch merge gates). Pass :all or :main for full DB health."}
                {:seon/schema :seon.health/report})))
 
 (defn health
@@ -213,7 +214,7 @@
         (d/merge-base bdb mcid bcid)))))
 
 (defn run-tests!
-  "Runs reach-selected or explicit `deftest`s live (accepting syms, namespaces, or `{:vars [...]}`)."
+  "Runs reach-selected or explicit `deftest`s AND `seed=42` Malli generative checks on edited/target contracted vars."
   {:malli/schema [:=> [:cat [:* :any]] [:maybe :map]] :seon.eval/budget-override {:ticks 2000000000 :bytes 4294967296}}
   ([] (run-tests! nil))
   ([target & more]
@@ -229,21 +230,52 @@
                        (->> tlist
                             (mapcat (fn [x]
                                       (let [s (if (string? x) (symbol x) x)]
-                                        (cond (namespace s) [s]
+                                        (cond (namespace s) (if (:seon.code.var/test? (d/pull bdb '[:seon.code.var/test?] [:seon.code.var/name s]))
+                                                              [s] (code/reaching-tests bdb (symbol (namespace s))))
                                               (str/ends-with? (name s) "-test")
                                               (keep #(let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test?] (:e %))] (when (:seon.code.var/test? v) (:seon.code.var/name v)))
                                                     (d/datoms bdb :avet :seon.code.var/ns s))
                                               :else (code/reaching-tests bdb s)))))
                             distinct sort vec)
                        (->> (distinct (keep :seon.code.form/ns (:upserts ops))) (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
-           results (wsup/call-with-candidate-overrides bdb (fn [_] (mapv #(wsup/run-single-test-var bdb % (str "local:" %)) test-syms)))
+           gen-vars (if (seq tlist)
+                      (vec (distinct (keep (fn [x]
+                                             (let [s (if (string? x) (symbol x) x)]
+                                               (when (and (qualified-symbol? s) (not (str/ends-with? (namespace s) "-test")))
+                                                 (let [v (d/pull bdb '[:seon.code.var/test? :seon.code.var/flow-edge? :seon.code.var/schema] [:seon.code.var/name s])]
+                                                   (when (and (not (:seon.code.var/test? v)) (not (:seon.code.var/flow-edge? v))
+                                                              (schema/generatable-function-schema? (:seon.code.var/schema v)))
+                                                     s)))))
+                                           tlist)))
+                      (->> (:upserts ops)
+                           (mapcat #(map :e (d/datoms bdb :avet :seon.code.var/form (:seon.code.form/key %))))
+                           (keep (fn [e]
+                                   (let [v (d/pull bdb '[:seon.code.var/name :seon.code.var/test? :seon.code.var/flow-edge? :seon.code.var/schema] e)
+                                         vn (:seon.code.var/name v)]
+                                     (when (and vn (not (:seon.code.var/test? v)) (not (:seon.code.var/flow-edge? v))
+                                                (not (str/ends-with? (namespace vn) "-test"))
+                                                (schema/generatable-function-schema? (:seon.code.var/schema v)))
+                                       vn))))
+                           distinct sort vec))
+           {:keys [results gen-results]}
+           (wsup/call-with-candidate-overrides bdb
+             (fn [_]
+               {:results (mapv #(wsup/run-single-test-var bdb % (str "local:" %)) test-syms)
+                :gen-results (vec (keep (fn [vsym]
+                                          (when-let [r (schema/stress-var bdb vsym {:samples 100 :seed 42 :measure-fn code/measure-call})]
+                                            (when-not (:skipped? r)
+                                              {:seon.test/var vsym :seon.test/kind :generative :seon.test/pass? (boolean (:ok? r))
+                                               :seon.test/ms (double (:ms r 0.0)) :seon.test/report (or (:reason r) "PASS")})))
+                                        gen-vars))}))
+           all-res (into results gen-results)
            fails (mapv (fn [f] (let [mp (main-test-pass? mdb (:seon.test/var f))]
-                                 (assoc (select-keys f [:seon.test/var :seon.test/report :seon.test/ms]) :main-pass? mp :summary (concise-failure-line f mp))))
-                       (filterv #(not (:seon.test/pass? %)) results))
+                                 (assoc (select-keys f [:seon.test/var :seon.test/kind :seon.test/report :seon.test/ms]) :main-pass? mp :summary (concise-failure-line f mp))))
+                       (filterv #(not (:seon.test/pass? %)) all-res))
            ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 10000.0)) 100.0)]
-       (when (seq fails) (println (str "FAIL (" (count fails) "/" (count results) "): " (str/join " | " (map :summary fails)))))
-       (cond-> {:ok? (empty? fails) :ran (count results) :passed (- (count results) (count fails)) :failed (count fails)
-                :ms ms :failures fails :results (mapv #(select-keys % [:seon.test/var :seon.test/pass? :seon.test/ms]) results)}
+       (when (seq fails) (println (str "FAIL (" (count fails) "/" (count all-res) "): " (str/join " | " (map :summary fails)))))
+       (cond-> {:ok? (empty? fails) :ran (count all-res) :passed (- (count all-res) (count fails)) :failed (count fails)
+                :gen-checked (count gen-results) :ms ms :failures fails
+                :results (mapv #(select-keys % [:seon.test/var :seon.test/kind :seon.test/pass? :seon.test/ms]) all-res)}
          (seq fails) (assoc :failure-lines (mapv :summary fails)))))))
 
 (defn inspect-branch

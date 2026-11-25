@@ -526,13 +526,21 @@
            declarations))
 
 (defn generatable-function-schema?
-  "True when `sch` is a single-arity `[:=> [:cat ...] ret]` without `:seon.host/*` handles in args."
-  {:malli/schema [:=> [:cat :any] [:maybe :boolean]] :cost/ticks 100000}
+  "True when `sch` is a single `[:=> [:cat ...] ret]` without `:seon.host/*` args, OR a multi-arity `[:function [:=> ...] ...]` whose `:=>` clauses have concrete non-`:seon.host/*`, non-`:any` args."
+  {:malli/schema [:=> [:cat :any] [:maybe :boolean]] :cost/ticks 150000}
   [sch]
-  (when (and (vector? sch) (= :=> (first sch)))
-    (let [args-form (if (map? (second sch)) (nth sch 2 nil) (second sch))]
-      (not (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
-                 (tree-seq coll? seq args-form))))))
+  (let [no-host? (fn [args-form] (not (some #(and (qualified-keyword? %) (= "seon.host" (namespace %))) (tree-seq coll? seq args-form))))
+        no-any? (fn [args-form] (not (some #(= :any %) (tree-seq coll? seq args-form))))
+        arity-ok? (fn [strict-any? s]
+                    (when (and (vector? s) (= :=> (first s)))
+                      (let [af (if (map? (second s)) (nth s 2 nil) (second s))]
+                        (and (no-host? af) (or (not strict-any?) (no-any? af))))))]
+    (cond
+      (and (vector? sch) (= :=> (first sch))) (boolean (arity-ok? false sch))
+      (and (vector? sch) (= :function (first sch)))
+      (let [ars (filterv vector? (rest sch))]
+        (boolean (and (seq ars) (every? #(arity-ok? true %) ars))))
+      :else nil)))
 
 (defn lookup-schemas
   "Pure schema inspector: `(lookup-schemas db)` lists all sorted `:seon.schema/key` keywords; `(lookup-schemas db :k)` pulls full schema entity; `(lookup-schemas db \"substr\" | #\"re\")` searches keys & docs."

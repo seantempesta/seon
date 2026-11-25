@@ -360,7 +360,10 @@
                  max-tx (reduce
                           (fn [mx dt]
                             (let [a (res-a (:a dt)) e (:e dt) added? (boolean (:added dt))
-                                  hit? (or (contains? domain-edit-attrs a)
+                                  hit? (or (or (contains? domain-edit-attrs a)
+                                                (when-let [ans (when (keyword? a) (namespace a))]
+                                                  (or (str/starts-with? ans "seon.code.")
+                                                      (contains? #{"seon.schema" "seon.rule" "seon.fix" "seon.config"} ans))))
                                            (and forked?
                                                 (or (and (not added?) (= a :seon.agent.eval/agent) (not= (:v dt) aid))
                                                     (and (not added?) (= a :seon.error/id))

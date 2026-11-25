@@ -378,6 +378,12 @@
     (try
       (let [form-val (read-string src)
             form-head (when (and (seq? form-val) (symbol? (first form-val))) (symbol (name (first form-val))))
+            unmap-target (when (= 'ns-unmap form-head)
+                           (let [n-arg (second form-val) s-arg (nth form-val 2 nil)
+                                 ns-v (cond (and (seq? n-arg) (= 'quote (first n-arg))) (second n-arg) (= '*ns* n-arg) ns-before :else nil)
+                                 sv (when (and (seq? s-arg) (= 'quote (first s-arg))) (second s-arg))]
+                             (when (and (symbol? ns-v) (symbol? sv) (not (contains? '#{user repl} ns-v)))
+                               (symbol (name ns-v) (name sv)))))
             v (let [[eff-ticks eff-bytes] (vreset! eff-caps (effective-eval-budgets form-val ticks-cap bytes-cap))
                     [val rset] (reads/with-reads
                                  #(jolt.host/run-interruptible
@@ -400,6 +406,10 @@
             nodes (:nodes @tap-acc)
             _ (when (seq nodes) (vswap! called-all into (analyze/called-seon-vars nodes)))
             ns-after (ns-name *ns*) is-ns? (= 'ns form-head)
+            _ (when (= 'in-ns form-head)
+                (when (empty? (ns-refers *ns*)) (clojure.core/refer-clojure))
+                (when (and (str/ends-with? (name ns-after) "-test") (nil? (ns-resolve *ns* 'deftest)))
+                  (try (clojure.core/require '[clojure.test :refer [deftest is testing]]) (catch Throwable _ nil))))
             _ (when is-ns? (register-loaded-ns! ns-after))
             target-ns (if is-ns? ns-after ns-before)
             _ (when-not (contains? '#{user repl} target-ns)
@@ -411,7 +421,10 @@
                 (arm-defined-vars-in-ns! db target-ns))
             scratch-def? (and (= 'def form-head) (some #(and (symbol? %) (= "user" (namespace %))) (tree-seq coll? seq form-val)))
             recordable? (and (not (contains? '#{user repl} target-ns)) (contains? persistable-repl-heads form-head) (not scratch-def?))]
-        {:ok? true :value v :final-ns ns-after :by-ns (if recordable? (update (:by-ns acc) target-ns (fnil conj []) src) (:by-ns acc))})
+        (cond-> {:ok? true :value v :final-ns ns-after
+                 :by-ns (if recordable? (update (:by-ns acc) target-ns (fnil conj []) src) (:by-ns acc))
+                 :retracts (:retracts acc)}
+          unmap-target (update :retracts (fnil conj []) unmap-target)))
       (catch Throwable t
         (let [[et eb] @eff-caps base-err (format-eval-throwable t et eb)
               _ (when (seq (:nodes @tap-acc)) (vswap! called-all into (analyze/called-seon-vars (:nodes @tap-acc))))
@@ -422,7 +435,7 @@
                     :lmdb-txn-aborted? (> (store/aborted-lmdb-write-txns) aborts0)
                     :poisoned-worker? (pos? (store/active-lmdb-write-txns))
                     :error (parse/enrich-eval-error code-str base-err hidx)
-                    :blame-info blame-info :final-ns (ns-name *ns*) :by-ns (:by-ns acc)}))))))
+                    :blame-info blame-info :final-ns (ns-name *ns*) :by-ns (array-map) :retracts []}))))))
 
 (defn- register-result-var!
   "Interns the eval result on the `result` namespace as `result/<handle>` with metadata."
@@ -493,7 +506,7 @@
         dk (max 0 (- (ticks-fn) k0))
         dbytes (max 0 (- (alloc-fn) b0))
         dms (/ (Math/round (/ (double (- (mono-fn) t0)) 1e4)) 100.0)
-        {:keys [ok? value error final-ns by-ns blame-info]} outcome
+        {:keys [ok? value error final-ns by-ns retracts blame-info]} outcome
         eid (random-uuid)
         res-handle (or handle (next-result-handle db agent-id))
         res-schema (when ok? (infer-result-schema db value))
@@ -509,8 +522,13 @@
                           (into #{} (keep #(:e (first (d/datoms db :avet :seon.code.var/name %)))) called-syms))
         _ (when ok?
             (register-result-var! res-handle value eid res-schema dms dk out-sw code-str))
-        persist-tx (when (seq by-ns)
-                     (persist-forms-by-ns db by-ns @ir-by-var))
+        retract-tx (when (and ok? (seq retracts))
+                     (vec (mapcat (fn [vsym]
+                                    (let [ve (:e (first (d/datoms db :avet :seon.code.var/name vsym)))
+                                          fe (:e (first (d/datoms db :avet :seon.code.form/key (str vsym))))]
+                                      (cond-> [] ve (conj [:db/retractEntity ve]) fe (conj [:db/retractEntity fe]))))
+                                  (distinct retracts))))
+        persist-tx (vec (concat retract-tx (when (and ok? (seq by-ns)) (persist-forms-by-ns db by-ns @ir-by-var))))
         touched-eids (let [ag-eid (when (and db agent-id (contains? (:schema db) :seon.agent/id))
                                     (:e (first (d/datoms db :avet :seon.agent/id agent-id))))
                            eids (analyze/extract-domain-touched-eids db @touched-all persist-tx ag-eid nil)]

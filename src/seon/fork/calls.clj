@@ -435,7 +435,7 @@
 
 (defn ^:seon.flow/edge tune-context!
   "Updates `:seon.agent/context-prefs`, `:seon.ctx/pattern`, and `:pin`/`:unpin` on `@ctx`."
-  {:seon.repl/export true :malli/schema [:=> [:cat :map] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [opts]
   (when *agent-ctx*
     (let [{:keys [patch context-prefs]} (compute-tune-patch @ctx/ctx nil opts)]

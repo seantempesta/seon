@@ -415,12 +415,19 @@
              wm (:wm (rules/step-rules nil wm0 dbs (vec rs) nil))
              prov (:provenance wm)
              ab (rules/wm-vals wm aid :gate/blocker)
-             rev-out (when (some #{:template/review-and-improve} tids)
+             rev-out (when (some #{:template/review-and-improve :template/tune-context} tids)
                        (evaluate-review-outcome main-db branch-db agent-id))
+             tuner-gen-bs (when (and branch-db (some #{:template/tune-context} tids))
+                            (when-let [lint (requiring-resolve 'seon.health.coverage/lint-rule-generality)]
+                              (let [iss (lint (rules/load-rules branch-db))]
+                                (when (seq iss)
+                                  [{:task :template/tune-context :reason :rule-generality-violation :rule :rule.gate/tuner-generality
+                                    :detail {:issues (vec (take 5 iss)) :message (str "Context Tuner introduced non-general hardcoded rule literal(s): " (pr-str (mapv :literal iss)))}}]))))
              ref-outs (vec (keep #(refine/evaluate-refinement-gate main-db branch-db %) tids))
              all-bs (concat
                      (mapv #(if-let [rid (:rule (first (get prov [(:task %) :gate/blocker %])))] (assoc % :rule rid) %) ab)
                      (:blockers rev-out)
+                     tuner-gen-bs
                      (mapcat :blockers ref-outs))
              bset (into #{} (keep :task) all-bs)
              blockers (->> all-bs

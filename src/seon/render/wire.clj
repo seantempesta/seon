@@ -112,7 +112,8 @@
     (let [max-tt (long (or (store/config-val main-db (:seon.agent/id ag) :seon.config/max-tool-turns) 32))]
       (when (pos? max-tt)
         (let [rem-t (max 0 (- max-tt (long cur-turn)))
-              chgs (diff/branch-changes main-db branch-db)
+              fc (:seon.agent/fork-commit ag)
+              chgs (let [bc (live-cid branch-db)] (cond (and fc (= fc bc)) [] (and fc (diff/ancestor-within? branch-db fc bc 256)) (try (d/changes branch-db fc bc) (catch Throwable _ (diff/branch-changes main-db branch-db))) :else (diff/branch-changes main-db branch-db)))
               n-edits (count (into #{}
                                    (keep (fn [dt]
                                            (let [a (:a dt)
@@ -365,6 +366,23 @@
                     (when excerpt (str "\n\nRendered preview:\n" excerpt))
                     "\n\nFull text: (user/simulate-context " taid " {:render-text? true}) | 12-scenario check: (user/check-corpus)")}))))))
 
+(defn- build-last-proofs-block [ag]
+  (when-let [lp (:seon.agent/last-proofs ag)]
+    (when (and (map? lp) (pos? (long (or (:ran lp) 0))))
+      (let [ok? (boolean (:ok? lp))
+            ran (long (:ran lp 0))
+            passed (long (:passed lp 0))
+            failed (long (:failed lp 0))
+            ms (:ms lp 0.0)
+            tx (:tx lp)
+            fails (vec (take 5 (:failures lp)))]
+        {:tag "auto-proofs"
+         :attrs {:ok (str ok?) :ran (str ran) :failed (str failed) :tx (str tx)}
+         :text (if ok?
+                 (str "Auto-proofs PASS (" passed "/" ran " green in " ms " ms, tx " tx ")")
+                 (str "Auto-proofs FAIL (" failed "/" ran " failed in " ms " ms, tx " tx "):\n"
+                      (str/join "\n" (map #(str "- " %) fails))))}))))
+
 (defn build-live-wire-request
   "Single source of truth for LLM wire context & Context Lab: ONE KV-cache prefix + ONE `<context-delta>` via `seon.ctx/project-entity`."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]
@@ -373,7 +391,7 @@
                                       disabled-rules weights explain? include-tail? depth] :as opts}]
   (let [inc-tail? (not= false include-tail?)
         d0 (long (or depth 0))
-        base-default? (and (empty? already-shown) (nil? token-budget) (nil? strategy)
+        base-default? (and (empty? already-shown) (empty? (:delta-already-shown opts)) (nil? token-budget) (nil? strategy)
                            (empty? disabled-rules) (nil? weights) (nil? (:now-ms opts)))
         ck (when (and base-default? (not explain?))
              (when-let [k (wire-cache-key main-db branch-db agent-id vision? viewport-screenshot)]
@@ -404,14 +422,15 @@
                         surface-stats explained candidates]} w
                 manifest (when-let [fid (:forked-from pfx)] (rstatus/format-forked-eval-manifest walk-db fid))
                 eff-walk (if manifest (str walk-text (when-not (str/blank? walk-text) "\n\n---\n\n") manifest) walk-text)
-                prev-shown (merge (:parent-shown pfx) already-shown shown)
+                prev-shown (merge (:parent-shown pfx) already-shown (:delta-already-shown opts) shown)
                 db-moved? (or (not= walk-main-cid (live-cid main-db)) (not= (live-cid walk-db) (live-cid branch-db)))
                 need-delta? (and inc-tail? (not explain?) (or db-moved? (seq evals)))
                 delta-res (when need-delta? (build-live-delta-blocks main-db branch-db ag cur-turn prev-shown opts))
                 tprev-block (when (and inc-tail? (not explain?)) (build-target-preview-block main-db branch-db ag evals d0))
                 vp-block (when inc-tail? (build-viewport-block main-db ag viewport-screenshot (boolean vision?) (:force-vision? opts)))
+                proofs-block (when inc-tail? (build-last-proofs-block ag))
                 budget-block (when inc-tail? (build-budget-block main-db branch-db ag cur-turn evals))
-                tail-blocks (when inc-tail? (vec (concat (:blocks delta-res) (when tprev-block [tprev-block]) (when budget-block [budget-block]) (when vp-block [vp-block]))))
+                tail-blocks (when inc-tail? (vec (concat (:blocks delta-res) (when proofs-block [proofs-block]) (when tprev-block [tprev-block]) (when budget-block [budget-block]) (when vp-block [vp-block]))))
                 activity-text (when inc-tail? (not-empty (str/join "\n\n" (keep :text tail-blocks))))
                 prefix-msg-eids (into #{} (comp (filter #(= :seon.agent.message/entity (:schema %))) (keep :entity)) active-tiles)
                 rendered-msg-eids (into (into prefix-msg-eids (keys prev-shown)) (:rendered-msg-eids delta-res))
