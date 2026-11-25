@@ -75,13 +75,13 @@
 
 (defn clip
   "Truncates `(str x)` to at most `n` chars (min 1) appending `…` when clipped."
-  {:malli/schema [:=> {:examples [[["hello world" 6] "hello…"] [["hi" 10] "hi"] [[nil 5] ""]]}
+  {:malli/schema [:=> {:examples [[["hello world" 6] "hello…"] [["hi" 10] "hi"] [[nil 5] ""] [["abc" 1] "…"]]}
                   [:cat :any pos-int?] :string]
    :cost/ticks 50000 :cost/bytes 16384}
   [x n]
   (let [s (if (nil? x) "" (str x))
         lim (max 1 (long n))]
-    (if (> (count s) lim) (str (subs s 0 (max 1 (dec lim))) "…") s)))
+    (if (> (count s) lim) (str (subs s 0 (max 0 (dec lim))) "…") s)))
 
 (defn one-line
   "Collapses whitespace in `x` to single spaces, trims, and clips to `n` chars."

@@ -46,8 +46,10 @@
    "Hint: Datahike `:memory` stores require `:id (java.util.UUID/randomUUID)` — or prefer `(seon.test-fixture/with-test-store [{:keys [conn]}] ...)` for Seon schema tests."]
   [["No such var: seon.ctx/"]
    "Hint: Do not reach into `seon.ctx/*` internals; use `(user/db)` for your branch db, `(user/main-db)` for `:main`, and `@ctx` for your live context snapshot."]
-  [["validate-against"]
+  [["validate-against" "No such var: schema/validate"]
    "Hint: Validate values with `(malli.core/validate sch val {:registry (:registry (seon.schema/registry-for-db (user/db)))})`."]
+  [["Unable to resolve symbol: pprint"]
+   "Hint: Require `[clojure.pprint :refer [pprint]]` or use `prn`."]
   [["Long cannot be cast to class clojure.lang.Named"
     "cannot be compared to :"]
    "Hint: `(:schema db)` contains both keyword attributes AND integer reverse idents — use `(user/schema \"term\")` or `(filter keyword? (keys (:schema db)))`."]

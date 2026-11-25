@@ -327,7 +327,7 @@
                          [acc 0]
                          (if (and (seq acc) (> (- (code/alloc-bytes) b0) soft-byte-cap))
                            [acc (count rem)]
-                           (recur (rest rem) (conj acc (wsup/run-single-test-var bdb (first rem) (str "local:" (first rem))))))))]
+                           (recur (rest rem) (conj acc (binding [fcalls/*agent-ctx* nil] (wsup/run-single-test-var bdb (first rem) (str "local:" (first rem)))))))))]
                  {:results ran-res
                   :skipped-by-budget skipped
                   :gen-results (vec (keep (fn [vsym]
