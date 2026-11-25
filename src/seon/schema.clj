@@ -483,26 +483,41 @@
                v (if (and (nil? (:malli/schema m0)) (symbol? (:seon.code/reexport m0)) (not= (:seon.code/reexport m0) fn-sym))
                    (or (resolve (:seon.code/reexport m0)) v) v)
                m (meta v) sch-form (:malli/schema m)
-               skip-reason (stress-skip-reason db fn-sym m)]
+               skip-reason (stress-skip-reason db fn-sym m)
+               fn-like? (and (vector? sch-form) (contains? #{:=> :function} (first sch-form)))]
            (cond
              skip-reason {:ok? true :skipped? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0 :ms 0.0 :reason skip-reason}
-             (generatable-function-schema? sch-form)
-             (let [{:keys [registry]} (registry-for-db db) opts {:registry registry}
+             fn-like?
+             (let [gen? (boolean (generatable-function-schema? sch-form))
+                   {:keys [registry]} (registry-for-db db) opts {:registry registry}
                    fn-sch (m/schema sch-form opts) target-fn (or (:seon/raw-fn m) @v)
                    budgets {:ticks-budget (:cost/ticks m) :bytes-budget (:cost/bytes m) :ms-budget (:cost/ms m)}
                    t0 (System/nanoTime)
-                   arities (if (= :function (m/type fn-sch))
-                             (filterv #(generatable-function-schema? (m/form %)) (m/children fn-sch))
-                             [fn-sch])
+                   all-ars (if (= :function (m/type fn-sch)) (vec (m/children fn-sch)) [fn-sch])
+                   arities (if gen? (filterv #(generatable-function-schema? (m/form %)) all-ars) all-ars)
                    top-ex (vec (or (:examples (m/properties fn-sch)) (:malli/examples m)))
-                   per (max 1 (quot (long samples) (max 1 (count arities))))
+                   per (if gen? (max 1 (quot (long samples) (max 1 (count arities)))) 0)
+                   ex-for-ar (fn [i ar]
+                               (let [ar-n (let [ch (first (m/children ar))]
+                                            (when (and ch (= :cat (m/type ch)))
+                                              (let [cs (m/children ch)]
+                                                (when-not (some #(contains? #{:* :? :+} (m/type %)) cs) (count cs)))))
+                                     top-match (if (and (= :function (m/type fn-sch)) ar-n)
+                                                 (filterv #(and (vector? %) (vector? (first %)) (= ar-n (count (first %)))) top-ex)
+                                                 (when (zero? i) top-ex))]
+                                 (vec (concat top-match (when (not= ar fn-sch) (:examples (m/properties ar)))))))
                    out (reduce (fn [acc [i ar]]
-                                 (let [exs (vec (concat (when (zero? i) top-ex) (when (not= ar fn-sch) (:examples (m/properties ar)))))
-                                       r (stress-arity fn-sym target-fn opts registry ar exs per (+ (long seed) i) measure-fn budgets)]
+                                 (let [r (stress-arity fn-sym target-fn opts registry ar (ex-for-ar i ar) per (+ (long seed) i) measure-fn budgets)]
                                    (if (:ok? r)
                                      (-> acc (update :ran + (:ran r 0)) (update :max-ticks max (:max-ticks r 0)) (update :max-bytes max (:max-bytes r 0)))
                                      (reduced r))))
                                {:ok? true :var fn-sym :ran 0 :max-ticks 0 :max-bytes 0}
                                (map-indexed vector arities))
                    ms (/ (Math/round (/ (- (System/nanoTime) t0) 1e4)) 100.0)]
-               (assoc out :ms (double ms))))))))))
+               (cond-> (assoc out :ms (double ms))
+                 (and (:ok? out) (not gen?))
+                 (assoc :skipped-gen? true
+                        :skipped? (zero? (long (:ran out 0)))
+                        :reason (if (pos? (long (:ran out 0)))
+                                  (str "Checked " (:ran out) " example(s); random seed=42 generation skipped (schema uses :seon.host/* or :any inside :function).")
+                                  "No :examples and random seed=42 generation skipped (schema uses :seon.host/* or :any inside :function — use concrete input types or single :=> for generation).")))))))))))

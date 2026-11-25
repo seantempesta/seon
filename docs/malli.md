@@ -17,9 +17,9 @@ All stored Datahike attributes, runtime write checks, and `seed = 42` generative
 ## Pure Function Contracts, Examples & `seed = 42` Generative Checks
 - Every pure public `defn` (`:seon.code.var/entity`) carries `:malli/schema` + `:cost/ticks`, e.g. `{:malli/schema [:=> [:cat :int :string] [:map {:closed true} [:ok? :boolean] [:label {:optional true} :string]]] :cost/ticks 500000}`.
 - Tighten loose `:map` returns with explicit keys and `{:closed true}` when the returned map keys are fixed; mark optional keys `[:k {:optional true} T]`.
-- Multi-arity functions use `[:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]]`. `seon.schema.index/generatable-function-schema?` automatically stresses both single-arity `:=>` and concrete multi-arity `[:function ...]` schemas.
+- Multi-arity functions use `[:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]]`. `seon.schema.stress/generatable-function-schema?` stresses single-arity `:=>` and concrete multi-arity `[:function ...]` schemas; `(user/stress-var 'ns/fn)` ALSO verifies `:examples` on non-generatable `:function`/`:any`/`:seon.host/*` schemas.
 - Mark functions that perform I/O, mutate state, or call `^:seon.flow/edge` helpers with `^:seon.flow/edge` (or accept `:seon.host/db` / `:seon.host/conn`).
-- Attach `:examples [[[arg1 arg2] expected] ...]` inside `:=>` properties (`[:=> {:examples [[[1 "a"] {:ok? true}]]} [:cat :int :string] [:map [:ok? :boolean]]]`; for 0-arg use `[[] expected]`) so `(user/stress-var 'ns/fn)` and `(user/run-tests! 'ns-test)` verify concrete examples before 100 `seed = 42` generated samples.
+- Attach `:examples [[arg-vec expected] ...]` inside `:=>` properties (`[:=> {:examples [[[1 "a"] {:ok? true}]]} [:cat :int :string] [:map [:ok? :boolean]]]`; 0-arg: `[[] expected]`; **1-arg taking a vector/seq `[a b]`**: `[[[a b]] expected]` — outer vector is the arg list, inner vector is arg 1!) and verify via `(user/stress-var 'ns/fn)` or `(user/run-tests!)`.
 ## Fixing Malli Errors
 
 - `:malli.core/invalid-input` (`:input-contract`): your call passed the wrong shape — inspect the expected `:seon.schema/entity` form and examples.

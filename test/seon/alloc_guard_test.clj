@@ -419,3 +419,22 @@
       (is (false? (:ok? bad-sym)))
       (is (= :invalid-stress-var-sym (:error bad-sym)))
       (is (true? (:ok? ok-v))))))
+
+(deftest wave6e-stress-var-examples-on-any-function-and-wire-12k-test
+  (testing "stress-var checks :examples on :function schemas with :any (never returns silent nil)"
+    (let [r (schema/stress-var nil 'seon.render.text/nonblank {:samples 10 :seed 42})]
+      (is (map? r))
+      (is (true? (:ok? r)))
+      (is (true? (:skipped-gen? r)))
+      (is (= 3 (:ran r)))))
+  (testing "format-eval-output preserves multi-var source maps up to 12k chars without summarizing"
+    (let [s1 (apply str (repeat 2600 "a"))
+          s2 (apply str (repeat 2600 "b"))
+          out (seon.model.wire/format-eval-output {:handle 'result/e1 :ok? true :value (pr-str {'a/f1 s1 'a/f2 s2})})]
+      (is (str/includes? out s1))
+      (is (str/includes? out s2))))
+  (testing "effective-eval-budgets grants 4GB override to standard clojure.test/run-tests"
+    (with-test-store [{:keys [conn]}]
+      (let [res (code/eval-forms @conn {:agent-id :repl/ct-ov :turn 1 :byte-budget 1048576}
+                                 "(do (require 'clojure.test) (let [_ clojure.test/run-tests] (vec (range 50000))))")]
+        (is (true? (:ok? res)) (pr-str res))))))

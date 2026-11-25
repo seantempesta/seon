@@ -389,7 +389,7 @@
                                         (not (string? parsed))
                                         (empty? disc)
                                         (nil? schema-rsym)
-                                        (<= (count safe-val-str) (min cap 4000))
+                                        (<= (count safe-val-str) (min cap 12000))
                                         (not (and (coll? parsed) (> (count parsed) 20))))
                         val-edn (cond
                                   media-txt (edn-multiline-str (cap-eval-text media-txt cap h-str))
