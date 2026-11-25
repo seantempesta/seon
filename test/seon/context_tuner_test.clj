@@ -46,23 +46,28 @@
         (is (true? (:pass? (get by-id :sit/unread-chat-and-zero-repeat))))
         (is (true? (:pass? (get by-id :sit/system-and-entity-browser))))
         (is (true? (:pass? (get by-id :sit/responsive-viewport-fit))))
-        (is (false? (:pass? (get by-id :sit/concept-doc-teaching))))
-        (is (seq (:missing-present (get by-id :sit/concept-doc-teaching))))
-        (is (false? (:pass? (get by-id :sit/active-code-neighborhood))))
+        (is (= 12 (get-in r1 [:counts :corpus-passed])) "All 12 Universal Scenarios pass")
+        (is (true? (:pass? (get by-id :sit/concept-doc-teaching))))
+        (is (true? (:pass? (get by-id :sit/active-code-neighborhood))))
+        (is (true? (:pass? (get by-id :sit/failing-reach-test))))
+        (is (true? (:pass? (get by-id :sit/visual-ui-authoring))))
+        (is (true? (:pass? (get by-id :sit/vague-request))))
         (is (every? #(true? (:ablation-needed? (get abl-by %))) baseline0-core-rules)
             "All 11 Baseline 0 core context rules contribute")))))
 
 (deftest self-building-loop-general-doc-rule-flips-corpus-and-ablation-test
   (testing "Adding a general :seon.code.doc/references rule flips :sit/concept-doc-teaching false->true with 0 regressions, 0 lint issues, and exact ablation"
     (with-test-store [{:keys [conn]}]
-      (d/transact conn {:tx-data (or rules/*base-rules-override* (rseed/starter-rules))})
+      (d/transact conn {:tx-data (mapv #(if (= :rule.ctx/referenced-concept-docs (:seon.rule/id %))
+                                          (assoc % :seon.rule/enabled? false)
+                                          %)
+                                       (or rules/*base-rules-override* (rseed/starter-rules)))})
       (let [mdb @conn
             r0 (corpus/corpus-report mdb)
             doc0 (first (filter #(= :sit/concept-doc-teaching (:id %)) (:corpus r0)))]
         (is (false? (:pass? doc0)))
         (is (= [[:seon.code.doc/id "docs/sit-canvas.md#canvas-guide"]] (:missing-present doc0)))
 
-        ;; Lever 1: add ONE general Datalog rule (zero hardcoded agent/task/var/ns literals)
         (d/transact conn
           {:tx-data [{:seon.rule/id :rule.ctx/doc-references-connected
                       :seon.rule/stratum 26 :seon.rule/category :context :seon.rule/target :any :seon.rule/enabled? true
@@ -88,7 +93,6 @@
           (is (true? (:ablation-needed? new-abl)))
           (is (some #{:sit/concept-doc-teaching} (:contributing-situations new-abl))))
 
-        ;; Redundancy detection: adding a duplicate rule is caught by ablation-report
         (d/transact conn
           {:tx-data [{:seon.rule/id :rule.ctx/doc-references-duplicate
                       :seon.rule/stratum 27 :seon.rule/category :context :seon.rule/target :any :seon.rule/enabled? true

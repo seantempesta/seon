@@ -2,8 +2,10 @@
   "Extracted child namespace of `seon.bench.cluster`."
   (:require [jolt.fs :as fs]
             [datahike.api :as d]
-            [seon.store :as store]
-            [seon.render.text :refer [round1]]))
+            [seon.store :as store :refer [db-schema]]
+            [seon.render.text :refer [round1]]
+            [seon.fork.calls :as fcalls]
+            [clojure.string :as str]))
 
 (defn parse-listening-port
   "Extracts the bound localhost integer port from a Seon startup log line, or nil."
@@ -288,3 +290,90 @@
         (when (not (:ok? health-res))
           (str "health-err: " (or (:error health-res) (pr-str (take 2 (filter #(= :error (:severity %)) (:problems health-res)))))))
         (:last-error final-trace))))
+
+(defn sample-random-tasks
+  "Deterministically samples `n` diverse real tasks directly from live Datahike `db` (using `seed`) across
+   3 pools (loose `:map` return contracts, entity schemas needing renderers, and pure namespace helpers)
+   in O(V + S) indexed reads (<15 MB) so context-tuning never overfits to a fixed prompt set."
+  {:malli/schema [:=> [:cat :seon.host/db [:? [:maybe :map]]] [:vector :map]]
+   :cost/ticks 15000000}
+  ([db] (sample-random-tasks db nil))
+  ([db opts]
+   (let [o (if (map? opts) opts {})
+         n (max 1 (long (or (:n o) 4)))
+         seed (long (or (:seed o) 42))
+         timeout-ms (long (or (:timeout-ms o) 240000))
+         det-shuffle (fn [xs] (vec (sort-by #(hash [seed (:id %)]) xs)))
+         loose-vars
+         (when (and ((db-schema db) :seon.code.var/name) ((db-schema db) :seon.code.var/schema))
+           (->> (d/datoms db :aevt :seon.code.var/schema)
+                (keep (fn [dt]
+                        (let [e (:e dt)
+                              sch (:v dt)
+                              vnm (:v (first (d/datoms db :eavt e :seon.code.var/name)))
+                              vns (:v (first (d/datoms db :eavt e :seon.code.var/ns)))
+                              priv? (:v (first (d/datoms db :eavt e :seon.code.var/private?)))]
+                          (when (and (qualified-symbol? vnm) (symbol? vns) (not priv?)
+                                     (str/starts-with? (name vns) "seon.")
+                                     (not (str/ends-with? (name vns) "-test"))
+                                     (vector? sch) (= :=> (first sch))
+                                     (= :map (last sch)))
+                            (let [tid (keyword "rand" (str "contract-" (str/replace (name vnm) #"[^a-zA-Z0-9-]" "-")))]
+                              {:id tid :category :schema-proof
+                               :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                               :task {:id tid :scope vns
+                                      :title (str "Tighten loose :map return contract on " vnm)
+                                      :plan (str "The public function `" vnm "` currently declares a loose `:map` return schema. Inspect its actual returned keys and callers, replace the loose `:map` return contract with explicit Malli keys (or a named schema), and verify all tests and seed=42 generative checks pass.")}})))))
+                (sort-by #(str (:id %)))
+                vec))
+         ns-tasks
+         (when ((db-schema db) :seon.code.ns/name)
+           (->> (d/datoms db :aevt :seon.code.ns/name)
+                (keep (fn [dt]
+                        (let [nsym (:v dt)]
+                          (when (and (symbol? nsym)
+                                     (str/starts-with? (name nsym) "seon.")
+                                     (not (str/ends-with? (name nsym) "-test"))
+                                     (not (contains? '#{seon.main seon.fork} nsym)))
+                            (let [tid (keyword "rand" (str "audit-" (str/replace (name nsym) "." "-")))]
+                              {:id tid :category :ns-contract-audit
+                               :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                               :task {:id tid :scope nsym
+                                      :title (str "Add Malli :examples and unit test coverage for a pure helper in " nsym)
+                                      :plan (str "Inspect the pure public functions in `" nsym "`, pick one lacking concrete Malli `:examples` or direct unit test coverage, add crisp `:examples` to its `:malli/schema` plus a focused unit test verifying normal and edge cases, and prove everything green.")}})))))
+                (sort-by #(str (:id %)))
+                vec))
+         schema-tasks
+         (when ((db-schema db) :seon.schema/key)
+           (->> (d/datoms db :aevt :seon.schema/key)
+                (keep (fn [dt]
+                        (let [sk (:v dt)]
+                          (when (and (qualified-keyword? sk) (= "entity" (name sk))
+                                     (str/starts-with? (namespace sk) "seon."))
+                            (let [tid (keyword "rand" (str "render-" (str/replace (namespace sk) "." "-")))]
+                              {:id tid :category :entity-renderers
+                               :run-tests? true :merge? true :require-merge? true :timeout-ms timeout-ms
+                               :task {:id tid :scope 'seon.render.entities
+                                      :title (str "Verify/improve multi-footprint pure Hiccup renderers for " sk)
+                                      :plan (str "Check renderer coverage and footprint distinctness for `" sk "` using `(user/coverage)`. Ensure it has clean compact and detailed pure `:seon.ui/hiccup` renderers with `:malli/schema` and unit test coverage.")}})))))
+                (sort-by #(str (:id %)))
+                vec))
+         pools (filterv seq [(det-shuffle loose-vars) (det-shuffle ns-tasks) (det-shuffle schema-tasks)])]
+     (vec
+      (take n
+            (loop [ps pools acc []]
+              (if (or (>= (count acc) n) (empty? ps))
+                acc
+                (let [heads (keep first ps)
+                      tails (filterv seq (map rest ps))]
+                  (recur tails (into acc heads))))))))))
+
+(defn ^:seon.flow/edge repl-sample-random-tasks
+  "REPL helper (`user/sample-random-tasks`): samples `n` diverse real tasks from live Datahike."
+  {:malli/schema [:function [:=> [:cat] [:vector :map]] [:=> [:cat [:maybe :map]] [:vector :map]]]
+   :cost/ticks 20000000}
+  ([] (repl-sample-random-tasks nil))
+  ([opts]
+   (let [ctx (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)
+         db (or (:db opts) (when-let [c (:conn ctx)] @c))]
+     (if db (sample-random-tasks db opts) []))))

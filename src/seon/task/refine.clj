@@ -439,7 +439,7 @@
                                           dt (when (dh-has? branch-db :seon.code.var/calls) (d/datoms branch-db :eavt ve :seon.code.var/calls))
                                           :let [cn (eav1 branch-db (:v dt) :seon.code.var/name)] :when (qualified-symbol? cn)]
                                       cn))
-              touches (try (ctouches/derived-agent-touches main-db branch-db agent-id) (catch Throwable _ nil))
+              touches (when (and main-db branch-db agent-id) (ctouches/derived-agent-touches main-db branch-db agent-id))
               eid->dom-lref (fn [e] (some (fn [a] (when-let [v (eav1 branch-db e a)] [a v])) [:seon.code.var/name :seon.schema/key :seon.code.doc/id :seon.code.ns/name]))
               disc-lrefs (when (map? touches)
                            (->> (:energy touches)
