@@ -678,3 +678,19 @@
       (is (= [{:role "user" :content "Check"}] (seon.model/sanitize-wire-image-parts bad-msgs)))
       (is (= good-msgs (seon.model/sanitize-wire-image-parts good-msgs)))
       (is (true? (seon.model/multimodal-unsupported-error? 400 "{\"error\":{\"message\":\".messages[17].content[2]: You have uploaded an unsupported\"}}"))))))
+
+(deftest wave15b-bounce-diagnostics-and-char-map-entry-hint-test
+  (testing "enrich-eval-error hints Character->Map$Entry when calling keys on user/source string"
+    (let [h (seon.code.errors/enrich-eval-error "(keys (user/source 'seon.repl.search))"
+              "class java.lang.Character cannot be cast to class java.util.Map$Entry" {})]
+      (is (clojure.string/includes? h "user/ns-outline"))))
+  (testing "trial-audit-summary surfaces :bounce-messages from main-db after :after-main-tx"
+    (with-test-store [{:keys [conn]}]
+      (let [t0 (:max-tx @conn)]
+        (d/transact conn {:tx-data [{:seon.agent/id :w/bounce-test :seon.agent/branch :main}
+                                    {:seon.agent.message/id (random-uuid) :seon.agent.message/seq 1
+                                     :seon.agent.message/from :transactor :seon.agent.message/to :w/bounce-test
+                                     :seon.agent.message/type :merge-conflict :seon.agent.message/body "3-way merge conflict on :branch/x"}]})
+        (let [res (seon.bench.helpers/trial-audit-summary conn @conn :w/bounce-test {:after-main-tx t0})]
+          (is (= 1 (count (:bounce-messages res))))
+          (is (= :merge-conflict (:type (first (:bounce-messages res))))))))))

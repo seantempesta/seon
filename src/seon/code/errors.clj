@@ -58,7 +58,9 @@
   [["the namespace name must be a symbol, got: (quote"]
    "Hint: `(ns my.ns ...)` takes an unquoted symbol (unlike `(in-ns 'my.ns)`)."]
   [["get-else: nil default value is not supported"]
-   "Hint: Datahike `get-else` rejects `nil` as the 3rd arg — use a non-nil sentinel like `:none` or `:missing`, or pull optional attrs via `(d/pull db '[...] eid)`."]])
+   "Hint: Datahike `get-else` rejects `nil` as the 3rd arg — use a non-nil sentinel like `:none` or `:missing`, or pull optional attrs via `(d/pull db '[...] eid)`."]
+  [["Character cannot be cast to class java.util.Map$Entry"]
+   "Hint: You passed a String to a map fn (`keys`/`vals`/`merge`) — `(user/source 'ns)` and `(user/source 'ns/var)` return source strings directly (use `(user/ns-outline 'ns)` for a map/vector of vars)."]])
 
 (defn- fuzzy-user-helper-hint [e helper-index]
   (let [bad (second (re-find #"user/([a-zA-Z0-9\-\!\?\*]+)" e))
