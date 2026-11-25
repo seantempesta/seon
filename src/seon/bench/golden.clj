@@ -5,7 +5,8 @@
             [seon.fork.calls :as fcalls]
             [seon.git :as git]
             [seon.render.text :refer [round1]]
-            [seon.store :as store :refer [db-schema]]))
+            [seon.store :as store :refer [db-schema]]
+            [clojure.string :as str]))
 
 (def ^:private run-pull-pattern
   '[:seon.bench.run/id :seon.bench.run/title :seon.bench.run/status
@@ -290,3 +291,170 @@
   ([opts]
    (when-let [{:keys [conn]} (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)]
      (golden-scoreboard (or (store/head conn :main) @conn) opts))))
+
+(defn build-ab-tasks
+  "Expands `base-tasks` across named `arms` (`{:control {...} :treatment {...}}` or seq of `[arm-kw cfg]`)
+   into paired isolated trial specs ready for `seon.bench.cluster/run-parallel-trial!`."
+  {:malli/schema [:=> {:examples [[[[{:id :t/one :scope 'seon.render.text :title "T1" :plan "Do X."}]
+                                     [[:control {:seon.config/auto-refine-tasks? false}]
+                                      [:treatment {:seon.config/auto-refine-tasks? true}]]
+                                     {:timeout-ms 120000}]
+                                    [{:id :ab/one-control :pair-id :t/one :arm :control
+                                      :run-tests? true :merge? true :require-merge? true
+                                      :auto-merge? true :timeout-ms 120000
+                                      :config {:seon.config/auto-refine-tasks? false}
+                                      :task {:id :t/one :scope 'seon.render.text :title "T1" :plan "Do X."}}
+                                     {:id :ab/one-treatment :pair-id :t/one :arm :treatment
+                                      :run-tests? true :merge? true :require-merge? true
+                                      :auto-merge? true :timeout-ms 120000
+                                      :config {:seon.config/auto-refine-tasks? true}
+                                      :task {:id :t/one :scope 'seon.render.text :title "T1" :plan "Do X."}}]]]}
+                  [:cat [:sequential :map] :any [:? [:maybe :map]]] [:vector :map]]
+   :cost/ticks 500000}
+  ([base-tasks arms] (build-ab-tasks base-tasks arms nil))
+  ([base-tasks arms opts]
+   (let [o (if (map? opts) opts {})
+         arm-pairs (cond
+                     (map? arms) (vec (sort-by (comp str key) (filter #(keyword? (key %)) arms)))
+                     (sequential? arms) (vec (keep #(when (and (sequential? %) (= 2 (count %)) (keyword? (first %)))
+                                                      [(first %) (if (map? (second %)) (second %) {})])
+                                                   arms))
+                     :else [])
+         timeout-ms (long (or (when (number? (:timeout-ms o)) (:timeout-ms o))
+                              (when (number? (:task-timeout-ms o)) (:task-timeout-ms o))
+                              240000))
+         inc-trace? (boolean (:include-trace? o))]
+     (vec (for [[idx raw] (map-indexed vector (filter map? base-tasks))
+                :let [inner (if (map? (:task raw)) (:task raw) raw)
+                      raw-pid (or (:pair-id raw) (:id inner) (:id raw))
+                      pair-id (if (keyword? raw-pid) raw-pid (keyword "ab" (str "t" (inc idx))))
+                      base-cfg (if (map? (:config raw)) (:config raw) {})]
+                [arm-kw arm-cfg] arm-pairs]
+            (cond-> {:id (keyword "ab" (str (name pair-id) "-" (name arm-kw)))
+                     :pair-id pair-id
+                     :arm arm-kw
+                     :run-tests? (if (contains? raw :run-tests?) (boolean (:run-tests? raw)) true)
+                     :merge? (if (contains? raw :merge?) (boolean (:merge? raw)) true)
+                     :require-merge? (if (contains? raw :require-merge?) (boolean (:require-merge? raw)) true)
+                     :auto-merge? (if (contains? raw :auto-merge?) (boolean (:auto-merge? raw)) true)
+                     :timeout-ms (long (if (number? (:timeout-ms raw)) (:timeout-ms raw) timeout-ms))
+                     :config (merge base-cfg (if (map? arm-cfg) arm-cfg {}))
+                     :task (select-keys inner [:id :scope :title :plan :description :refs :curated :tests :needs])}
+              (:category raw) (assoc :category (:category raw))
+              inc-trace? (assoc :include-trace? true)))))))
+
+(defn summarize-ab
+  "Pure side-by-side paired A/B summary over trial result maps tagged with `:arm` and `:pair-id`."
+  {:malli/schema [:=> {:examples [[[[{:id :ab/x-control :pair-id :t/x :arm :control :merged? true :turns 10 :total-turns 10 :total-prompt-tokens 50000 :total-kv-hit-pct 85.0 :elapsed-ms 40000}
+                                     {:id :ab/x-treatment :pair-id :t/x :arm :treatment :merged? true :turns 6 :child-turns 5 :child-merged? true :total-turns 11 :total-prompt-tokens 60000 :total-kv-hit-pct 88.0 :backward-walk-rows 3 :elapsed-ms 45000}]]
+                                    {:arms [:control :treatment]
+                                     :by-arm {:control {:total 1 :merged 1 :merge-rate-pct 100.0 :median-worker-turns 10.0 :median-total-turns 10.0 :total-prompt-tokens 50000 :mean-kv-hit-pct 85.0 :child-merged 0 :new-scope-vars 0 :new-test-vars 0}
+                                              :treatment {:total 1 :merged 1 :merge-rate-pct 100.0 :median-worker-turns 6.0 :median-total-turns 11.0 :total-prompt-tokens 60000 :mean-kv-hit-pct 88.0 :child-merged 1 :new-scope-vars 0 :new-test-vars 0}}
+                                     :pairs [{:pair-id :t/x
+                                              :arms {:control {:status nil :merged? true :worker-turns 10 :child-turns 0 :total-turns 10 :prompt-tokens 50000 :kv-hit-pct 85.0 :backward-walk-rows 0 :new-scope-vars 0 :new-test-vars 0 :wall-s 40.0 :last-error nil}
+                                                     :treatment {:status nil :merged? true :worker-turns 6 :child-turns 5 :total-turns 11 :prompt-tokens 60000 :kv-hit-pct 88.0 :backward-walk-rows 3 :new-scope-vars 0 :new-test-vars 0 :wall-s 45.0 :last-error nil}}}]
+                                     :summary "control: 1/1 merged (100.0%, med W=10.0t Tot=10.0t, KV 85.0%) | treatment: 1/1 merged (100.0%, med W=6.0t Tot=11.0t, KV 88.0%)"}]]}
+                  [:cat [:sequential :map]] :map]
+   :cost/ticks 500000}
+  [results]
+  (let [rows (vec (filter map? results))
+        arm-order (vec (distinct (keep :arm rows)))
+        as-l #(long (or % 0))
+        row-view (fn [r]
+                   (let [wt (as-l (or (:turns r) (:evals r)))
+                         ct (as-l (:child-turns r))
+                         tt (as-l (or (:total-turns r) (+ wt ct)))
+                         pt (as-l (or (:total-prompt-tokens r) (:prompt-tokens r)))
+                         kv (or (:total-kv-hit-pct r)
+                                (let [h (as-l (:kv-hit-tokens r)) m (as-l (:kv-miss-tokens r))]
+                                  (when (pos? (+ h m)) (round1 (/ (* 100.0 h) (+ h m))))))]
+                     {:status (:status r) :merged? (trial-merged? r)
+                      :worker-turns wt :child-turns ct :total-turns tt
+                      :prompt-tokens pt :kv-hit-pct kv
+                      :backward-walk-rows (as-l (:backward-walk-rows r))
+                      :new-scope-vars (as-l (:new-scope-vars r))
+                      :new-test-vars (as-l (:new-test-vars r))
+                      :wall-s (when (number? (:elapsed-ms r)) (round1 (/ (double (:elapsed-ms r)) 1000.0)))
+                      :last-error (:last-error r)}))
+        by-arm (into {}
+                     (for [arm arm-order
+                           :let [rs (filterv #(= arm (:arm %)) rows)
+                                 n (count rs)
+                                 m (count (filter trial-merged? rs))
+                                 vs (mapv row-view rs)
+                                 kvs (keep :kv-hit-pct vs)
+                                 mean-kv (when (seq kvs) (round1 (/ (reduce + 0.0 kvs) (count kvs))))]]
+                       [arm {:total n :merged m
+                             :merge-rate-pct (if (pos? n) (round1 (* 100.0 (/ (double m) n))) 0.0)
+                             :median-worker-turns (median (map :worker-turns vs))
+                             :median-total-turns (median (map :total-turns vs))
+                             :total-prompt-tokens (reduce + 0 (map :prompt-tokens vs))
+                             :mean-kv-hit-pct mean-kv
+                             :child-merged (count (filter :child-merged? rs))
+                             :new-scope-vars (reduce + 0 (map :new-scope-vars vs))
+                             :new-test-vars (reduce + 0 (map :new-test-vars vs))}]))
+        pair-order (vec (distinct (keep :pair-id rows)))
+        pairs (mapv (fn [pid]
+                      {:pair-id pid
+                       :arms (into {} (for [r rows :when (and (= pid (:pair-id r)) (:arm r))]
+                                        [(:arm r) (row-view r)]))})
+                    pair-order)
+        summary (clojure.string/join
+                 " | "
+                 (for [arm arm-order
+                       :let [a (get by-arm arm)]]
+                   (str (name arm) ": " (:merged a) "/" (:total a) " merged (" (:merge-rate-pct a) "%"
+                        (when (:median-worker-turns a) (str ", med W=" (:median-worker-turns a) "t Tot=" (:median-total-turns a) "t"))
+                        (when (:mean-kv-hit-pct a) (str ", KV " (:mean-kv-hit-pct a) "%"))
+                        ")")))]
+    {:arms arm-order :by-arm by-arm :pairs pairs :summary summary}))
+
+(defn ^:seon.flow/edge run-ab!
+  "REPL helper (`user/run-ab!`): runs paired A/B isolated Seon trials directly inside Seon.
+   Pass `:tasks` (defaults to `(select-golden-tasks opts)`), `:arms` (defaults to Control vs
+   `:seon.config/auto-refine-tasks? true`), `:sync? true` for blocking REPL results with `:ab-summary`
+   (running one pair's arms concurrently at a time when `:by-pair? true`), or `:sync? false` to stream
+   live to `#cv-bench-runs` and persist `:seon.bench.run/entity`."
+  {:malli/schema [:=> [:cat [:? [:maybe :map]]] :map] :cost/ticks 40000000}
+  ([] (run-ab! nil))
+  ([opts]
+   (let [o (if (map? opts) opts {})
+         ctx (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)
+         conn (:conn ctx)
+         main-db (when conn (or (store/head conn :main) @conn))
+         base-tasks (or (seq (:tasks o)) (select-golden-tasks o))
+         arms (or (:arms o) [[:control {:seon.config/auto-refine-tasks? false :seon.config/max-tool-turns 24}]
+                             [:treatment {:seon.config/auto-refine-tasks? true :seon.config/max-tool-turns 24}]])
+         trials (build-ab-tasks base-tasks arms o)
+         suite-id (or (:suite-id o) :ab/experiment)
+         git-sha (or (:git-commit o)
+                     (when (and main-db ((db-schema main-db) :seon.git/repo)
+                                (first (d/datoms main-db :avet :seon.git/repo :main)))
+                       (:seon.git/commit (d/pull main-db '[:seon.git/commit] [:seon.git/repo :main]))))
+         main-tx (or (:main-tx o) (when main-db (:max-tx main-db)))
+         model-name (or (:model o) (when main-db (store/config-val main-db nil :seon.config/ai-model)))
+         base-run-opts (cond-> (merge {:proxy? (if (contains? o :proxy?) (boolean (:proxy? o)) false)
+                                       :seed-store "runs/store" :suite-id suite-id
+                                       :title (or (:title o) (str "Paired A/B (" (count base-tasks) " tasks × " (count arms) " arms)"))
+                                       :max-os-procs 3 :max-test-workers 2}
+                                      (dissoc o :tasks :arms :only :ids :categories :sync? :by-pair? :publish-fn :include-trace?))
+                         git-sha (assoc :git-commit (str git-sha))
+                         main-tx (assoc :main-tx (long main-tx))
+                         model-name (assoc :model (str model-name)))]
+     (if (:sync? o)
+       (let [by-pair? (not (false? (:by-pair? o)))
+             batches (if by-pair?
+                       (mapv (fn [pid] (filterv #(= pid (:pair-id %)) trials))
+                             (distinct (map :pair-id trials)))
+                       [trials])
+             res-list (mapv #(cluster/run-parallel-trial! (assoc base-run-opts :tasks %)) batches)
+             all-results (vec (mapcat :results res-list))]
+         {:ok? (every? :ok? all-results)
+          :count (count all-results)
+          :elapsed-ms (round1 (reduce + 0.0 (map #(double (or (:elapsed-ms %) 0.0)) res-list)))
+          :ab-summary (summarize-ab all-results)
+          :results all-results})
+       (let [run-opts (assoc base-run-opts :tasks trials)]
+         (if (:publish-fn o)
+           (cluster/start-bench-run-async! run-opts (:publish-fn o))
+           (fcalls/start-bench-run! run-opts)))))))
