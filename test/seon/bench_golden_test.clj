@@ -272,3 +272,21 @@
         (is (= 1 (get-in ab [:by-arm :treatment :child-merged])))
         (is (= 6.0 (get-in ab [:by-arm :treatment :median-worker-turns])))
         (is (= 11.0 (get-in ab [:by-arm :treatment :median-total-turns])))))))
+
+(deftest ^{:cost/ticks 60000000} empty-merge-rejected-and-session-budget-tail-test
+  (testing "trial-outcome never passes an empty 0-edit merge"
+    (let [to (requiring-resolve 'seon.bench.cluster/trial-outcome)
+          res-empty (to {:task {:task :t/x :merge? true :require-merge? true}
+                         :ag-snap {:status :waiting :evals 24}
+                         :eval-res nil :agent-res {:wait {:ok? true}}
+                         :test-res {:ok? true}
+                         :merge-res {:ok? true :touched-paths #{}}})
+          res-real (to {:task {:task :t/x :merge? true :require-merge? true}
+                        :ag-snap {:status :waiting :evals 12}
+                        :eval-res nil :agent-res {:wait {:ok? true}}
+                        :test-res {:ok? true}
+                        :merge-res {:ok? true :touched-paths #{"src/seon/render/text.clj"}}})]
+      (is (false? (:merged? res-empty)) "0-edit empty merge must NOT count as merged")
+      (is (false? (:ok? res-empty)) "0-edit empty merge must NOT pass")
+      (is (true? (:merged? res-real)))
+      (is (true? (:ok? res-real))))))

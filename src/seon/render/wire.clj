@@ -252,6 +252,26 @@
          {:keys [walk-text]} (project-wire main-db branch-db ag (assoc opts :task-db tdb))]
      (str "<walk-context>\n" walk-text "\n</walk-context>"))))
 
+(defn- build-budget-block [main-db branch-db ag cur-turn evals]
+  (when (and (seq evals) (not (:seon.agent/interactive? ag)))
+    (let [max-tt (long (or (store/config-val main-db (:seon.agent/id ag) :seon.config/max-tool-turns) 32))]
+      (when (pos? max-tt)
+        (let [rem-t (max 0 (- max-tt (long cur-turn)))
+              chgs (diff/branch-changes main-db branch-db)
+              n-edits (count (into #{}
+                                   (keep (fn [dt]
+                                           (let [a (:a dt)
+                                                 ns-s (when (keyword? a) (namespace a))]
+                                             (when (and ns-s (or (str/starts-with? ns-s "seon.code.")
+                                                                 (= ns-s "seon.schema")
+                                                                 (= ns-s "seon.rule")))
+                                               (:e dt)))))
+                                   chgs))]
+          {:tag "session-budget"
+           :text (str "Turn " cur-turn " / " max-tt " (" rem-t " left) · branch code/schema/rule edits: " n-edits
+                      (when (and (zero? n-edits) (>= (long cur-turn) (max 2 (quot max-tt 2))))
+                        " · halfway through budget with 0 persisted edits — begin implementing and testing now"))})))))
+
 (defn build-live-wire-request
   "Single source of truth for LLM wire context & Context Lab: ONE KV-cache prefix + ONE `<context-delta>` via `seon.ctx/project-entity`."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :keyword :map] :map]
@@ -296,7 +316,8 @@
                 need-delta? (and inc-tail? (not explain?) (or db-moved? (seq evals)))
                 delta-res (when need-delta? (build-live-delta-blocks main-db branch-db ag cur-turn prev-shown opts))
                 vp-block (when inc-tail? (build-viewport-block main-db ag viewport-screenshot (boolean vision?) (:force-vision? opts)))
-                tail-blocks (when inc-tail? (vec (concat (:blocks delta-res) (when vp-block [vp-block]))))
+                budget-block (when inc-tail? (build-budget-block main-db branch-db ag cur-turn evals))
+                tail-blocks (when inc-tail? (vec (concat (:blocks delta-res) (when budget-block [budget-block]) (when vp-block [vp-block]))))
                 activity-text (when inc-tail? (not-empty (str/join "\n\n" (keep :text tail-blocks))))
                 prefix-msg-eids (into #{} (comp (filter #(= :seon.agent.message/entity (:schema %))) (keep :entity)) active-tiles)
                 rendered-msg-eids (into (into prefix-msg-eids (keys prev-shown)) (:rendered-msg-eids delta-res))
