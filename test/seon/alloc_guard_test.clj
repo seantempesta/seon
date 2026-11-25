@@ -21,7 +21,8 @@
             [clojure.java.io :as io]
             [seon.repl.search :as rsearch]
             [seon.bench.sampler]
-            [seon.code.errors]))
+            [seon.code.errors]
+            [seon.code.reach.delta]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -737,7 +738,7 @@
             c1 (d/commit-id @conn)
             from-db (d/commit-as-db conn c0)
             to-db @conn
-            via-aevt (#'seon.code.reach/changed-form-ops-aevt from-db to-db)
+            via-aevt (#'seon.code.reach.delta/changed-form-ops-aevt from-db to-db)
             via-ops (seon.code.reach/changed-form-ops conn c0 c1)
             via-cached (seon.code.reach/changed-form-ops conn c0 c1)]
         (is (= (set (map :seon.code.form/key (:upserts via-ops)))
