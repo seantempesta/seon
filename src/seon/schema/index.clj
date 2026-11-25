@@ -356,6 +356,7 @@
          f (if (contains? entry :seon.schema/form) (:seon.schema/form entry) (:form entry))
          props (form-props f)
          doc (or (:seon.schema/doc entry) (:doc entry) (:seon.schema/doc props))
+         policy (or (:seon.schema/context-policy entry) (:seon.schema/context-policy props))
          exs (or (:seon.schema/examples entry) (:examples entry))
          dh-sch (when db (:schema db))
          has-attr? (fn [a] (or (nil? dh-sch) (contains? dh-sch a)))
@@ -384,7 +385,8 @@
        (and type (has-attr? :seon.schema/type)) (assoc :seon.schema/type type)
        (and (seq req-refs) (has-attr? :seon.schema/keys)) (assoc :seon.schema/keys req-refs)
        (and (seq opt-refs) (has-attr? :seon.schema/optional-keys)) (assoc :seon.schema/optional-keys opt-refs)
-       (and (seq tgt-refs) (has-attr? :seon.schema/ref-targets)) (assoc :seon.schema/ref-targets tgt-refs)))))
+       (and (seq tgt-refs) (has-attr? :seon.schema/ref-targets)) (assoc :seon.schema/ref-targets tgt-refs)
+       (and policy (has-attr? :seon.schema/context-policy)) (assoc :seon.schema/context-policy policy)))))
 
 (defn stale-schema-edge-retracts
   "Computes `:db/retract` ops for removed `:seon.schema/{keys,optional-keys,ref-targets}` refs."

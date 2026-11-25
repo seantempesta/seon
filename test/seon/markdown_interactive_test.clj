@@ -190,8 +190,8 @@
       (is (false? (get-in blank-res [:st :branch-feedback :ok?])))))
   (testing "default-system-prompt encourages expressive Markdown while staying slim"
     (let [p messages/default-system-prompt]
-      (is (< (count p) 450))
-      (is (< (count (str/split p #"\s+")) 75))
+      (is (<= 900 (count p) 1800))
+      (is (<= 140 (count (str/split p #"\s+")) 320))
       (is (str/includes? p "Markdown"))
       (is (str/includes? p "hiccup"))
       (is (str/includes? p "NO tool calls"))

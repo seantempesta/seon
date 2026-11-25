@@ -41,7 +41,7 @@
       (is (= :converged (:entity (first by-cv)))))))
 
 (deftest ^{:cost/ticks 25000000} wire-upgrade-ladder-strategies-and-shown-dedup-test
-  (testing "2-pass Upgrade Ladder for :target :wire differentiates :breadth-first vs :depth-first and handles already-shown 0-token dedup + ?tx re-warm"
+  (testing "2-pass Upgrade Ladder for :target :wire differentiates :breadth-first vs :depth-first and enforces strict zero-repetition"
     (let [mk-cands (fn [sym]
                      [{:fn (symbol "demo" (str sym "-chip")) :hiccup [:span sym] :tokens 10 :min-width 120 :area 2400}
                       {:fn (symbol "demo" (str sym "-card")) :hiccup [:div sym] :tokens 40 :min-width 320 :area 12800}
@@ -62,22 +62,45 @@
       (is (= 'demo/b-chip (:chosen-fn (get df-by 2))))
       (is (= 110 (:tokens df)))
 
-      ;; Turn 2: unchanged entities with tight budget=10 cost 0 tokens via already-shown
-      (let [t2 (fit/upgrade-ladder items {:target :wire :token-budget 10 :already-shown (:shown bf)})
+      ;; Case 1: Unchanged entities stay locked at 0 tokens EVEN when delta budget expands to 4000!
+      (let [t2 (fit/upgrade-ladder items {:target :wire :strategy :depth-first :token-budget 4000 :already-shown (:shown bf)})
             t2-by (into {} (map (juxt :entity identity)) (:selected t2))]
-        (is (= 0 (:tokens t2)))
+        (is (= 0 (:tokens t2)) "Unchanged entities must never opportunistically re-emit or upgrade on spare budget")
         (is (= :unchanged (:status (get t2-by 1))))
-        (is (= :unchanged (:status (get t2-by 2)))))
+        (is (= :unchanged (:status (get t2-by 2))))
+        (is (= 'demo/a-card (:chosen-fn (get t2-by 1))))
+        (is (= 0 (:tokens (get t2-by 1)))))
 
-      ;; Turn 3: entity 1 upgrades cleanly when budget expands; entity 2 re-warms when native ?tx bumps
+      ;; Case 2: Underlying data change (?tx bump) re-emits :rewarmed while unchanged sibling stays locked at 0 tok
       (let [items3 [(assoc (first items) :tx 20)
                     (assoc (second items) :tx 35)]
-            t3 (fit/upgrade-ladder items3 {:target :wire :strategy :depth-first :token-budget 120 :already-shown (:shown bf)})
+            t3 (fit/upgrade-ladder items3 {:target :wire :strategy :depth-first :token-budget 4000 :already-shown (:shown bf)})
             t3-by (into {} (map (juxt :entity identity)) (:selected t3))]
-        (is (= :upgraded (:status (get t3-by 1))))
-        (is (= 'demo/a-full (:chosen-fn (get t3-by 1))))
+        (is (= :unchanged (:status (get t3-by 1))))
+        (is (= 0 (:tokens (get t3-by 1))))
         (is (= :rewarmed (:status (get t3-by 2))))
-        (is (= 110 (:tokens t3)))))))
+        (is (= 'demo/b-full (:chosen-fn (get t3-by 2))))
+        (is (= 100 (:tokens t3))))
+
+      ;; Case 3: Explicit different :fn not in prev :fns emits :upgraded ONCE, then locks on subsequent turn!
+      (let [items4 [(assoc (first items) :tx 20 :fn 'demo/a-full)
+                    (assoc (second items) :tx 10)]
+            t4 (fit/upgrade-ladder items4 {:target :wire :strategy :depth-first :token-budget 4000 :already-shown (:shown bf)})
+            t4-by (into {} (map (juxt :entity identity)) (:selected t4))
+            ;; Next turn with same explicit :fn 'demo/a-full is now in (:fns prev) -> locked at 0 tok!
+            t5 (fit/upgrade-ladder items4 {:target :wire :strategy :depth-first :token-budget 4000 :already-shown (:shown t4)})
+            t5-by (into {} (map (juxt :entity identity)) (:selected t5))
+            ;; Explicit :fn not present in candidates must NOT spuriously re-emit prev view
+            items-miss [(assoc (first items) :tx 20 :fn 'demo/nonexistent)]
+            t6 (fit/upgrade-ladder items-miss {:target :wire :strategy :depth-first :token-budget 4000 :already-shown (:shown bf)})]
+        (is (= :upgraded (:status (get t4-by 1))))
+        (is (= 'demo/a-full (:chosen-fn (get t4-by 1))))
+        (is (= 100 (:tokens t4)))
+        (is (contains? (get-in t4 [:shown 1 :fns]) 'demo/a-full))
+        (is (= :unchanged (:status (get t5-by 1))))
+        (is (= 0 (:tokens t5)))
+        (is (= :unchanged (:status (first (:selected t6)))))
+        (is (= 0 (:tokens t6)))))))
 
 (deftest ^{:cost/ticks 25000000} html-upgrade-ladder-viewport-and-slot-adaptation-test
   (testing "measure-hiccup & resolve-slot-budget drive responsive HTML candidate choice with zero @media cutoffs"
@@ -167,29 +190,31 @@
           (is (< (:tokens bar-m) (:tokens pan-m))))))))
 
 (deftest ^{:cost/ticks 40000000} ctx-project-fit-integration-and-seed42-generative-test
-  (testing "budget-and-order-projections supports optional fit-opts while preserving 2-arg behavior"
+  (testing "upgrade-ladder handles :target :wire and :target :html seamlessly"
     (let [p1 {:entity 1 :zone :workspace :priority 90 :tx 30 :status :new :delta-data {:a 1}
               :candidates [{:fn 'demo/p1-sm :tokens 10 :min-width 180 :area 4000}
                            {:fn 'demo/p1-lg :tokens 60 :min-width 520 :area 36000}]}
           p2 {:entity 2 :zone :static :priority 70 :tx 10 :status :unchanged :delta-data {}
               :candidates [{:fn 'demo/p2-sm :tokens 20 :min-width 180 :area 4000}]}
-          r-wire (proj/budget-and-order-projections [p1 p2] 80 {:target :wire :strategy :depth-first})
-          r-html (proj/budget-and-order-projections [p1 p2] 80 {:target :html :viewport-w 430 :viewport-h 900 :slot :main})
-          r-2arg (proj/budget-and-order-projections [p1 p2] 80)]
+          r-wire (fit/upgrade-ladder [p1 p2] {:target :wire :strategy :depth-first :token-budget 80})
+          r-html (fit/upgrade-ladder [p1 p2] {:target :html :viewport-w 430 :viewport-h 900 :slot :main})
+          r-def (fit/upgrade-ladder [p1 p2] {:token-budget 80})]
       (is (= [2 1] (mapv :entity (:selected r-wire))))
       (is (= 'demo/p1-lg (:chosen-fn (second (:selected r-wire)))))
       (is (seq (:candidates (second (:selected r-wire)))))
       (is (= 'demo/p1-sm (:chosen-fn (first (:selected r-html)))))
-      (is (= 60 (:tokens r-2arg)))))
+      (is (= 60 (:tokens r-def)))))
 
-  (testing "Pure functions in seon.render.fit, seon.signals, and seon.ctx.project pass 100-sample seed=42 generative checks"
+  (testing "Pure functions in seon.render.fit, seon.render.fit.measure, seon.signals, and seon.ctx.project pass 100-sample seed=42 generative checks"
     (doseq [sym '[seon.render.fit/rank-candidates
                   seon.render.fit/measure-hiccup
                   seon.render.fit/resolve-slot-budget
                   seon.render.fit/upgrade-ladder
+                  seon.render.fit.measure/pass2-upgrade
+                  seon.render.fit.measure/finalize-entry
                   seon.signals/render-signals-bar
                   seon.signals/render-signals-panel
-                  seon.ctx.project/budget-and-order-projections]]
+                  seon.ctx.project/merge-pull-patterns]]
       (let [res (schema/stress-var nil sym {:samples 100 :seed 42})]
         (is (:ok? res) (str sym " failed seed=42 generative check: " (pr-str res)))))))
 

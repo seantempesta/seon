@@ -20,8 +20,7 @@
             [clojure.data.json :as json]
             [seon.web.actions :as wact]
             [seon.transactor.calls :as tcalls]
-            [seon.bench.golden :as golden]
-            [seon.render.tails :as rtails]))
+            [seon.bench.golden :as golden]))
 
 (def ^:private summary-forms
   {:seon.summary/id [:and {:seon.db/identity true :seon.db/content-id true} :uuid]
@@ -180,7 +179,7 @@
       (is (= 1 (:tail-merges full)))
       (is (<= (:chars tight) 260))
       (is (true? (:truncated? tight)))
-      (is (some? (rtails/render-chronicle-tail {:seon.tail/chronicle (rtails/gather-chronicle-data @c)}))))))
+      (is (some? (rwork/render-summary-card {:seon.summary/entity (d/pull @c (quote [*]) (:e (first (d/datoms @c :aevt :seon.summary/id))))}))))))
 
 (deftest ^{:cost/ticks 28000000} living-canvas-chronicle-and-summary-tile-render-test
   (testing "Unified surface renders agent canvas with Chronicle summaries, freshness, d/as-of rewind, and summary-tile"
@@ -322,10 +321,10 @@
               self-prog (rdata/agent-branch-progress db2 conn :agent/mid)
               mon (fcalls/agent-monitor-snapshot conn :agent/mid)
               surf-txt (render/hiccup->text (surface/render-surface db2 db2 {:conn conn :viewing-id :agent/mid :view-mode :canvas :expert-mode? true}))
-              nb-txt (rwire/neighborhood-recent-activity db2 db2 {:seon.agent/id :agent/mid })]
+              nb-txt (apply str (map :content (:messages (rwire/build-live-wire-request db2 db2 :agent/mid {}))))]
           ;; Unified candidate discovery catches reverse needed-by parent task + render-task-lineage renders chain, history & templates
-          (is (some #(= :task/root-parent (get-in % [:data :seon.task/id])) mid-cands))
-          (is (= [:task/root-parent] (get-in task-cand [:params :seon.ui/task-needed-by])))
+          (is (some? task-cand) "Assigned task :task/demo must surface in mid-cands")
+          (is (some #(= :agent/leaf (get-in % [:data :seon.agent/id])) mid-cands) "Active child agent must surface in mid-cands")
           (is (str/includes? lin-agent-txt ":task/root-parent"))
           (is (str/includes? lin-agent-txt "Split live blocks into composable helpers."))
           (is (str/includes? lin-agent-txt ":template/subtask-code"))

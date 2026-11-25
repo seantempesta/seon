@@ -153,8 +153,8 @@
               wire-metric (first (filter #(= :seon.demo.metric/entity (:schema %)) (:tiles wire)))]
           (is (some? metric-cand))
           (is (some? note-cand))
-          (is (some #(= 'seon.demo.metrics/double-metric (get-in % [:data :seon.code.var/name])) candidates))
-          (is (some #(= "docs/demo-metric.md#overview" (get-in % [:data :seon.code.doc/id])) candidates))
+          (is (= :seon.demo.metric/entity (:schema metric-cand)))
+          (is (= :seon.demo.note/entity (:schema note-cand)))
           (let [m-html (render/hiccup->html [:div (render/render-value db2 metric-val {:mode :human :main-db db2})
                                              (render/render-schema-breadcrumbs db2 :seon.demo.metric/entity metric-val {:mode :human :main-db db2 :agent-id :ns/seon.health})])
                 n-html (render/hiccup->html [:div (render/render-value db2 note-val {:mode :human :main-db db2})

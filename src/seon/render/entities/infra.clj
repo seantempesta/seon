@@ -102,3 +102,76 @@
                       ["method" (when method (str method))]
                       ["handler" (when (symbol? handler) [:span {:class "mono tiny"} (str handler)])]])
        (when (nonblank doc) [:div {:class "doc-box sm-copy"} [:p (str doc)]])))
+
+(defn render-form-chip
+  "Compact chip (~160px) for `:seon.code.form/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.code.form/entity :seon.code.form/entity]]]
+                  [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 500000}
+  [{{:seon.code.form/keys [key]} :seon.code.form/entity}]
+  (chip 160 "ent-form" (rlinks/badge "blue" "form") (el :seon.code.form/key key (one-line (or key "(form)") 44))))
+
+(defn render-form-card
+  "Summary card (~360px) for `:seon.code.form/entity` with bounded source preview."
+  {:malli/schema [:=> [:cat [:map [:seon.code.form/entity :seon.code.form/entity]]]
+                  [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 1200000}
+  [{{:seon.code.form/keys [key ns lines chars src test?]} :seon.code.form/entity}]
+  (let [ls (when (string? src) (vec (str/split-lines src)))
+        n (or lines (count ls))
+        preview (when (seq ls) (str/join "\n" (take 8 ls)))]
+    (box "ent-card" 360 "ent-form"
+         [(rlinks/badge (if test? "green" "blue") (if test? "test-form" "form"))
+          (el :seon.code.form/key key (one-line (or key "(form)") 48))]
+         (str (when n (str n " lines")) (when chars (str " · " chars " ch")))
+         (rlinks/kv-dl [["ns" (when ns (el :seon.code.ns/name ns))]
+                        ["key" (when key (el :seon.code.form/key key))]])
+         (when preview [:pre {:class "code-box tiny"} [:code preview]])
+         (when (and ls (> (count ls) 8))
+           [:div {:class "muted tiny"} (str "… " (- (count ls) 8) " more lines")]))))
+
+(defn render-form-full
+  "Full detail card (~560px) for `:seon.code.form/entity` with metadata, deps, and full source."
+  {:malli/schema [:=> [:cat [:map [:seon.code.form/entity :seon.code.form/entity]]]
+                  [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 1800000}
+  [{{:seon.code.form/keys [key ns order lines chars hash deps src test?]} :seon.code.form/entity}]
+  (let [ds (when (and (coll? deps) (not (map? deps))) (seq deps))]
+    (box "ent-full" 560 "ent-form"
+         [(rlinks/badge (if test? "green" "blue") (if test? "test-form" "form"))
+          (el :seon.code.form/key key (str (or key "(form)")))]
+         (when ns (rlinks/meta-link :seon.code.ns/name ns))
+         (rlinks/kv-dl [["ns" (when ns (el :seon.code.ns/name ns))]
+                        ["order" order]
+                        ["lines" lines]
+                        ["chars" chars]
+                        ["hash" (when hash (short-sha hash))]])
+         (when ds (rlinks/pill-list "deps:" ds :seon.code.var/name 12))
+         (when (nonblank src) [:pre {:class "code-box ent-code tiny"} [:code (str src)]]))))
+
+(defn render-message-chip
+  "Compact chip (~180px) for `:seon.agent.message/entity`."
+  {:malli/schema [:=> [:cat [:map [:seon.agent.message/entity :seon.agent.message/entity]]]
+                  [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 500000}
+  [{{:seon.agent.message/keys [id from type body]} :seon.agent.message/entity}]
+  (chip 180 "ent-message"
+        (rlinks/badge "purple" (if (ident? type) (name type) "msg"))
+        (el :seon.agent.message/id id (str (or from :user)))
+        [:span {:class "muted tiny"} (one-line (or body "") 48)]))
+
+(defn render-message-card
+  "Full message card (~420px) for `:seon.agent.message/entity` preserving full body."
+  {:malli/schema [:=> [:cat [:map [:seon.agent.message/entity :seon.agent.message/entity]]]
+                  [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
+   :cost/ticks 1200000}
+  [{{:seon.agent.message/keys [id seq from to type body]} :seon.agent.message/entity}]
+  (box "ent-card" 420 "ent-message"
+       [(rlinks/badge "purple" (if (ident? type) (name type) "chat"))
+        (if (qualified-keyword? from) (el :seon.agent/id from (str from)) [:span {:class "mono strong"} (str (or from :user))])
+        [:span {:class "muted tiny"} "→"]
+        (if (qualified-keyword? to) (el :seon.agent/id to (str to)) [:span {:class "mono strong"} (str (or to :agent))])]
+       (when (integer? seq) (str "#" seq))
+       (rlinks/kv-dl [["id" (when id (el :seon.agent.message/id id))]
+                      ["type" (when type (if (ident? type) (name type) (str type)))]])
+       [:div {:class "doc-box sm-copy"} (str (or body ""))]))

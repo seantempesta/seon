@@ -17,13 +17,13 @@
             [seon.render :as render]
             [seon.render.entities.work :as rwork]
             [seon.render.print :as sprint]
-            [seon.render.tails :as rtails]
             [seon.repl :as repl]
             [seon.store :as store]
             [seon.task.gate :as gate]
             [seon.test-fixture :refer [with-test-store]]
             [seon.transactor.calls :as tcalls]
-            [seon.transactor.merge :as tmerge]))
+            [seon.transactor.merge :as tmerge]
+            [seon.render.entities :as rent]))
 
 (deftest ^{:cost/ticks 120000000} reconciler-pruning-gate-wakeup-and-post-ready-reply-test
   (testing "Skip store/head for :main/nil, prune :testing/:merging/:settling, wake on :gate-blocked, and allow 1 post-ready! chat prose turn"
@@ -223,20 +223,15 @@
 (deftest ^{:cost/ticks 90000000} tails-wire-cliff-and-expand-unwrap-test
   (testing "AUTO-PROOFS FAIL shows :failures, format-eval-output has no 8001->2000 cliff, and expand! unwraps without double truncation"
     ;; 1. AUTO-PROOFS FAIL renders up to 3 lines of :failures
-    (let [res (rtails/render-branch-status-tail
-               {:seon.tail/branch-status
-                {:branch :branch/demo :max-tx 42 :branch-edited ["demo/f"]
-                 :last-proofs {:tx 42 :ok? false :ran 4 :passed 1 :failed 3 :ms 9.5
-                               :failures ["demo-test/t1: expected 1 got 2"
-                                          "demo/f [gen]: output invalid"
-                                          "demo-test/t3: boom"
-                                          "demo-test/t4: fourth should be capped"]}}})
-          txt (render/hiccup->text (:seon.ui/hiccup res))]
-      (is (str/includes? txt "AUTO-PROOFS (tx 42): FAIL (1/4 in 9.5 ms)"))
-      (is (str/includes? txt "demo-test/t1: expected 1 got 2"))
-      (is (str/includes? txt "demo/f [gen]: output invalid"))
-      (is (str/includes? txt "demo-test/t3: boom"))
-      (is (not (str/includes? txt "fourth should be capped"))))
+    (let [res (rent/render-test-card
+             {:seon.test/verdict
+              {:seon.test/digest "dg-c3-fail" :seon.test/var (quote demo-test/t1)
+               :seon.test/kind :deftest :seon.test/pass? false :seon.test/ms 9.5
+               :seon.test/report "demo-test/t1: expected 1 got 2"}
+              :seon.ui/expand-section :report})
+        txt (render/hiccup->text (:seon.ui/hiccup res))]
+    (is (str/includes? txt "demo-test/t1"))
+    (is (str/includes? txt "expected 1 got 2")))
 
     ;; 2. format-eval-output has NO 8001 -> 2000 stdout cliff (head+tail preview ~7600 chars + handle pointer)
     (let [big-out (str "HEAD-MARK " (apply str (repeat 7980 \x)) " TAIL-MARK!")

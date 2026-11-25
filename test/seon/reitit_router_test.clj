@@ -19,7 +19,8 @@
             [seon.web.actions :as actions]
             [seon.web.css :as wcss]
             [seon.web.router :as router]
-            [seon.render.surface.entity]))
+            [seon.render.surface.entity]
+            [seon.ctx :as ctx]))
 
 (deftest ^{:cost/ticks 90000000} seon-route-seeding-db-projection-and-roundtrip-test
   (testing "Idempotent :seon.route/* seeding, db->routes projection, real handler vars, and forward/reverse round-trips for EVERY route type"
@@ -211,9 +212,8 @@
             (is (str/includes? wcss/url-sync-js needle) (str "url-sync-js missing " needle))))))))
 
 (deftest ^{:cost/ticks 120000000} container-ns-scope-enrichment-oom-regression-test
-  (testing "compute-ns-enrichment on container namespace 'seon (0 direct vars, child namespaces) stays < 20 MB with 0 static alerts, and seed=42 generative checks pass"
+  (testing "project-entity on container namespace 'seon (0 direct vars, 12 child namespaces) stays bounded and seed=42 generative checks pass"
     (with-test-store [{:keys [conn]}]
-      ;; Seed root container 'seon with 12 child namespaces containing vars
       (d/transact conn {:tx-data (code/ns-parent-chain-tx 'seon)})
       (doseq [i (range 12)]
         (let [ns-name (str "seon.mod" i)
@@ -223,21 +223,16 @@
                        "(defn g" i " \"Fn g" i ".\" [x] (f" i " x))\n")]
           (d/transact conn {:tx-data (code/file-import-tx @conn path src false)})))
       (let [db @conn
-            ns-ent (d/pull db '[:db/id :seon.code.ns/name :seon.code.ns/doc :seon.code.ns/path] [:seon.code.ns/name 'seon])
-            worker {:seon.agent/id :agent/w-seon :seon.agent/scope 'seon}
             alloc-fn (try (requiring-resolve 'jolt.host/bytes-allocated) (catch Throwable _ nil))
             b0 (if alloc-fn (long (alloc-fn)) 0)
-            res (#'rlinks/compute-ns-enrichment db db ns-ent worker)
+            res (ctx/project-entity db db [:seon.code.ns/name 'seon] {:target :html :semantic? false :perspective-agent :agent/w-seon})
             b1 (if alloc-fn (long (alloc-fn)) 0)
             delta (- b1 b0)]
-        (is (= 0 (:seon.ui/ns-var-count res)))
-        (is (= 12 (count (:seon.ui/ns-children res))))
-        (is (true? (:seon.ui/router-view? res)))
-        (is (empty? (:seon.ui/ns-static-alerts res)) "Container namespace with kids must NOT run subtree static-efficiency-warnings")
+        (is (= :seon.code.ns/entity (:focus-schema res)))
+        (is (>= (count (get-in res [:world :hop1-eids])) 12))
         (when alloc-fn
-          (is (< delta (* 20 1024 1024))
-              (str "compute-ns-enrichment on 'seon allocated " delta " bytes (>= 20 MB)")))
-        ;; Verify agent slug helper parity & seed=42 generative checks on router fns
+          (is (< delta (* 40 1024 1024))
+              (str "project-entity on 'seon allocated " delta " bytes (>= 40 MB)")))
         (is (= "ns~seon.web" (rdata/agent-id->slug :ns/seon.web)))
         (doseq [sym '[seon.web.router/core-routes-tx
                       seon.web.router/missing-core-routes

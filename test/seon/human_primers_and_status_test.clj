@@ -17,14 +17,13 @@
             [seon.render.fit :as fit]
             [seon.render.status :as rstatus]
             [seon.render.surface :as surface]
-            [seon.render.tails :as rtails]
-            [seon.render.wire :as rwire]
             [seon.rule :as rules]
             [seon.rule.seed :as rseed]
             [seon.schema :as schema]
             [seon.store :as store]
             [seon.test-fixture :refer [with-test-store]]
-            [seon.transactor :as txr]))
+            [seon.transactor :as txr]
+            [seon.render.data :as rdata]))
 
 (defn- seed-primers-doc! [conn]
   (let [md (str "# Seon Agent Primers\n\nIntro.\n\n"
@@ -49,8 +48,8 @@
 
 (deftest ^{:cost/ticks 90000000} blank-agent-spawn-and-slim-system-prompt-test
   (testing "Slim default-system-prompt and blank + NEW AGENT spawn without synthetic task"
-    (is (< (count model/default-system-prompt) 450))
-    (is (< (count (str/split model/default-system-prompt #"\s+")) 75))
+    (is (<= 900 (count model/default-system-prompt) 1800))
+    (is (<= 140 (count (str/split model/default-system-prompt #"\s+")) 320))
     (is (str/includes? model/default-system-prompt "NO tool calls"))
     (is (str/includes? model/default-system-prompt "<agent ...>...</agent>"))
     (with-test-store [{:keys [conn]}]
@@ -90,76 +89,41 @@
       (is (= [:task/open-demo] (seon.render.data/agent-task-ids @conn ag-scope)) "Explicit scope must preserve best-task-for-scope matching")))))
 
 (deftest ^{:cost/ticks 120000000} jit-primer-rules-firing-and-reply-suppression-test
-  (testing "All 7 JIT Datalog primer rules + live-status-card fire ONLY on matching facts and stop after reply"
+  (testing "Baseline 0 canonical context rules are 100% native :seon.rule/query and fire ONLY on matching facts"
     (let [all-rs (rseed/starter-rules)
           by-id (into {} (map (juxt :seon.rule/id identity)) all-rs)]
       (is (= 0 (count (filter :seon.rule/when all-rs))))
-      (doseq [rid [:rule.ctx/primer-messaging :rule.ctx/primer-live-progress
-                   :rule.ctx/primer-data-modeling :rule.ctx/primer-editing
-                   :rule.ctx/primer-contracts :rule.ctx/primer-delegation
-                   :rule.ctx/primer-proofs :rule.ctx/live-status-card]]
+      (doseq [rid [:rule.ctx/active-tasks :rule.ctx/agent-prefix-sessions :rule.ctx/branch-edits
+                   :rule.ctx/delegated-calls :rule.ctx/failing-tests :rule.ctx/open-errors
+                   :rule.ctx/pinned-entities :rule.ctx/review-target :rule.ctx/scope-namespaces
+                   :rule.ctx/system-overview :rule.ctx/unread-messages]]
         (is (some? (get-in by-id [rid :seon.rule/query])) (str "Missing native :seon.rule/query for " rid))))
 
     (with-test-store [{:keys [conn]}]
-      (seed-primers-doc! conn)
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/p.clj"
                                                       "(ns demo.p)\n(defn f {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] (inc x))\n" false)})
-      (d/transact conn {:tx-data [{:seon.agent/id :agent/idle :seon.agent/branch :main }
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/idle :seon.agent/branch :main}
                                   {:seon.agent/id :agent/coord :seon.agent/branch :main :seon.agent/router? true}
-                                  {:seon.agent/id :agent/editor :seon.agent/branch :branch/ed }]})
-      ;; 1. Idle worker fires ZERO primers
+                                  {:seon.agent/id :agent/editor :seon.agent/branch :branch/ed}]})
+      ;; 1. Idle worker fires ZERO work/error/message context rules
       (let [f0 (fired-rule-ids @conn @conn :agent/idle)]
-        (doseq [rid [:rule.ctx/primer-messaging :rule.ctx/primer-live-progress :rule.ctx/primer-data-modeling
-                     :rule.ctx/primer-editing :rule.ctx/primer-contracts :rule.ctx/primer-delegation
-                     :rule.ctx/primer-proofs :rule.ctx/live-status-card]]
+        (doseq [rid [:rule.ctx/active-tasks :rule.ctx/unread-messages :rule.ctx/open-errors
+                     :rule.ctx/failing-tests :rule.ctx/delegated-calls :rule.ctx/branch-edits]]
           (is (not (contains? f0 rid)) (str "Idle worker unexpectedly fired " rid))))
 
-      ;; 2. Coordinator fires :rule.ctx/primer-delegation
-      (is (contains? (fired-rule-ids @conn @conn :agent/coord) :rule.ctx/primer-delegation))
-
-      ;; 3. Unanswered :from :user :type :chat -> messaging + data-modeling (taskless), NOT live-progress yet
+      ;; 2. Unread user chat message fires :rule.ctx/unread-messages and stops once seen
       (let [m1 (random-uuid)]
         (d/transact conn {:tx-data [{:seon.agent.message/id m1 :seon.agent.message/seq 1
                                      :seon.agent.message/from :user :seon.agent.message/to :agent/idle
                                      :seon.agent.message/type :chat :seon.agent.message/body "Hello"}]})
-        (let [f1 (fired-rule-ids @conn @conn :agent/idle)]
-          (is (contains? f1 :rule.ctx/primer-messaging))
-          (is (contains? f1 :rule.ctx/primer-data-modeling))
-          (is (not (contains? f1 :rule.ctx/primer-live-progress))))
-
-        ;; 4. Add 2 tool evals -> primer-live-progress fires
+        (is (contains? (fired-rule-ids @conn @conn :agent/idle) :rule.ctx/unread-messages))
         (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/idle
                                      :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
-                                     :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/seen-messages #{m1}}
-                                    {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/idle
-                                     :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0
-                                     :seon.agent.eval/code "(+ 2 2)"}]})
-        (let [f2 (fired-rule-ids @conn @conn :agent/idle)]
-          (is (contains? f2 :rule.ctx/primer-messaging))
-          (is (contains? f2 :rule.ctx/primer-live-progress)))
+                                     :seon.agent.eval/code "(+ 1 1)" :seon.agent.eval/seen-messages #{m1}}]})
+        (is (not (contains? (fired-rule-ids @conn @conn :agent/idle) :rule.ctx/unread-messages))))
 
-        ;; 5. Plain-prose reply stops messaging, live-progress, and data-modeling
-        (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/idle
-                                     :seon.agent.eval/turn 3 :seon.agent.eval/call-index 0
-                                     :seon.agent.eval/code "" :seon.agent.eval/thought "Hi there!"}]})
-        (let [f3 (fired-rule-ids @conn @conn :agent/idle)]
-          (is (not (contains? f3 :rule.ctx/primer-messaging)))
-          (is (not (contains? f3 :rule.ctx/primer-live-progress)))
-          (is (not (contains? f3 :rule.ctx/primer-data-modeling)))))
-
-      ;; 6. Second user msg answered via outbound message from agent -> stops firing
-      (let [m2 (random-uuid)]
-        (d/transact conn {:tx-data [{:seon.agent.message/id m2 :seon.agent.message/seq 2
-                                     :seon.agent.message/from :user :seon.agent.message/to :agent/idle
-                                     :seon.agent.message/type :chat :seon.agent.message/body "Ping"}]})
-        (is (contains? (fired-rule-ids @conn @conn :agent/idle) :rule.ctx/primer-messaging))
-        (d/transact conn {:tx-data [{:seon.agent.message/id (random-uuid) :seon.agent.message/seq 3
-                                     :seon.agent.message/from :agent/idle :seon.agent.message/to :user
-                                     :seon.agent.message/type :chat :seon.agent.message/body "Pong"}]})
-        (is (not (contains? (fired-rule-ids @conn @conn :agent/idle) :rule.ctx/primer-messaging))))
-
-      ;; 7. Open task -> primer-editing; open :missing-contract error -> primer-contracts; failing test -> primer-proofs
-      (d/transact conn {:tx-data [{:seon.task/id :task/edit-me :seon.task/title "Edit" :seon.task/done? false}
+      ;; 3. Open task, open error, delegated call, failing test fire their exact Baseline 0 rules
+      (d/transact conn {:tx-data [{:seon.task/id :task/edit-me :seon.task/title "Edit" :seon.task/scope 'demo.p :seon.task/done? false}
                                   {:seon.agent/id :agent/idle :seon.agent/tasks #{[:seon.task/id :task/edit-me]}}
                                   (serr/error-tx {:kind :missing-contract :severity :error :source :health
                                                   :agent :agent/idle :message "Missing :malli/schema"})
@@ -167,38 +131,29 @@
                                    :seon.agent.call/callee :agent/idle :seon.agent.call/status :pending
                                    :seon.agent.call/prompt "Check"}]})
       (let [f4 (fired-rule-ids @conn @conn :agent/idle)]
-        (is (contains? f4 :rule.ctx/primer-editing))
-        (is (contains? f4 :rule.ctx/primer-contracts))
-        (is (contains? f4 :rule.ctx/primer-delegation))
-        (is (not (contains? f4 :rule.ctx/primer-proofs))))
-      ;; Failing test verdict triggers :rule.ctx/primer-proofs via :rule.ctx/failing-reach-tests
+        (is (contains? f4 :rule.ctx/active-tasks))
+        (is (contains? f4 :rule.ctx/scope-namespaces))
+        (is (contains? f4 :rule.ctx/open-errors))
+        (is (contains? f4 :rule.ctx/delegated-calls))
+        (is (not (contains? f4 :rule.ctx/failing-tests))))
       (let [veid (:e (first (d/datoms @conn :avet :seon.code.var/name 'demo.p/f)))]
         (d/transact conn {:tx-data [{:seon.test/digest "failtest0001" :seon.test/var 'demo.p/f
                                      :seon.test/var-ref veid :seon.test/kind :deftest :seon.test/pass? false
                                      :seon.test/ms 1.0 :seon.test/report "boom"}]})
-        (is (contains? (fired-rule-ids @conn @conn :agent/idle) :rule.ctx/primer-proofs)))
+        (is (contains? (fired-rule-ids @conn @conn :agent/idle) :rule.ctx/failing-tests)))
 
-      ;; 8. Branch edit -> edited-var-on-branch -> primer-editing + primer-contracts + primer-proofs
+      ;; 4. Branch edit fires :rule.ctx/branch-edits for both :wire and :canvas
       (store/branch! conn :main :branch/ed)
       (let [bconn (d/connect (assoc (:config @conn) :branch :branch/ed))]
         (try
           (d/transact bconn {:tx-data (code/file-import-tx @bconn "src/demo/p.clj"
                                                            "(ns demo.p)\n(defn f {:malli/schema [:=> [:cat :int] :int] :cost/ticks 10000} [x] (+ x 2))\n" false)})
-          (let [fb (fired-rule-ids @conn @bconn :agent/editor :wire)
-              fb-canvas (fired-rule-ids @conn @bconn :agent/editor :canvas)]
-          (is (contains? fb :rule.ctx/primer-editing))
-          (is (contains? fb :rule.ctx/primer-contracts))
-          (is (contains? fb :rule.ctx/primer-proofs))
-          ;; Primer rules are :target :wire so browser :canvas/:debug skips them
-          (is (not-any? #{:rule.ctx/primer-messaging :rule.ctx/primer-live-progress
-                          :rule.ctx/primer-data-modeling :rule.ctx/primer-editing
-                          :rule.ctx/primer-contracts :rule.ctx/primer-delegation
-                          :rule.ctx/primer-proofs}
-                        fb-canvas)))
+          (is (contains? (fired-rule-ids @conn @bconn :agent/editor :wire) :rule.ctx/branch-edits))
+          (is (contains? (fired-rule-ids @conn @bconn :agent/editor :canvas) :rule.ctx/branch-edits))
           (finally (d/release bconn)))))))
 
 (deftest ^{:cost/ticks 120000000} live-status-renderers-svg-sanitization-and-wait-nudge-test
-  (testing ":seon.ui.status/* upsert, renderer discovery, SVG sanitization, wait-nudge tail, and seed=42 checks"
+  (testing ":seon.ui.status/* upsert, renderer discovery, SVG sanitization, wait-nudge helper, and seed=42 checks"
     (with-test-store [{:keys [conn]}]
       (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/render/status.clj"
                                                       (str "(ns seon.render.status)\n"
@@ -206,7 +161,7 @@
                                                            "(defn render-status-card {:malli/schema [:=> [:cat [:map [:seon.ui.status/entity :seon.ui.status/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]} [m] {:seon.ui/hiccup [:div \"k\"]})\n")
                                                       false)})
       (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn {:analyze-compiler? true})})
-      (d/transact conn {:tx-data [{:seon.agent/id :agent/helper :seon.agent/branch :main }]})
+      (d/transact conn {:tx-data [{:seon.agent/id :agent/helper :seon.agent/branch :main}]})
       (let [disc (fit/discover-renderers @conn :seon.ui.status/entity)]
         (is (= '[seon.render.status/render-status-card seon.render.status/render-status-chip] disc)))
 
@@ -228,7 +183,6 @@
           (is (:ok? r1))
           (is (:ok? r2))
           (is (= 1 (count st-ents)) "Repeated set-status! must upsert single entity via :seon.ui.status/id")
-          (is (contains? (fired-rule-ids @conn @conn :agent/helper) :rule.ctx/live-status-card))
           (is (str/includes? card-html "Verifying proofs"))
           (is (str/includes? card-html "80%"))
           (is (str/includes? card-html "role=\"progressbar\""))
@@ -243,21 +197,18 @@
           (is (:ok? (rstatus/clear-status!)))
           (is (nil? (rstatus/latest-agent-status @conn @conn :agent/helper)))))
 
-      ;; 3. <user-waiting> tail nudge: eval-count >= 2 OR elapsed >= 5s; suppressed after recent status or reply
+      ;; 3. compute-wait-nudge-data: eval-count >= 2 OR elapsed >= 5s; suppressed after recent status or reply
       (let [mid (random-uuid)
             r-msg (d/transact conn {:tx-data [{:seon.agent.message/id mid :seon.agent.message/seq 1
                                                :seon.agent.message/from :user :seon.agent.message/to :agent/helper
                                                :seon.agent.message/type :chat :seon.agent.message/body "How is the system?"}]})
             msg-tx (:max-tx (:db-after r-msg))
             msg-ms (.getTime ^java.util.Date (:db/txInstant (d/pull @conn '[:db/txInstant] msg-tx)))
-            ;; 0 evals + 1s -> no nudge
-            w-early (rwire/build-live-wire-request @conn @conn :agent/helper {:conn conn :now-ms (+ msg-ms 1000)})
-            ;; 0 evals + 8s -> <user-waiting> fires!
-            w-slow (rwire/build-live-wire-request @conn @conn :agent/helper {:conn conn :now-ms (+ msg-ms 8000)})]
-        (is (not (some #(= "user-waiting" (:tag %)) (:tail-blocks w-early))))
-        (is (some #(= "user-waiting" (:tag %)) (:tail-blocks w-slow)))
-        (is (str/includes? (str (:activity-text w-slow)) "8s"))
-        (is (str/includes? (str (:activity-text w-slow)) "user/set-status!"))
+            ag {:seon.agent/id :agent/helper}]
+        (is (nil? (rstatus/compute-wait-nudge-data @conn @conn ag [] (+ msg-ms 1000))))
+        (let [n-slow (rstatus/compute-wait-nudge-data @conn @conn ag [] (+ msg-ms 8000))]
+          (is (= 8 (:elapsed-s n-slow)))
+          (is (= 0 (:eval-count n-slow))))
         ;; Add 2 evals at +1s -> fires on eval-count >= 2
         (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/helper
                                      :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0
@@ -265,20 +216,20 @@
                                     {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/helper
                                      :seon.agent.eval/turn 2 :seon.agent.eval/call-index 0
                                      :seon.agent.eval/code "(+ 2 2)"}]})
-        (let [w-evs (rwire/build-live-wire-request @conn @conn :agent/helper {:conn conn :now-ms (+ msg-ms 1000)})]
-          (is (some #(= "user-waiting" (:tag %)) (:tail-blocks w-evs)))
-          (is (str/includes? (str (:activity-text w-evs)) "2 eval(s)")))
+        (let [evs (mapv #(d/pull @conn '[*] (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))
+              n-evs (rstatus/compute-wait-nudge-data @conn @conn ag evs (+ msg-ms 1000))]
+          (is (= 2 (:eval-count n-evs))))
         ;; Recent status update suppresses nudge
         (d/transact conn {:tx-data [(rstatus/build-status-tx {:label "Working" :pct 50 :stage :researching}
                                                              :agent/helper (+ msg-ms 2000))]})
-        (let [w-st (rwire/build-live-wire-request @conn @conn :agent/helper {:conn conn :now-ms (+ msg-ms 9000)})]
-          (is (not (some #(= "user-waiting" (:tag %)) (:tail-blocks w-st)))))
+        (let [evs (mapv #(d/pull @conn '[*] (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))]
+          (is (nil? (rstatus/compute-wait-nudge-data @conn @conn ag evs (+ msg-ms 9000)))))
         ;; Plain-prose reply suppresses nudge even after status expires
         (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :agent/helper
                                      :seon.agent.eval/turn 3 :seon.agent.eval/call-index 0
                                      :seon.agent.eval/code "" :seon.agent.eval/thought "All healthy!"}]})
-        (let [w-done (rwire/build-live-wire-request @conn @conn :agent/helper {:conn conn :now-ms (+ msg-ms 60000)})]
-          (is (not (some #(= "user-waiting" (:tag %)) (:tail-blocks w-done))))))
+        (let [evs (mapv #(d/pull @conn '[*] (:e %)) (d/datoms @conn :avet :seon.agent.eval/agent :agent/helper))]
+          (is (nil? (rstatus/compute-wait-nudge-data @conn @conn ag evs (+ msg-ms 60000))))))
 
       ;; 4. 100-sample seed=42 generative checks
       (let [db @conn]
@@ -286,8 +237,7 @@
                       seon.render.status/status-id-for-agent
                       seon.render.status/render-status-chip
                       seon.render.status/render-status-card
-                      seon.render.status/build-status-tx
-                      seon.render.tails/render-wait-nudge-tail]]
+                      seon.render.status/build-status-tx]]
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]
             (is (:ok? res) (str sym " failed seed=42 check: " (pr-str res)))))))))
 

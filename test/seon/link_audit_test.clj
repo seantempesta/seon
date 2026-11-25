@@ -1,17 +1,17 @@
 (ns seon.link-audit-test
   "Automated QA & Link-Completeness Audit Suite:
-   1. Walks rendered Hiccup trees across ALL 4 views (`:session`, `:context`, `:system`, `:inspect`
-      across all 15 entity kinds), shell units, `seon.render.entities`, `seon.render.tails`,
-      `seon.signals`, and `seon.render/render-schema-breadcrumbs` — verifying EVERY `:on-click` /
-      `:on-submit` resolves to a bound `^:seon/callable` var (0 broken/stale links) and EVERY
-      major ref type emits clickable `.ent-link` navigation while `hiccup->text` stays clean.
-   2. 4-hop trail navigation (`agent -> task -> ns -> var`, Back/Forward/Breadcrumb jump) and
-      `< 40 ms` warm frame budget across all 4 views.
-   3. Regression tests for all 4 live Chrome crawl bugs (#1 `AsOfDB` `(:schema db)` nil,
-      #2 stale-branch `:seon.code.var/calls` Malli contract on armed `render-var-chip`,
-      #3 `toggle-lab-rule!` Datastar JSON body + live flip + candidate suppression,
-      #4 stale `#stream-error-notice` clearing + `Return to Live` fault button + CSS polish).
-   4. `seed=42` generative proofs on all new public render/link helpers."
+  1. Walks rendered Hiccup trees across ALL 4 views (`:session`, `:context`, `:system`, `:inspect`
+     across all 15 entity kinds), shell units, `seon.render.entities`, `seon.render.wire`,
+     `seon.signals`, and `seon.render/render-schema-breadcrumbs` — verifying EVERY `:on-click` /
+     `:on-submit` resolves to a bound `^:seon/callable` var (0 broken/stale links) and EVERY
+     major ref type emits clickable `.ent-link` navigation while `hiccup->text` stays clean.
+  2. 4-hop trail navigation (`agent -> task -> ns -> var`, Back/Forward/Breadcrumb jump) and
+     `< 40 ms` warm frame budget across all 4 views.
+  3. Regression tests for all 4 live Chrome crawl bugs (#1 `AsOfDB` `(:schema db)` nil,
+     #2 stale-branch `:seon.code.var/calls` Malli contract on armed `render-var-chip`,
+     #3 `toggle-lab-rule!` Datastar JSON body + live flip + candidate suppression,
+     #4 stale `#stream-error-notice` clearing + `Return to Live` fault button + CSS polish).
+  4. `seed=42` generative proofs on all new public render/link helpers."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -25,7 +25,6 @@
             [seon.render.links :as rlinks]
             [seon.render.surface :as surface]
             [seon.render.surface.inspector :as sinsp]
-            [seon.render.tails :as rtails]
             [seon.render.ui :as ui]
             [seon.rule :as rule]
             [seon.schema :as schema]
@@ -35,7 +34,8 @@
             [seon.vector :as vec]
             [seon.web :as web]
             [seon.web.actions :as actions]
-            [seon.web.styles :as styles]))
+            [seon.web.styles :as styles]
+            [seon.render.entities.infra :as rinfra]))
 
 (defn- unit-vec [dims idx]
   (vec (for [i (range dims)] (if (= i idx) 1.0 (if (= i (mod (inc idx) dims)) 0.1 0.0)))))
@@ -330,16 +330,13 @@
         (let [fix-ent (d/pull db '[*] [:seon.fix/id fix-id])
               call-ent (d/pull db '[*] [:seon.agent.call/id call-id])
               snap (sig/all-signals db)
-              tail-act (:seon.ui/hiccup (rtails/render-activity-tail
-                                         {:seon.tail/activity
-                                          {:scope 'demo.audit
-                                           :incoming [call-ent]
-                                           :outgoing [call-ent]
-                                           :open-errors [(d/pull db '[*] [:seon.error/id err-id])]}}))
-              tail-br  (:seon.ui/hiccup (rtails/render-branch-status-tail
-                                         {:seon.tail/branch-status
-                                          {:branch :branch/audit :max-tx 100 :branch-edited [form-key]
-                                           :branch-errors [{:class :test-fail :var 'demo.audit/compute :subject "demo.audit/compute" :message "boom"}]}}))
+              tail-act (:seon.ui/hiccup (rinfra/render-message-card
+                                        {:seon.agent.message/entity
+                                         {:seon.agent.message/id (random-uuid) :seon.agent.message/seq 1
+                                          :seon.agent.message/from :agent/root :seon.agent.message/to :agent/worker
+                                          :seon.agent.message/type :chat :seon.agent.message/body "Audit message"}}))
+              tail-br  (:seon.ui/hiccup (rinfra/render-form-card
+                                        {:seon.code.form/entity (update (d/pull db '[*] [:seon.code.form/key form-key]) :seon.code.form/deps set)}))
               sig-bar  (:seon.ui/hiccup (sig/render-signals-bar {:seon.signal/snapshot snap}))
               sig-pan  (:seon.ui/hiccup (sig/render-signals-panel {:seon.signal/snapshot snap}))
               fix-card (:seon.ui/hiccup (rent/render-fix-card {:seon.fix/entity fix-ent}))
@@ -547,12 +544,12 @@
                       seon.render.entities.work/render-bench-run-card
                       seon.render.entities.work/render-health-report
                       seon.render.entities.work/render-task-lineage
-                      seon.render.tails/render-branch-status-tail
-                      seon.render.tails/render-scoped-health-tail
-                      seon.render.tails/render-activity-tail
-                      seon.render.tails/render-inbox-tail
-                      seon.render.tails/render-system-health-tail
-                      seon.render.tails/render-viewport-tail
+                      seon.render.entities.infra/render-form-chip
+                      seon.render.entities.infra/render-form-card
+                      seon.render.entities.infra/render-form-full
+                      seon.render.entities.infra/render-message-chip
+                      seon.render.entities.infra/render-message-card
+                      seon.render.entities/render-system-card
                       seon.render.surface.context-lab/render-kv-cache-section
                       seon.web.actions/parse-form-body]]
           (let [res (schema/stress-var db sym {:samples 100 :seed 42})]

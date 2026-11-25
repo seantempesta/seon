@@ -118,12 +118,16 @@
                   (is (some #(= :scale/b1 (:v %)) ch2))
                   (is (some #(= :scale/b2 (:v %)) ch2)))))
             (finally (d/release bconn)))))))
-  (testing "tail-rules-with-producers detects (ground :ephemeral-tail) zone bindings"
-    (let [r {:seon.rule/id :rule.test/grounded-tail :seon.rule/stratum 20 :seon.rule/category :context
-             :seon.rule/query '[:find ?e ?z :in $branch :where [$branch ?e :seon.agent.eval/id _] [(ground :ephemeral-tail) ?z]]
-             :seon.rule/assert '[{:entity ?e :zone ?z :priority 50}]}
-          res (ctx/tail-rules-with-producers [r])]
-      (is (= [:rule.test/grounded-tail] (mapv :seon.rule/id res))))))
+  (testing "project-entity handles both :target :wire and :target :html uniformly"
+  (with-test-store [{:keys [conn]}]
+    (d/transact conn {:tx-data [{:seon.agent/id :scale/proj :seon.agent/branch :main}]})
+    (let [db @conn
+          w (ctx/project-entity db db [:seon.agent/id :scale/proj] {:target :wire :semantic? false})
+          h (ctx/project-entity db db [:seon.agent/id :scale/proj] {:target :html :semantic? false})]
+      (is (= :agent (:focus-kind w)))
+      (is (= :agent (:focus-kind h)))
+      (is (map? (:fitted w)))
+      (is (map? (:fitted h)))))))
 
 (deftest scale-invariance-1x-to-10x-test
   (testing "Monotonic 1x -> 10x store growth keeps wire, health, coverage, :context, :system, and incremental test-snapshot < 2.0x and under hard ceilings"

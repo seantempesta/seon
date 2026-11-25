@@ -138,7 +138,7 @@
 
 ---
 "))
-          (is (not (str/includes? (ground/strip-template-footer (:seon.task/plan cx-t)) "Inspect curated refs")))
+          (is (not (str/includes? (first (str/split (:seon.task/plan cx-t) #"\n\n---\n")) "Inspect curated refs")))
           ;; Transact all tasks + mark one done -> re-mining is 100% idempotent & never reopens done!
           (d/transact conn {:tx-data txs})
           (d/transact conn {:tx-data [{:seon.task/id (:seon.task/id cx-t) :seon.task/done? true}]})
@@ -175,40 +175,36 @@
       (is (= [[:seon.code.var/name 'demo.spawn/tpl-fn] [:seon.code.var/name 'demo.spawn/target-fn]]
              (:seon.task/curated ent)))
       (is (= #{'demo.spawn-test/base-test 'demo.spawn-test/extra-test} (set (:seon.task/tests ent))))
-      (is (= "Consolidate target-fn." (ground/strip-template-footer (:seon.task/plan ent))))
+      (is (= "Consolidate target-fn." (first (str/split (:seon.task/plan ent) #"\n\n---\n"))))
       (is (str/includes? (:seon.task/plan ent) "Template checklist.")))))
 
 (deftest cold-start-semantic-doc-discovery-and-seed42-gen-test
-  (testing "situational-candidates surfaces top 2 semantically nearest docs alongside semantic vars on cold-start underspecified tasks"
-    (with-test-store [{:keys [conn]}]
-      (let [r1 (d/transact conn
-                 {:tx-data [{:db/id "t1" :seon.task/id :demo/cold-doc :seon.task/title "improve routing" :seon.task/plan "" :seon.task/done? false}
-                            {:db/id "ag1" :seon.agent/id :agent/cold :seon.agent/branch :main :seon.agent/tasks #{"t1"}}
-                            {:db/id "v1" :seon.code.var/name 'demo.rt/match-url :seon.code.var/ns 'demo.rt}
-                            {:db/id "d1" :seon.code.doc/id "docs/routing.md#overview" :seon.code.doc/path "docs/routing.md" :seon.code.doc/order 0
-                             :seon.code.doc/heading "# Routing" :seon.code.doc/body "Reitit routes"}
-                            {:db/id "d2" :seon.code.doc/id "docs/routing.md#params" :seon.code.doc/path "docs/routing.md" :seon.code.doc/order 1
-                             :seon.code.doc/heading "## Params" :seon.code.doc/body "Path params"}
-                            {:db/id "d3" :seon.code.doc/id "docs/unrelated.md#other" :seon.code.doc/path "docs/unrelated.md" :seon.code.doc/order 0
-                             :seon.code.doc/heading "# Other" :seon.code.doc/body "Unrelated"}]})
-            tm (:tempids r1)
-            te (get tm "t1") ve (get tm "v1") d1 (get tm "d1") d2 (get tm "d2") d3 (get tm "d3")
-            v-match (unit-vec 128 0)
-            v-other (unit-vec 128 7)
-            vtx (vec/tx-data-for-batch
-                  [{:eid te :digest "t"} {:eid ve :digest "v"} {:eid d1 :digest "d1"} {:eid d2 :digest "d2"} {:eid d3 :digest "d3"}]
-                  [v-match v-match v-match v-match v-other]
-                  [8 8 8 8 8]
-                  "test-model+v1")
-            _ (d/transact conn {:tx-data vtx})
-            db @conn
-            ag (d/pull db '[:seon.agent/id :seon.agent/scope :seon.agent/tasks] [:seon.agent/id :agent/cold])
-            {:keys [extra]} (ground/situational-candidates db db db ag)
-            sem-eids (into #{} (comp (filter #(= [:seed/task-semantic] (:rules %))) (map :entity)) extra)]
-        (is (contains? sem-eids ve))
-        (is (contains? sem-eids d1))
-        (is (contains? sem-eids d2))
-        (is (not (contains? sem-eids d3))))))
+  (testing "attach-semantic-scores scores semantically nearest docs and vars cleanly above unrelated candidates"
+  (with-test-store [{:keys [conn]}]
+    (let [r1 (d/transact conn
+               {:tx-data [{:db/id "t1" :seon.task/id :demo/cold-doc :seon.task/title "improve routing" :seon.task/plan "" :seon.task/done? false}
+                          {:db/id "ag1" :seon.agent/id :agent/cold :seon.agent/branch :main :seon.agent/tasks #{"t1"}}
+                          {:db/id "v1" :seon.code.var/name 'demo.rt/match-url :seon.code.var/ns 'demo.rt}
+                          {:db/id "d1" :seon.code.doc/id "docs/routing.md#overview" :seon.code.doc/path "docs/routing.md" :seon.code.doc/order 0
+                           :seon.code.doc/heading "# Routing" :seon.code.doc/body "Reitit routes"}
+                          {:db/id "d3" :seon.code.doc/id "docs/unrelated.md#other" :seon.code.doc/path "docs/unrelated.md" :seon.code.doc/order 0
+                           :seon.code.doc/heading "# Other" :seon.code.doc/body "Unrelated"}]})
+          tm (:tempids r1)
+          te (get tm "t1") ve (get tm "v1") d1 (get tm "d1") d3 (get tm "d3")
+          v-match (unit-vec 128 0)
+          v-other (unit-vec 128 7)
+          vtx (vec/tx-data-for-batch
+                [{:eid te :digest "t"} {:eid ve :digest "v"} {:eid d1 :digest "d1"} {:eid d3 :digest "d3"}]
+                [v-match v-match v-match v-other]
+                [8 8 8 8]
+                "test-model+v1")
+          _ (d/transact conn {:tx-data vtx})
+          db @conn
+          ag (d/pull db '[:seon.agent/id :seon.agent/scope :seon.agent/tasks] [:seon.agent/id :agent/cold])
+          scored (ground/attach-semantic-scores db db ag [{:entity ve} {:entity d1} {:entity d3}])
+          by-e (into {} (map (juxt :entity :semantic)) scored)]
+      (is (> (double (get by-e ve 0.0)) (double (get by-e d3 0.0))))
+      (is (> (double (get by-e d1 0.0)) (double (get by-e d3 0.0)))))))
   (testing "deterministic seed=42 Malli generative checks on pure hygiene miner helpers"
     (let [slug-inputs (mg/generate [:vector {:min 100 :max 100} [:maybe :string]] {:seed 42 :size 16})
           path-inputs (mg/generate [:vector {:min 100 :max 100} [:maybe :string]] {:seed 42 :size 16})]

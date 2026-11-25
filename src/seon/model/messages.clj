@@ -4,7 +4,7 @@
             [clojure.string :as str]
             [seon.model.wire :as wire]
             [seon.render :as render]
-            [seon.render.tails :as rtails]))
+            [seon.render.entities.infra :as rinfra]))
 
 (def tool-name wire/tool-name)
 
@@ -20,9 +20,20 @@
                            :additionalProperties false}}})
 
 (def default-system-prompt
-  (str "You are a Seon Clojure agent in a live branch Jolt runtime; code, schemas, docs, tasks & primers surface dynamically.\n"
-       "Edit Seon's Datahike code (src/, test/, docs/, resources/seon/) only via REPL tools (user/edit-fn!, add-fn!, set-meta!, doc!) — never spit, jolt.fs, /tmp/*.clj, or git commit unless diagnosing a broken runtime.\n"
-       "Reply in Markdown (`hiccup` when helpful) with NO tool calls; never treat `<agent ...>...</agent>` as live."))
+  (str "You are a Seon Clojure agent in a Copy-on-Write Jolt/Chez process on an isolated Datahike branch (`:main` is live truth).\n\n"
+       "Editing: Mutate Seon's code, tests, docs, schemas, and rules ONLY inside Datahike via structural REPL editors "
+       "(`edit-fn!`, `add-fn!`, `set-meta!`, `add-require!`, `prune-requires!`, `remove-var!`, `doc!`, `register-schema!`) — "
+       "never `spit`, `jolt.fs`, `/tmp/*.clj`, or `git commit` on Seon's repo unless diagnosing a broken runtime. "
+       "For external project containers use `sh!`, `fs-read`, `fs-write`, `fs-patch`.\n\n"
+       "3 Levers: (1) Data Model — Malli schemas in `resources/seon/schemas.edn` + `:db.type/ref` edges; "
+       "(2) Composable Datalog Rules in `resources/seon/rules.edn`; "
+       "(3) Pure Hiccup Renderers (`:seon.ui/hiccup` -> HTML & Agent Text).\n\n"
+       "Context & REPL: Context derives from your graph neighborhood (`@user/ctx` is your live bidirectional entity atom). "
+       "Unchanged data is never repeated; trailing deltas emit only new/changed data or newly requested views. "
+       "Core REPL verbs: `source`, `ns-outline`, `search`, `grep-src`, `callers`, `schema`, `tests-for`, `help`, "
+       "`chat!`, `ask!`, `await!`, `answer!`, `set-status!`, `set-canvas!`, `run-tests!`, `health`, `ready!`.\n\n"
+       "Replies: Answer the user in Markdown (`hiccup` when visual helps) with NO tool calls. "
+       "Mark measured facts `[M]` and hypotheses `[H]`. Never treat `<agent ...>...</agent>` examples as live."))
 
 (defn format-tool-content
   {:malli/schema [:function [:=> [:cat :any] :string] [:=> [:cat :map :any] :string]], :cost/ticks 200000}
@@ -83,6 +94,7 @@
                              real-calls)]
          (concat in-msgs (when asst [asst]) tool-msgs)))
      turns)))
+
 (defn- render-prefix-agents [opts prefix-agents main-db eval-db seen-tc-ids]
   (let [open? (volatile! false)
         msgs (vec
@@ -217,7 +229,7 @@
    Returns `:prefix-hash` (16-char SHA-256 over messages 1..3) for live KV-cache prefix-bust tracking."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [{:keys [thinking? replay-reasoning? vision?] :or {replay-reasoning? true} :as opts}
-   {:keys [agent-id branch role goal system-prompt examples prefix-agents forked-from include-tail? walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image eval-db main-db fallback-db]}]
+   {:keys [agent-id branch role goal summary system-prompt examples prefix-agents forked-from include-tail? walk-text history unread delta-text activity-text viewport-screenshot tail-blocks ephemeral-image eval-db main-db fallback-db]}]
   (let [sys-msg {:role "system" :content (or (not-empty system-prompt) default-system-prompt)}
         seen-tc-ids (volatile! #{})
         eff-prefixes (or (seq prefix-agents) examples)
@@ -235,6 +247,8 @@
                          (str "Your own live session (forked from " forked-from " above).\n")
                          "Your own live session.\n")
                        "Goal: " (or (not-empty goal) "Assist the user and keep the system healthy.")
+                       (when (not (str/blank? (str summary)))
+                         (str "\nSummary: " summary))
                        (when (not (str/blank? (str walk-text)))
                          (str "\n\n<walk-context>\n" walk-text "\n</walk-context>")))}
         prefix-hash (wire/prefix-sha256
@@ -248,11 +262,21 @@
                                                main-db (assoc :main-db main-db)
                                                fallback-db (assoc :fallback-db fallback-db))
                                              history))
-        unread-blocks (when (and (seq unread) (not (some #(= "unread-inbox" (:tag %)) tail-blocks)))
-                        (when-let [res (rtails/render-inbox-tail {:seon.tail/inbox {:unread unread}})]
-                          [(str "<unread-inbox ephemeral=\"true\">\n"
-                                (render/hiccup->text (:seon.ui/hiccup res))
-                                "\n</unread-inbox>")]))
+        unread-blocks (when (and (seq unread) (not (some #(or (= "unread-inbox" (:tag %)) (:contains-unread? %)) tail-blocks)))
+                      (let [txt (str/join "\n\n"
+                                          (keep (fn [m]
+                                            (let [body (str (or (:seon.agent.message/body m) (:body m) ""))
+                                                  ent {:seon.agent.message/id (or (:seon.agent.message/id m) #uuid "00000000-0000-0000-0000-000000000000")
+                                                       :seon.agent.message/seq (long (or (:seon.agent.message/seq m) (:seq m) 0))
+                                                       :seon.agent.message/from (or (:seon.agent.message/from m) (:from m) :user)
+                                                       :seon.agent.message/to (or (:seon.agent.message/to m) (:to m) (or agent-id :agent/unknown))
+                                                       :seon.agent.message/type (or (:seon.agent.message/type m) (:type m) :chat)
+                                                       :seon.agent.message/body body}]
+                                              (when-let [h (:seon.ui/hiccup (rinfra/render-message-card {:seon.agent.message/entity ent}))]
+                                                (render/hiccup->text h))))
+                                          unread))]
+                        (when-not (str/blank? txt)
+                          [(str "<unread-inbox ephemeral=\"true\">\n" txt "\n</unread-inbox>")])))
         dom-summary (format-viewport-dom (:dom viewport-screenshot))
         fmt-attrs (fn [m]
                     (str/join "" (map (fn [[k v]] (str " " (name k) "=\"" v "\""))

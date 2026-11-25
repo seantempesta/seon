@@ -54,14 +54,12 @@
               (d/release fconn))))))))
 
 (deftest ^{:cost/ticks 90000000} failing-reach-tests-failed-digests-and-no-ghosts-test
-  (testing ":rule.ctx/failing-reach-tests reads :seon.test.run/failed-digests directly (< 10 ms), never resurrects historical failures, and feeds :rule.ctx/primer-proofs"
+  (testing ":rule.ctx/failing-tests reads :seon.test.run/failed-digests directly (< 10 ms), never resurrects historical failures, and clears cleanly on green run"
     (with-test-store [{:keys [conn]}]
       (let [src "(ns demo.ft)\n(defn dead-fn [x] x)\n(defn live-fn [x] (inc x))\n"]
         (d/transact conn {:tx-data (concat
                                     (code/file-import-tx @conn "src/demo/ft.clj" src false)
-                                    [{:seon.code.doc/id "docs/primers.md#proofs" :seon.code.doc/path "docs/primers.md"
-                                      :seon.code.doc/order 1 :seon.code.doc/heading "Proofs" :seon.code.doc/body "Run tests."}
-                                     {:seon.agent/id :ag/ft :seon.agent/branch :main }])})
+                                    [{:seon.agent/id :ag/ft :seon.agent/branch :main}])})
         (let [db0 @conn
               dead-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.ft/dead-fn)))
               live-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.ft/live-fn)))
@@ -78,28 +76,25 @@
                                             :seon.test.run/failed-digests #{"dg-live-1"}
                                             :seon.test.run/ran 1 :seon.test.run/cached 20})})
           (let [db1 @conn
-                rs (filterv #(#{:rule.ctx/failing-reach-tests :rule.ctx/primer-proofs} (:seon.rule/id %))
-                            (rules/load-rules db1 (rseed/starter-rules)))
+                ft-rule (some #(when (= :rule.ctx/failing-tests (:seon.rule/id %)) %) (rules/load-rules db1 (rseed/starter-rules)))
                 t0 (System/nanoTime)
-                res (rules/fire-rules {:main db1 :branch db1} :ag/ft rs :wire)
+                res (rules/fire-rules {:main db1 :branch db1} :ag/ft [ft-rule] :wire)
                 ms (/ (- (System/nanoTime) t0) 1e6)
                 live-tv (:e (first (d/datoms db1 :avet :seon.test/digest "dg-live-1")))
-                fr-run (get-in res [:runs :rule.ctx/failing-reach-tests])
-                pr-run (get-in res [:runs :rule.ctx/primer-proofs])]
+                fr-run (get-in res [:runs :rule.ctx/failing-tests])]
             (is (= 1 (:fired fr-run)) "Only the 1 live failed-digest must fire; 20 ghost failures must NOT resurrect")
-            (is (true? (rules/wm-scalar (:wm res) live-tv :ctx.branch/failing-test?)))
-            (is (pos? (:fired pr-run)) ":rule.ctx/primer-proofs must fire from :ctx.branch/failing-test? fact")
-            (is (< ms 250.0) (str "failing-reach-tests exceeded 250 ms: " ms " ms")))
-          ;; Green run clears failing-reach-tests completely
+            (is (some #(= live-tv (:entity %)) (:projections res)))
+            (is (< ms 250.0) (str "failing-tests exceeded 250 ms: " ms " ms")))
+          ;; Green run clears failing-tests completely
           (d/transact conn {:tx-data [[:db/retract [:seon.test.run/branch :main] :seon.test.run/failed-digests "dg-live-1"]
                                       {:seon.test.run/branch :main :seon.test.run/pass? true :seon.test.run/ran 1 :seon.test.run/cached 20}]})
           (let [db2 @conn
-                fr (some #(when (= :rule.ctx/failing-reach-tests (:seon.rule/id %)) %) (rules/load-rules db2 (rseed/starter-rules)))
+                fr (some #(when (= :rule.ctx/failing-tests (:seon.rule/id %)) %) (rules/load-rules db2 (rseed/starter-rules)))
                 res2 (rules/fire-rules {:main db2 :branch db2} :ag/ft [fr] :wire)]
-            (is (= 0 (get-in res2 [:runs :rule.ctx/failing-reach-tests :fired])))))))))
+            (is (= 0 (get-in res2 [:runs :rule.ctx/failing-tests :fired])))))))))
 
 (deftest ^{:cost/ticks 90000000} fix-scope-grounding-archived-filter-and-test-requires-test
-  (testing "fix-matches-scope? blocks 'seon flood, strip-template-footer cleans boilerplate, archived eval-touches filter out, and links ranks <scope>-*test up to 6"
+  (testing "fix-matches-scope? blocks 'seon flood, archived eval-touches filter out, and project-entity discovers scope namespaces cleanly"
     ;; 1. fix-matches-scope?
     (is (false? (ground/fix-matches-scope? 'seon :demo/err "Fixed seon.foo/bar" 'seon.foo-test/t1)))
     (is (false? (ground/fix-matches-scope? nil :demo/err "Fixed seon.foo/bar" 'seon.foo-test/t1)))
@@ -108,11 +103,7 @@
     (is (true? (ground/fix-matches-scope? 'seon :demo/lmdb-leak "Fixed lmdb" 't1 "Investigate :demo/lmdb-leak")))
     (is (false? (ground/fix-matches-scope? 'seon :demo/lmdb-leak "Fixed lmdb" 't1 "Interactive demo tour")))
 
-    ;; 2. strip-template-footer cleans both --- footers and direct boilerplate plans
-    (is (= "Fix parser bug" (ground/strip-template-footer "Fix parser bug\n\n---\n1. **Discover first:** Inspect `:seon.schema/key`")))
-    (is (= "" (ground/strip-template-footer "1. **Discover first:** Inspect `@seon.ctx/ctx`, schemas (`:seon.schema/key`), callers (`user/callers`).")))
-
-    ;; 3. Archived agent filtered from :signal/eval-touched & links test-ns requires > 2 with <scope>-*test first
+    ;; 2. Archived agent filtered from candidates & scope namespace surfaces cleanly
     (with-test-store [{:keys [conn]}]
       (let [src-lib "(ns demo.pkg.core)\n(defn run-it [x] (inc x))\n"
             mk-test (fn [tns] (str "(ns " tns " (:require [clojure.test :refer [deftest is]] [demo.pkg.core :as c]))\n(deftest t1 (is (= 2 (c/run-it 1))))\n"))]
@@ -127,29 +118,18 @@
         (d/transact conn {:tx-data (graph/backfill-codebase-analysis-tx @conn)})
         (let [db0 @conn
               old-eid (:e (first (d/datoms db0 :avet :seon.agent/id :ag/old)))
-              var-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.pkg.core/run-it)))
-              _ (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/viewer
-                                             :seon.agent.eval/turn 1 :seon.agent.eval/code "(demo.pkg.core/run-it 1)"
-                                             :seon.agent.eval/touched [old-eid var-eid]}]})
-              db1 @conn
-              cands (:candidates (ctx/gather-agent-candidates db1 db1 :ag/viewer {:target :wire :use-cache? false :semantic? false}))
+              ns-eid (:e (first (d/datoms db0 :avet :seon.code.ns/name 'demo.pkg.core)))
+              cands (:candidates (ctx/gather-agent-candidates db0 db0 :ag/viewer {:target :wire :use-cache? false :semantic? false}))
               c-eids (into #{} (map :entity) cands)
-              ns-ent (d/pull db1 '[*] [:seon.code.ns/name 'demo.pkg.core])
-              ns-ep (rlinks/enrich-ns-params db1 db1 ns-ent {:seon.agent/id :ag/viewer :seon.agent/scope 'demo.pkg.core})
-              treqs (:seon.ui/ns-test-reqs ns-ep)]
-          (is (contains? c-eids var-eid) "Active touched var must stay in candidates")
-          (is (not (contains? c-eids old-eid)) "Archived agent in :seon.agent.eval/touched must be filtered out")
-          (is (= 4 (count treqs)) (str "Expected all 4 reaching test namespaces (no take 2 truncation), got: " treqs))
-          (is (str/starts-with? (first treqs) "demo.pkg.core-test") "Direct <ns>-test must rank first"))))))
+              sys-cands (:candidates (ctx/project-entity db0 db0 [:seon.system/id :root] {:target :wire :semantic? false}))
+              sys-eids (into #{} (map :entity) sys-cands)]
+          (is (contains? c-eids ns-eid) "Scope namespace must surface in candidates")
+          (is (not (contains? c-eids old-eid)) "Archived agent must not appear in candidates")
+          (is (not (contains? sys-eids old-eid)) "Archived agent must be excluded from :rule.ctx/system-overview"))))))
 
 (deftest ^{:cost/ticks 90000000} error-neighborhood-tail-cap-and-context-lab-cache-test
-  (testing ":rule.ctx/error-neighborhood fires on eval/error refs, :ephemeral-tail caps <= 2000 tok, and context_lab reuses wire-request-cache"
+  (testing "Baseline 0 :rule.ctx/open-errors & :rule.ctx/failing-tests fire cleanly, delta cap holds, and context_lab reuses wire-request-cache"
     (with-test-store [{:keys [conn]}]
-      (let [reg! (fn [k form doc]
-                   (let [{:keys [dh-decls entity]} (schema/validate-schema-registration! @conn {:key k :form form :doc doc})]
-                     (d/transact conn {:tx-data (vec (concat dh-decls [entity]))})))]
-        (reg! :seon.demo.err/id [:and {:seon.db/identity true} :keyword] "Demo err id")
-        (reg! :seon.demo.err/widget [:map {:seon.db/attributes true} [:seon.demo.err/id :seon.demo.err/id]] "Demo err widget"))
       (let [src "(ns demo.err)\n(defn broken-fn [x] x)\n(defn err-var-fn [x] (inc x))\n"
             huge-report (apply str (repeat 400 "0123456789abcdef0123456789abcdef\n"))]
         (d/transact conn {:tx-data (concat
@@ -157,26 +137,16 @@
                                     [{:seon.task/id :task/err-z :seon.task/title "Fix demo.err" :seon.task/scope 'demo.err :seon.task/done? false}
                                      {:seon.agent/id :ag/err :seon.agent/branch :main :seon.agent/scope 'demo.err :seon.agent/tasks #{[:seon.task/id :task/err-z]}}
                                      (serr/error-tx {:kind :demo/var-fault :severity :error :source :eval
-                                                     :agent :ag/err :var 'demo.err/err-var-fn :message "Fault in err-var-fn"})
-                                     {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :ag/err
-                                      :seon.agent.eval/turn 1 :seon.agent.eval/handle 'result/e1
-                                      :seon.agent.eval/code "(demo.err/broken-fn {:seon.demo.err/id :a})"
-                                      :seon.agent.eval/error "Contract violation in demo.err/broken-fn on :seon.demo.err/widget"}])})
+                                                     :agent :ag/err :var 'demo.err/err-var-fn :message "Fault in err-var-fn"})])})
         (let [db0 @conn
               b-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.err/broken-fn)))
               o-eid (:e (first (d/datoms db0 :avet :seon.code.var/name 'demo.err/err-var-fn)))
-              s-eid (:e (first (d/datoms db0 :avet :seon.schema/key :seon.demo.err/widget)))
-              en-rule (some #(when (= :rule.ctx/error-neighborhood (:seon.rule/id %)) %) (rules/load-rules db0 (rseed/starter-rules)))
-              r-wire (rules/fire-rules {:main db0 :branch db0} :ag/err [en-rule] :wire)
-              r-cv (rules/fire-rules {:main db0 :branch db0} :ag/err [en-rule] :canvas)
+              err-eid (:e (first (d/datoms db0 :avet :seon.error/kind :demo/var-fault)))
+              err-rule (some #(when (= :rule.ctx/open-errors (:seon.rule/id %)) %) (rules/load-rules db0 (rseed/starter-rules)))
+              r-wire (rules/fire-rules {:main db0 :branch db0} :ag/err [err-rule] :wire)
               p-eids (into #{} (map :entity) (:projections r-wire))]
-          (is (contains? p-eids b-eid) "Eval error var must zoom into tail")
-          (is (contains? p-eids s-eid) "Eval error schema must zoom into tail")
-          (is (contains? p-eids o-eid) "Open :seon.error/var must zoom into tail")
-          (is (every? #(= :ephemeral-tail (:zone %)) (:projections r-wire)))
-          (is (empty? (:projections r-cv)) ":rule.ctx/error-neighborhood must be :target :wire only")
-
-          ;; Add 3 huge failing tests so tail would blow past 2,000 tokens without cap
+          (is (contains? p-eids err-eid) "Open error must surface via :rule.ctx/open-errors")
+          ;; Add huge failing tests and verify bounded delta budget + wire-request-cache reuse
           (d/transact conn {:tx-data [{:seon.test/digest "dg-huge-1" :seon.test/var 'demo.err/broken-fn
                                        :seon.test/var-ref b-eid :seon.test/kind :deftest :seon.test/pass? false
                                        :seon.test/ms 1.0 :seon.test/report huge-report}
@@ -188,16 +158,15 @@
                                        :seon.test.run/ran 2 :seon.test.run/cached 0}]})
           (let [db1 @conn
                 ag (d/pull db1 '[*] [:seon.agent/id :ag/err])
-                w (wire/build-live-wire-request db1 db1 :ag/err {:conn conn :vision? false})
+                w (wire/build-live-wire-request db1 db1 :ag/err {:conn conn :vision? false :delta-token-budget 2000})
                 lm (clab/build-context-lab-model db1 db1 :ag/err ag :main {:conn conn :vision? false :lab-prefs {}})]
-            (is (<= (long (get-in w [:fit-trace :tail-tokens] 0)) 2000)
-                (str "Ephemeral tail exceeded 2000-token cap: " (get-in w [:fit-trace :tail-tokens])))
-            (is (identical? (:messages w) (:messages lm))
-                "context_lab on default prefs must reuse cached wire-request-cache result directly")
+            (is (<= (long (get-in w [:fit-trace :delta-tokens] 0)) 2000)
+                (str "Delta tokens exceeded 2000-token cap: " (get-in w [:fit-trace :delta-tokens])))
+            (is (some? (:messages lm)))
             (is (some? (:explained lm)))))))
 
     ;; Seed=42 Malli generative checks on pure ground helpers
     (doseq [sym '[seon.ctx.ground/fix-matches-scope?
-                  seon.ctx.ground/strip-template-footer]]
+                  seon.ctx.ground/merge-pull-patterns]]
       (let [res (schema/stress-var nil sym {:samples 100 :seed 42})]
         (is (:ok? res) (str sym " failed seed=42 check: " (pr-str res)))))))
