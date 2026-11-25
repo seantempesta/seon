@@ -20,10 +20,9 @@
                            :additionalProperties false}}})
 
 (def default-system-prompt
-  (str "You are a Seon Clojure agent in your branch's live Jolt runtime.\n"
-       "Relevant code, schemas, docs, tasks, and primers are surfaced dynamically in context.\n"
-       "Use clear Markdown — headings, tables, diffs, backtick entity links, or inline `hiccup` blocks when helpful — with NO tool calls when replying directly to the user.\n"
-       "Never treat a closed `<agent ...>...</agent>` example block as your own live session."))
+  (str "You are a Seon Clojure agent in a live branch Jolt runtime; code, schemas, docs, tasks & primers surface dynamically.\n"
+       "Edit Seon's Datahike code (src/, test/, docs/, resources/seon/) only via REPL tools (user/edit-fn!, add-fn!, set-meta!, doc!) — never spit, jolt.fs, /tmp/*.clj, or git commit unless diagnosing a broken runtime.\n"
+       "Reply in Markdown (`hiccup` when helpful) with NO tool calls; never treat `<agent ...>...</agent>` as live."))
 
 (defn format-tool-content
   {:malli/schema [:function [:=> [:cat :any] :string] [:=> [:cat :map :any] :string]], :cost/ticks 200000}
@@ -137,29 +136,30 @@
     (max 4 (long (Math/ceil (/ (+ text-len tc-len r-len 16) 4.0))))))
 
 (defn vision-capable-model?
-"Returns true when `model-name` natively accepts OpenAI-compat `image_url` content blocks."
-{:malli/schema [:=> {:examples [[["deepseek-flash"] false]
-                                [["deepseek-chat"] false]
-                                [["deepseek-reasoner"] false]
-                                [["deepseek-vl2"] true]
-                                [["gemini-2.5-flash"] true]
-                                [["google/gemini-2.5-flash"] true]
-                                [["gpt-4o"] true]
-                                [["gpt-5"] true]
-                                [["claude-sonnet-4"] true]
-                                [["qwen2.5-vl-72b"] true]
-                                [[nil] false]]}
-                [:cat [:maybe :string]] :boolean]
- :cost/ticks 1000000}
-[model-name]
-(let [m (str/lower-case (str (or model-name "")))]
-  (boolean
-   (or (str/includes? m "vision")
-       (some? (re-find #"(?:^|[-_/])vl(?:[-_0-9]|$)" m))
-       (str/includes? m "gpt-4o")
-       (str/includes? m "gpt-5")
-       (str/includes? m "claude-")
-       (str/includes? m "gemini")))))
+  "Returns true when `model-name` natively accepts OpenAI-compat `image_url` content blocks."
+  {:malli/schema [:=> {:examples [[["deepseek-flash"] true]
+                                  [["deepseek-chat"] false]
+                                  [["deepseek-reasoner"] false]
+                                  [["deepseek-vl2"] true]
+                                  [["gemini-2.5-flash"] true]
+                                  [["google/gemini-2.5-flash"] true]
+                                  [["gpt-4o"] true]
+                                  [["gpt-5"] true]
+                                  [["claude-sonnet-4"] true]
+                                  [["qwen2.5-vl-72b"] true]
+                                  [[nil] false]]}
+                  [:cat [:maybe :string]] :boolean]
+   :cost/ticks 1000000}
+  [model-name]
+  (let [m (str/lower-case (str (or model-name "")))]
+    (boolean
+     (or (str/includes? m "deepseek-flash")
+         (str/includes? m "vision")
+         (some? (re-find #"(?:^|[-_/])vl(?:[-_0-9]|$)" m))
+         (str/includes? m "gpt-4o")
+         (str/includes? m "gpt-5")
+         (str/includes? m "claude-")
+         (str/includes? m "gemini")))))
 
 (defn format-viewport-dom
   {:malli/schema [:=> [:cat :any] [:maybe :string]], :cost/ticks 300000}

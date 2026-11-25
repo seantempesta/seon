@@ -321,18 +321,21 @@
         (is (contains? (:ins (get procs dst-p)) dst-i) (str "Unknown target port " [dst-p dst-i]))))))
 
 (deftest ^{:cost/ms 6000} vision-gate-and-transport-drop-multimodal-fallback-test
-  (testing "vision-capable-model? excludes text-only deepseek-flash while allowing true vision models"
-    (is (false? (model/vision-capable-model? "deepseek-flash")))
+  (testing "vision-capable-model? enables deepseek-flash and other vision models while excluding text-only models"
+    (is (true? (model/vision-capable-model? "deepseek-flash")))
     (is (false? (model/vision-capable-model? "deepseek-chat")))
+    (is (false? (model/vision-capable-model? "deepseek-reasoner")))
     (is (false? (model/vision-capable-model? nil)))
     (is (true? (model/vision-capable-model? "deepseek-vl2")))
     (is (true? (model/vision-capable-model? "gemini-2.5-flash")))
     (is (true? (model/vision-capable-model? "google/gemini-2.5-flash")))
     (is (true? (model/vision-capable-model? "gpt-4o")))
+    (is (true? (model/vision-capable-model? "gpt-5")))
     (is (true? (model/vision-capable-model? "claude-sonnet-4"))))
 
-  (testing "openai-stream-chat! retries text-only on TCP drop with image_url and caches endpoint capability"
-    (let [hits (atom 0)
+  (testing "openai-stream-chat! retries transient TCP drops without permanent caching, while caching explicit HTTP 400 multimodal rejections"
+    (let [drop-hits (atom 0)
+          err400-hits (atom 0)
           ss (java.net.ServerSocket. 0 16 (java.net.InetAddress/getByName "127.0.0.1"))
           port (.getLocalPort ss)
           running? (atom true)
@@ -352,37 +355,65 @@
                                               (parse-long (str/trim (subs line 15)))
                                               cl)]
                                     (recur cl2)))))))
+          write-sse! (fn [^java.net.Socket sock txt]
+                       (let [sse-body (str "data: " (json/write-str {:choices [{:delta {:content txt}}]}) "\n\ndata: [DONE]\n\n")
+                             resp (str "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
+                                       (alength (.getBytes sse-body "UTF-8"))
+                                       "\r\nConnection: close\r\n\r\n" sse-body)
+                             out (.getOutputStream sock)]
+                         (.write out (.getBytes resp "UTF-8"))
+                         (.flush out)
+                         (.close sock)))
           srv-fut (a/thread
                     (while @running?
                       (try
                         (let [sock (.accept ss)]
                           (a/thread
                             (try
-                              (swap! hits inc)
-                              (let [body (read-http-req (.getInputStream sock))]
-                                (if (str/includes? body "image_url")
-                                  (.close sock)
-                                  (let [sse-body (str "data: " (json/write-str {:choices [{:delta {:content "recovered-ok"}}]}) "\n\ndata: [DONE]\n\n")
-                                        resp (str "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
-                                                  (alength (.getBytes sse-body "UTF-8"))
-                                                  "\r\nConnection: close\r\n\r\n" sse-body)
-                                        out (.getOutputStream sock)]
-                                    (.write out (.getBytes resp "UTF-8"))
-                                    (.flush out)
-                                    (.close sock))))
+                              (let [body (read-http-req (.getInputStream sock))
+                                    has-img? (str/includes? body "image_url")]
+                                (if (str/includes? body "reject-400-model")
+                                  (do
+                                    (swap! err400-hits inc)
+                                    (if has-img?
+                                      (let [err-body "{\"error\":\"unknown variant `image_url`, expected `text`\"}"
+                                            resp (str "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: "
+                                                      (alength (.getBytes err-body "UTF-8"))
+                                                      "\r\nConnection: close\r\n\r\n" err-body)
+                                            out (.getOutputStream sock)]
+                                        (.write out (.getBytes resp "UTF-8"))
+                                        (.flush out)
+                                        (.close sock))
+                                      (write-sse! sock "text-fallback-ok")))
+                                  (do
+                                    (swap! drop-hits inc)
+                                    (if has-img?
+                                      (.close sock)
+                                      (write-sse! sock "recovered-ok")))))
                               (catch Throwable _ (try (.close sock) (catch Throwable _))))))
                         (catch Throwable _ nil))))
-          prov {:type :openai-compat :base-url (str "http://127.0.0.1:" port) :api-key "sk-test" :model "drop-img-model"}
+          base-url (str "http://127.0.0.1:" port)
+          drop-prov {:type :openai-compat :base-url base-url :api-key "sk-test" :model "drop-img-model"}
+          err-prov  {:type :openai-compat :base-url base-url :api-key "sk-test" :model "reject-400-model"}
           mm-msgs [{:role "system" :content "sys"}
                    {:role "user" :content [{:type "text" :text "check ui"}
                                            {:type "image_url" :image_url {:url "data:image/jpeg;base64,AA=="}}]}]]
       (try
-        (let [r1 (model/openai-stream-chat! prov "sys" [] "check ui" mm-msgs nil)]
+        ;; 1. Transient TCP drop recovers on retry (2 hits) WITHOUT permanently disabling multimodal vision
+        (let [r1 (model/openai-stream-chat! drop-prov "sys" [] "check ui" mm-msgs nil)]
           (is (= "recovered-ok" (:thought r1)))
-          (is (= 2 @hits) "First call hits once with image_url (dropped) then retries once text-only"))
-        (let [r2 (model/openai-stream-chat! prov "sys" [] "check ui" mm-msgs nil)]
+          (is (= 2 @drop-hits) "First call hits once with image_url (dropped) then retries once text-only"))
+        (let [r2 (model/openai-stream-chat! drop-prov "sys" [] "check ui" mm-msgs nil)]
           (is (= "recovered-ok" (:thought r2)))
-          (is (= 3 @hits) "Second call pre-strips image_url from cached unsupported endpoint (1 hit only)"))
+          (is (= 4 @drop-hits) "Second call MUST still attempt multimodal first (not cached text-only on transient TCP drop)"))
+
+        ;; 2. Explicit HTTP 400 `unknown variant image_url` retries text-only AND caches endpoint-k
+        (let [r3 (model/openai-stream-chat! err-prov "sys" [] "check ui" mm-msgs nil)]
+          (is (= "text-fallback-ok" (:thought r3)))
+          (is (= 2 @err400-hits) "First HTTP 400 rejection hits once with image_url then retries text-only"))
+        (let [r4 (model/openai-stream-chat! err-prov "sys" [] "check ui" mm-msgs nil)]
+          (is (= "text-fallback-ok" (:thought r4)))
+          (is (= 3 @err400-hits) "Second call pre-strips image_url from cached unsupported endpoint (1 hit only)"))
         (finally
           (reset! running? false)
           (try (.close ss) (catch Throwable _))
