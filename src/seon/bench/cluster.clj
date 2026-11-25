@@ -127,7 +127,7 @@
    :model-stub? (if (contains? task :model-stub?) (:model-stub? task) (:model-stub? opts))
    :max-os-procs (or (:max-os-procs task) (:max-os-procs opts) 2)
    :max-test-workers (or (:max-test-workers task) (:max-test-workers opts) 2)
-   :timeout-ms (or (:boot-timeout-ms opts) 25000)})
+   :timeout-ms (or (:boot-timeout-ms opts) 60000)})
 
 (defn trial-task-plan
   "Resolves a trial's inline task map, task-entity id, scope, goal, and body text."
@@ -253,7 +253,7 @@
      (eval-probe-edn inst
        (str "(if-let [f (or (requiring-resolve (quote seon.bench.helpers/trial-audit-summary)) "
             "(requiring-resolve (quote seon.health.metrics/agent-friction-summary)))] "
-            "(f (user/conn) (user/main-db) " (pr-str agent-id) " " (pr-str opts-map) ") {})")))))
+            "(f (user/conn) (user/main-db) " (pr-str agent-id) " (quote " (pr-str opts-map) ")) {})")))))
 
 (defn- ^:seon.flow/edge probe-agent-baseline [inst agent-id branch]
   (let [status-snap (instance-op! inst {:op :status})
@@ -360,7 +360,7 @@
   {:malli/schema [:=> [:cat [:? :map]] :map]}
   ([] (run-parallel-trial! {:tasks []}))
   ([{:keys [tasks proxy? proxy-opts model-base-url boot-timeout-ms task-timeout-ms keep-dirs?]
-     :as opts :or {proxy? false boot-timeout-ms 25000 task-timeout-ms 60000 keep-dirs? false}}]
+     :as opts :or {proxy? false boot-timeout-ms 60000 task-timeout-ms 60000 keep-dirs? false}}]
    (let [started-ns (System/nanoTime)
          proxy-inst (when proxy? (proxy/start! (or proxy-opts {})))
          run-opts (assoc opts :eff-base-url (or (when proxy-inst (:base-url proxy-inst)) model-base-url)
