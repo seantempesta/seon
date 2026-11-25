@@ -256,8 +256,9 @@
       bdb (if (= :seon.system/id (first ref)) main-db (or branch-db main-db))
       mc (live-cid main-db) bc (live-cid bdb)
       ck (when (and mc bc ref) [(get-in main-db [:config :store :id]) mc (:max-tx main-db) bc (:max-tx bdb) ref])]
-  (if ck (store/lru-get! entity-world-cache 32 ck #(compute-entity-world main-db bdb ref))
-      (compute-entity-world main-db bdb ref))))
+  (if ck
+    (store/lru-get! entity-world-cache 32 ck #(compute-entity-world main-db bdb ref))
+    (compute-entity-world main-db bdb ref))))
 
 (defn render-variations-panel
   "Renders all renderer variations side-by-side (`Browser HTML` vs `Model Text`)."

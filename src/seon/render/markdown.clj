@@ -176,8 +176,7 @@
    [:path {:d "M6.5 3.9c.5-.1 1-.15 1.5-.15 4.1 0 6.5 4.25 6.5 4.25s-.8 1.4-2.1 2.5"}]])
 
 (defn- activity-step-facts
-  "Pure derivation of a single activity step's display facts (code/narration split, ids,
-   title, right-meta). Extracted so step rendering stays small and testable."
+  "Derives display facts for one activity step."
   [e id-prefix idx]
   (let [code-str (str (or (:seon.agent.eval/code e) ""))
         has-code? (not (str/blank? code-str))
@@ -207,8 +206,7 @@
      :show-note? show-note? :code-lines code-lines :right-meta right-meta}))
 
 (defn- activity-step-subs
-  "Renders the connected sub-drawer list (meta row + Thinking/Note/Code/Output/Error/Result)
-   for one activity step from its precomputed facts."
+  "Renders the sub-drawer list for one activity step."
   [e {:keys [step-id reasoning narration show-note? has-code? code-str code-lines out-str err-str val-str]}]
   [:div {:class "step-subs"}
    (step-meta-row e err-str)
@@ -258,8 +256,7 @@
                           {:extra-class "is-result"}))])
 
 (defn- render-activity-step
-  "Renders one collapsible activity step: summary row plus an expanded drawer that is either a
-   bare reasoning block (thought-only step) or the connected sub-drawer list."
+  "Renders one collapsible activity step drawer."
   [e id-prefix idx]
   (let [f (activity-step-facts e id-prefix idx)
         {:keys [step-id step-title has-code? reasoning err-str right-meta]} f]
@@ -374,10 +371,17 @@
     [:code {:class (str "language-" lang)} (str (or content ""))]]])
 
 (defn- render-hiccup-block [content]
-  (let [raw (str (or content ""))
+(let [raw (str (or content ""))
       parsed (mdp/safe-read-edn raw)]
   (if (and (:ok? parsed) (sanitize/contains-unevaluated-form? (:val parsed)))
-    (render-clojure-block "clojure" raw)
+    [:div {:class "md-code-block md-hiccup-fallback"}
+     [:div {:class "md-code-head"}
+      [:span {:class "md-code-lang"} "hiccup"]
+      [:div {:class "md-code-actions"} (copy-code-btn)]]
+     [:div {:class "notice tiny muted"}
+      "Hiccup fences require pure EDN data."]
+     [:pre {:class "code-box tiny"}
+      [:code {:class "language-clojure"} raw]]]
     (let [safe (when (:ok? parsed) (mdp/sanitize-hiccup (:val parsed)))]
       [:div {:class "md-live-card md-hiccup-card"}
        [:div {:class "md-live-head"}

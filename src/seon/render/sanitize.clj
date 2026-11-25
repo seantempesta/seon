@@ -122,83 +122,21 @@
                   [:cat :any] :boolean]
    :cost/ticks 500000 :cost/bytes 131072}
   [node]
-  (letfn [(scan [x d]
-            (cond
-              (or (nil? x) (> d 24)) false
-              (seq? x) (boolean (or (and (seq x) (symbol? (first x))) (some #(scan % (inc d)) x)))
-              (vector? x) (boolean (some #(scan % (inc d)) x))
-              (map? x) (boolean (some #(scan % (inc d)) (vals x)))
-              :else false))]
-    (scan node 0)))
-
-(defn- parse-rgb [s]
-  (when (string? s)
-    (let [lo (str/lower-case (str/trim s))]
-      (cond
-        (= lo "white") [255 255 255 1.0]
-        (= lo "black") [0 0 0 1.0]
-        (str/starts-with? lo "#")
-        (let [h (subs lo 1)]
-          (try
-            (case (count h)
-              3 [(Integer/parseInt (str (nth h 0) (nth h 0)) 16)
-                 (Integer/parseInt (str (nth h 1) (nth h 1)) 16)
-                 (Integer/parseInt (str (nth h 2) (nth h 2)) 16) 1.0]
-              6 [(Integer/parseInt (subs h 0 2) 16)
-                 (Integer/parseInt (subs h 2 4) 16)
-                 (Integer/parseInt (subs h 4 6) 16) 1.0]
-              8 [(Integer/parseInt (subs h 0 2) 16)
-                 (Integer/parseInt (subs h 2 4) 16)
-                 (Integer/parseInt (subs h 4 6) 16)
-                 (/ (double (Integer/parseInt (subs h 6 8) 16)) 255.0)]
-              nil)
-            (catch NumberFormatException _ nil)))
-        (str/starts-with? lo "rgb")
-        (let [ns (re-seq #"\d+(?:\.\d+)?" lo)]
-          (when (>= (count ns) 3)
-            (try
-              [(long (Math/round (Double/parseDouble (nth ns 0))))
-               (long (Math/round (Double/parseDouble (nth ns 1))))
-               (long (Math/round (Double/parseDouble (nth ns 2))))
-               (if (>= (count ns) 4) (Double/parseDouble (nth ns 3)) 1.0)]
-              (catch NumberFormatException _ nil))))
-        :else nil))))
-
-(defn- rel-lum [[r g b]]
-  (let [lin (fn [c] (let [v (/ (double (max 0 (min 255 c))) 255.0)]
-                      (if (<= v 0.03928) (/ v 12.92) (Math/pow (/ (+ v 0.055) 1.055) 2.4))))]
-    (+ (* 0.2126 (lin r)) (* 0.7152 (lin g)) (* 0.0722 (lin b)))))
-
-(defn- adapt-svg-fill [tag fill-val attrs]
-  (if-not (string? fill-val)
-    fill-val
-    (if-let [[r g b a :as rgba] (parse-rgb fill-val)]
-      (cond
-        (and (#{:svg :rect} tag) (>= a 0.85) (>= r 240) (>= g 240) (>= b 240)
-             (let [pn (fn [v] (cond (number? v) (double v)
-                                    (string? v) (when-let [m (re-find #"^\d+(?:\.\d+)?" (str/trim v))]
-                                                  (try (Double/parseDouble m) (catch NumberFormatException _ nil)))
-                                    :else nil))
-                   w (pn (:width attrs)) h (pn (:height attrs))]
-               (not (and w h (< w 48.0) (< h 48.0)))))
-        "var(--base-900)"
-
-        (and (#{:text :tspan} tag) (>= a 0.6) (<= (- (max r g b) (min r g b)) 48))
-        (let [lum (rel-lum rgba)]
-          (cond (< lum 0.08) "var(--text-100)"
-                (< lum 0.28) "var(--text-300)"
-                :else fill-val))
-
-        :else fill-val)
-      fill-val)))
-
-(defn- adapt-svg-style-str [tag s attrs]
-  (if-not (string? s)
-    s
-    (str/replace s #"(?i)(\b(?:background(?:-color)?|fill)\s*:\s*)([^;\"']+)"
-                 (fn [[full prop val]]
-                   (let [nv (adapt-svg-fill tag val attrs)]
-                     (if (= nv val) full (str prop nv)))))))
+  (letfn [(allowed-on-click? [v]
+          (or (safe-seon-action? v)
+              (and (seq? v) (= (quote quote) (first v)) (safe-seon-action? (second v)))))
+        (scan [x d]
+          (cond
+            (or (nil? x) (> d 24)) false
+            (seq? x) (boolean (or (and (seq x) (symbol? (first x))) (some #(scan % (inc d)) x)))
+            (vector? x) (boolean (some #(scan % (inc d)) x))
+            (map? x) (boolean (some (fn [[k v]]
+                                      (if (and (= k :on-click) (allowed-on-click? v))
+                                        false
+                                        (scan v (inc d))))
+                                    x))
+            :else false))]
+  (scan node 0)))
 
 (defn sanitize-hiccup-with-report
   "Sanitizes an untrusted Hiccup tree against the strict HTML/SVG tag and attribute allowlist,
@@ -248,25 +186,18 @@
                   :type (if (and actions? (#{"button" :button} v))
                           (assoc acc :type "button")
                           (do (note! (str "Stripped disallowed :type " (pr-str v) " on " btag)) acc))
-                  :fill (if (string? v)
-                          (assoc acc :fill (adapt-svg-fill btag v m))
-                          (if (or (number? v) (boolean? v) (keyword? v))
-                            (assoc acc :fill v)
-                            (do (note! (str "Stripped invalid value for :fill on " btag)) acc)))
                   :style (cond
-                           (string? v) (if (safe-style-str? v)
-                                         (assoc acc :style (adapt-svg-style-str btag v m))
-                                         (do (note! (str "Stripped unsafe :style on " btag)) acc))
-                           (map? v) (let [sm (into {} (keep (fn [[sk sv]]
-                                                              (if (and (or (simple-keyword? sk) (string? sk))
-                                                                       (or (string? sv) (number? sv) (keyword? sv))
-                                                                       (safe-style-str? (str sv)))
-                                                                (let [sv' (if (and (string? sv) (#{:fill :background :background-color "fill" "background" "background-color"} sk))
-                                                                            (adapt-svg-fill btag sv m) sv)]
-                                                                  [sk sv'])
-                                                                (do (note! (str "Stripped unsafe :style entry " sk " on " btag)) nil)))) v)]
-                                      (if (seq sm) (assoc acc :style sm) acc))
-                           :else (do (note! (str "Stripped unsafe :style on " btag)) acc))
+                  (string? v) (if (safe-style-str? v)
+                                (assoc acc :style v)
+                                (do (note! (str "Stripped unsafe :style on " btag)) acc))
+                  (map? v) (let [sm (into {} (keep (fn [[sk sv]]
+                                                     (if (and (or (simple-keyword? sk) (string? sk))
+                                                              (or (string? sv) (number? sv) (keyword? sv))
+                                                              (safe-style-str? (str sv)))
+                                                       [sk sv]
+                                                       (do (note! (str "Stripped unsafe :style entry " sk " on " btag)) nil)))) v)]
+                             (if (seq sm) (assoc acc :style sm) acc))
+                  :else (do (note! (str "Stripped unsafe :style on " btag)) acc))
                   (if (or (string? v) (number? v) (boolean? v) (keyword? v))
                     (assoc acc k v)
                     (do (note! (str "Stripped invalid value for " k " on " btag)) acc))))))
@@ -311,32 +242,6 @@
   ([node] (:hiccup (sanitize-hiccup-with-report node nil)))
   ([node opts] (:hiccup (sanitize-hiccup-with-report node opts))))
 
-(defn adapt-svg-theme-colors
-  "Rewrites hardcoded bright-white SVG card fills (`#fff`/`#f8fafc`/`white`) to `var(--base-900)`
-   and dark neutral SVG text fills (`#0f172a`/`#475569`/`#64748b`/`black`) to `var(--text-100)`/`var(--text-300)`
-   so inline SVGs maintain >= 7:1 contrast across dark and light themes without altering theme-aware accents."
-  {:malli/schema [:=> {:examples [[["<svg><rect width=\"340\" height=\"210\" fill=\"#f8fafc\"/><text fill=\"#0f172a\">Hi</text></svg>"]
-                                   "<svg><rect width=\"340\" height=\"210\" fill=\"var(--base-900)\"/><text fill=\"var(--text-100)\">Hi</text></svg>"]]}
-                  [:cat [:maybe :string]] [:maybe :string]]
-   :cost/ticks 500000 :cost/bytes 2097152}
-  [s]
-  (when (string? s)
-    (str/replace
-     s
-     #"(?is)<(svg|rect|text|tspan)\b([^>]*)>"
-     (fn [[full tag-s attr-s]]
-       (let [tag (keyword (str/lower-case tag-s))
-             w (second (re-find #"(?i)\bwidth\s*=\s*[\"']([^\"']+)[\"']" attr-s))
-             h (second (re-find #"(?i)\bheight\s*=\s*[\"']([^\"']+)[\"']" attr-s))
-             am (cond-> {} w (assoc :width w) h (assoc :height h))
-             a1 (str/replace attr-s
-                             #"(?i)(\bfill\s*=\s*[\"'])([^\"']+)([\"'])"
-                             (fn [[f pre v suf]] (let [nv (adapt-svg-fill tag v am)] (if (= nv v) f (str pre nv suf)))))
-             a2 (str/replace a1
-                             #"(?i)(\bstyle\s*=\s*[\"'])([^\"']+)([\"'])"
-                             (fn [[f pre v suf]] (let [nv (adapt-svg-style-str tag v am)] (if (= nv v) f (str pre nv suf)))))]
-         (if (= a2 attr-s) full (str "<" tag-s a2 ">")))))))
-
 (defn sanitize-svg
   "Sanitizes an inline `<svg ...>` string by stripping `<script>`, active embedded elements,
    `on*` event attributes, and `javascript:`/`vbscript:`/`data:text/html` URIs, and normalizing
@@ -368,4 +273,4 @@
                             (str/replace svg-data-html-re "")
                             str/trim))]
           (when (and (re-find svg-open-re cleaned) (str/includes? cleaned ">"))
-            (adapt-svg-theme-colors (normalize-svg-ratios cleaned))))))))
+            (normalize-svg-ratios cleaned)))))))

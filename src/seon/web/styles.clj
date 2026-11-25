@@ -123,9 +123,7 @@
    [".topbar.is-dev-mode .brand" {:flex "0 0 auto" :overflow :visible}]
    [".topbar.is-dev-mode .stats-strip" {:flex-wrap :wrap :row-gap "5px" :justify-content :flex-end}]
    [".nav-pill.is-dev-pill" {:background "rgba(240,180,41,.18)" :color "var(--signal)" :border "1px solid rgba(240,180,41,.55)" :font-weight 600}]
-   [".topbar.is-narrow" {:padding "4px 8px" :height "auto" :min-height "44px"}] [".topbar.is-narrow .brand-row" {:gap "6px" :flex-wrap "wrap"}]
-   [".topbar.is-narrow .brand" {:gap "5px"}] [".topbar.is-narrow .stats-strip" {:gap "4px" :min-width 0 :max-width "100%"}]
-   [".topbar.is-narrow .icon-btn" {:width "26px" :height "26px"}] [".topbar.is-narrow .status-pill,.topbar.is-narrow .status-toggle-idle,.topbar.is-narrow .status-toggle-pill" {:height "26px" :padding "0 7px"}] [".topbar.is-narrow .nav-pill" {:padding "3px 7px" :font-size "10.5px"}]
+   
    [".root-canvas-wrap,.root-canvas,.user-chat-wrap,.user-chat-col,.user-welcome" {:display :flex :flex-direction :column}]
    [".root-canvas-wrap" {:min-height "100%" :width "100%" :gap "12px"}]
    [".root-canvas" {:max-width "1040px" :width "100%" :margin "0 auto" :gap "14px"}]
@@ -269,7 +267,6 @@
        "@media(prefers-reduced-motion:reduce){.stream-dot,.sig-dot,.status-sidebar{animation:none}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}\n"
        "@media(max-width:960px){.status-sidebar{position:fixed;top:auto;left:0;right:0;bottom:0;z-index:40;width:100%;max-width:100%;height:auto;max-height:42vh;border-left:none;border-top:1px solid var(--base-800);border-radius:14px 14px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.48);animation:seon-sheet-up .18s ease-out}.live-thinking-panel{padding:10px 16px}}\n"
        "@media(max-width:759px){.sidebar.open{display:none}.surface-entity-grid{grid-template-columns:1fr}.surface-entity-item{min-width:0;max-width:100%;overflow-wrap:anywhere}.kv-grid{grid-template-columns:110px 1fr}.session-split,.view-scroll{padding-bottom:96px}}\n"
-       "@media(max-width:740px){.status-toggle-idle .status-label,.status-toggle-rate{display:none}.status-toggle-pill{padding:0 8px}}\n"
        ".hovercard{max-width:min(360px,calc(100vw - 24px));padding:10px 12px;border-radius:9px;border:1px solid var(--base-700);background:var(--base-900);color:var(--text-200);box-shadow:0 14px 36px rgba(0,0,0,.48);pointer-events:auto;z-index:80;font-size:12.5px}\n"
        ".hovercard-body{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:100%}\n"
        ".hovercard-body .card{background:transparent;border:none;padding:0}\n"

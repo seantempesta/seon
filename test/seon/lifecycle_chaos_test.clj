@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.chaos-harness :as chaos]
             [seon.code :as code]
             [seon.code.edit :as cedit]
             [seon.code.io :as cio]
@@ -13,8 +14,7 @@
             [seon.fork.worker-support :as wsup]
             [seon.schema :as schema]
             [seon.store :as store]
-            [seon.test :as stest]
-            [seon.test.chaos :as chaos]))
+            [seon.test :as stest]))
 
 (def ^:private chaos-scenarios
   {:core [:spawn-worker :user-chat :edit-fn :set-meta :fork-review
@@ -25,20 +25,82 @@
    :faults-terminal [:spawn-worker :model-400-ctx :model-auth-err
                      :main-register-schema :external-branch-move]})
 
-(defn- assert-no-chaos-leaks! [pfx dir]
-  (is (empty? (filter #(str/starts-with? (name (ns-name %)) pfx) (all-ns))))
+(defn generate-plan
+  "Deterministic chaos event plan covering all 18 events when `n-steps >= 18`."
+  {:malli/schema [:=> [:cat [:map [:seed {:optional true} :int] [:n-steps {:optional true} :int]]] [:vector :keyword]]
+   :cost/ticks 1000000}
+  [{:keys [seed n-steps] :or {seed 42 n-steps 24}}]
+  (let [rng (java.util.Random. (long seed))
+        total (max 1 (min 64 (long n-steps)))
+        alpha-len (count chaos/event-alphabet)
+        padded (into chaos/event-alphabet
+                     (repeatedly (max 0 (- total alpha-len))
+                                 #(nth chaos/event-alphabet (.nextInt rng alpha-len))))]
+    (if (< total alpha-len)
+      (subvec chaos/event-alphabet 0 total)
+      (let [prefix (subvec padded 0 11)
+            tail (subvec padded 11)
+            shuffled (reduce (fn [items idx]
+                               (let [swap-idx (+ idx (.nextInt rng (- (count items) idx)))]
+                                 (assoc items idx (items swap-idx) swap-idx (items idx))))
+                             tail
+                             (range (dec (count tail))))]
+        (into prefix shuffled)))))
+
+(defn format-reproducer
+  "Formats a copy-pasteable `seon.chaos-harness/replay!` call."
+  {:malli/schema [:=> [:cat :int [:vector :keyword]] :string]
+   :cost/ticks 200000}
+  [seed steps]
+  (str "(seon.chaos-harness/replay! {:seed " seed " :steps " (pr-str (vec steps)) "})"))
+
+(defn shrink-failing-sequence
+  "Zeller `ddmin` delta-debugging shrinker for failing event sequences."
+  {:malli/schema [:=> [:cat [:vector :keyword] [:=> [:cat [:vector :keyword]] :boolean]] [:vector :keyword]]
+   :cost/ticks 5000000}
+  [steps failing?]
+  (let [initial (vec steps)]
+    (if (or (<= (count initial) 1) (not (failing? initial)))
+      initial
+      (loop [current initial
+             granularity 2]
+        (let [length (count current)
+              parts (min granularity length)
+              chunk-size (quot (+ length parts -1) parts)
+              ranges (for [start (range 0 length chunk-size)]
+                       [start (min length (+ start chunk-size))])
+              still-fails? #(and (seq %) (< (count %) length) (failing? %))
+              failing-part (some (fn [[s e]]
+                                   (let [candidate (subvec current s e)]
+                                     (when (still-fails? candidate) candidate)))
+                                 ranges)
+              failing-comp (when-not failing-part
+                             (some (fn [[s e]]
+                                     (let [candidate (into (subvec current 0 s)
+                                                           (subvec current e length))]
+                                       (when (still-fails? candidate) candidate)))
+                                   ranges))]
+          (cond
+            (<= length 1) current
+            failing-part (recur failing-part 2)
+            failing-comp (recur failing-comp (max 2 (dec parts)))
+            (< parts length) (recur current (min length (* 2 parts)))
+            :else current))))))
+
+(defn- assert-no-chaos-leaks! [prefix dir]
+  (is (empty? (filter #(str/starts-with? (name (ns-name %)) prefix) (all-ns))))
   (is (string? dir))
   (is (not (.exists (io/file dir))) (str "leaked dir: " dir)))
 
 (defn- open-lean-store! [tag]
   (let [dir (str "/tmp/seon-chaos-" tag "-" (System/nanoTime))
         cfg (assoc (store/store-cfg dir {:cache-bytes 4194304}) :branch :main)
-        d0 (dissoc cfg :branch)
-        c0 (do (d/create-database d0) (d/connect d0))]
+        init-cfg (dissoc cfg :branch)
+        init-conn (do (d/create-database init-cfg) (d/connect init-cfg))]
     (try
-      (d/transact c0 {:tx-data (:declarations @schema/base-registry)})
-      (d/branch! c0 :db :main)
-      (finally (d/release c0)))
+      (d/transact init-conn {:tx-data (:declarations @schema/base-registry)})
+      (d/branch! init-conn :db :main)
+      (finally (d/release init-conn)))
     (let [conn (store/connect cfg :main)]
       (d/transact conn {:tx-data [(assoc store/default-config-values
                                          :seon.config/key :seon.config/root)]})
@@ -50,11 +112,15 @@
   (try (store/rm-rf! (io/file dir)) (catch Throwable _)))
 
 (deftest chaos-alphabet-and-core-code-sync-test
-  (testing "Scenario partition covers all 18 events in event-alphabet"
-    (let [plan (chaos/generate-plan {:seed 42 :n-steps 18})
+  (testing "Scenario partition covers all 18 events and flow-edges derive directly from seon.main/flow-connections"
+    (let [plan (generate-plan {:seed 42 :n-steps 18})
           union-ev (into #{} (mapcat val chaos-scenarios))]
       (is (= (set chaos/event-alphabet) (set plan)))
-      (is (= (set chaos/event-alphabet) union-ev))))
+      (is (= (set chaos/event-alphabet) union-ev))
+      (is (= #{[:db :reconciler :db] [:db :test :db]} (set (:transactor chaos/flow-edges))))
+      (is (= #{[:run :agents :run] [:batch :test :batch] [:tx :transactor :tx]} (set (:reconciler chaos/flow-edges))))
+      (is (= #{[:exits :reconciler :exits] [:tx :transactor :tx] [:request :model :request]} (set (:agents chaos/flow-edges))))
+      (is (= #{[:tx :transactor :tx]} (set (:test chaos/flow-edges))))))
   (let [res (chaos/replay! {:seed 42 :steps (:core chaos-scenarios)})]
     (is (:ok? res) (pr-str (:violations res)))
     (is (= (count (:core chaos-scenarios)) (:ran res)))
@@ -88,29 +154,29 @@
 
 (deftest ddmin-shrinker-and-fault-hook-reproducer-test
   (testing "Zeller ddmin shrinks a 20-step synthetic failing plan to <= 4 steps"
-    (let [steps (chaos/generate-plan {:seed 42 :n-steps 20})
+    (let [steps (generate-plan {:seed 42 :n-steps 20})
           fails? (fn [s]
                    (let [i (.indexOf ^java.util.List s :main-refactor-delete-fn)
                          j (.indexOf ^java.util.List s :add-require-or-prune)]
                      (and (<= 0 i) (< i j))))
-          shrunk (chaos/shrink-failing-sequence steps fails?)
-          repro (chaos/format-reproducer 42 shrunk)]
+          shrunk (shrink-failing-sequence steps fails?)
+          repro (format-reproducer 42 shrunk)]
       (is (= 20 (count steps)))
       (is (true? (fails? steps)))
       (is (<= (count shrunk) 4) (pr-str shrunk))
       (is (= [:main-refactor-delete-fn :add-require-or-prune] shrunk))
-      (is (str/starts-with? repro "(seon.test.chaos/replay! {:seed 42 :steps ["))))
+      (is (str/starts-with? repro "(seon.chaos-harness/replay! {:seed 42 :steps ["))))
   (testing "fault-hook triggers invariant catch and copy-pasteable reproducer"
-    (let [hook (fn [w ev]
+    (let [hook (fn [world ev]
                  (if (= ev :edit-fn)
-                   (update w :ferrs conj {:synthetic :injected-flow-error})
-                   w))
+                   (update world :flow-errors conj {:synthetic :injected-flow-error})
+                   world))
           res (chaos/replay! {:seed 42
                               :steps [:spawn-worker :edit-fn :user-chat]
                               :fault-hook hook})]
       (is (false? (:ok? res)))
       (is (= :inv-6 (:inv (first (:violations res)))))
-      (is (str/includes? (chaos/format-reproducer 42 [:spawn-worker :edit-fn])
+      (is (str/includes? (format-reproducer 42 [:spawn-worker :edit-fn])
                          ":edit-fn"))
       (assert-no-chaos-leaks! "seon.chaos.s42" (:dir res)))))
 
@@ -226,27 +292,27 @@
     (try
       (d/transact conn {:tx-data (vec (mapcat (fn [[p s]] (code/file-import-tx @conn p s false)) (:files ns-info)))})
       (store/branch! conn :main :branch/w-stale)
-      (d/transact conn {:tx-data (code/file-import-tx @conn (:up ns-info) (:ur ns-info) false)})
-      (let [fs (vec (mapcat #(code/ns-forms @conn %) [(:h ns-info) (:u ns-info)]))]
+      (d/transact conn {:tx-data (code/file-import-tx @conn (:ui-path ns-info) (:ui-refactored-src ns-info) false)})
+      (let [fs (vec (mapcat #(code/ns-forms @conn %) [(:helper-ns ns-info) (:ui-ns ns-info)]))]
         (code/apply-overlay! @conn {:upserts (code/sort-forms-topologically fs) :retracted-keys #{}} true))
       (let [bc (store/connect cfg :branch/w-stale)]
         (reset! c-br bc)
         (binding [fcalls/*agent-ctx* {:conn bc :branch :branch/w-stale :agent-id :agent/w-stale}]
-          (cedit/add-require! (:u ns-info) (quote [clojure.set :as cset]) {:eval? false})
-          (cedit/prune-requires! (:u ns-info)))
+          (cedit/add-require! (:ui-ns ns-info) (quote [clojure.set :as cset]) {:eval? false})
+          (cedit/prune-requires! (:ui-ns ns-info)))
         (testing "merged-ns-src on stale branch never resurrects :main-deleted render-nav-bar"
-          (let [src (cio/merged-ns-src bc :branch/w-stale (:u ns-info))]
+          (let [src (cio/merged-ns-src bc :branch/w-stale (:ui-ns ns-info))]
             (is (string? src))
             (is (not (str/includes? src "render-nav-bar")))))
         (testing "overlay/load-delta! on stale branch compiles cleanly without M0 overwrite"
           (let [base (d/merge-base bc :main :branch/w-stale)
                 head (d/commit-id @bc)
                 res (overlay/load-delta! bc base head false)
-                page-fn (ns-resolve (:u ns-info) (quote page))]
+                page-fn (ns-resolve (:ui-ns ns-info) (quote page))]
             (is (empty? (:errors res)) (pr-str res))
             (is (str/starts-with? (page-fn 1) "i1")))))
       (finally
         (close-lean-store! st @c-br)
-        (doseq [n (all-ns) :when (str/starts-with? (name (ns-name n)) (:pfx ns-info))]
+        (doseq [n (all-ns) :when (str/starts-with? (name (ns-name n)) (:prefix ns-info))]
           (try (remove-ns (ns-name n)) (catch Throwable _)))
-        (assert-no-chaos-leaks! (:pfx ns-info) (:dir st))))))
+        (assert-no-chaos-leaks! (:prefix ns-info) (:dir st))))))

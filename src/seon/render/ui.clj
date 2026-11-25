@@ -152,9 +152,12 @@
   [db {:keys [conn] :as opts}]
   (let [vs (user-view-state db)
       vid (:viewing-id vs)
-      sys? (and (= :system (rdata/canonical-view-mode (:view-mode vs))) (nil? (:inspect-ref vs)))
-      head-bdb (if sys? db (branch-db-for db conn (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id vid])) :main)))]
-  (surface/render-surface db head-bdb (assoc (merge opts (select-keys vs [:viewing-id :selected-branch :as-of-tx :view-mode :inspect-ref :inspect-trail :inspect-forward :lab-prefs :expert-mode?])) :include-composer? false))))
+      branch (or (:seon.agent/branch (d/pull db '[:seon.agent/branch] [:seon.agent/id vid])) :main)
+      head-bdb (branch-db-for db conn branch)]
+  (surface/render-surface
+   db head-bdb
+   (assoc (merge opts (select-keys vs [:viewing-id :selected-branch :as-of-tx :view-mode :inspect-ref :inspect-trail :inspect-forward :lab-prefs :expert-mode?]))
+          :include-composer? false))))
 
 (defn css-unit
   "Mounted live `<style id=\"seon-css\">` unit (0 DB reads)."
@@ -226,8 +229,7 @@
         canon (rdata/canonical-view-mode view-mode)
         explain? (= canon :context)
         vw (long (or viewport-w 1280))
-        narrow? (< vw 760)
-        sb-open? (and sidebar-open? (not narrow?))
+        sb-open? (and sidebar-open? (>= vw 760))
         can-back? (boolean (or (seq (:nav-back lab-prefs)) (seq inspect-trail)))
         can-fwd? (boolean (or (seq (:nav-forward lab-prefs)) (seq inspect-forward) (seq (:inspect-forward lab-prefs))))
         nav-seq (:nav-seq lab-prefs)
@@ -250,7 +252,7 @@
         svg-act [:svg {:width "14" :height "14" :viewBox "0 0 16 16" :fill "none" :stroke "currentColor" :stroke-width "1.5" :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden "true"}
                  [:polyline {:points "1.5 8.5 4.2 8.5 6 3.5 9.6 12.5 11.4 8.5 14.5 8.5"}]]]
     [:header (cond-> {:id "seon-header"
-                      :class (str "topbar" (when narrow? " is-narrow") (when expert-mode? " is-dev-mode"))
+                      :class (str "topbar" (when expert-mode? " is-dev-mode"))
                       :data-canonical-url (router/user-state->path db vs)
                       :data-expert-mode (if expert-mode? "true" "false")
                       :data-viewport-w (str vw) :data-boot-seq (str (or boot-seq 1)) :data-theme (name (or theme :auto))}
@@ -271,12 +273,15 @@
        [:span {:class "crumb-sep"} "/"]
        (header-focal-crumbs db inspect-ref inspect-trail canon viewing-id expert-mode?)]
       [:div {:class "stats-strip"}
-       (when (and expert-mode? (>= vw 900)) (header-signals-strip db sigs))
-       (when (and expert-mode? (< vw 900))
-         [:a {:href (router/entity-ref->path db [:seon.signal/kind :health]) :class (str "status-pill nav-link " (if ok? "ok" "bad"))
-              :data-preview-ref "[:seon.signal/kind :health]" :interestfor "seon-hovercard"
-              :aria-label (if ok? "System healthy" (str err-n " error(s)")) :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
-          [:span {:class (str "dot " (if ok? "live" "bad"))}]])
+       (when expert-mode?
+       (list
+        (header-signals-strip db sigs)
+        [:a {:href (router/entity-ref->path db [:seon.signal/kind :health])
+             :class (str "status-pill hdr-health-compact nav-link " (if ok? "ok" "bad"))
+             :data-preview-ref "[:seon.signal/kind :health]" :interestfor "seon-hovercard"
+             :aria-label (if ok? "System healthy" (str err-n " error(s)"))
+             :on-click '(seon.web/inspect-entity! [:seon.signal/kind :health])}
+         [:span {:class (str "dot " (if ok? "live" "bad"))}]]))
        (when expert-mode?
          (ibtn (str "icon-btn vision-toggle" (when vision-on? " active"))
                (str "Live viewport screenshot " (if vision-on? "ON" "OFF")) '(seon.web/toggle-vision!)
@@ -291,9 +296,9 @@
           (cond
             (and expert-mode? (pos? active-n))
             (list [:span {:class "dot pulsing"}]
-                  [:span {:class "status-toggle-count"} (str active-n (when-not narrow? " active"))]
-                  (when-not narrow? [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}]))
-            expert-mode? (list svg-act (when-not narrow? [:span {:class "status-label"} "Activity"]))
+                  [:span {:class "status-toggle-count"} (str active-n) [:span {:class "status-active-word"} " active"]]
+                  [:span {:class "status-toggle-rate" :data-show "$aggRate" :data-text "$aggRate"}])
+            expert-mode? (list svg-act [:span {:class "status-label"} "Activity"])
             :else (list [:span {:class "dot pulsing"}]
                         [:span {:class "status-toggle-count"} (if (= 1 active-n) "Working…" (str active-n " working…"))]))])
        [:div {:class "mode-group"}
