@@ -339,7 +339,7 @@
    :cost/ticks 10000000}
   ([wm dbs agent-id rule] (eval-rule-query wm dbs agent-id rule nil nil))
   ([wm dbs agent-id rule focus-ref focus-eid]
-   (let [{:keys [pq req-tree focus-eq fn-syms db-fn-call? eff-q eff-ins] :as qm} (rq/query-meta (:seon.rule/query rule))
+   (let [{:keys [pq req-tree focus-eq fn-syms db-fn-call? direct-fn-call eff-q eff-ins] :as qm} (rq/query-meta (:seon.rule/query rule))
          eff-focus (or focus-ref (when agent-id [:seon.agent/id agent-id]))]
      (if (or (nil? eff-q)
              (and (some? focus-eq) (not= eff-focus focus-eq))
@@ -348,9 +348,13 @@
              (and (seq fn-syms) (not-every? #(or (resolve %) (try (requiring-resolve %) (catch Throwable _ nil))) fn-syms)))
        []
        (if-let [args (resolve-query-inputs eff-ins wm dbs agent-id focus-ref focus-eid)]
+         (if direct-fn-call
+         (rq/eval-direct-fn-call direct-fn-call args)
+         (if direct-fn-call
+         (rq/eval-direct-fn-call direct-fn-call args)
          (rows->envs pq (if db-fn-call?
                           (binding [dq/*query-result-cache?* false] (apply d/q eff-q args))
-                          (apply d/q eff-q args)))
+                          (apply d/q eff-q args)))))
          [])))))
 
 (defn- step-one-rule [state r stratum dbs aid fref feid prev-state tx-datoms dirty-attrs recomputed skipped]
