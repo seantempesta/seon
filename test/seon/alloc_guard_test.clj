@@ -714,3 +714,14 @@
             seen (atom [])]
         (seon.ctx.recall/add-turn0-var-neighborhood! db (fn [e pri] (swap! seen conj [e pri])) we)
         (is (some #(= te (first %)) @seen))))))
+
+(deftest wave17b-error-hints-and-health-splits-test
+  (testing "enrich-eval-error hints macro-as-value, standalone thrown?, and malli.registry contains?"
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Can't take value of a macro: #'clojure.core/ns" {}) "quote"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "Unable to resolve symbol: thrown? in this context" {}) "clojure.test/is"))
+    (is (clojure.string/includes? (seon.code.errors/enrich-eval-error "" "contains? not supported on type: malli.registry$composite_registry" {}) "entity-index")))
+  (testing "split health child namespaces keep full public re-export parity"
+    (is (fn? seon.health.coverage/rule-atlas))
+    (is (fn? seon.health.coverage/lint-rule-generality))
+    (is (fn? seon.health.static/form-meta-snapshot))
+    (is (fn? seon.health.static/used-before-defined))))
