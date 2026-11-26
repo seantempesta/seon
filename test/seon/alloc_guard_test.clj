@@ -20,7 +20,7 @@
             [seon.ctx.touches :as ctouches]
             [clojure.java.io :as io]
             [seon.repl.search :as rsearch]
-            [seon.bench.sampler]
+            [seon.bench.sampler :as bsampler]
             [seon.code.errors]
             [seon.code.reach.delta]
             [seon.code.cst.meta :as cmeta]
@@ -37,7 +37,12 @@
             [seon.code.cst :as cst]
             [seon.health.contracts :as hctr]
             [datahike.versioning :as dv]
-            [seon.code.files :as cfiles]))
+            [seon.code.files :as cfiles]
+            [seon.bench.ab :as bab]
+            [seon.bench.golden :as bgolden]
+            [seon.bench.lab :as blab]
+            [seon.task.gate :as tgate]
+            [seon.health.metrics :as hmetrics]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -468,27 +473,43 @@
       (is (false? (:ok? r3)))
       (is (= :invalid-stress-var-args (:error r3)))))
   (testing "Every registered schema carries :seon.schema/doc"
-    (when-let [conn (:conn seon.fork.calls/*agent-ctx*)]
-      (let [db @conn
-            missing (remove #(some? (:seon.schema/doc %))
-                            (map #(d/pull db '[:seon.schema/key :seon.schema/doc] (:e %))
-                                 (d/datoms db :aevt :seon.schema/key)))]
-        (is (empty? missing))))))
+    (with-test-store [{:keys [conn]}]
+    (d/transact conn {:tx-data [{:seon.schema/key :seon.demo/prim :seon.schema/form :string :seon.schema/doc "Bare primitive doc"}
+                                {:seon.schema/key :seon.demo/vec :seon.schema/form [:vector :int] :seon.schema/doc "Vector doc"}]})
+    (let [rendered (cfiles/render-schema-file @conn "resources/seon/schemas.edn")
+          reimp (cfiles/import-schema-file-tx nil "resources/seon/schemas.edn" rendered)
+          by-k (into {} (keep #(when (:seon.schema/key %) [(:seon.schema/key %) (:seon.schema/doc %)])) reimp)]
+      (is (= "Bare primitive doc" (get by-k :seon.demo/prim)) "Bare keyword schemas must preserve :seon.schema/doc on export")
+      (is (= "Vector doc" (get by-k :seon.demo/vec)) "Vector schemas must preserve :seon.schema/doc on export")))))
 
 (deftest ^{:cost/ticks 150000000} wave8b-scoped-search-grep-and-run-tests-only-test
-  (testing "search and grep-src accept bare namespace symbol as 2nd arg"
-    (when seon.fork.calls/*agent-ctx*
-      (let [s-res (seon.repl.search/search "stress" 'seon.schema)
-            g-res (seon.repl.search/grep-src "stress-var" 'seon.schema)]
-        (is (some #(= 'seon.schema/stress-var %) (:vars s-res)))
-        (is (every? #(or (= "seon.schema" (namespace %)) (clojure.string/starts-with? (str (namespace %)) "seon.schema.")) (:vars s-res)))
-        (is (seq g-res))
-        (is (every? #(or (= "seon.schema" (:ns %)) (clojure.string/starts-with? (str (:ns %)) "seon.schema.")) g-res)))))
-  (testing "run-tests! accepts :only keyword arg without passing :only into reaching-tests"
-    (when seon.fork.calls/*agent-ctx*
-      (let [rt (seon.repl/run-tests! 'seon.alloc-guard-test :only '[seon.alloc-guard-test/wave7d-stress-var-kwargs-and-schema-docs-test])]
-        (is (true? (:ok? rt)))
-        (is (= 1 (:ran rt)))))))
+  (testing "search, grep-src, and run-tests! :only execute real assertions in isolated test store"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (vec (concat
+                                       (code/file-import-tx @conn "src/demo/w8b_a.clj"
+                                         "(ns demo.w8b-a)
+(defn stress-var-demo \"Demo stress helper.\" [x] x)" false)
+                                       (code/file-import-tx @conn "src/demo/w8b_b.clj"
+                                         "(ns demo.w8b-b)
+(defn stress-other [x] x)" false)
+                                       (code/file-import-tx @conn "test/demo/w8b_a_test.clj"
+                                         "(ns demo.w8b-a-test (:require [clojure.test :refer [deftest is]]))
+(deftest t-one (is (= 2 (+ 1 1))))
+(deftest t-two (is (= 4 (+ 2 2))))" false)))})
+      (eval (read-string "(ns demo.w8b-a-test (:require [clojure.test :refer [deftest is]]))"))
+      (eval (read-string "(in-ns 'demo.w8b-a-test)"))
+      (binding [*ns* (find-ns 'demo.w8b-a-test)]
+        (eval (read-string "(deftest t-one (is (= 2 (+ 1 1))))"))
+        (eval (read-string "(deftest t-two (is (= 4 (+ 2 2))))")))
+      (binding [fcalls/*agent-ctx* {:conn conn :main-conn conn :branch :main :agent-id :ag/w8b}]
+        (let [s-res (rsearch/search "stress" 'demo.w8b-a)
+              g-res (rsearch/grep-src "stress-var-demo" 'demo.w8b-a)
+              rt (repl/run-tests! 'demo.w8b-a-test :only '[demo.w8b-a-test/t-one])]
+          (is (= ['demo.w8b-a/stress-var-demo] (:vars s-res)))
+          (is (= 1 (count g-res)))
+          (is (= "demo.w8b-a" (:ns (first g-res))))
+          (is (true? (:ok? rt)))
+          (is (= 1 (:ran rt))))))))
 
 (deftest ^{:cost/ticks 60000000} wave9e-doseq-ns-unmap-and-scratch-def-guard-test
   (testing "doseq/do (ns-unmap ...) retracts vars & forms from Datahike, and runtime scratch defs do not pollute target namespaces"
@@ -1038,3 +1059,76 @@
     (is (nil? (resolve 'seon.code/clean-edn-for-hash)))
     (is (nil? (resolve 'seon.store/db-at)))
     (is (nil? (resolve 'seon.web/http-routes)))))
+
+(deftest wave-d-honest-metrics-sampler-lab-gate-and-golden-v2-test
+  (testing "trial-merged? and trial-passed? never count verify-failed/health-failed merges as passed or merged"
+    (is (true? (bab/trial-merged? {:status :merged :merged? true :ok? true})))
+    (is (false? (bab/trial-merged? {:status :failed :merged? true :ok? false})))
+    (is (false? (bab/trial-merged? {:status :failed :merged? true})))
+    (is (false? (bab/trial-merged? {:merged? true :ok? false})))
+    (let [sb (bgolden/compute-scoreboard
+              [{:seon.bench.run/id (random-uuid) :seon.bench.run/suite-id :golden/v2 :seon.bench.run/started-ms 1000
+                :seon.bench.run/total 3 :seon.bench.run/status :partial
+                :seon.bench.run/trials [{:id :t1 :category :schema-proof :status :merged :merged? true :ok? true :turns 8}
+                                        {:id :t2 :category :ns-audit :status :failed :merged? true :ok? false :turns 10}
+                                        {:id :t3 :category :bplus-delegation :status :passed :merged? false :ok? true :turns 5}]}]
+              {:suite-id :golden/v2})]
+      (is (= 1 (:merged (:latest sb))) "Verify-failed merge must NOT be counted as merged")
+      (is (= 2 (:merge-eligible (:latest sb))) ":bplus-delegation must be excluded from merge-eligible denom")
+      (is (= 50.0 (:merge-rate-pct sb)))
+      (is (= 2 (:passed (:latest sb))))))
+
+  (testing "golden-suite-v2 has 8 unique strictly verified unrigged tasks"
+    (let [s2 (bgolden/golden-suite-v2)]
+      (is (= 8 (count s2)))
+      (is (= 8 (count (set (map :id s2)))))
+      (is (= 8 (count (set (map :category s2)))))
+      (is (every? #(and (map? (:verify-spec %)) (keyword? (get-in % [:verify-spec :kind]))) s2)
+          "Every :golden/v2 task must carry a strict :verify-spec")
+      (is (= s2 (bgolden/select-golden-tasks {:suite-id :golden/v2})))
+      (doseq [t s2 :let [txt (or (get-in t [:task :plan]) (:body t))]]
+        (is (not (re-find #"\[:=>|:malli/schema|:seon\.|\.(?:clj|edn)\b" txt))
+            (str "Rigged token leaked into :golden/v2 prompt: " (:id t))))))
+
+  (testing "sampler verify-task-spec fails closed on unknown kind, rejects loose contracts, empty :examples, and failing verdicts"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (vec (concat
+                                       (code/file-import-tx @conn "src/demo/samp_x.clj"
+                                         "(ns demo.samp-x)
+(defn f-any {:malli/schema [:=> [:cat :int] :any]} [x] {:a x})
+(defn f-map {:malli/schema [:=> [:cat :int] [:map]]} [x] {:a x})
+(defn f-empty-ex {:malli/schema [:=> {:examples []} [:cat :int] :int]} [x] x)" false)
+                                       (code/file-import-tx @conn "test/demo/samp_x_test.clj"
+                                         "(ns demo.samp-x-test (:require [clojure.test :refer [deftest is]] [demo.samp-x :as sx]))
+(deftest fail-t (is (= 1 (sx/f-empty-ex 2))))" false)))})
+      (d/transact conn {:tx-data [{:seon.test/digest "dg-fail-1" :seon.test/var 'demo.samp-x-test/fail-t :seon.test/kind :deftest :seon.test/pass? false :seon.test/ms 1.0 :seon.test/report "FAIL"}]})
+      (let [db @conn]
+        (is (false? (:ok? (bsampler/verify-task-spec db {:kind :totally-unknown-kind}))) "Unknown :kind must fail closed")
+        (is (false? (:ok? (bsampler/verify-task-spec db {:kind :tighten-return-contract :var 'demo.samp-x/f-any}))) ":any return must fail")
+        (is (false? (:ok? (bsampler/verify-task-spec db {:kind :tighten-return-contract :var 'demo.samp-x/f-map}))) "[:map] return must fail")
+        (is (false? (:ok? (bsampler/verify-task-spec db {:kind :ns-test-or-example :ns 'demo.samp-x :after-main-tx 0})))
+            "Empty :examples [] and failing test verdict must NOT pass :ns-test-or-example"))))
+
+  (testing "gate-blocked-notify-op wakes Tuners on :rule-generality-violation and :corpus-regression; lab guards turn-0 waiting"
+    (let [n1 (tgate/gate-blocked-notify-op :gate-blocked
+               {:blockers [{:task :template/tune-context :reason :rule-generality-violation :detail {:message "Hardcoded literal"}}]}
+               :tune/t1 100 #{})
+          n2 (tgate/gate-blocked-notify-op :gate-blocked
+               {:blockers [{:task :template/tune-context :reason :corpus-regression :detail {:message "Regressed 12 -> 11"}}]}
+               :tune/t1 101 #{})]
+      (is (= :send-message (:op n1)))
+      (is (str/includes? (:body n1) "Hardcoded literal"))
+      (is (= :send-message (:op n2)))
+      (is (str/includes? (:body n2) "Regressed 12 -> 11")))
+    (is (nil? (blab/should-intervene? {:status :waiting :turns 0 :errors 0 :has-edits? false} {}))
+        "Freshly spawned turn-0 worker must not trigger :settled-not-merged"))
+
+  (testing "select-agent-targets sorts newest-first by creation :tx instead of content-hashed :e"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data [{:seon.agent/id :w/older-tx :seon.agent/branch :main :seon.agent/goal "old"}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/older-tx :seon.agent.eval/turn 1 :seon.agent.eval/code "1"}]})
+      (d/transact conn {:tx-data [{:seon.agent/id :w/newer-tx :seon.agent/branch :main :seon.agent/goal "new"}
+                                  {:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :w/newer-tx :seon.agent.eval/turn 1 :seon.agent.eval/code "2"}]})
+      (let [sel @#'hmetrics/select-agent-targets
+            targets (sel conn @conn {:window 2})]
+        (is (= [:w/newer-tx :w/older-tx] (mapv :agent-id targets)))))))

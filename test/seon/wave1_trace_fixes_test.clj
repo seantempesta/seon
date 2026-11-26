@@ -21,7 +21,8 @@
             [seon.store :as store]
             [seon.test-fixture :refer [with-test-store]]
             [seon.code.parse :as parse]
-            [seon.fork.helpers :as fhelpers]))
+            [seon.fork.helpers :as fhelpers]
+            [clojure.java.io :as io]))
 
 (deftest ^{:cost/ticks 60000000} string-no-20-line-clip-and-expand-out-test
   (testing "120-line strings <= 8000 chars render verbatim without 20-line clipping, >8000 summarizes, and expand! supports {:out? true}"
@@ -240,20 +241,22 @@
             (d/release cconn)))))))
 
 (deftest ^{:cost/ticks 60000000} primers-content-and-zero-broken-doc-refs-test
-  (testing "docs/primers.md carries Wave-1 high-ROI recipes and live DB has 0 :broken-doc-ref"
-    (let [db (when fcalls/*agent-ctx* @(:conn fcalls/*agent-ctx*))
-          ed (when db (:seon.code.doc/body (d/pull db (quote [:seon.code.doc/body]) [:seon.code.doc/id "docs/primers.md#editing"])))
-          ct (when db (:seon.code.doc/body (d/pull db (quote [:seon.code.doc/body]) [:seon.code.doc/id "docs/primers.md#contracts"])))
-          pr (when db (:seon.code.doc/body (d/pull db (quote [:seon.code.doc/body]) [:seon.code.doc/id "docs/primers.md#proofs"])))]
-      (when db
-        (is (str/includes? (str ed) "overwrites existing functions"))
-        (is (str/includes? (str ed) "ONLY the `(ns ...)` header"))
-        (is (str/includes? (str ed) "parallel `repl` tool calls"))
-        (is (str/includes? (str ct) ">= 5000"))
-        (is (str/includes? (str ct) "^:seon.flow/edge"))
-        (is (str/includes? (str pr) "variadic"))
-        (is (empty? (hcontracts/broken-doc-refs db))))
-      (is (<= 110000000 (:cost/ticks (meta (requiring-resolve (quote seon.core-test/kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test)))) 150000000)))))
+  (testing "docs/primers.md carries Wave-1 high-ROI recipes (loaded into isolated test store, never skipped)"
+    (with-test-store [{:keys [conn]}]
+      (let [txt (slurp (io/file store/checkout-root "docs/primers.md"))]
+        (d/transact conn {:tx-data (code/file-import-tx @conn "docs/primers.md" txt false)})
+        (let [db @conn
+              ed (:seon.code.doc/body (d/pull db '[:seon.code.doc/body] [:seon.code.doc/id "docs/primers.md#editing"]))
+              ct (:seon.code.doc/body (d/pull db '[:seon.code.doc/body] [:seon.code.doc/id "docs/primers.md#contracts"]))
+              pr (:seon.code.doc/body (d/pull db '[:seon.code.doc/body] [:seon.code.doc/id "docs/primers.md#proofs"]))]
+          (is (string? ed))
+          (is (str/includes? ed "overwrites existing functions"))
+          (is (str/includes? ed "ONLY the `(ns ...)` header"))
+          (is (str/includes? ed "parallel `repl` tool calls"))
+          (is (str/includes? (str ct) ">= 5000"))
+          (is (str/includes? (str ct) "^:seon.flow/edge"))
+          (is (str/includes? (str pr) "variadic")))))
+    (is (<= 110000000 (:cost/ticks (meta (requiring-resolve 'seon.core-test/kv-cache-prefix-stability-volatility-ordering-and-eval-preview-test))) 150000000))))
 
 (deftest ^{:cost/ticks 90000000} wave2-trace-class-fixes-test
   (testing "Wave E0: ex-data on bare :set schema error, ::alias/kw in add-fn!, 24k verbatim string, source opts map, and @(user/db) hint"

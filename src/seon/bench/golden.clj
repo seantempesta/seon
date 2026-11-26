@@ -74,26 +74,12 @@
     :run-tests? false :merge? false :require-merge? false :timeout-ms 180000
     :body "Please delegate two quick read-only checks in parallel—one checking current health coverage status and one checking the largest namespaces—and give me a concise combined summary once both finish."}])
 
-(defn select-golden-tasks
-  "Filters `(golden-suite-v1)` by optional `:only`/`:ids`, `:categories`, and `:task-timeout-ms`/`:timeout-ms`."
-  {:malli/schema [:=> [:cat [:? [:maybe :map]]] [:vector :map]] :cost/ticks 10000}
-  ([] (golden-suite-v1))
-  ([opts]
-   (let [options (if (map? opts) opts {})
-         selected-ids (when-let [xs (or (:only options) (:ids options))] (set xs))
-         selected-cats (when-let [cs (:categories options)] (set cs))
-         timeout-ms (or (:task-timeout-ms options) (:timeout-ms options))]
-     (->> (golden-suite-v1)
-          (filter #(and (or (nil? selected-ids) (selected-ids (:id %)))
-                        (or (nil? selected-cats) (selected-cats (:category %)))))
-          (mapv #(cond-> % (pos-int? timeout-ms) (assoc :timeout-ms (long timeout-ms))))))))
-
 (defn- median [& args] (apply ab/median args))
 
 (defn- trial-merged? [& args] (apply ab/trial-merged? args))
 
 (defn- trial-passed? [trial]
-  (boolean (or (trial-merged? trial) (= :passed (:status trial)))))
+  (boolean (and (not (false? (:ok? trial))) (not (contains? #{:failed :timeout :error} (:status trial))) (or (trial-merged? trial) (= :passed (:status trial))))))
 
 (defn- summarize-run [run-rec]
   (let [trials (vec (filter map? (when (sequential? (:seon.bench.run/trials run-rec))
@@ -104,7 +90,7 @@
                        (count (filter trial-passed? trials))
                        (or (when (number? (:seon.bench.run/passed run-rec)) (:seon.bench.run/passed run-rec)) 0)))
         merged (count (filter trial-merged? trials))
-        merge-eligible (let [eligible (remove #(= :root-delegation (:category %)) trials)]
+        merge-eligible (let [eligible (remove #(contains? #{:root-delegation :bplus-delegation} (:category %)) trials)]
                          (if (seq eligible) (count eligible) total))
         merge-rate-pct (if (pos? merge-eligible) (round1 (* 100.0 (/ (double merged) merge-eligible))) 0.0)
         pass-rate-pct (if (pos? total) (round1 (* 100.0 (/ (double passed) total))) 0.0)
@@ -247,6 +233,94 @@
                    [])]
         (compute-scoreboard runs opts))))))
 
+(defn ^:seon.flow/edge repl-golden-scoreboard
+  "REPL helper (`user/golden-scoreboard`): computes the cross-commit `:golden/v1` scoreboard from `:main`."
+  {:malli/schema [:=> [:cat [:? [:maybe :map]]] [:maybe :seon.bench/scoreboard]] :cost/ticks 15000000}
+  ([] (repl-golden-scoreboard nil))
+  ([opts]
+   (when-let [{:keys [conn]} (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)]
+     (golden-scoreboard (or (store/head conn :main) @conn) opts))))
+
+(defn ^{:seon.code/reexport 'seon.bench.ab/build-ab-tasks} build-ab-tasks [& args] (apply ab/build-ab-tasks args))
+
+(defn ^{:seon.code/reexport 'seon.bench.ab/summarize-ab} summarize-ab [& args] (apply ab/summarize-ab args))
+
+(defn golden-suite-v2
+  "Returns the refreshed, strictly verified 8-task `:golden/v2` benchmark suite (1-2 sentence human prompts, zero rigging, strict `:verify-spec` on all 8 tasks)."
+  {:malli/schema [:=> [:cat] [:vector :map]] :cost/ticks 5000}
+  []
+  [{:id :golden/v2-user-view-state-contract
+    :suite-id :golden/v2 :category :schema-proof
+    :run-tests? true :merge? true :require-merge? true :timeout-ms 240000
+    :verify-spec {:kind :tighten-return-contract :var 'seon.render.data/user-view-state}
+    :task {:id :golden/v2-user-view-state-contract :scope 'seon.render.data
+           :title "Specify exact return contract for user-view-state"
+           :plan "Inspect the user view state helper and its callers in the render data namespace. Replace its loose map return contract with an explicit structured return specification verified by automated checks."}}
+   {:id :golden/v2-derive-agent-status-contract
+    :suite-id :golden/v2 :category :schema-proof-core
+    :run-tests? true :merge? true :require-merge? true :timeout-ms 240000
+    :verify-spec {:kind :tighten-return-contract :var 'seon.reconciler/derive-agent-status}
+    :task {:id :golden/v2-derive-agent-status-contract :scope 'seon.reconciler
+           :title "Specify exact return contract for derive-agent-status"
+           :plan "Inspect the agent status derivation helper and its consumers in the reconciler namespace. Tighten its return specification so its actual returned keys are explicit and verified by automated checks."}}
+   {:id :golden/v2-analyze-rule-contract
+    :suite-id :golden/v2 :category :schema-proof-rules
+    :run-tests? true :merge? true :require-merge? true :timeout-ms 240000
+    :verify-spec {:kind :tighten-return-contract :var 'seon.health.coverage.rules/analyze-rule}
+    :task {:id :golden/v2-analyze-rule-contract :scope 'seon.health.coverage.rules
+           :title "Specify exact return contract for analyze-rule"
+           :plan "Inspect the rule analysis helper and its callers in the coverage rules namespace. Replace its loose map return contract with an explicit structured return specification verified by automated checks."}}
+   {:id :golden/v2-liveness-tests
+    :suite-id :golden/v2 :category :ns-contract-audit
+    :run-tests? true :merge? true :require-merge? true :timeout-ms 240000
+    :verify-spec {:kind :ns-test-or-example :ns 'seon.health.liveness}
+    :task {:id :golden/v2-liveness-tests :scope 'seon.health.liveness
+           :title "Add behavioral unit tests and contract examples in health liveness"
+           :plan "Review the pure public functions in the health liveness namespace and pick one lacking direct edge-case unit tests or concrete contract examples. Add thorough tests and concrete examples and prove everything green."}}
+   {:id :golden/v2-git-forks-tests
+    :suite-id :golden/v2 :category :ns-git-audit
+    :run-tests? true :merge? true :require-merge? true :timeout-ms 240000
+    :verify-spec {:kind :ns-test-or-example :ns 'seon.git.forks}
+    :task {:id :golden/v2-git-forks-tests :scope 'seon.git.forks
+           :title "Add behavioral unit tests and contract examples in git forks"
+           :plan "Review the pure public functions in the git forks namespace and pick one lacking direct unit tests or concrete contract examples. Add thorough edge-case tests and examples and prove everything green."}}
+   {:id :golden/v2-health-branch-tests
+    :suite-id :golden/v2 :category :ns-health-audit
+    :run-tests? true :merge? true :require-merge? true :timeout-ms 240000
+    :verify-spec {:kind :ns-test-or-example :ns 'seon.health.branch}
+    :task {:id :golden/v2-health-branch-tests :scope 'seon.health.branch
+           :title "Add behavioral unit tests and contract examples in health branch"
+           :plan "Review the pure public functions in the health branch namespace and pick one lacking direct edge-case unit tests or concrete contract examples. Add thorough tests and concrete examples and prove everything green."}}
+   {:id :golden/v2-split-server-proc
+    :suite-id :golden/v2 :category :large-fn-refactor
+    :run-tests? true :merge? true :require-merge? true :timeout-ms 240000
+    :verify-spec {:kind :large-fn-cleared :ns 'seon.server :var 'seon.server/server-proc}
+    :task {:id :golden/v2-split-server-proc :scope 'seon.server
+           :title "Decompose oversized server-proc into cohesive helpers"
+           :plan "The main server process function exceeds the function size budget and triggers a static health warning. Extract cohesive pure helpers so every function in the server namespace stays under budget while keeping all tests green."}}
+   {:id :golden/v2-bplus-delegation
+    :suite-id :golden/v2 :category :bplus-delegation
+    :chat-agent :agent/root :branch :branch/root
+    :min-delegated-calls 2
+    :run-tests? false :merge? false :require-merge? false :timeout-ms 360000
+    :verify-spec {:kind :multi-ns-tests :namespaces ['seon.bench.ab 'seon.code.cst.meta]}
+    :body "Please delegate two parallel code tasks to specialist agents—one adding edge-case unit tests and concrete contract examples in seon.bench.ab and one in seon.code.cst.meta—wait for both to merge, then give me a concise verified summary."}])
+
+(defn select-golden-tasks
+  "Filters `(golden-suite-v1)` (or `(golden-suite-v2)` when `:suite-id :golden/v2`) by optional `:only`/`:ids`, `:categories`, and `:task-timeout-ms`/`:timeout-ms`."
+  {:malli/schema [:=> [:cat [:? [:maybe :map]]] [:vector :map]] :cost/ticks 10000}
+  ([] (golden-suite-v1))
+  ([opts]
+   (let [options (if (map? opts) opts {})
+         base (if (= :golden/v2 (:suite-id options)) (golden-suite-v2) (golden-suite-v1))
+         selected-ids (when-let [xs (or (:only options) (:ids options))] (set xs))
+         selected-cats (when-let [cs (:categories options)] (set cs))
+         timeout-ms (or (:task-timeout-ms options) (:timeout-ms options))]
+     (->> base
+          (filter #(and (or (nil? selected-ids) (selected-ids (:id %)))
+                        (or (nil? selected-cats) (selected-cats (:category %)))))
+          (mapv #(cond-> % (pos-int? timeout-ms) (assoc :timeout-ms (long timeout-ms))))))))
+
 (defn ^:seon.flow/edge run-golden-suite!
   "Launches the unrigged 8-task `:golden/v1` suite with commit/tx/model provenance persisted to `:seon.bench.run/entity`."
   {:malli/schema [:=> [:cat [:? [:maybe :map]]] :map] :cost/ticks 40000000}
@@ -275,18 +349,6 @@
      (cond (:sync? options) (cluster/run-parallel-trial! run-opts)
            (:publish-fn options) (cluster/start-bench-run-async! run-opts (:publish-fn options))
            :else (fcalls/start-bench-run! run-opts)))))
-
-(defn ^:seon.flow/edge repl-golden-scoreboard
-  "REPL helper (`user/golden-scoreboard`): computes the cross-commit `:golden/v1` scoreboard from `:main`."
-  {:malli/schema [:=> [:cat [:? [:maybe :map]]] [:maybe :seon.bench/scoreboard]] :cost/ticks 15000000}
-  ([] (repl-golden-scoreboard nil))
-  ([opts]
-   (when-let [{:keys [conn]} (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref)]
-     (golden-scoreboard (or (store/head conn :main) @conn) opts))))
-
-(defn ^{:seon.code/reexport 'seon.bench.ab/build-ab-tasks} build-ab-tasks [& args] (apply ab/build-ab-tasks args))
-
-(defn ^{:seon.code/reexport 'seon.bench.ab/summarize-ab} summarize-ab [& args] (apply ab/summarize-ab args))
 
 (defn ^:seon.flow/edge run-ab!
   "REPL helper (`user/run-ab!`): runs paired A/B isolated Seon trials directly inside Seon.

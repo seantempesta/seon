@@ -6,14 +6,8 @@
             [clojure.string :as str]
             [seon.render.fit :as fit]
             [seon.schema :as schema]
-            [seon.code :as code]))
-
-(defn- loose-map-return? [sch]
-  (let [one? (fn [s] (and (vector? s) (= :=> (first s))
-                          (let [r (last s)]
-                            (or (= :map r) (= [:maybe :map] r)))))]
-    (or (one? sch)
-        (and (vector? sch) (= :function (first sch)) (some one? (rest sch))))))
+            [seon.code :as code]
+            [seon.health.efficiency :as heff]))
 
 (defn- has-host-arg? [sch]
   (boolean (some #(and (qualified-keyword? %) (= "seon.host" (namespace %)))
@@ -24,6 +18,23 @@
     (when-let [fsrc (:seon.code.form/src (d/pull db '[:seon.code.form/src] [:seon.code.form/key fkey]))]
       (when-let [m (re-find #":seon\.code/reexport\s+'([a-zA-Z0-9_.\-\!\?\*]+/[a-zA-Z0-9_.\-\!\?\*]+)" (str fsrc))]
         (symbol (second m))))))
+
+(defn- loose-return-shape? [r]
+  (or (= :map r)
+      (= :any r)
+      (= 'map? r)
+      (= [:map] r)
+      (= [:maybe :map] r)
+      (= [:maybe :any] r)
+      (= [:map-of :any :any] r)
+      (and (vector? r) (= :or (first r))
+           (some #{:map :any 'map? [:map]} (rest r)))))
+
+(defn- loose-map-return? [sch]
+  (let [one? (fn [s] (and (vector? s) (= :=> (first s)) (loose-return-shape? (last s))))]
+    (or (one? sch)
+        (and (vector? sch) (= :function (first sch))
+             (some one? (if (map? (second sch)) (nnext sch) (rest sch)))))))
 
 (defn sample-random-tasks
   "Deterministically samples `n` diverse, verified, unrigged real tasks live from Datahike `db` (using `seed`)
@@ -135,8 +146,25 @@
          db (or (:db opts) (when-let [c (:conn ctx)] (or (store/head c :main) @c)))]
      (if db (sample-random-tasks db opts) []))))
 
+(defn- has-nonempty-examples? [sch]
+  (let [nonempty? (fn [m] (let [exs (when (map? m) (:examples m))]
+                            (boolean (and (coll? exs) (not (map? exs)) (seq exs)))))]
+    (when (vector? sch)
+      (or (nonempty? (second sch))
+          (and (= :function (first sch))
+               (boolean (some #(and (vector? %) (nonempty? (second %)))
+                              (if (map? (second sch)) (nnext sch) (rest sch)))))))))
+
+(defn- latest-test-verdict-pass? [db vname]
+  (when (and db (qualified-symbol? vname) (contains? (db-schema db) :seon.test/var))
+    (let [latest (->> (d/datoms db :avet :seon.test/var vname)
+                      (sort-by #(long (or (:tx %) 0)) >)
+                      first)]
+      (when latest
+        (:v (first (d/datoms db :eavt (:e latest) :seon.test/pass?)))))))
+
 (defn ^:seon.flow/edge verify-task-spec
-  "Evaluates a serializable `:verify-spec` map against post-merge `:main` `db`, returning `{:ok? bool :reason str}`."
+  "Evaluates a serializable `:verify-spec` map against post-merge `:main` `db`, returning `{:ok? bool :reason str}`. Fails closed on unknown `:kind`."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] :map]
    :cost/ticks 25000000}
   [db spec]
@@ -163,7 +191,8 @@
                               sch (when ve (:v (first (d/datoms db :eavt ve :seon.code.var/schema))))
                               still-loose? (or (nil? sch) (loose-map-return? sch))
                               stress (when (and (not still-loose?) (schema/generatable-function-schema? sch))
-                                       (try (schema/stress-var db s {:samples 50 :seed 42}) (catch Throwable _ nil)))]
+                                       (try (schema/stress-var db s {:samples 50 :seed 42})
+                                            (catch Throwable ex {:ok? false :reason (str "stress-var threw: " (or (.getMessage ex) (str ex)))})))]
                           (cond
                             (nil? ve) {:ok? false :kind :tighten-return-contract :reason (str "Var not found: " s)}
                             still-loose? {:ok? false :kind :tighten-return-contract :reason (str s " still has loose return schema: " (pr-str sch))}
@@ -182,26 +211,36 @@
       :ns-test-or-example
       (let [nsym (:ns spec)
             after-tx (long (or (:after-main-tx spec) 0))
-            ex-hits (for [dt (d/datoms db :avet :seon.code.var/ns nsym)
-                          :let [e (:e dt)
-                                sch-dt (first (d/datoms db :eavt e :seon.code.var/schema))]
-                          :when (and sch-dt (> (long (:tx sch-dt 0)) after-tx)
-                                     (str/includes? (pr-str (:v sch-dt)) ":examples"))]
-                      (:v (first (d/datoms db :eavt e :seon.code.var/name))))
+            ex-hits (vec (keep (fn [dt]
+                                 (let [e (:e dt)
+                                       sch-dt (first (d/datoms db :eavt e :seon.code.var/schema))
+                                       sch (:v sch-dt)]
+                                   (when (and sch-dt (> (long (:tx sch-dt 0)) after-tx)
+                                              (has-nonempty-examples? sch))
+                                     (let [vnm (:v (first (d/datoms db :eavt e :seon.code.var/name)))
+                                           st (when (and (qualified-symbol? vnm) (resolve vnm))
+                                                (try (schema/stress-var db vnm {:samples 50 :seed 42})
+                                                     (catch Throwable ex {:ok? false :reason (str ex)})))]
+                                       (when (or (nil? st) (:ok? st))
+                                         vnm)))))
+                               (d/datoms db :avet :seon.code.var/ns nsym)))
             reaching (set (code/reaching-tests db nsym))
-            test-hits (for [dt (d/datoms db :aevt :seon.code.var/test?)
-                            :when (and (true? (:v dt)) (> (long (:tx dt 0)) after-tx))
-                            :let [e (:e dt)
-                                  vname (:v (first (d/datoms db :eavt e :seon.code.var/name)))
-                                  vns (:v (first (d/datoms db :eavt e :seon.code.var/ns)))
-                                  refs (map :v (d/datoms db :eavt e :seon.code.var/refs))]
-                            :when (or (= vns (symbol (str (name nsym) "-test")))
-                                      (some #(= (name nsym) (namespace %)) refs)
-                                      (contains? reaching vname))]
-                        vname)]
+            test-hits (vec (for [dt (d/datoms db :aevt :seon.code.var/test?)
+                                 :when (and (true? (:v dt)) (> (long (:tx dt 0)) after-tx))
+                                 :let [e (:e dt)
+                                       vname (:v (first (d/datoms db :eavt e :seon.code.var/name)))
+                                       vns (:v (first (d/datoms db :eavt e :seon.code.var/ns)))
+                                       refs (map :v (d/datoms db :eavt e :seon.code.var/refs))
+                                       verdict (latest-test-verdict-pass? db vname)]
+                                 :when (and (not (false? verdict))
+                                            (or (some #(= (name nsym) (namespace %)) refs)
+                                                (contains? reaching vname)
+                                                (and (= vns (symbol (str (name nsym) "-test")))
+                                                     (seq refs))))]
+                             vname))]
         (if (or (seq ex-hits) (seq test-hits))
-          {:ok? true :kind :ns-test-or-example :ns nsym :examples (vec ex-hits) :tests (vec test-hits)}
-          {:ok? false :kind :ns-test-or-example :reason (str "No new unit test or contract examples recorded for " nsym " after tx " after-tx)}))
+          {:ok? true :kind :ns-test-or-example :ns nsym :examples ex-hits :tests test-hits}
+          {:ok? false :kind :ns-test-or-example :reason (str "No verified passing unit test or non-empty contract examples recorded for " nsym " after tx " after-tx)}))
 
       :entity-renderers
       (let [sk (:schema spec)
@@ -211,4 +250,16 @@
           {:ok? true :kind :entity-renderers :schema sk :count (count rends) :renderers (vec rends)}
           {:ok? false :kind :entity-renderers :reason (str sk " has only " (count rends) " renderer(s), need >= " min-r)}))
 
-      {:ok? true :kind (:kind spec)})))
+      :large-fn-cleared
+      (let [nsym (:ns spec)
+            vsym (:var spec)
+            warns (when (symbol? nsym)
+                    (filterv #(and (= :large-function (:class %))
+                                   (or (nil? vsym) (= vsym (:var %))))
+                             (heff/static-efficiency-warnings db nsym)))]
+        (if (empty? warns)
+          {:ok? true :kind :large-fn-cleared :ns nsym :var vsym}
+          {:ok? false :kind :large-fn-cleared :ns nsym :var vsym
+           :reason (str "Still has :large-function warning: " (:message (first warns)))}))
+
+      {:ok? false :kind (:kind spec) :reason (str "Unknown verify-spec kind: " (pr-str (:kind spec)))})))

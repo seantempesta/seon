@@ -65,6 +65,7 @@
            :base-cid base-cid})))))
 
 (defn- resolve-candidate-overrides
+  {:seon.flow/edge true}
   [db]
   (let [real-db? (instance? datahike.db.DB db)
         sid (when real-db? (get-in db [:config :store :id]))

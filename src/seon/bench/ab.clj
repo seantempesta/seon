@@ -15,9 +15,16 @@
                   (/ (+ (nth values (dec mid)) (nth values mid)) 2.0)))))))
 
 (defn trial-merged?
-  {:malli/schema [:=> {:examples [[[{:merged? true}] true] [[{:status :merged}] true] [[{:status :failed}] false]]} [:cat [:maybe :map]] :boolean], :cost/ticks 50000}
+  {:malli/schema [:=> {:examples [[[{:merged? true}] true]
+                                  [[{:status :merged}] true]
+                                  [[{:status :failed}] false]
+                                  [[{:status :failed :merged? true}] false]
+                                  [[{:merged? true :ok? false}] false]]}
+                  [:cat [:maybe :map]] :boolean], :cost/ticks 50000}
   [trial]
-  (boolean (or (:merged? trial) (= :merged (:status trial)))))
+  (boolean (and (not (false? (:ok? trial)))
+                (not (contains? #{:failed :timeout :error} (:status trial)))
+                (or (:merged? trial) (= :merged (:status trial))))))
 
 (defn build-ab-tasks
   "Expands `base-tasks` across named `arms` (`{:control {...} :treatment {...}}` or seq of `[arm-kw cfg]`)

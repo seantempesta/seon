@@ -43,6 +43,7 @@
   {:malli/schema [:=> {:examples [[[{:status :runnable :turns 5 :errors 2 :has-edits? false} {:trigger-on-errors 2 :trigger-on-empty-turns 8}] :error-threshold]
                                   [[{:status :runnable :turns 8 :errors 0 :has-edits? false} {:trigger-on-errors 2 :trigger-on-empty-turns 8}] :empty-turns]
                                   [[{:status :merged :turns 6 :errors 0 :has-edits? true} {:trigger-on-errors 2 :trigger-on-empty-turns 8}] nil]
+                                  [[{:status :waiting :turns 0 :errors 0 :has-edits? false} {:trigger-on-errors 2 :trigger-on-empty-turns 8}] nil]
                                   [[{:status :waiting :turns 4 :errors 1 :has-edits? false} {:trigger-on-errors 2 :trigger-on-empty-turns 8}] :settled-not-merged]]}
                   [:cat :map :map] [:maybe :keyword]]
    :cost/ticks 50000}
@@ -55,7 +56,7 @@
       (and (pos-int? force-tune-after-turns) (>= t (long force-tune-after-turns))) :forced-turn
       (and (pos? err-lim) (>= e err-lim)) :error-threshold
       (and (pos? emp-lim) (>= t emp-lim) (not has-edits?)) :empty-turns
-      (contains? #{:waiting :gate-blocked :failed} status) :settled-not-merged
+      (and (pos? t) (contains? #{:waiting :gate-blocked :failed} status)) :settled-not-merged
       :else nil)))
 
 (defn- ^:seon.flow/edge watch-worker-until-trigger! [inst worker-id worker-br timeout-ms trig-opts]
@@ -144,52 +145,67 @@
 (defn- ^:seon.flow/edge run-tuner-intervention! [inst tid worker-id worker-br tuner-id watch opts t0]
   (let [{:keys [tuner-timeout-ms resume-timeout-ms tuner-max-turns verify-spec after-main-tx proxy-inst on-phase!]} opts
         _ (cluster/instance-op! inst {:op :transact :tx-data [{:seon.agent/id worker-id :seon.agent/paused? true}] :reason :lab-pause-worker})
-        _ (wait-until-not-busy! inst worker-id 15000)
-        pre-det (probe-agent-detail inst worker-id worker-br)
-        pre-ctx (probe-context-and-corpus inst worker-id worker-br false)
-        err-hint (->> (:trace pre-det) (keep :error) last)
-        tuner-goal (str "Supervisor Pause-and-Fork for " worker-id " (trigger: " (name (:reason watch))
-                        ", turns: " (:turns pre-det) ", errors: " (:errors pre-det)
-                        (when err-hint (str ", latest error: " err-hint))
-                        "). DO NOT solve " worker-id "'s task yourself! Diagnose why " worker-id " struggled, improve the GENERAL context system (Lever 1 rules / Lever 2 renderers / Lever 3 schemas), verify <target-context-preview> + (user/check-corpus) 12/12 (0 generality issues), roll back bad turns via @user/ctx, and reply concisely to merge back and resume " worker-id ".")
-        spawn-res (cluster/instance-op! inst {:op :spawn-agent :id tuner-id :fork-from [:seon.agent/id worker-id]
-                                              :merge-target [:seon.agent/id worker-id] :tasks [:template/tune-context]
-                                              :auto-merge? true :pause-parent? true
-                                              :config {:seon.config/max-tool-turns tuner-max-turns} :goal tuner-goal})
-        tuner-br (:branch spawn-res)
-        _ (when on-phase! (on-phase! {:phase :tuning :trigger (:reason watch) :turns (long (:turns pre-det 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
-        tuner-wait (cluster/wait-for-agent! inst tuner-id tuner-timeout-ms)
-        tuner-row (some #(when (= tuner-id (:id %)) %) (get-in tuner-wait [:status :agents]))
-        tuner-det (probe-agent-detail inst tuner-id tuner-br)
-        post-tune-w (probe-agent-detail inst worker-id worker-br)
-        post-tune-ctx (probe-context-and-corpus inst worker-id worker-br true)
-        _ (when (:paused? post-tune-w)
-            (cluster/instance-op! inst {:op :transact :tx-data [{:seon.agent/id worker-id :seon.agent/paused? false}] :reason :lab-resume-worker}))
-        _ (when on-phase! (on-phase! {:phase :resuming :trigger (:reason watch) :turns (+ (long (:turns pre-det 0)) (long (:turns tuner-det 0))) :tuner-merged? (boolean (or (= :merged (:status tuner-row)) (pos? (long (or (:merged-tx tuner-det) 0))))) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
-        resume-wait (cluster/wait-for-agent! inst worker-id resume-timeout-ms)
-        final-row (some #(when (= worker-id (:id %)) %) (get-in resume-wait [:status :agents]))
-        final-det (probe-agent-detail inst worker-id worker-br)
-        final-health (cluster/instance-op! inst {:op :health})
-        verify-res (when verify-spec (cluster/instance-op! inst {:op :verify-task :spec (assoc verify-spec :after-main-tx (long (or after-main-tx 0)))}))
-        tuner-merged? (boolean (or (= :merged (:status tuner-row)) (pos? (long (or (:merged-tx tuner-det) 0)))))
-        rolled-back? (< (long (:evals post-tune-w 0)) (long (:evals pre-det 0)))
-        tuner-eff? (boolean (and tuner-merged? (or rolled-back? (seq (:new-rules post-tune-ctx)) (seq (:upserted-forms post-tune-ctx)))))
-        merged? (= :merged (:status final-row))
-        ok? (boolean (and merged? (:ok? final-health) (if verify-res (:ok? verify-res) true)))]
-    {:ok? ok? :phase :supervised-cycle
-     :task tid :worker worker-id :tuner tuner-id :trigger (:reason watch)
-     :merged? merged? :final-worker-status (:status final-row)
-     :tuner-status (:status tuner-row) :tuner-merged? tuner-merged? :tuner-effective? tuner-eff?
-     :rolled-back-evals? rolled-back?
-     :turns (+ (long (:turns final-det 0)) (long (:turns tuner-det 0)))
-     :worker-turns (long (:turns final-det 0)) :tuner-turns (long (:turns tuner-det 0))
-     :verify-ok? (if verify-res (boolean (:ok? verify-res)) true) :verify-reason (:reason verify-res)
-     :tuner-diff (:diff-vs-main post-tune-ctx) :tuner-upserts (:upserted-forms post-tune-ctx) :tuner-new-rules (:new-rules post-tune-ctx)
-     :pre-worker pre-det :pre-context pre-ctx :tuner-detail tuner-det
-     :post-tune-worker-evals (:evals post-tune-w) :post-tune-context post-tune-ctx
-     :final-worker final-det :health-ok? (boolean (:ok? final-health))
-     :proxy-stats (when proxy-inst (proxy/stats proxy-inst))
-     :elapsed-s (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e8)) 10.0)}))
+        paused-row (wait-until-not-busy! inst worker-id 15000)
+        pre-det (probe-agent-detail inst worker-id worker-br)]
+    (if (= :merged (:status paused-row))
+      (let [fh (cluster/instance-op! inst {:op :health})
+            vr (when verify-spec (cluster/instance-op! inst {:op :verify-task :spec (assoc verify-spec :after-main-tx (long (or after-main-tx 0)))}))]
+        {:ok? (boolean (and (:ok? fh) (if vr (:ok? vr) true))) :phase :cold-merged :task tid :worker worker-id :merged? true
+         :health-ok? (boolean (:ok? fh)) :health-problems (vec (take 10 (:problems fh)))
+         :verify-ok? (if vr (boolean (:ok? vr)) true) :verify-reason (:reason vr)
+         :turns (long (:turns pre-det 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))
+         :worker-pre pre-det :elapsed-s (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e8)) 10.0)})
+      (let [pre-ctx (probe-context-and-corpus inst worker-id worker-br false)
+            err-hint (->> (:trace pre-det) (keep :error) last)
+            tuner-goal (str "Supervisor Pause-and-Fork for " worker-id " (trigger: " (name (:reason watch))
+                            ", turns: " (:turns pre-det) ", errors: " (:errors pre-det)
+                            (when err-hint (str ", latest error: " err-hint))
+                            "). DO NOT solve " worker-id "'s task yourself! Diagnose why " worker-id " struggled, improve the GENERAL context system (Lever 1 rules / Lever 2 renderers / Lever 3 schemas), verify <target-context-preview> + (user/check-corpus) 12/12 (0 generality issues), roll back bad turns via @user/ctx, and reply concisely to merge back and resume " worker-id ".")
+            spawn-res (cluster/instance-op! inst {:op :spawn-agent :id tuner-id :fork-from [:seon.agent/id worker-id]
+                                                  :merge-target [:seon.agent/id worker-id] :tasks [:template/tune-context]
+                                                  :auto-merge? true :pause-parent? true
+                                                  :config {:seon.config/max-tool-turns tuner-max-turns} :goal tuner-goal})
+            tuner-br (:branch spawn-res)
+            _ (when on-phase! (on-phase! {:phase :tuning :trigger (:reason watch) :turns (long (:turns pre-det 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
+            tuner-wait (cluster/wait-for-agent! inst tuner-id tuner-timeout-ms)
+            tuner-row (some #(when (= tuner-id (:id %)) %) (get-in tuner-wait [:status :agents]))
+            tuner-det (probe-agent-detail inst tuner-id tuner-br)
+            post-tune-w (probe-agent-detail inst worker-id worker-br)
+            post-tune-ctx (probe-context-and-corpus inst worker-id worker-br true)
+            _ (when (:paused? post-tune-w)
+                (cluster/instance-op! inst {:op :transact :tx-data [{:seon.agent/id worker-id :seon.agent/paused? false}] :reason :lab-resume-worker}))
+            _ (when on-phase! (on-phase! {:phase :resuming :trigger (:reason watch) :turns (+ (long (:turns pre-det 0)) (long (:turns tuner-det 0))) :tuner-merged? (boolean (or (= :merged (:status tuner-row)) (pos? (long (or (:merged-tx tuner-det) 0))))) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
+            resume-wait (cluster/wait-for-agent! inst worker-id resume-timeout-ms nil {:baseline-evals (long (:evals post-tune-w 0))})
+            final-row (some #(when (= worker-id (:id %)) %) (get-in resume-wait [:status :agents]))
+            final-det (probe-agent-detail inst worker-id worker-br)
+            final-health (cluster/instance-op! inst {:op :health})
+            verify-res (when verify-spec (cluster/instance-op! inst {:op :verify-task :spec (assoc verify-spec :after-main-tx (long (or after-main-tx 0)))}))
+            tuner-merged? (boolean (or (= :merged (:status tuner-row)) (pos? (long (or (:merged-tx tuner-det) 0)))))
+            rolled-back? (< (long (:evals post-tune-w 0)) (long (:evals pre-det 0)))
+            pre-rules (set (:new-rules pre-ctx))
+            pre-ups (set (:upserted-forms pre-ctx))
+            tuner-new-rules (vec (remove pre-rules (:new-rules post-tune-ctx)))
+            tuner-upserts (vec (remove pre-ups (:upserted-forms post-tune-ctx)))
+            tuner-eff? (boolean (and tuner-merged? (or rolled-back? (seq tuner-new-rules) (seq tuner-upserts))))
+            merged? (= :merged (:status final-row))
+            ok? (boolean (and merged? (:ok? final-health) (if verify-res (:ok? verify-res) true)))
+            post-resume-turns (max 0 (- (long (:turns final-det 0)) (long (:turns post-tune-w 0))))
+            total-turns (+ (long (:turns pre-det 0)) (long (:turns tuner-det 0)) post-resume-turns)]
+        {:ok? ok? :phase :supervised-cycle
+         :task tid :worker worker-id :tuner tuner-id :trigger (:reason watch)
+         :merged? merged? :final-worker-status (:status final-row)
+         :tuner-status (:status tuner-row) :tuner-merged? tuner-merged? :tuner-effective? tuner-eff?
+         :rolled-back-evals? rolled-back?
+         :turns total-turns
+         :worker-turns (+ (long (:turns pre-det 0)) post-resume-turns) :tuner-turns (long (:turns tuner-det 0))
+         :verify-ok? (if verify-res (boolean (:ok? verify-res)) true) :verify-reason (:reason verify-res)
+         :tuner-diff (:diff-vs-main post-tune-ctx) :tuner-upserts tuner-upserts :tuner-new-rules tuner-new-rules
+         :pre-worker pre-det :pre-context pre-ctx :tuner-detail tuner-det
+         :post-tune-worker-evals (:evals post-tune-w) :post-tune-context post-tune-ctx
+         :final-worker final-det :health-ok? (boolean (:ok? final-health))
+         :health-problems (vec (take 10 (:problems final-health)))
+         :proxy-stats (when proxy-inst (proxy/stats proxy-inst))
+         :elapsed-s (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e8)) 10.0)}))))
 
 (defn- execute-supervisor-cycle! [opts]
   (let [{:keys [task timeout-ms tuner-timeout-ms resume-timeout-ms seed-store keep-dir?
