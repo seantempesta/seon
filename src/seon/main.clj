@@ -29,32 +29,6 @@
 
 (def ^{:private true} aot-build-ms (compile-epoch-ms))
 
-(defn- sync-cold-boot-forms!
-  "Overlays non-test `:seon.code.form/*` entities on `db0` written after `aot-build-ms` into the
-   coordinator runtime and ForkParent so cold-booted binaries never run stale AOT code against `:main`."
-  [db0 router]
-  (when (and db0 (contains? (:schema db0) :seon.code.form/src))
-    (let [cutoff (- (long aot-build-ms) 60000)
-          fresh-txs (into #{}
-                          (keep (fn [dt]
-                                  (let [v (:v dt)]
-                                    (when (and (instance? java.util.Date v) (>= (.getTime ^java.util.Date v) cutoff))
-                                      (:e dt)))))
-                          (d/datoms db0 :aevt :db/txInstant))]
-      (when (seq fresh-txs)
-        (let [upserts (->> (d/datoms db0 :aevt :seon.code.form/src)
-                           (keep (fn [dt]
-                                   (when (contains? fresh-txs (:tx dt))
-                                     (let [f (d/pull db0 '[:seon.code.form/key :seon.code.form/ns :seon.code.form/src
-                                                           :seon.code.form/order :seon.code.form/deps] (:e dt))
-                                           nsym (:seon.code.form/ns f)]
-                                       (when (and nsym (not= nsym 'seon.main)) f)))))
-                           vec)]
-          (when (seq upserts)
-            (code/apply-overlay! db0 {:upserts upserts} true)
-            (when-let [fo (:fork-out router)]
-              (a/put! fo {:op :advance-image :upserts upserts :commit (d/commit-id db0)}))))))))
-
 (defn make-fork-router
   "Routes ForkParent events to active `:agent`/`:test` channels and dispatches control events (`:killed-all-9`, `:image-advance-error`, `:image-advanced`)."
   {:seon.flow/edge true :malli/schema [:=> [:cat :map] :map]}
@@ -249,6 +223,70 @@
    [[:server :browser] [:browser :req]]
    [[:transactor :db] [:vectors :db]]
    [[:vectors :tx] [:transactor :tx]]])
+
+(defn cold-boot-overlay-delta
+  "Computes the non-test cold-boot overlay `{:upserts [...] :retracted-keys #{...}}` written to `db0`
+   at or after `cutoff-ms`, expanded via `code/expand-overlay-rebinds` for `ForkParent`."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :map] :cost/ticks 50000000}
+  [db0 cutoff-ms]
+  (if-not (and db0 (contains? (:schema db0) :seon.code.form/src))
+    {:upserts [] :retracted-keys #{}}
+    (let [fresh-txs (into #{}
+                          (keep (fn [dt]
+                                  (let [v (:v dt)]
+                                    (when (and (instance? java.util.Date v) (>= (.getTime ^java.util.Date v) cutoff-ms))
+                                      (:e dt)))))
+                          (d/datoms db0 :aevt :db/txInstant))
+          test-ns? (fn [nsym] (or (nil? nsym) (= nsym 'seon.main) (str/ends-with? (name nsym) "-test")))]
+      (if (empty? fresh-txs)
+        {:upserts [] :retracted-keys #{}}
+        (let [upserts (->> (d/datoms db0 :aevt :seon.code.form/src)
+                           (keep (fn [dt]
+                                   (when (contains? fresh-txs (:tx dt))
+                                     (let [f (d/pull db0 '[:seon.code.form/key :seon.code.form/ns :seon.code.form/src
+                                                           :seon.code.form/order :seon.code.form/deps :seon.code.form/test?] (:e dt))
+                                           nsym (:seon.code.form/ns f)]
+                                       (when (and nsym (not (test-ns? nsym)) (not (:seon.code.form/test? f)))
+                                         f)))))
+                           vec)
+              retracted-keys (if (get-in db0 [:config :keep-history?])
+                               (into #{}
+                                     (keep (fn [dt]
+                                             (let [k (:v dt)]
+                                               (when (and (not (:added dt))
+                                                          (contains? fresh-txs (:tx dt))
+                                                          (string? k)
+                                                          (not (str/includes? k "-test"))
+                                                          (not (str/starts-with? k "seon.main"))
+                                                          (nil? (first (d/datoms db0 :avet :seon.code.form/key k))))
+                                                 k))))
+                                     (d/datoms (d/history db0) :aevt :seon.code.form/key))
+                               #{})
+              raw {:upserts upserts :retracted-keys retracted-keys}]
+          (if (or (seq upserts) (seq retracted-keys))
+            (code/expand-overlay-rebinds db0 raw)
+            raw))))))
+
+(defn- sync-cold-boot-forms!
+  "Overlays non-test `:seon.code.form/*` entities and retractions on `db0` written after `aot-build-ms`
+   into the coordinator runtime and ForkParent (awaiting `:image-advanced` before serving requests)."
+  [db0 router]
+  (let [delta (cold-boot-overlay-delta db0 (- (long aot-build-ms) 60000))]
+    (when (or (seq (:upserts delta)) (seq (:retracted-keys delta)))
+      (code/apply-overlay! db0 delta true)
+      (when-let [fo (:fork-out router)]
+        (let [ack (promise)
+              set-t! (:set-targets! router)]
+          (when set-t!
+            (set-t! {:agent-ch nil :test-ch nil :kill-ack nil :server-in-ch nil
+                     :report-chan nil :error-chan nil :on-image-event #(deliver ack %)}))
+          (try
+            (a/>!! fo (assoc delta :op :advance-image :commit (d/commit-id db0)))
+            (when set-t! (deref ack 15000 nil))
+            (finally
+              (when set-t!
+                (set-t! {:agent-ch nil :test-ch nil :kill-ack nil :server-in-ch nil
+                         :report-chan nil :error-chan nil :on-image-event nil})))))))))
 
 (defn start-flow-instance!
   {:malli/schema [:=> [:cat [:map [:fork-out :seon.host/chan]] :map] :map]}

@@ -1169,3 +1169,29 @@
                 (finally (d/release bc))))
             (finally
               (try (remove-ns ns-sym) (catch Throwable _ nil)))))))))
+
+(deftest cold-boot-overlay-excludes-tests-and-includes-retractions-test
+  (testing "seon.main/cold-boot-overlay-delta excludes -test forms and propagates deleted non-test form keys"
+    (with-test-store
+      (fn [conn _cfg]
+        (let [t-before (- (System/currentTimeMillis) 5000)]
+          (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/cboot/demo.clj"
+                                                         "(ns seon.cboot.demo)
+(defn keep-fn [] 1)
+(defn drop-fn [] 2)" false)})
+          (let [t-mid (System/currentTimeMillis)]
+            (Thread/sleep 5)
+            ;; Modify keep-fn, delete drop-fn, and add a -test namespace after t-mid
+            (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/cboot/demo.clj"
+                                                           "(ns seon.cboot.demo)
+(defn keep-fn [] 99)" false)})
+            (d/transact conn {:tx-data (code/file-import-tx @conn "test/seon/cboot_demo_test.clj"
+                                                           "(ns seon.cboot-demo-test (:require [clojure.test :refer [deftest is]]))
+(deftest sample-test (is true))" false)})
+            (let [delta ((requiring-resolve 'seon.main/cold-boot-overlay-delta) @conn t-mid)
+                  ukeys (set (map :seon.code.form/key (:upserts delta)))]
+              (is (contains? ukeys "seon.cboot.demo/keep-fn") (pr-str delta))
+              (is (not (some #(str/includes? % "-test") ukeys)) (pr-str delta))
+              (is (contains? (:retracted-keys delta) "seon.cboot.demo/drop-fn") (pr-str delta))
+              (is (not (some #(str/includes? % "-test") (:retracted-keys delta))) (pr-str delta))
+              (is (number? t-before)))))))))

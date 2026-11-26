@@ -671,4 +671,12 @@
   :seon.fix/error-class :seon.code.overlay/router-branch-full-recompile-boot-stall,
   :seon.fix/root-cause "Long-lived router/reviewed branches synced from :main via 1-parent d/transact kept d/merge-base pinned thousands of TXs in the past, and changed-form-ops/load-delta! lacked a pre-pull skip check against the already-loaded :main db; sync-coordinator-branches! silently swallowed replay errors instead of catching up via 3-way sync.",
   :seon.fix/regression-test seon.alloc-guard-test/load-delta-skips-forms-identical-to-main-test,
-  :seon.fix/id #uuid "20261126-d002-4000-8000-000000000005"}]
+  :seon.fix/id #uuid "20261126-d002-4000-8000-000000000005"}
+ {:seon.fix/created-ms 1795664015402,
+  :seon.fix/symptom "Cold-booted target/seon benchmark instances threw 'Attempting to call unbound fn: #'seon.fork.worker-support/merge-3way-map' and 'Unable to resolve symbol: sidebar-agents-list' because ForkParent's :advance-image crashed mid-overlay on unloaded -test forms.",
+  :seon.fix/change-summary "Extracted seon.main/cold-boot-overlay-delta filtering out all -test and seon.main forms, collecting retracted non-test keys from d/history, expanding via code/expand-overlay-rebinds, and making sync-cold-boot-forms! synchronously await :image-advanced before starting Flow procs.",
+  :seon.fix/before-after "[M] Cold-booted isolated benchmark instances: 34 leaked -test forms crashed ForkParent :advance-image mid-overlay -> 0 leaked -test forms, full retracted-keys & caller rebind propagation, synchronous ForkParent sync, fresh rebuilt target/seon binary.",
+  :seon.fix/error-class :seon.main/cold-boot-overlay-test-leak-and-missing-retractions,
+  :seon.fix/root-cause "seon.main/sync-cold-boot-forms! failed to filter out -test forms (despite its docstring), omitted :retracted-keys and code/expand-overlay-rebinds, and dispatched :advance-image via async a/put! without awaiting :image-advanced.",
+  :seon.fix/regression-test seon.alloc-guard-test/cold-boot-overlay-excludes-tests-and-includes-retractions-test,
+  :seon.fix/id #uuid "20261126-d003-4000-8000-000000000006"}]
