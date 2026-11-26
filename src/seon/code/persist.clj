@@ -93,52 +93,40 @@
     txs))
 
 (defn- reorder-form-txs
-  "Returns `raw-form-txs` possibly re-ordered so nothing is used before it is defined,
+  "Returns `raw-form-txs` topologically ordered via unified `cst-ns/topo-order-ns-forms` so same-ns
+   callees always precede callers (including multi-hop chains and newly resolved forward refs),
    emitting `:seon.code.form/order` fixes for moved existing forms."
   [by-key raw-form-txs]
-  (let [merged-all (vals (merge by-key (into {} (map (juxt :seon.code.form/key identity)) raw-form-txs)))
-        new-keys (into #{} (remove #(contains? by-key %)) (map :seon.code.form/key raw-form-txs))
-        need-reorder?
-        (and (seq new-keys)
-             (let [ord-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/order)) merged-all)]
-               (some (fn [f]
-                       (let [co (get ord-by-k (:seon.code.form/key f) 0)]
-                         (some (fn [dep]
-                                 (let [dk (str dep)]
-                                   (and (contains? new-keys dk)
-                                        (< co (get ord-by-k dk 0)))))
-                               (:seon.code.form/deps f))))
-                     merged-all)))]
-    (if-not need-reorder?
+  (let [tx-by-k (into {} (map (juxt :seon.code.form/key identity)) raw-form-txs)
+        new-syms (into [] (keep (fn [k]
+                                  (when (and (not (contains? by-key k)) (string? k) (str/includes? k "/") (not (str/includes? k "#")))
+                                    (symbol k))))
+                       (keys tx-by-k))
+        enriched (mapv (fn [f]
+                         (if (or (empty? new-syms) (contains? tx-by-k (:seon.code.form/key f)))
+                           f
+                           (let [src (str (:seon.code.form/src f))
+                                 cur-deps (set (:seon.code.form/deps f))
+                                 extra (keep (fn [s]
+                                               (let [nm (name s)]
+                                                 (when (and (not (contains? cur-deps s))
+                                                            (str/includes? src nm)
+                                                            (re-find (re-pattern (str "(?<![A-Za-z0-9_?!*/.-])" (java.util.regex.Pattern/quote nm) "(?![A-Za-z0-9_?!*/.-])")) src))
+                                                   s)))
+                                             new-syms)]
+                             (if (seq extra) (update f :seon.code.form/deps #(vec (distinct (concat % extra)))) f))))
+                       (vals (merge by-key tx-by-k)))
+        ord-updates (cst-ns/topo-order-ns-forms enriched)]
+    (if (empty? ord-updates)
       raw-form-txs
-      (let [ns-hdr? #(str/ends-with? (:seon.code.form/key % "") "#ns")
-            existing-ord (vec (sort-by (fn [f] [(if (ns-hdr? f) 0 1) (:seon.code.form/order f 0) (:seon.code.form/key f "")])
-                                       (remove #(contains? new-keys (:seon.code.form/key %)) merged-all)))
-            new-ord (vec (sort-by :seon.code.form/order (filter #(contains? new-keys (:seon.code.form/key %)) raw-form-txs)))
-            placed (reduce
-                    (fn [acc nf]
-                      (let [nk (:seon.code.form/key nf)
-                            nsym-dep (when (str/includes? nk "/") (symbol nk))
-                            idx (when nsym-dep
-                                  (first (keep-indexed
-                                          (fn [i ef]
-                                            (when (contains? (set (:seon.code.form/deps ef)) nsym-dep) i))
-                                          acc)))]
-                        (if idx
-                          (vec (concat (subvec acc 0 idx) [nf] (subvec acc idx)))
-                          (conj acc nf))))
-                    existing-ord
-                    (reverse new-ord))
-            tx-by-k (into {} (map (juxt :seon.code.form/key identity)) raw-form-txs)]
-        (vec
-         (keep-indexed
-          (fn [i f]
-            (let [k (:seon.code.form/key f)]
-              (if-let [changed (get tx-by-k k)]
-                (assoc changed :seon.code.form/order (long i))
-                (when (not= (long i) (long (:seon.code.form/order f -1)))
-                  {:seon.code.form/key k :seon.code.form/order (long i)}))))
-          placed))))))
+      (let [ord-by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/order)) ord-updates)
+            updated-txs (mapv (fn [f]
+                                (if-let [no (get ord-by-k (:seon.code.form/key f))]
+                                  (assoc f :seon.code.form/order no)
+                                  f))
+                              raw-form-txs)
+            moved-existing (filterv #(not (contains? tx-by-k (:seon.code.form/key %))) ord-updates)]
+        (into updated-txs moved-existing)))))
 
 (defn persist-forms-by-ns
   "Persists newly defined or updated top-level Clojure forms `{nsym [src ...]}` into Datahike tx-data with topo reordering, in-place named-expr replacement, and ns-header sync."

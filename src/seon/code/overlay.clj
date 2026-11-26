@@ -269,21 +269,25 @@
      (doseq [old-ns retracted-nss]
        (when (and (not (contains? @touched-nss old-ns)) (find-ns old-ns)) (remove-ns old-ns)))
      (let [arm-db (when-not (seq schema/*base-forms-override*) db)
-           changed-schemas (into (set retracted-schemas) (keep :seon.schema/key) schema-upserts)]
-       (doseq [nsym @touched-nss :let [ns-obj (find-ns nsym)] :when ns-obj [_ v] (ns-interns ns-obj)
-               :let [m (meta v)]
-               :when (and (not (:private m)) (or (not (:seon/instrumented? m)) (seq changed-schemas)) (:malli/schema m))]
-         (if tolerant?
-           (try (schema/arm-var! arm-db v)
-                (catch Throwable ex (vswap! errors conj {:key (symbol (name nsym) (str (:name m))) :error (or (.getMessage ex) (str ex))})))
-           (schema/arm-var! arm-db v)))
-       (when (seq changed-schemas)
-         (doseq [ns-obj (all-ns) :let [nsym (ns-name ns-obj)]
-                 :when (and (not (contains? @touched-nss nsym)) (str/starts-with? (name nsym) "seon."))
-                 [_ v] (ns-interns ns-obj)
-                 :let [m (meta v) sch (:malli/schema m)]
-                 :when (and (:seon/instrumented? m) (vector? sch) (some changed-schemas (schema/schema-refs-in-form sch)))]
-           (schema/arm-var! arm-db v))))
+         upserted-keys (into #{} (map :seon.code.form/key) all-upserts)
+         changed-schemas (into (set retracted-schemas) (keep :seon.schema/key) schema-upserts)
+         arm-changed? (or (contains? upserted-keys "seon.schema/arm-var!")
+                          (contains? upserted-keys "seon.schema/report-contract-violation!"))]
+     (doseq [nsym @touched-nss :let [ns-obj (find-ns nsym)] :when ns-obj [_ v] (ns-interns ns-obj)
+             :let [m (meta v)]
+             :when (and (not (:private m)) (or (not (:seon/instrumented? m)) (seq changed-schemas) arm-changed?) (:malli/schema m))]
+       (if tolerant?
+         (try (schema/arm-var! arm-db v)
+              (catch Throwable ex (vswap! errors conj {:key (symbol (name nsym) (str (:name m))) :error (or (.getMessage ex) (str ex))})))
+         (schema/arm-var! arm-db v)))
+     (when (or (seq changed-schemas) arm-changed?)
+       (doseq [ns-obj (all-ns) :let [nsym (ns-name ns-obj)]
+               :when (and (not (contains? @touched-nss nsym)) (str/starts-with? (name nsym) "seon."))
+               [_ v] (ns-interns ns-obj)
+               :let [m (meta v) sch (:malli/schema m)]
+               :when (and (:seon/instrumented? m) (vector? sch)
+                          (or arm-changed? (some changed-schemas (schema/schema-refs-in-form sch))))]
+         (schema/arm-var! arm-db v))))
      (do (refresh-warm-user-helpers! (into #{} (map :seon.code.form/key) all-upserts)) @errors))))
 
 (defn ^:seon.flow/edge rebind-spliced-callers!

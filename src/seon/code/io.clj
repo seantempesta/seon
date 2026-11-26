@@ -459,7 +459,10 @@
 (defn resolve-form-target
   {:malli/schema [:=> [:cat :seon.host/conn :keyword :any] :map], :cost/ticks 10000000}
   [conn branch target]
-  (let [s (str target)
+  (let [s (cond
+            (var? target) (str (symbol target))
+            (keyword? target) (if (namespace target) (str (namespace target) "/" (name target)) (name target))
+            :else (str target))
         bdb @conn
         mdb (if (= branch :main) bdb (or (try (store/head conn :main) (catch Throwable _ nil)) bdb))
         [nsym fkey] (cond
@@ -474,9 +477,22 @@
         path (or (:seon.code.ns/path (d/pull bdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
                  (:seon.code.ns/path (d/pull mdb '[:seon.code.ns/path] [:seon.code.ns/name nsym]))
                  (parse/ns->default-path nsym))
-        f-ent (let [b (d/pull bdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])]
-                (if (:seon.code.form/src b) b
-                    (d/pull mdb '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead] [:seon.code.form/key fkey])))]
+        fpull '[:seon.code.form/src :seon.code.form/order :seon.code.form/lead]
+        b-ent (d/pull bdb fpull [:seon.code.form/key fkey])
+        m-ent (if (= (d/commit-id bdb) (d/commit-id mdb)) b-ent (d/pull mdb fpull [:seon.code.form/key fkey]))
+        b-src (:seon.code.form/src b-ent)
+        m-src (:seon.code.form/src m-ent)
+        f-ent (cond
+                (= b-src m-src) (if b-src b-ent m-ent)
+                (= branch :main) b-ent
+                :else
+                (let [base-db (try (store/merge-base-db conn :main branch) (catch Throwable _ nil))
+                      base-src (when base-db (:seon.code.form/src (d/pull base-db '[:seon.code.form/src] [:seon.code.form/key fkey])))]
+                  (cond
+                    (and (nil? b-src) (some? base-src)) {}
+                    (and (some? m-src) (= b-src base-src)) m-ent
+                    (some? b-src) b-ent
+                    :else m-ent)))]
     {:ns nsym :key fkey :path path
      :src (:seon.code.form/src f-ent)
      :order (:seon.code.form/order f-ent)

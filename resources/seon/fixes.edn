@@ -6,6 +6,13 @@
   :seon.fix/regression-test seon.fork-sandbox-test/live-kernel-worker-sandbox-blocks-repo-and-git-allows-store-test,
   :seon.fix/root-cause "Forked COW workers inherited unrestricted host write perms; :git proc lacked :commit-git? gate and ref cleanup; hot-loaded git-proc checked (if-not (:commit-git? st)) instead of (if (false? (:commit-git? st))).",
   :seon.fix/symptom "Runaway COW worker ran spit/git commit on host repo; isolated bench trials leaked 495 refs/heads/seon/*; hot-reloaded git-proc with nil :commit-git? skipped write-back."}
+ {:seon.fix/before-after "Before: 0% KV stability across child merges, run-tests! {:ns} OOM (12.88 GB), renderer input validation bypassed on :examples. After: 100% KV stability across >70 sibling TXs & 2-parent merges, scoped run-tests! {:ns}, live Malli validation & unified Kahn ordering",
+  :seon.fix/change-summary "Unwrapped props map in renderer-input-schema; BFS multi-parent ancestor-within? without global TX cap in attr-ns-sig; sha256-hex wire cache key; {:ns} + filtered eff-ops in run-tests!; code-db-sig cache keys in search/recall; named report-contract-violation! + overlay re-arm; 3-way resolve-form-target; unified Kahn sorter with declare/defrecord; deleted leaky fast-valid-malli?",
+  :seon.fix/error-class :silent-bug-and-kv-bust,
+  :seon.fix/id #uuid "20261126-b001-4000-8000-000000000002",
+  :seon.fix/regression-test seon.alloc-guard-test/wave-b-silent-bugs-kv-stability-run-tests-and-arm-var-test,
+  :seon.fix/root-cause "Props-map blind schema destructuring, store-global max-tx threshold + single-parent-only ancestor walk, unfiltered branch ops in run-tests!, inline anonymous closure in arm-var!, 2-way branch preference in resolve-form-target, and leaky fast-valid-malli? / naive single-pass form sorter",
+  :seon.fix/symptom "renderer-input-schema bypassed validation on :examples renderers; rules-db-sig busted KV cache across >65 sibling TXs and 2-parent merges; run-tests! ignored {:ns} and stale-diffed OOM; arm-var! closed over stale report fn; resolve-form-target overwrote newer :main; CST/topo had duplicate broken sorters and silent metadata wipe"}
  {:seon.fix/change-summary "Resolved both test reads via seon.store/checkout-root and fixed build-ab-tasks caller :timeout-ms override, in-place deftype/defrecord REPL replacement, /op :timeout-ms, :explore-scope, and automatic :error-samples/:failing-tests persistence.",
   :seon.fix/error-class :bench/cwd-relative-test-slurp,
   :seon.fix/id #uuid "269efac2-ee2d-4d95-b1b2-3a761e17daca",

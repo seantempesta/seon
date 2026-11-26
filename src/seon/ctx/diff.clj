@@ -151,29 +151,28 @@
 
 (defonce ^:private ^:seon.flow/edge commit-parent-lru (store/lru-cache 512))
 
-(defn- ^:seon.flow/edge single-parent-cid [db store sid cid]
+(defn- ^:seon.flow/edge commit-parents-cid [db store sid cid]
   (if (and (instance? datahike.db.DB db) (= cid (live-cid db)))
-    (single-parent-of db)
+    (let [ps (get-in db [:meta :datahike/parents])]
+      (if (set? ps) (vec ps) []))
     (let [cache-key [sid cid]
           hit (store/lru-peek commit-parent-lru cache-key ::miss)]
       (if-not (identical? ::miss hit)
-        (when-not (identical? ::none hit) hit)
+        (if (vector? hit) hit (if (identical? ::none hit) [] [hit]))
         (let [record (store/without-agent-eval-reads
                       #(try (dv/commit-graph-record store cid) (catch Throwable _ nil)))
               parents (:datahike/parents record)
-              parent (when (and (set? parents) (= 1 (count parents)))
-                       (first parents))]
-          (store/lru-put! commit-parent-lru 512 cache-key (if (some? parent) parent ::none))
-          parent)))))
+              pvec (if (and (set? parents) (seq parents)) (vec parents) [])]
+          (store/lru-put! commit-parent-lru 512 cache-key pvec)
+          pvec)))))
 
 (defn ^:seon.flow/edge ancestor-within?
-  "True iff `anc-cid` is reachable from `cur-cid` via at most `max-hops` single-parent commits.
-   Uses in-memory `single-parent-of` for hop 1 and cached `datahike.versioning/commit-graph-record`
-   thereafter so callers never trigger `:datahike/changes-not-ancestor` throws or error logs."
+  "True iff `anc-cid` is reachable from `cur-cid` via at most `max-hops` commit-graph hops (including multi-parent merge commits).
+   Uses in-memory parents for hop 1 and cached `datahike.versioning/commit-graph-record` thereafter so callers never trigger `:datahike/changes-not-ancestor` throws."
   {:malli/schema [:function
                   [:=> [:cat [:maybe :seon.host/db] :any :any] :boolean]
                   [:=> [:cat [:maybe :seon.host/db] :any :any :int] :boolean]]
-   :cost/ticks 2000000}
+   :cost/ticks 4000000}
   ([db anc-cid cur-cid]
    (ancestor-within? db anc-cid cur-cid 16))
   ([db anc-cid cur-cid max-hops]
@@ -187,15 +186,23 @@
            limit (long (max 0 (or max-hops 0)))]
        (if-not (and store sid (pos? limit))
          false
-         (loop [cid cur-cid
-                hops 0]
-           (if (>= hops limit)
+         (loop [q (conj clojure.lang.PersistentQueue/EMPTY [cur-cid 0])
+                seen #{cur-cid}]
+           (if (or (empty? q) (> (count seen) 256))
              false
-             (if-let [parent (single-parent-cid db store sid cid)]
-               (if (= parent anc-cid)
-                 true
-                 (recur parent (inc hops)))
-               false))))))))
+             (let [[cid depth] (peek q)
+                   q1 (pop q)]
+               (if (>= (long depth) limit)
+                 (recur q1 seen)
+                 (let [ps (commit-parents-cid db store sid cid)]
+                   (if (some #(= % anc-cid) ps)
+                     true
+                     (let [[q2 seen2] (reduce (fn [[aq as] p]
+                                                (if (or (nil? p) (contains? as p))
+                                                  [aq as]
+                                                  [(conj aq [p (inc (long depth))]) (conj as p)]))
+                                              [q1 seen] ps)]
+                       (recur q2 seen2)))))))))))))
 
 (defn- ^:seon.flow/edge attr-ns-sig [db kind pred]
   (cond
@@ -217,20 +224,21 @@
                   p1 (single-parent-of db)
                   p-hit (when p1 (store/lru-peek attr-sig-lru [sid kind p1] ::miss))
                   anc (get @attr-sig-anchors ak)
+                  anc-same? (and (map? anc) (= bc (:cid anc)) (= scnt (:schema-cnt anc)))
                   prev (cond
+                         anc-same? nil
                          (and (map? p-hit) (= scnt (:schema-cnt p-hit)))
                          {:cid p1 :sig (:sig p-hit)}
-                         (and (map? anc) (not= bc (:cid anc)) (= scnt (:schema-cnt anc))
-                              (< 0 (- mtx (long (:max-tx anc 0))) 65))
+                         (and (map? anc) (not= bc (:cid anc)) (= scnt (:schema-cnt anc)))
                          {:cid (:cid anc) :sig (:sig anc)}
                          :else nil)
-                  unchanged? (when (and prev (ancestor-within? db (:cid prev) bc 16))
+                  unchanged? (when (and prev (ancestor-within? db (:cid prev) bc 64))
                                (store/without-agent-eval-reads
                                 #(try
                                    (not-any? (fn [dt] (pred (resolve-attr db (:a dt))))
                                              (d/changes db (:cid prev) bc))
                                    (catch Throwable _ false))))
-                  eff-sig (if unchanged? (:sig prev) bc)
+                  eff-sig (cond anc-same? (:sig anc) unchanged? (:sig prev) :else bc)
                   entry {:sig eff-sig :schema-cnt scnt}]
               (store/lru-put! attr-sig-lru 256 ck entry)
               (bounded-assoc! attr-sig-anchors 64 ak (assoc entry :cid bc :max-tx mtx))

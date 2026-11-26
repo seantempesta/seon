@@ -359,14 +359,6 @@
                                                "for pure fns include :cost/ticks & :cost/bytes for seed=42 generative proofs.")}))))))
                 (sort-by :subject) vec)))))))
 
-(def ^:private simple-malli-leaves
-  #{:any :int :double :string :boolean :keyword :qualified-keyword :simple-keyword
-    :symbol :qualified-symbol :simple-symbol :map :vector :set :nil :uuid :inst
-    'number? 'pos-int? 'nat-int? 'neg-int? 'string? 'keyword? 'symbol? 'fn? 'bytes?
-    'boolean? 'map? 'vector? 'set? 'int? 'pos? 'coll? 'sequential?
-    :seon.host/db :seon.host/conn :seon.host/chan :seon.host/atom :seon.host/fn
-    :seon.host/var :seon.host/ns :seon.host/deref :seon.host/throwable :char})
-
 (def ^:private host-only-registry
   (delay
     (mr/composite-registry
@@ -376,47 +368,6 @@
 (defonce ^:private ^:seon.flow/edge host-contract-cache (store/lru-cache 1024))
 
 (defonce ^:private ^:seon.flow/edge custom-contract-cache (store/lru-cache 512))
-
-(defn- fast-valid-malli? [s]
-  (cond
-    (contains? simple-malli-leaves s) true
-    (not (vector? s)) false
-    (empty? s) false
-    :else
-    (case (first s)
-      :=> (let [[_ a1 a2 a3] s
-                [props args ret] (if (map? a1) [a1 a2 a3] [nil a1 a2])]
-            (and (or (nil? props) (every? #{:examples :doc :description} (keys props)))
-                 (if (map? a1) (= 4 (count s)) (= 3 (count s)))
-                 (vector? args) (= :cat (first args))
-                 (every? fast-valid-malli? (rest args))
-                 (fast-valid-malli? ret)))
-      :function (let [props (when (map? (second s)) (second s))
-                      items (if props (nnext s) (rest s))]
-                  (and (or (nil? props) (every? #{:examples :doc :description} (keys props)))
-                       (seq items)
-                       (every? #(and (vector? %) (= :=> (first %)) (fast-valid-malli? %)) items)))
-      (:maybe :? :* :+) (and (= 2 (count s)) (fast-valid-malli? (second s)))
-      (:sequential :vector :set)
-      (or (and (= 2 (count s)) (fast-valid-malli? (second s)))
-          (and (= 3 (count s)) (map? (second s))
-               (every? #{:min :max :doc :description} (keys (second s)))
-               (fast-valid-malli? (nth s 2))))
-      :enum (and (>= (count s) 2) (every? #(or (keyword? %) (string? %) (number? %) (boolean? %) (nil? %)) (rest s)))
-      (:int :string :double) (and (= 2 (count s)) (map? (second s)) (every? #{:min :max} (keys (second s))) (every? number? (vals (second s))))
-      :map (let [p? (map? (second s))
-                 ch (if p? (nnext s) (rest s))]
-             (and (or (not p?) (every? #{:closed :doc :description :min :max} (keys (second s))))
-                  (every? (fn [en]
-                            (and (vector? en) (keyword? (first en))
-                                 (or (and (= 2 (count en)) (fast-valid-malli? (second en)))
-                                     (and (= 3 (count en)) (map? (second en))
-                                          (every? #{:optional :doc :description} (keys (second en)))
-                                          (fast-valid-malli? (nth en 2))))))
-                          ch)))
-      (:or :and :tuple) (and (>= (count s) 2) (not (map? (second s))) (every? fast-valid-malli? (rest s)))
-      :map-of (and (= 3 (count s)) (not (map? (second s))) (fast-valid-malli? (second s)) (fast-valid-malli? (nth s 2)))
-      false)))
 
 (defn- custom-schema-refs [s]
   (let [strip-props (fn strip [x]
@@ -435,21 +386,20 @@
           (tree-seq coll? seq (strip-props s)))))
 
 (defn- validate-contract-schema [db reg-cell sch]
-  (when-not (fast-valid-malli? sch)
-    (let [refs (custom-schema-refs sch)
-          host-check #(store/lru-get! host-contract-cache 1024 sch
-                        (fn []
-                          (try (m/schema sch {:registry @host-only-registry}) nil
-                               (catch Throwable ex (or (.getMessage ex) (str ex))))))]
-      (if (empty? refs)
-        (host-check)
-        (let [{:keys [forms registry reg-sig]} (or @reg-cell (let [r (schema/registry-for-db db)] (vreset! reg-cell r) r))]
-          (if-not (some #(contains? forms %) refs)
-            (host-check)
-            (store/lru-get! custom-contract-cache 512 [reg-sig sch]
-              (fn []
-                (try (m/schema sch {:registry registry}) nil
-                     (catch Throwable ex (or (.getMessage ex) (str ex))))))))))))
+  (let [refs (custom-schema-refs sch)
+        host-check #(store/lru-get! host-contract-cache 2048 sch
+                      (fn []
+                        (try (m/schema sch {:registry @host-only-registry}) nil
+                             (catch Throwable ex (or (.getMessage ex) (str ex))))))]
+    (if (empty? refs)
+      (host-check)
+      (let [{:keys [forms registry reg-sig]} (or @reg-cell (let [r (schema/registry-for-db db)] (vreset! reg-cell r) r))]
+        (if-not (some #(contains? forms %) refs)
+          (host-check)
+          (store/lru-get! custom-contract-cache 512 [reg-sig sch]
+            (fn []
+              (try (m/schema sch {:registry registry}) nil
+                   (catch Throwable ex (or (.getMessage ex) (str ex)))))))))))
 
 (defn invalid-contract-violations
   "Validates stored `:seon.code.var/schema` forms on `db` reusing the compiled Malli registry.

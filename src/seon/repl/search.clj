@@ -3,12 +3,13 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.fork.calls :as fcalls :refer [*agent-ctx*]]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.ctx.diff :as diff]))
 
 (def ^:private grep-src-cache (store/lru-cache 8))
 
 (defn- cached-form-index [bdb]
-  (let [ck [(get-in bdb [:config :store :id]) (get-in bdb [:config :branch] :main) (:max-tx bdb)]]
+  (let [ck (or (diff/code-db-sig bdb) [(get-in bdb [:config :store :id]) (get-in bdb [:config :branch] :main) (:max-tx bdb)])]
     (store/lru-get! grep-src-cache 8 ck
       (fn []
         (let [by-e (volatile! {}) out (volatile! [])]
@@ -57,30 +58,6 @@
     (when (:seon.schema/form sm) (doseq [dt (d/datoms db :aevt :seon.schema/form)] (when (hit? (pr-str (:v dt))) (when-let [k (e-v (:e dt) :seon.schema/key)] (vswap! ss conj k)))))
     (when (:seon.code.doc/id sm) (doseq [dt (d/datoms db :aevt :seon.code.doc/id)] (when (hit? (:v dt)) (vswap! ds conj (:v dt)))))
     {:vars @vs :schemas @ss :docs @ds}))
-
-(defn search
-  "Searches vars (name + doc), schemas (key + doc + form), and docs by case-insensitive substring. Optional 2nd arg filters to a namespace symbol (or `{:ns 'seon.foo}`)."
-  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]]]}
-  ([substr] (search substr nil))
-  ([substr scope-or-opts]
-   (when-let [{:keys [conn branch]} *agent-ctx*]
-     (let [bdb @conn
-           mdb (if (= branch :main) bdb (or (store/head conn :main) bdb))
-           q (str/lower-case (str substr))
-           raw-ns (cond (map? scope-or-opts) (:ns scope-or-opts) (integer? scope-or-opts) nil :else scope-or-opts)
-           ns-pref (when raw-ns (if (string? raw-ns) raw-ns (name raw-ns)))
-           in-ns? (fn [x]
-                    (if-not ns-pref
-                      true
-                      (let [xs (cond (qualified-symbol? x) (namespace x)
-                                     (qualified-keyword? x) (namespace x)
-                                     :else (str x))]
-                        (and xs (or (= xs ns-pref) (str/starts-with? xs (str ns-pref ".")))))))
-           h1 (search-db-hits mdb q)
-           h2 (when (not= (d/commit-id bdb) (d/commit-id mdb)) (search-db-hits bdb q))]
-       {:vars (->> (concat (:vars h1) (:vars h2)) (filter in-ns?) distinct sort (take 25) vec)
-        :schemas (->> (concat (:schemas h1) (:schemas h2)) (filter in-ns?) distinct sort (take 20) vec)
-        :docs (->> (concat (:docs h1) (:docs h2)) distinct sort (take 20) vec)}))))
 
 (defn ns-size-summary
   "O(N) zero-source summary of namespaces ranked by estimated token count (`{:ns :forms :vars :chars :tokens}`).
@@ -152,7 +129,7 @@
                   (let [code-eids (volatile! #{})
                         dirty? (volatile! false)]
                     (doseq [dt changes
-                            :let [a (:a dt)]]
+                            :let [raw-a (:a dt) a (if (keyword? raw-a) raw-a (get-in bdb [:ref-ident-map raw-a] raw-a))]]
                       (when (or (= a :seon.code.form/hash)
                                 (= a :seon.code.form/src)
                                 (= a :seon.code.form/key)
@@ -201,6 +178,28 @@
                    (if (and tns (seq nss) (not (contains? nss tns)))
                      mdb
                      bdb)))))))))))
+
+(defn search
+  "Searches vars (name + doc), schemas (key + doc + form), and docs by case-insensitive substring. Optional 2nd arg filters to a namespace symbol (or `{:ns 'seon.foo}`)."
+  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any :any] [:maybe :map]]]}
+  ([substr] (search substr nil))
+  ([substr scope-or-opts]
+   (when-let [{:keys [conn branch]} *agent-ctx*]
+     (let [db (effective-code-db conn (or branch :main))
+         q (str/lower-case (str substr))
+         raw-ns (cond (map? scope-or-opts) (:ns scope-or-opts) (integer? scope-or-opts) nil :else scope-or-opts)
+         ns-pref (when raw-ns (if (string? raw-ns) raw-ns (name raw-ns)))
+         in-ns? (fn [x]
+                  (if-not ns-pref
+                    true
+                    (let [xs (cond (qualified-symbol? x) (namespace x)
+                                   (qualified-keyword? x) (namespace x)
+                                   :else (str x))]
+                      (and xs (or (= xs ns-pref) (str/starts-with? xs (str ns-pref ".")))))))
+         h (search-db-hits db q)]
+     {:vars (->> (:vars h) (filter in-ns?) distinct sort (take 25) vec)
+      :schemas (->> (:schemas h) (filter in-ns?) distinct sort (take 20) vec)
+      :docs (->> (:docs h) distinct sort (take 20) vec)}))))
 
 (defn grep-src
   "Cached single- or multi-pattern grep across forms (falls back to `:seon.schema/*` when pattern mentions `seon.`). Accepts `{:ns 'ns :limit 30}` or a bare namespace symbol as 2nd arg."

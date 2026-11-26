@@ -23,7 +23,7 @@
             [seon.bench.sampler]
             [seon.code.errors]
             [seon.code.reach.delta]
-            [seon.code.cst.meta]
+            [seon.code.cst.meta :as cmeta]
             [clojure.core.async]
             [jolt.http-client]
             [ring-chez.adapter]
@@ -31,7 +31,12 @@
             [seon.bench.proxy]
             [seon.browser]
             [seon.vector.flow]
-            [seon.web]))
+            [seon.web]
+            [seon.render.fit :as rfit]
+            [seon.ctx.diff :as cdiff]
+            [seon.code.cst :as cst]
+            [seon.health.contracts :as hctr]
+            [datahike.versioning :as dv]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -914,3 +919,95 @@
           st1 (assoc st0 :interactive-queue [{:op :embed-query :query "x" :reply-ch rq}])]
       (seon.vector.flow/vectors-proc st1 :clojure.core.async.flow/stop)
       (is (= :vectors-stopped (:error (clojure.core.async/poll! rq)))))))
+
+(deftest wave-b-silent-bugs-kv-stability-run-tests-and-arm-var-test
+  (testing "renderer-input-schema unwraps :examples props maps on :=> and :function"
+    (let [ris @#'rfit/renderer-input-schema
+          v1 (with-meta {} {:malli/schema [:=> {:examples [[[{:x 1}] [:div]]]} [:cat :seon.demo/ent] :seon.ui/hiccup]})
+          v2 (with-meta {} {:malli/schema [:function {:examples []} [:=> {:examples []} [:cat :seon.demo/ent2] :seon.ui/hiccup]]})]
+      (is (= :seon.demo/ent (ris v1)))
+      (is (= :seon.demo/ent2 (ris v2)))))
+
+  (testing "rules-db-sig and ancestor-within? stay stable across >70 sibling TXs and 2-parent merge commits"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data [{:seon.rule/id :rule.demo/stable :seon.rule/doc "S" :seon.rule/query '[:find ?e :where [?e :seon.agent/id]]}]})
+      (let [m0 @conn
+            sig0 (cdiff/rules-db-sig m0)
+            c0 (store/live-cid m0)]
+        (store/branch! conn :main :branch/worker-a)
+        (let [ca (store/connect cfg :branch/worker-a)]
+          (try
+            (dotimes [i 75]
+              (d/transact ca {:tx-data [{:seon.agent/id (keyword "ag" (str "w" i)) :seon.agent/branch :branch/worker-a :seon.agent/goal (str i)}]}))
+            (dv/merge! conn #{:branch/worker-a} [{:seon.agent/id :ag/merged-marker :seon.agent/branch :main :seon.agent/goal "m"}])
+            (let [m1 @conn
+                  c1 (store/live-cid m1)]
+              (is (> (- (long (:max-tx m1)) (long (:max-tx m0))) 70))
+              (is (true? (cdiff/ancestor-within? m1 c0 c1 64)) "2-parent merge commit must reach pre-merge main ancestor")
+              (is (= sig0 (cdiff/rules-db-sig m1)) "rules-db-sig must stay identical across >70 sibling TXs and non-rule merge"))
+            (finally (d/release ca)))))))
+
+  (testing "resolve-run-tests-targets honors {:ns ...}, :ns ..., and leading keyword targets"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "test/seon/demo_rt_test.clj"
+                                   "(ns seon.demo-rt-test (:require [clojure.test :refer [deftest is]])) (deftest t1 (is true))" false)})
+      (let [db @conn
+            res-fn @#'repl/resolve-run-tests-targets
+            ops {:upserts []}]
+        (is (= ['seon.demo-rt-test/t1] (:ordered-tests (res-fn db db ops {:ns 'seon.demo-rt-test} nil))))
+        (is (= ['seon.demo-rt-test/t1] (:ordered-tests (res-fn db db ops :ns ['seon.demo-rt-test]))))
+        (is (= ['seon.demo-rt-test/t1] (:ordered-tests (res-fn db db ops :seon.demo-rt-test nil)))))))
+
+  (testing "flatten-top-level-do-srcs handles leading comments, no-space (do(, and mid comments"
+    (let [s "; hdr
+(do(defn a [] 1)
+  ; mid comment
+  (defn b []
+    2))"
+          out (cst/flatten-top-level-do-srcs s)]
+      (is (= ["(defn a [] 1)" "(defn b []
+  2)"] out))))
+
+  (testing "set-defn-meta-src fails loudly on unreadable attr-map instead of wiping metadata"
+    (let [r (cmeta/set-defn-meta-src "(defn f {:bad ::nonexistent.alias/foo} [x] x)" {:cost/ticks 100})]
+    (is (false? (:ok? r)))
+    (is (= :unreadable-attr-map (:error r)))))
+
+  (testing "unified Kahn topo-order-ns-forms respects declare, defrecord constructors, and multi-hop chains"
+    (let [forms [{:seon.code.form/key "demo.k#ns" :seon.code.form/order 0 :seon.code.form/src "(ns demo.k)"}
+                 {:seon.code.form/key "demo.k/top" :seon.code.form/order 1 :seon.code.form/deps ['demo.k/mid] :seon.code.form/src "(defn top [] (mid))"}
+                 {:seon.code.form/key "demo.k/mid" :seon.code.form/order 2 :seon.code.form/deps ['demo.k/->Rec] :seon.code.form/src "(defn mid [] (->Rec 1))"}
+                 {:seon.code.form/key "demo.k#expr#1" :seon.code.form/order 3 :seon.code.form/deps [] :seon.code.form/src "(defrecord Rec [x])"}]
+          upd (cmeta/topo-order-ns-forms forms)
+          by-k (into {} (map (juxt :seon.code.form/key :seon.code.form/order)) upd)]
+      (is (< (get by-k "demo.k#expr#1" 3) (get by-k "demo.k/mid" 2)))
+      (is (< (get by-k "demo.k/mid" 2) (get by-k "demo.k/top" 1))))
+    (let [decl-forms [{:key "demo.d#expr#1" :order 1 :deps [] :src "(declare b)"}
+                      {:key "demo.d/a" :order 2 :deps ['demo.d/b] :src "(defn a [] (b))"}
+                      {:key "demo.d/b" :order 3 :deps ['demo.d/a] :src "(defn b [] (a))"}]
+          sorted (cmeta/topo-sort-ns-forms 'demo.d decl-forms)]
+      (is (= ["demo.d#expr#1" "demo.d/a" "demo.d/b"] (mapv :key sorted)) "Declared mutual recursion must remain acyclic")))
+
+  (testing "resolve-form-target coerces Var and uses 3-way merge-base without resurrecting deletions"
+    (with-test-store [{:keys [conn cfg]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo_rft.clj"
+                                   "(ns seon.demo-rft)
+(defn a [] 1)
+(defn b [] 2)" false)})
+      (store/branch! conn :main :branch/rft)
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/seon/demo_rft.clj"
+                                   "(ns seon.demo-rft)
+(defn a [] 99)
+(defn b [] 2)" false)})
+      (let [cb (store/connect cfg :branch/rft)]
+        (try
+          (d/transact cb {:tx-data [[:db/retractEntity [:seon.code.form/key "seon.demo-rft/b"]]]})
+          (is (= "(defn a [] 99)" (:src (cio/resolve-form-target cb :branch/rft 'seon.demo-rft/a))) "Untouched form sees newer main")
+          (is (nil? (:src (cio/resolve-form-target cb :branch/rft 'seon.demo-rft/b))) "Branch deletion is not resurrected from main")
+          (finally (d/release cb))))))
+
+  (testing "arm-var! delegates to named report-contract-violation! and contracts uses real Malli"
+    (is (var? (resolve 'seon.schema/report-contract-violation!)))
+    (is (nil? (resolve 'seon.health.contracts/fast-valid-malli?)))
+    (let [vfn @#'hctr/validate-contract-schema]
+      (is (some? (vfn nil (volatile! nil) [:=> [:cat :set] :any])) "Real Malli rejects bare :set that leaky fast-valid-malli? accepted"))))

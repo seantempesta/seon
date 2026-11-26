@@ -303,13 +303,16 @@
 
 (defn- renderer-input-schema [v]
   (let [ms (:malli/schema (meta v))
-        ar1 (cond (and (vector? ms) (= :=> (first ms))) ms
-                  (and (vector? ms) (= :function (first ms)))
-                  (some #(when (and (vector? %) (= :=> (first %)) (vector? (second %))
-                                    (= :cat (first (second %))) (= 2 (count (second %)))) %) (rest ms))
-                  :else nil)]
-    (when (and (vector? ar1) (vector? (second ar1)) (= :cat (first (second ar1))) (= 2 (count (second ar1))))
-      (second (second ar1)))))
+        extract (fn [ar]
+                  (when (and (vector? ar) (= :=> (first ar)))
+                    (let [in (if (map? (second ar)) (nth ar 2 nil) (second ar))]
+                      (when (and (vector? in) (= :cat (first in)) (= 2 (count in)))
+                        (second in)))))]
+    (cond
+      (and (vector? ms) (= :=> (first ms))) (extract ms)
+      (and (vector? ms) (= :function (first ms)))
+      (some extract (if (map? (second ms)) (nnext ms) (rest ms)))
+      :else nil)))
 
 (defn- cached-renderer-validator [reg-info rsym v]
   (let [in-s (renderer-input-schema v) reg (:registry reg-info)]
@@ -408,8 +411,11 @@
         extra-ctx {}
         fb-map (:fallback-renderers o) main-db (:main-db o)
         reg-info (let [r-db (cached-registry-info db)
-                       r-m (when (and main-db (not= main-db db)) (cached-registry-info main-db))]
-                   (if (and r-m (> (count (:forms r-m)) (count (:forms r-db)))) r-m r-db))
+                     has-db-schemas? (boolean (and db (contains? (db-schema db) :seon.schema/key)
+                                                   (first (d/datoms db :aevt :seon.schema/key))))
+                     r-m (when (and (not has-db-schemas?) main-db (not= main-db db))
+                           (cached-registry-info main-db))]
+                 (or r-m r-db))
         ent-idx (:entity-index reg-info)]
     (mapv (fn [item]
             (let [eid (:entity item)

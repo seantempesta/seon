@@ -151,25 +151,15 @@
 (defn- ^:seon.flow/edge scoped-branch-health [conn mdb bdb branch agent-id explicit-scope]
   (let [ag-sc (when agent-id (:seon.agent/scope (d/pull bdb '[:seon.agent/scope] [:seon.agent/id agent-id])))
         known (or explicit-scope (when (and ag-sc (not= ag-sc 'seon)) ag-sc))
-        {:keys [fkeys tnss skeys]} (branch-delta-info conn bdb branch known)
+        {:keys [tnss skeys]} (branch-delta-info conn bdb branch known)
         sc (or known (first tnss))
         alerts (health/fast-scoped-alerts mdb bdb (or sc 'seon) agent-id nil {})
         sforms (into {} (keep (fn [k] (when-let [f (:seon.schema/form (d/pull bdb '[:seon.schema/form] [:seon.schema/key k]))] [k f]))) skeys)
         caused (if (and mdb (not= mdb bdb))
                  (health/caused-by-branch mdb bdb sforms (when (seq tnss) tnss))
                  (when (seq sforms) (health/schema-violations mdb sforms)))
-        ctr-errs (if (seq fkeys)
-                   (let [proj '[:seon.code.var/name :seon.code.var/ns :seon.code.var/private? :seon.code.var/macro? :seon.code.var/test? :seon.code.var/arglists :seon.code.var/schema]]
-                     (vec (for [fk (take 24 fkeys) dt (d/datoms bdb :avet :seon.code.var/form fk)
-                                :let [v (d/pull bdb proj (:e dt)) vn (:seon.code.var/name v) n (:seon.code.var/ns v)]
-                                :when (and vn n (not (str/ends-with? (name n) "-test")) (not (:seon.code.var/private? v))
-                                           (not (:seon.code.var/macro? v)) (not (:seon.code.var/test? v))
-                                           (seq (:seon.code.var/arglists v)) (nil? (:seon.code.var/schema v)))]
-                            {:class :missing-contract :severity :error :kind :static :ns n :var vn :subject (str vn)
-                             :branch branch :message (str "Public fn " vn " is missing :malli/schema.")})))
-                   [])
-        probs (vec (distinct (concat caused ctr-errs alerts
-                                     (when (and sc (not= sc 'seon)) (health/static-efficiency-warnings bdb sc)))))]
+        probs (vec (distinct (concat caused alerts
+        (when (and sc (not= sc 'seon)) (health/static-efficiency-warnings bdb sc)))))]
     (with-meta {:ok? (not (some #(= :error (:severity %)) probs)) :branch branch :scoped? true :scope sc
                 :touched-nss tnss :counts (frequencies (map :class probs)) :problems probs
                 :note "Scoped branch health (full caused-by-branch merge gates). Pass :all or :main for full DB health."}
@@ -293,13 +283,21 @@
     (vec (sort-by (fn [s] [(if (contains? direct-nss (namespace s)) 0 1) (str s)]) test-syms))))
 
 (defn- resolve-run-tests-targets [bdb mdb ops target more]
-  (let [raw (if (seq more) (cons target more) [target])
-        [pos-args kw-args] (split-with (complement keyword?) raw)
-        kw-map (when (and (seq kw-args) (even? (count kw-args))) (apply hash-map kw-args))
+  (let [raw (vec (remove nil? (if (seq more) (cons target more) [target])))
+        opt-keys #{:only :vars :tests :ns :nss :namespace :namespaces :target :targets}
+        kw-opt-start? (fn [xs] (and (even? (count xs)) (seq xs) (contains? opt-keys (first xs))))
+        [pos-args kw-args] (loop [i 0]
+                             (cond
+                               (>= i (count raw)) [raw nil]
+                               (kw-opt-start? (subvec raw i)) [(subvec raw 0 i) (subvec raw i)]
+                               :else (recur (inc i))))
+        kw-map (when (seq kw-args) (apply hash-map kw-args))
         opt-m (merge (when (map? (last pos-args)) (last pos-args)) kw-map)
-        tlist (if-let [vs (or (:only opt-m) (:vars opt-m) (:tests opt-m))]
-                (if (coll? vs) (vec vs) [vs])
-                (vec (mapcat #(cond (or (nil? %) (map? %) (keyword? %)) nil (coll? %) % :else [%]) pos-args)))
+        tlist (if-let [vs (or (:only opt-m) (:vars opt-m) (:tests opt-m)
+                              (:ns opt-m) (:nss opt-m) (:namespace opt-m) (:namespaces opt-m)
+                              (:target opt-m) (:targets opt-m))]
+                (if (and (coll? vs) (not (map? vs))) (vec vs) [vs])
+                (vec (mapcat #(cond (or (nil? %) (map? %)) nil (coll? %) % :else [%]) pos-args)))
         ns-test-vars (fn [db s]
                        (keep #(let [v (d/pull db '[:seon.code.var/name :seon.code.var/test?] (:e %))]
                                 (when (:seon.code.var/test? v) (:seon.code.var/name v)))
@@ -307,16 +305,16 @@
         test-syms (if (seq tlist)
                     (->> tlist
                          (mapcat (fn [x]
-                         (when-let [s (coerce-target-sym x)]
-                           (cond (namespace s)
-                                 (if (or (:seon.code.var/test? (d/pull bdb '[:seon.code.var/test?] [:seon.code.var/name s]))
-                                         (and mdb (not= mdb bdb) (:seon.code.var/test? (d/pull mdb '[:seon.code.var/test?] [:seon.code.var/name s]))))
-                                   [s] (code/reaching-tests bdb (symbol (namespace s))))
-                                 (str/ends-with? (name s) "-test")
-                                 (or (seq (ns-test-vars bdb s))
-                                     (when (and mdb (not= mdb bdb)) (seq (ns-test-vars mdb s)))
-                                     [])
-                                 :else (code/reaching-tests bdb s)))))
+                                   (when-let [s (coerce-target-sym x)]
+                                     (cond (namespace s)
+                                           (if (or (:seon.code.var/test? (d/pull bdb '[:seon.code.var/test?] [:seon.code.var/name s]))
+                                                   (and mdb (not= mdb bdb) (:seon.code.var/test? (d/pull mdb '[:seon.code.var/test?] [:seon.code.var/name s]))))
+                                             [s] (code/reaching-tests bdb (symbol (namespace s))))
+                                           (str/ends-with? (name s) "-test")
+                                           (or (seq (ns-test-vars bdb s))
+                                               (when (and mdb (not= mdb bdb)) (seq (ns-test-vars mdb s)))
+                                               [])
+                                           :else (code/reaching-tests bdb s)))))
                          distinct sort vec)
                     (->> (distinct (keep :seon.code.form/ns (:upserts ops))) (mapcat #(code/reaching-tests bdb %)) distinct sort vec))
         gen-vars (if (seq tlist)
@@ -362,7 +360,8 @@
            _ (when (and (or (seq overlay-upserts) (seq retracted-vs-main)) (not= @last-run-tests-overlay ov-sig))
                (wsup/apply-form-overlay! bdb {:upserts overlay-upserts :retracted-keys retracted-vs-main})
                (reset! last-run-tests-overlay ov-sig))
-           {:keys [ordered-tests gen-vars]} (resolve-run-tests-targets eff-db mdb ops target more)
+           eff-ops {:upserts overlay-upserts :retracted-keys retracted-vs-main}
+           {:keys [ordered-tests gen-vars]} (resolve-run-tests-targets eff-db mdb eff-ops target more)
            b0 (code/alloc-bytes) soft-byte-cap 4294967296
            {:keys [results skipped-by-budget gen-results]}
            (wsup/call-with-candidate-overrides eff-db

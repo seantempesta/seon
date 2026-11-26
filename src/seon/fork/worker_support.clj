@@ -432,16 +432,17 @@
                           g-fails (keep #(when-not (:ok? %)
                                            (str (:var %) " [gen]: " (:reason %)))
                                         g-res)
-                          all-fails (vec (take 5 (concat t-fails g-fails)))
+                          all-fails (vec (concat t-fails g-fails))
+                          fail-cnt (count all-fails)
                           ran (+ (count t-res) (count g-res))
                           ms (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e4)) 100.0)
                           summary {:tx (:max-tx bdb)
-                                   :ok? (empty? all-fails)
+                                   :ok? (zero? fail-cnt)
                                    :ran ran
-                                   :passed (- ran (count all-fails))
-                                   :failed (count all-fails)
+                                   :passed (- ran fail-cnt)
+                                   :failed fail-cnt
                                    :ms ms
-                                   :failures all-fails}]
+                                   :failures (vec (take 5 all-fails))}]
                       (when (contains? (:schema bdb) :seon.agent/last-proofs)
                         (d/transact conn {:tx-data [{:seon.agent/id agent-id
                                                      :seon.agent/last-proofs summary}]}))
