@@ -91,7 +91,6 @@
                        (update st1 :perf-alerts dissoc fid))
                    :else st1))
                st1)]
-     (when-let [lv (:live-st-vol st2)] (vreset! lv st2))
      (when-let [sp (:set-page! st2)] (sp (page-shell walk db)))
      (when (and (seq out-chunks) (:broadcast! st2)) ((:broadcast! st2) (apply str out-chunks)))
      st2)))

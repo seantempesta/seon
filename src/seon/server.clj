@@ -311,7 +311,7 @@
   (let [opts (merge {:repo-dir (:repo-dir st)
                      :seed-store (get-in st [:cfg :store :path])}
                     (or (:opts req) {}))
-        start-fn (requiring-resolve 'seon.bench.cluster/start-bench-run-async!)
+        start-fn (requiring-resolve (if (:supervisor? req) 'seon.bench.lab/start-supervisor-cycle-async! 'seon.bench.cluster/start-bench-run-async!))
         inst-op (requiring-resolve 'seon.bench.cluster/instance-op!)
         in-ch (:in-ch st)
         coord-url (str "http://127.0.0.1:" (or (:coordinator-port req) (System/getenv "SEON_PORT") 9998))
@@ -499,7 +499,13 @@
            :start-bench-run
            [st' (start-bench-run-op st req reply-ch)]
 
-           (:push :index-forks)
+           :start-supervisor-cycle
+           [st' (start-bench-run-op st (assoc req :supervisor? true) reply-ch)]
+
+           :push
+           [st' {:git [(assoc req :reply-ch reply-ch)]}]
+
+           :index-forks
            [st' (handle-fork-op! st req reply-ch)]
 
            (:render-hiccup-frames :measure-dom :snapshot :browser-reload)
@@ -524,10 +530,7 @@
 
            :switch-over
            (if-let [sw (:on-switch-over st)]
-             (do (a/thread
-                   (let [ans (try (sw) (catch Throwable ex {:ok? false :error (.getMessage ex)}))]
-                     (reply! reply-ch ans)))
-                 [st' {:clojure.core.async.flow/report ["[:server] initiating atomic build + --self-test + --take-over switch-over..."]}])
+             [st' {:git [(assoc req :reply-ch reply-ch :on-switch-over sw)]}]
              (do (reply! reply-ch {:ok? false :error "Switch-over not configured on this instance"})
                  [st' nil]))
 

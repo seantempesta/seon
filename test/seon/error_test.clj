@@ -408,12 +408,14 @@
           (is (= 4 @drop-hits) "Second call MUST still attempt multimodal first (not cached text-only on transient TCP drop)"))
 
         ;; 2. Explicit HTTP 400 `unknown variant image_url` retries text-only AND caches endpoint-k
-        (let [r3 (model/openai-stream-chat! err-prov "sys" [] "check ui" mm-msgs nil)]
-          (is (= "text-fallback-ok" (:thought r3)))
-          (is (= 2 @err400-hits) "First HTTP 400 rejection hits once with image_url then retries text-only"))
-        (let [r4 (model/openai-stream-chat! err-prov "sys" [] "check ui" mm-msgs nil)]
+        (let [r3 (model/openai-stream-chat! err-prov "sys" [] "check ui" mm-msgs nil)
+            err-prov2 (cond-> err-prov (:mark-unsupported-endpoint r3) (assoc :unsupported-endpoints #{(:mark-unsupported-endpoint r3)}))]
+        (is (= "text-fallback-ok" (:thought r3)))
+        (is (some? (:mark-unsupported-endpoint r3)))
+        (is (= 2 @err400-hits) "First HTTP 400 rejection hits once with image_url then retries text-only")
+        (let [r4 (model/openai-stream-chat! err-prov2 "sys" [] "check ui" mm-msgs nil)]
           (is (= "text-fallback-ok" (:thought r4)))
-          (is (= 3 @err400-hits) "Second call pre-strips image_url from cached unsupported endpoint (1 hit only)"))
+          (is (= 3 @err400-hits) "Second call pre-strips image_url from Flow-owned unsupported-endpoints (1 hit only)")))
         (finally
           (reset! running? false)
           (try (.close ss) (catch Throwable _))

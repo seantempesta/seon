@@ -196,15 +196,11 @@
 
 ;; ---- async IO edge helpers (ZERO blocking in Flow steps!) -------------------
 
-(defn- ^:seon.flow/edge dispatch-embed-async! [embed-fn alive-fn worker-res-ch req-id kind texts]
-  (a/thread
-    (let [res (try (embed-fn texts)
-                   (catch Throwable t {:ok? false :error :embed-exception :message (or (.getMessage t) (str t))}))]
-      (a/put! worker-res-ch {:id req-id :kind kind :result res
-                             :worker-alive? (boolean (when alive-fn (alive-fn)))}))))
+(defn- ^:seon.flow/edge dispatch-embed-async! [work-ch req-id kind texts]
+  (when work-ch (a/put! work-ch {:op :embed :id req-id :kind kind :texts texts})))
 
-(defn- ^:seon.flow/edge close-worker-async! [close-fn]
-  (when close-fn (a/thread (try (close-fn) (catch Throwable _ nil)))))
+(defn- ^:seon.flow/edge close-worker-async! [work-ch]
+  (when work-ch (a/put! work-ch {:op :close})))
 
 (defn- schedule-idle-close [st]
   (let [idle-ms (long (:idle-close-ms st default-idle-close-ms))
@@ -213,7 +209,7 @@
     (if (not (:worker-alive? st'))
       st'
       (if (<= idle-ms 0)
-        (do (close-worker-async! (:close-fn st')) (assoc st' :worker-alive? false))
+        (do (close-worker-async! (:work-ch st')) (assoc st' :worker-alive? false))
         (do (when-let [tch (get-in st' [::flow/in-ports :idle-tick])]
               (a/go (a/<! (a/timeout idle-ms)) (a/put! tch {:token tok})))
             st')))))
@@ -229,23 +225,28 @@
                  (when-not (and (= cur-model cur-m) (= (:digest it) cur-h)) it))))
            eids))))
 
+(defn- sync-vectors-filter [st]
+  (if (>= (count (:interactive-queue st)) 32)
+    (assoc st ::flow/input-filter #{:db :worker-res :idle-tick})
+    (dissoc st ::flow/input-filter)))
+
 (defn- maybe-dispatch [st]
-  (loop [cur st]
+  (loop [cur (sync-vectors-filter st)]
     (if-let [work (select-next-work cur)]
-      (let [res-ch (get-in cur [::flow/in-ports :worker-res])
+      (let [wch (:work-ch cur)
             rid (inc (long (:req-seq cur 0)))
-            base (-> (:st work) (assoc :req-seq rid :idle-token (inc (long (:idle-token cur 0)))))]
+            base (-> (:st work) (assoc :req-seq rid :idle-token (inc (long (:idle-token cur 0)))) sync-vectors-filter)]
         (case (:kind work)
           :interactive
           (let [req (:req work)]
-            (dispatch-embed-async! (:embed-fn base) (:alive-fn base) res-ch rid :interactive [(vec/query-text (str (:query req)))])
+            (dispatch-embed-async! wch rid :interactive [(vec/query-text (str (:query req)))])
             [(assoc base :in-flight {:id rid :kind :interactive :req req}) nil])
 
           :backfill
           (let [items (fresh-due-items @(:conn base) (:model-id base) (:eids work))]
             (if (empty? items)
               (recur base)
-              (do (dispatch-embed-async! (:embed-fn base) (:alive-fn base) res-ch rid :backfill (mapv :text items))
+              (do (dispatch-embed-async! wch rid :backfill (mapv :text items))
                   [(assoc base :in-flight {:id rid :kind :backfill :items items}) nil])))))
       (let [idle? (and (nil? (:in-flight cur)) (empty? (:interactive-queue cur))
                        (empty? (:pending cur)) (not (:more-backfill? cur)))]
@@ -342,8 +343,26 @@
 (defn- handle-idle-tick [st msg]
   (if (and (= (:token msg) (:idle-token st)) (nil? (:in-flight st))
            (empty? (:interactive-queue st)) (empty? (:pending st)) (:worker-alive? st))
-    (do (close-worker-async! (:close-fn st)) [(assoc st :worker-alive? false) nil])
+    (do (close-worker-async! (:work-ch st)) [(assoc st :worker-alive? false) nil])
     [st nil]))
+
+(defn- ^:seon.flow/edge start-embed-worker-loop! [work-ch worker-res-ch embed-fn alive-fn close-fn]
+  (a/io-thread
+    (try
+      (loop []
+        (when-let [job (a/<!! work-ch)]
+          (case (:op job)
+            :embed
+            (let [res (try (if embed-fn (embed-fn (:texts job)) {:ok? false :error :vectors-disabled})
+                           (catch Throwable t {:ok? false :error :embed-exception :message (or (.getMessage t) (str t))}))]
+              (a/put! worker-res-ch {:id (:id job) :kind (:kind job) :result res
+                                     :worker-alive? (boolean (when alive-fn (alive-fn)))}))
+            :close
+            (when close-fn (try (close-fn) (catch Throwable _ nil)))
+            nil)
+          (recur)))
+      (finally
+        (when close-fn (try (close-fn) (catch Throwable _ nil)))))))
 
 (defn vectors-proc
   "Static `core.async.flow` `:io` proc for backpressured semantic indexing and interactive search."
@@ -371,29 +390,39 @@
                               :batches-done (:batches-done st 0) :queries-done (:queries-done st 0)
                               :errors (:errors st 0) :backpressure-active? (backpressure-active? st)})})
   ([args]
-   (let [worker-res-ch (a/chan 32) idle-tick-ch (a/chan 16)
+   (let [worker-res-ch (a/chan 32) idle-tick-ch (a/chan 16) work-ch (a/chan 4)
          custom-embed (:embed-fn args)
          req-enabled? (if (contains? args :enabled?) (boolean (:enabled? args)) true)
          mpath (when (and req-enabled? (nil? custom-embed))
                  (if (contains? args :model-path) (vec/resolve-model-path (:model-path args)) (vec/resolve-model-path)))
          client (when (and req-enabled? (nil? custom-embed) mpath) (vec/embed-client {:model-path mpath}))
          eff-enabled? (boolean (and req-enabled? (or custom-embed client)))
-         eff-model-id (or (:model-id args) (:model-id client) (when custom-embed "synthetic+v1") "disabled")]
+         eff-model-id (or (:model-id args) (:model-id client) (when custom-embed "synthetic+v1") "disabled")
+         embed-fn (or custom-embed (:embed! client))
+         close-fn (or (:close-fn args) (:close! client))
+         alive-fn (or (:alive-fn args) (:alive? client))]
+     (when (or embed-fn close-fn)
+       (start-embed-worker-loop! work-ch worker-res-ch embed-fn alive-fn close-fn))
      {:conn (:conn args) :enabled? eff-enabled?
       :auto-backfill? (if (contains? args :auto-backfill?) (boolean (:auto-backfill? args)) eff-enabled?)
       :model-path mpath :model-id eff-model-id
       :batch-size (long (or (:batch-size args) default-batch-size))
       :max-pending (long (or (:max-pending args) default-max-pending))
       :idle-close-ms (long (or (:idle-close-ms args) default-idle-close-ms))
-      :embed-fn (or custom-embed (:embed! client))
-      :close-fn (or (:close-fn args) (:close! client))
-      :alive-fn (or (:alive-fn args) (:alive? client))
+      :work-ch work-ch :embed-fn embed-fn :close-fn close-fn :alive-fn alive-fn
       :pending {} :pending-order 0 :overflow? false :more-backfill? false :backfill-scanned? (boolean (:skip-boot-scan? args))
       :interactive-queue [] :in-flight nil :req-seq 0 :batches-done 0 :queries-done 0
       :errors 0 :consecutive-errors 0 :last-error nil :worker-alive? false :idle-token 0
       ::flow/in-ports {:worker-res worker-res-ch :idle-tick idle-tick-ch}}))
   ([st transition]
-   (when (= transition ::flow/stop) (close-worker-async! (:close-fn st)))
+   (when (= transition ::flow/stop)
+     (when (= :interactive (get-in st [:in-flight :kind]))
+       (reply! (get-in st [:in-flight :req :reply-ch]) {:ok? false :error :vectors-stopped :results []}))
+     (doseq [{:keys [reply-ch]} (:interactive-queue st)]
+       (reply! reply-ch {:ok? false :error :vectors-stopped :results []}))
+     (when-let [wch (:work-ch st)] (a/close! wch))
+     (when-let [ch (get-in st [::flow/in-ports :worker-res])] (a/close! ch))
+     (when-let [ch (get-in st [::flow/in-ports :idle-tick])] (a/close! ch)))
    st)
   ([st cid msg]
    (if (nil? msg)
