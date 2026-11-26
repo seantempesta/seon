@@ -14,7 +14,6 @@
     (nil? (:seon.rule/query r))
     (sequential? (:seon.rule/query r))
     (map? (:seon.rule/query r)))
-  (or (nil? (:seon.rule/when r)) (sequential? (:seon.rule/when r)))
   (or (nil? (:seon.rule/assert r)) (sequential? (:seon.rule/assert r)))))
 
 (defn- eval-rules-into-policy [db rs]

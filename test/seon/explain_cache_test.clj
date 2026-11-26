@@ -315,13 +315,13 @@
                                        :seon.agent/context-prefs {:minimal? true :disabled-rules #{:rule.ctx/scope-namespaces :rule.ctx/pinned-entities}}}]})
         var-eid (:db/id (d/pull @conn (quote [:db/id]) [:seon.code.var/name (quote seon.demo.scope/target-fn)]))
         _ (is (integer? var-eid))
-        _ (d/transact conn {:tx-data [{:seon.agent.eval/id (java.util.UUID/randomUUID) :seon.agent.eval/agent aid-full :seon.agent.eval/turn 1 :seon.agent.eval/code "(user/show (quote seon.demo.scope/target-fn))" :seon.agent.eval/touched [var-eid var-eid]}]}) 
+        _ (do (d/transact conn {:tx-data [{:seon.agent.eval/id (java.util.UUID/randomUUID) :seon.agent.eval/agent aid-full :seon.agent.eval/turn 1 :seon.agent.eval/code "(user/show (quote seon.demo.scope/target-fn))"}]}) (ctouches/record-live-reads! @conn aid-full 1 [var-eid]) (ctouches/record-live-reads! @conn aid-full 2 [var-eid])) 
         db2 @conn
         cands-full (:candidates (ctx/gather-agent-candidates db2 db2 aid-full {:target :wire :use-cache? false :semantic? false}))
         touched-c (some #(when (= var-eid (:entity %)) %) cands-full)
         w-full (wire/build-live-wire-request db2 db2 aid-full {:vision? false})
         w-min (wire/build-live-wire-request db2 db2 aid-min {:vision? false})]
-    (is (some? touched-c) "Live :seon.agent.eval/touched EID enters unified candidate pool")
+    (is (some? touched-c) "Live recorded read EID enters unified candidate pool")
     (is (= 2 (:touches touched-c)) "Cumulative live touch count populates :touches for rank-candidates")
     (is (< (count (:tiles w-min)) (count (:tiles w-full))) "Minimal context-prefs trims non-essential tiles cleanly"))))
 

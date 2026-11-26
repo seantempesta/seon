@@ -173,7 +173,7 @@
         all-r (if code-s (snippet-refs code-s nil) {:syms #{} :schemas #{} :refs #{} :eids #{}})
         man-r (manual-lookups code-s)
         reas-r (reasoning-refs db reas-s)
-        traw (let [t (:seon.agent.eval/touched ev)] (if (coll? t) t []))
+        traw []
         trefs (into #{} (filter #(and (vector? %) (= 2 (count %)) (qualified-keyword? (first %)))) traw)
         rsraw (let [rs (:seon.agent.eval/result-schemas ev)] (if (coll? rs) rs []))
         man-res (resolve-db-ids db man-r)
@@ -209,8 +209,8 @@
     []
     (->> (d/datoms db :avet :seon.agent.eval/agent agent-id)
          (map #(assoc (d/pull db '[:seon.agent.eval/id :seon.agent.eval/turn :seon.agent.eval/handle
-                                   :seon.agent.eval/code :seon.agent.eval/reasoning :seon.agent.eval/touched
-                                   :seon.agent.eval/result-schema :seon.agent.eval/result-schemas]
+                                 :seon.agent.eval/code :seon.agent.eval/reasoning
+                                 :seon.agent.eval/result-schema :seon.agent.eval/result-schemas]
                               (:e %))
                       :_tx (long (:tx % 0))))
          (sort-by (juxt :_tx #(nonneg-long (:seon.agent.eval/turn %))))

@@ -47,7 +47,7 @@
         (let [db @conn
               ord (cite/ordered-citations "First `docs/guide.md#beta-atom` then [a](docs/guide.md#alpha-atom) and `demo.doc/step-a`.")
               res (cite/resolve-doc-refs db "First `docs/guide.md#beta-atom` then [a](docs/guide.md#alpha-atom) and `demo.doc/step-a`.")
-              v-ent (d/pull db '[:seon.code.var/doc-refs :seon.code.var/doc-ref-order] [:seon.code.var/name 'demo.doc/step-a])
+              v-ent (d/pull db '[:seon.code.var/doc-refs] [:seon.code.var/name 'demo.doc/step-a])
               s-ent (d/pull db '[:seon.schema/doc-refs] [:seon.schema/key :seon.demo/rec])]
           (is (= [[:doc "docs/guide.md#beta-atom"] [:doc "docs/guide.md#alpha-atom"] [:var 'demo.doc/step-a]] ord))
           (is (= [[:seon.code.doc/id "docs/guide.md#beta-atom"]
@@ -55,10 +55,7 @@
                   [:seon.code.var/name 'demo.doc/step-a]]
                  (:ordered res)))
           (is (= 3 (count (:refs res))))
-          (is (= [[:seon.code.doc/id "docs/guide.md#beta-atom"]
-                  [:seon.code.doc/id "docs/guide.md#alpha-atom"]
-                  [:seon.schema/key :seon.demo/rec]]
-                 (:seon.code.var/doc-ref-order v-ent)))
+          (is (seq (:seon.code.var/doc-refs v-ent)))
           (is (= 3 (count (:seon.code.var/doc-refs v-ent))))
           (is (= 2 (count (:seon.schema/doc-refs s-ent)))))))))
 

@@ -41,8 +41,6 @@
 
 (defn ^:seon/callable set-view-mode! [& args] (apply actions/set-view-mode! args))
 
-(defn ^:seon/callable select-branch! [& args] (apply actions/select-branch! args))
-
 (defn ^:seon/callable switch-tab! [& args] (apply actions/switch-tab! args))
 
 (defn ^:seon/callable inspect-entity! [& args] (apply actions/inspect-entity! args))
@@ -79,8 +77,6 @@
 
 (defn ^:seon/callable spawn-on-entity-form! [& args] (apply actions/spawn-on-entity-form! args))
 
-(defn ^:seon/callable register-schema-form! [& args] (apply actions/register-schema-form! args))
-
 (defn ^:seon/callable step-canvas-history! [& args] (apply actions/step-canvas-history! args))
 
 (defn ^:seon/callable jump-canvas-tx! [& args] (apply actions/jump-canvas-tx! args))
@@ -91,11 +87,7 @@
 
 (defn ^:seon/callable chat-agent-form! [& args] (apply actions/chat-agent-form! args))
 
-(defn ^:seon/callable eval-agent-form! [& args] (apply actions/eval-agent-form! args))
-
 (defn ^:seon/callable pin-ref-form! [& args] (apply actions/pin-ref-form! args))
-
-(defn ^:seon/callable unpin-tile! [& args] (apply actions/unpin-tile! args))
 
 (defn ^:seon/callable toggle-vision! [& args] (apply actions/toggle-vision! args))
 
@@ -224,14 +216,6 @@
           (let [val (if format-fn (format-fn (or ans {:ok? false :error :timeout})) (or ans {:ok? false :error :timeout}))]
             (a/put! ui-ch {:ev :action-done :slot slot :val val})))))))
 
-(def http-routes
-  "Data-driven HTTP route table for the `web-proc` Ring edge."
-  [{:route/id :datastar-js :route/method :get  :route/path "/datastar.js"}
-   {:route/id :op          :route/method :post :route/path "/op"}
-   {:route/id :mcp         :route/method :post :route/path "/mcp"}
-   {:route/id :call        :route/method :post :route/path "/call"}
-   {:route/id :preview     :route/method :get  :route/path "/preview"}])
-
 (defn match-http-route
   {:malli/schema [:=> [:cat [:map [:request-method [:enum :get :post :put :delete]] [:uri :string]]]
                   [:maybe [:map [:route/id :keyword]]]]
@@ -315,10 +299,6 @@
 
 (def ^:private http-route-handlers
   {:datastar-js handle-datastar-js-route :op handle-op-route :mcp handle-mcp-route :call handle-call-route :preview handle-preview-route})
-
-(def http-route-handler-ids
-  "The `:route/id`s covered by `http-route-handlers`."
-  (set (keys http-route-handlers)))
 
 (defn ^:seon.flow/edge handle-http-request!
   "Ring handler for `web-proc`."

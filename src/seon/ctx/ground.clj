@@ -172,16 +172,6 @@
         scalar-vec (if star? ['*] (vec (sort (remove #(contains? merged-nested %) scalars))))]
     (vec (concat scalar-vec nested-vec (sort-by pr-str other)))))
 
-(defn message-unread?
-  "Pure predicate: true when `msg-id` has not been recorded in `agent-id`'s seen-message set on `branch-db`."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :keyword] :any] :boolean]
-   :cost/ticks 2000000}
-  [branch-db agent-id msg-id]
-  (boolean
-   (and (some? msg-id)
-        (or (nil? branch-db) (nil? agent-id)
-            (not (contains? (store/agent-seen-message-ids branch-db agent-id) msg-id))))))
-
 (defn unread-message-eids
   "Returns `[eid tx]` pairs for unread `:seon.agent.message/*` addressed to `agent-id` in O(M + E)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db] [:maybe :keyword]] [:vector [:tuple :int :int]]]

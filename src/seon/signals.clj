@@ -388,14 +388,6 @@
        (signal-cell :proof "Proof" (:level proof) (:summary proof) proof-pct false)
        (signal-cell :health "Health" (:level health) (:summary health) health-pct false)]]}))
 
-(defn extract-eval-touches
-  "Thin alias for `seon.signals.scoreboard/extract-eval-touches`."
-  {:malli/schema [:=> [:cat :any [:? :any] [:? :any]] :map]
-   :cost/ticks 25000000}
-  ([evals] (scoreboard/extract-eval-touches evals))
-  ([db evals-or-agent] (scoreboard/extract-eval-touches db evals-or-agent))
-  ([db evals-or-agent opts] (scoreboard/extract-eval-touches db evals-or-agent opts)))
-
 (defn score-shown-blocks
   "Thin alias for `seon.signals.scoreboard/score-shown-blocks`."
   {:malli/schema [:=> [:cat [:vector :map] [:vector :map] [:maybe :map]] :seon.signal/scoreboard]

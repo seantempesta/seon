@@ -147,15 +147,6 @@
     (d/branch! conn from-branch new-branch))
   new-branch)
 
-(defn db-at
-  {:malli/schema [:=> [:cat [:or :seon.host/conn :seon.host/db :map] :map] :any]}
-  [store-or-conn {:keys [commit branch tx]}]
-  (let [s (if (instance? clojure.lang.IDeref store-or-conn) (:store @store-or-conn) store-or-conn)]
-    (cond
-      commit (d/commit-as-db s commit)
-      :else  (let [base (d/branch-as-db s (or branch :main))]
-               (if tx (d/as-of base tx) base)))))
-
 (defn point
   {:malli/schema [:=> [:cat :seon.host/db] :seon.store/point]}
   [db]

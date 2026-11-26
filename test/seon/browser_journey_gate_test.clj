@@ -77,8 +77,8 @@
            false {:skip-compiler-analyze? true})
           [{:seon.system/id :root :seon.system/title "Seon Runtime" :seon.system/description "Offline test runtime"}
            {:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main
-            :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/label "Root"
-            :seon.agent/hero-title "Offline Journey Test"}
+           :seon.agent/router? true :seon.agent/label "Root"
+           :seon.agent/hero-title "Offline Journey Test"}
            {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
             :seon.user/view-mode :canvas :seon.user/theme :dark :seon.user/viewport-w 1280 :seon.user/viewport-h 800
             :seon.user/expert-mode? false :seon.user/sidebar-open? true}]))})

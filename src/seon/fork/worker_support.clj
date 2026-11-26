@@ -7,25 +7,10 @@
             [seon.store :as store]
             [seon.ctx :as ctx]
             [seon.schema :as schema]
-            [seon.rule :as rules]))
+            [seon.rule :as rules]
+            [seon.code.overlay :as overlay]))
 
 (defonce ^:private ^:seon.flow/edge active-overlay-state (store/lru-cache 8))
-
-(defn- merge-3way-map
-  [base ours theirs]
-  (let [after-del (reduce (fn [acc k]
-                            (if (and (not (contains? theirs k))
-                                     (= (get ours k) (get base k)))
-                              (dissoc acc k)
-                              acc))
-                          (or ours {})
-                          (keys base))]
-    (reduce-kv (fn [acc k v]
-                 (if (not= v (get base k ::absent))
-                   (assoc acc k v)
-                   acc))
-               after-del
-               (or theirs {}))))
 
 (defn- sort-rules [rule-maps]
   (->> rule-maps
@@ -97,9 +82,9 @@
                           (let [ms (schema/db-schema-forms main-db)
                                 res (if full-ov?
                                       (apply-schema-overlay ms ov)
-                                      (merge-3way-map (schema/db-schema-forms @base-db-delay)
-                                                      ms
-                                                      (schema/db-schema-forms db)))]
+                                      (overlay/merge-3way-map (schema/db-schema-forms @base-db-delay)
+                                      ms
+                                      (schema/db-schema-forms db)))]
                             (when (seq res) res)))
                 rules (when (or (contains? (:schema main-db) :seon.rule/id)
                                 (contains? (:schema db) :seon.rule/id))
@@ -107,9 +92,9 @@
                               res (if full-ov?
                                     (apply-rule-overlay mr ov)
                                     (let [to-m #(into {} (map (juxt :seon.rule/id identity)) %)]
-                                      (sort-rules (vals (merge-3way-map (to-m (rules/load-rules @base-db-delay))
-                                                                        (to-m mr)
-                                                                        (to-m (rules/load-rules db)))))))]
+                                      (sort-rules (vals (overlay/merge-3way-map (to-m (rules/load-rules @base-db-delay))
+                                                        (to-m mr)
+                                                        (to-m (rules/load-rules db)))))))]
                           (when (seq res) res)))
                 res {:schemas schemas :rules rules :form-db main-db
                      :main-db main-db :base-cid base-cid :overlay ov}]
@@ -138,9 +123,9 @@
     (and main-db base-cid)
     (let [base-db (d/commit-as-db db base-cid)
           to-m #(into {} (map (juxt :seon.code.form/key identity)) %)
-          merged (merge-3way-map (to-m (code/ns-forms base-db ns-sym))
-                                 (to-m (code/ns-forms main-db ns-sym))
-                                 (to-m (code/ns-forms db ns-sym)))]
+          merged (overlay/merge-3way-map (to-m (code/ns-forms base-db ns-sym))
+                 (to-m (code/ns-forms main-db ns-sym))
+                 (to-m (code/ns-forms db ns-sym)))]
       (->> (vals merged)
            (sort-by (juxt #(long (or (:seon.code.form/order %) 0)) :seon.code.form/key))
            vec))

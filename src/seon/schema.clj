@@ -469,8 +469,6 @@
 (defn- live-branch-db []
   (some-> (requiring-resolve 'seon.fork.calls/*agent-ctx*) deref :conn deref))
 
-(defn- edn-safe-ipc [& args] (apply six/edn-safe-ipc args))
-
 (defn- stress-arity [& args] (apply six/stress-arity args))
 
 (defn- stress-var*

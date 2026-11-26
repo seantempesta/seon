@@ -73,7 +73,7 @@
       (d/transact conn {:tx-data (vec (concat (router/core-routes-tx)
                                               [{:seon.system/id :root :seon.system/title "Seon Runtime" :seon.system/description "Test runtime"}
                                                {:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :branch/root
-                                                :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/label "Root"}
+                                               :seon.agent/router? true :seon.agent/label "Root"}
                                                {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
                                                 :seon.user/view-mode :canvas :seon.user/expert-mode? true :seon.user/viewport-w 1280 :seon.user/viewport-h 800}]))})
       (store/branch! conn :main :branch/root)
@@ -170,7 +170,7 @@
                     (router/core-routes-tx)
                     [{:seon.system/id :root :seon.system/title "Seon Runtime" :seon.system/description "Regression runtime"}
                      {:seon.agent/id :agent/root :seon.agent/entry? true :seon.agent/branch :main
-                      :seon.agent/read-branch :main :seon.agent/router? true :seon.agent/label "Root"}
+                     :seon.agent/router? true :seon.agent/label "Root"}
                      {:seon.user/id :user/default :seon.user/viewing [:seon.agent/id :agent/root]
                       :seon.user/view-mode :canvas :seon.user/theme :dark :seon.user/viewport-w 375 :seon.user/viewport-h 812
                       :seon.user/expert-mode? false :seon.user/sidebar-open? false}

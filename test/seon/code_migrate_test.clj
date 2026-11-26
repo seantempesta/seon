@@ -102,7 +102,7 @@
     (d/transact conn {:tx-data [{:seon.rule/id :rule.demo/test
                                  :seon.rule/stratum 10
                                  :seon.rule/enabled? true
-                                 :seon.rule/when [[:db '?e :seon.demo.old/label '?v]]
+                                 :seon.rule/query [:find '?e '?v :where ['?e :seon.demo.old/label '?v]]
                                  :seon.rule/assert [[:fact '?e :seen '?v]]}
                                 {:seon.task/id :seon.demo/t1
                                  :seon.task/title "Demo task"
@@ -135,8 +135,8 @@
       (is (str/includes? (code/render-path db "src/seon/demo/caller.clj") "[seon.demo.new :as old]"))
       (is (str/includes? (code/render-path db "docs/demo.md") "seon.demo.new/greet"))
       (is (str/includes? (code/render-path db "docs/demo.md") ":seon.demo.new/title"))
-      (is (= [[:db '?e :seon.demo.new/title '?v]]
-             (:seon.rule/when (d/pull db '[:seon.rule/when] [:seon.rule/id :rule.demo/test]))))
+      (is (= [:find '?e '?v :where ['?e :seon.demo.new/title '?v]]
+      (:seon.rule/query (d/pull db '[:seon.rule/query] [:seon.rule/id :rule.demo/test]))))
       (is (= 'seon.demo.new
              (:seon.task/scope (d/pull db '[:seon.task/scope] [:seon.task/id :seon.demo/t1]))))
       (let [ag (d/pull db '[:seon.agent/scope :seon.agent/pinned {:seon.agent/focus [:seon.code.ns/name]}]
@@ -306,19 +306,18 @@
     (with-test-store [{:keys [conn cfg]}]
       (let [err-id (random-uuid)
             ev-id (random-uuid)]
-        (d/transact conn {:tx-data [{:seon.error/id err-id :seon.error/kind :slow-render :seon.error/severity :warning
-                                     :seon.error/source :web :seon.error/status :open :seon.error/message "slow" :seon.error/at 1}
+        (d/transact conn {:tx-data [{:seon.code.var/name 'demo.dref/f :seon.code.var/ns 'demo.dref :seon.code.var/form "demo.dref/f"}
                                     {:seon.agent/id :w/dref :seon.agent/branch :branch/w-dref :seon.agent/goal "test"}]})
         (store/branch! conn :main :branch/w-dref)
         ;; :main retracts transient error while branch records an eval touching it
-        (d/transact conn {:tx-data [[:db/retractEntity [:seon.error/id err-id]]]})
+        (d/transact conn {:tx-data [[:db/retractEntity [:seon.code.var/name 'demo.dref/f]]]})
         (let [bconn (store/connect cfg :branch/w-dref)]
           (try
-            (let [ee (:e (first (d/datoms @bconn :avet :seon.error/id err-id)))
-                  ae (:e (first (d/datoms @bconn :avet :seon.agent/id :w/dref)))]
-              (d/transact bconn {:tx-data [{:seon.agent.eval/id ev-id :seon.agent.eval/agent :w/dref :seon.agent.eval/agent-ref ae
-                                            :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "1"
-                                            :seon.agent.eval/touched-refs #{ee}}]}))
+            (let [ve (:e (first (d/datoms @bconn :avet :seon.code.var/name 'demo.dref/f)))
+                ae (:e (first (d/datoms @bconn :avet :seon.agent/id :w/dref)))]
+            (d/transact bconn {:tx-data [{:seon.agent.eval/id ev-id :seon.agent.eval/agent :w/dref :seon.agent.eval/agent-ref ae
+                                          :seon.agent.eval/turn 1 :seon.agent.eval/call-index 0 :seon.agent.eval/code "1"
+                                          :seon.agent.eval/called-vars #{ve}}]}))
             (let [plan (seon.merge/three-way conn cfg :branch/w-dref)]
               (is (true? (:ok? plan)))
               ;; Transacting plan onto :main must NOT throw Nothing found for entity id [:seon.error/id ...]

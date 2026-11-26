@@ -462,5 +462,3 @@
             :tx (when r (:max-tx (:db-after r)))}))))))
 
 (defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.fork.ui/ui-patch!} ui-patch! [& args] (apply ui/ui-patch! args))
-
-(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.fork.ui/measure-renderers!} measure-renderers! [& args] (apply ui/measure-renderers! args))

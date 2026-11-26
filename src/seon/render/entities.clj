@@ -68,8 +68,8 @@
                              [:seon.code.form/src {:optional true} :seon.code.form/src]]]
                   [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1500000}
-  [{{:seon.code.var/keys [name ns doc arglists schema form big-o ticks-budget bytes-budget refs ops private?] :as v}
-    :seon.code.var/entity src :seon.code.form/src :as m}]
+  [{{:seon.code.var/keys [name ns doc arglists schema form ticks-budget bytes-budget refs ops private?] :as v}
+  :seon.code.var/entity src :seon.code.form/src :as m}]
   (let [rs (seq-items refs) os (seq-items ops) exp? (= :source (:seon.ui/expand-section m))
         cs (when (:seon.ui/show-callers? m) (seq-items (:seon.ui/callers m)))]
     (box "ent-full" 540 "ent-var"
@@ -77,11 +77,10 @@
          (meta-link :seon.code.ns/name ns)
          (doc-box doc (bl m 800) (hl-terms m))
          (kv-dl [["ns" (when ns (el :seon.code.ns/name ns))]
-                 ["arglists" (when (seq-items arglists) (fmt-pr arglists 140))]
-                 ["form" (when form (el :seon.code.form/key form))]
-                 ["big-o" big-o]
-                 ["ticks-budget" (fmt-num ticks-budget)] ["bytes-budget" (fmt-num bytes-budget)]
-                 ["ops" (when os (str/join ", " (map str os)))]])
+         ["arglists" (when (seq-items arglists) (fmt-pr arglists 140))]
+         ["form" (when form (el :seon.code.form/key form))]
+         ["ticks-budget" (fmt-num ticks-budget)] ["bytes-budget" (fmt-num bytes-budget)]
+         ["ops" (when os (str/join ", " (map str os)))]])
          (when rs (pill-list "refs:" rs :seon.code.var/name 12))
          (when cs (pill-list "callers:" cs :seon.code.var/name 12))
          (when (some? schema) (code-block (fmt-pr schema (bl m 600))))
@@ -151,7 +150,7 @@
   "Detail card (~440px) for `:seon.fix/entity`."
   {:malli/schema [:=> [:cat [:map [:seon.fix/entity :seon.fix/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
-  [{{:seon.fix/keys [id error-class symptom root-cause change-summary regression-test before-after merge-tx]} :seon.fix/entity :as m}]
+  [{{:seon.fix/keys [id error-class symptom root-cause change-summary regression-test before-after]} :seon.fix/entity :as m}]
   (let [terms (hl-terms m)]
     (box "ent-card" 440 "ent-fix"
          [(badge "green" "fix") (el :seon.fix/id id (str (or error-class id)))]
@@ -159,11 +158,10 @@
          (doc-box symptom (bl m 360) terms)
          (doc-box root-cause (bl m 480) terms)
          (kv-dl [["id" (el :seon.fix/id id)]
-                 ["error-class" (el :seon.fix/id id (str error-class))]
-                 ["change" (clip change-summary (bl m 480))]
-                 ["regression-test" (when (qualified-symbol? regression-test) (el :seon.code.var/name regression-test))]
-                 ["before/after" (when (some? before-after) (clip before-after 240))]
-                 ["merge-tx" (fmt-num merge-tx)]]))))
+         ["error-class" (el :seon.fix/id id (str error-class))]
+         ["change" (clip change-summary (bl m 480))]
+         ["regression-test" (when (qualified-symbol? regression-test) (el :seon.code.var/name regression-test))]
+         ["before/after" (when (some? before-after) (clip before-after 240))]]))))
 
 (defn- task-badge [{:seon.task/keys [template? done?]}]
   (cond template? (badge "purple" "template") done? (badge "green" "done") :else (badge "blue" "task")))
@@ -232,8 +230,8 @@
   "Detail card (~460px) for `:seon.schema/entity` with `[unique]`/`[indexed]` markers & `Used by:` vars."
   {:malli/schema [:=> [:cat [:map [:seon.schema/entity :seon.schema/entity]]] [:map [:seon.ui/hiccup :seon.ui/hiccup]]]
    :cost/ticks 1200000}
-  [{{:seon.schema/keys [key form doc examples render type keys optional-keys ref-targets]} :seon.schema/entity :as m}]
-  (let [rsym (or (when (qualified-symbol? render) render) (schema-form-renderer form))
+  [{{:seon.schema/keys [key form doc examples type keys optional-keys ref-targets]} :seon.schema/entity :as m}]
+  (let [rsym (schema-form-renderer form)
         ks (or (seq-items (:seon.ui/schema-keys m)) (seq-items keys))
         oks (or (seq-items (:seon.ui/schema-optional-keys m)) (seq-items optional-keys))
         refs (or (seq-items (:seon.ui/schema-ref-targets m)) (seq-items ref-targets))

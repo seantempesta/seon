@@ -32,8 +32,7 @@
                       :seon.agent.eval/code "(demo.touch/compute-score 41)"
                       :seon.agent.eval/result-schemas #{sch-eid}}
                      {:seon.agent.eval/turn 2 :seon.agent.eval/handle 'result/e2 :_tx 200
-                      :seon.agent.eval/code "(do (user/source 'demo.touch/helper-a) (user/grep-src \"helper-b\") (d/pull db '[*] [:seon.task/id :task/touch-1]))"
-                      :seon.agent.eval/touched [task-eid [:seon.schema/key :seon.error/entity]]}]
+                     :seon.agent.eval/code "(do (user/source 'demo.touch/helper-a) (user/grep-src \"helper-b\") (d/pull db '[*] [:seon.task/id :task/touch-1]) :seon.error/entity)"}]
               all-t (sb/extract-eval-touches db evals nil)
               after-t (sb/extract-eval-touches db evals {:after-tx 100})
               no-db-t (sb/extract-eval-touches evals)]

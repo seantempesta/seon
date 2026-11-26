@@ -144,7 +144,10 @@
         (assoc overlay :upserts (vec (vals (reduce (fn [m f] (assoc m (:seon.code.form/key f) f)) {} (concat upserts extra)))))
         overlay))))
 
-(defn- merge-3way-map [base ours theirs]
+(defn merge-3way-map
+  "Pure 3-way map merge (`base` -> `ours` + `theirs`) preserving branch deletions against untouched `ours` entries."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map] [:maybe :map]] :map] :cost/ticks 1000000}
+  [base ours theirs]
   (let [after-del (reduce (fn [acc k]
                             (if (and (not (contains? theirs k)) (= (get ours k) (get base k)))
                               (dissoc acc k) acc))

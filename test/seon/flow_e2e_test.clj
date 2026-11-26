@@ -8,7 +8,11 @@
             [seon.git :as git]
             [seon.main :as main]
             [seon.web :as web]
-            [seon.store :refer [rm-rf!]]))
+            [seon.store :refer [rm-rf!]]
+            [seon.render]
+            [seon.render.ui]
+            [seon.schema]
+            [seon.switchover]))
 
 (defonce shared-test-router
   (delay (main/make-fork-router (fork/start-fork-parent!))))
@@ -328,7 +332,7 @@
             extra {:seon.agent/entry? [:boolean {:seon.db/index true}]
                    :seon.agent/label :string
                    :seon.agent/hero-title :string
-                   :seon.agent/read-branch :keyword
+                   
                    :seon.agent/router? :boolean
                    :seon.agent/seed-path :string
                    :seon.agent/entity-extra
@@ -336,7 +340,6 @@
                     [:seon.agent/entry? {:optional true} :seon.agent/entry?]
                     [:seon.agent/label {:optional true} :seon.agent/label]
                     [:seon.agent/hero-title {:optional true} :seon.agent/hero-title]
-                    [:seon.agent/read-branch {:optional true} :seon.agent/read-branch]
                     [:seon.agent/router? {:optional true} :seon.agent/router?]
                     [:seon.agent/seed-path {:optional true} :seon.agent/seed-path]]}
             reg (seon.schema/registry-for-db @conn extra)
@@ -353,7 +356,7 @@
                                               :seon.agent/label "Atlas"
                                               :seon.agent/hero-title "Ask Atlas anything"
                                               :seon.agent/branch :branch/atlas
-                                              :seon.agent/read-branch :main
+                                              
                                               :seon.agent/router? true
                                               :seon.agent/scope 'demo
                                               :seon.agent/focus "ns/demo"
@@ -481,7 +484,7 @@
               (is (true? (:seon.agent/entry? root-ag)))
               (is (= "Root" (:seon.agent/label root-ag)))
               (is (true? (:seon.agent/router? root-ag)))
-              (is (= :main (:seon.agent/read-branch root-ag)))
+              (is (true? (:seon.agent/router? root-ag)))
               (is (not (str/blank? (str (:seon.agent/system-prompt root-ag)))))
               (is (= :agent/root (get-in user-ent [:seon.user/viewing :seon.agent/id])))
               (is (= :seon.web/split-oversized-namespace (:seon.task/id task-ent)))

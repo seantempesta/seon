@@ -8,10 +8,10 @@
 
 (def ^:private agent-control-attrs
   #{:seon.agent/id :seon.agent/branch :seon.agent/interactive? :seon.agent/label :seon.agent/entry?
-    :seon.agent/parent :seon.agent/waiting? :seon.agent/paused? :seon.agent/ready?
-    :seon.agent/awaiting :seon.agent/archived? :seon.agent/auto-merge? :seon.agent/read-branch
-    :seon.agent/router? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/last-proofs
-    :seon.agent/hero-title :seon.agent/system-prompt :seon.agent/scope :seon.agent/focus})
+  :seon.agent/parent :seon.agent/waiting? :seon.agent/paused? :seon.agent/ready?
+  :seon.agent/awaiting :seon.agent/archived? :seon.agent/auto-merge?
+  :seon.agent/router? :seon.agent/tested-tx :seon.agent/merged-tx :seon.agent/last-proofs
+  :seon.agent/hero-title :seon.agent/system-prompt :seon.agent/scope :seon.agent/focus})
 
 (defn- resolve-ref-eid [bdb mdb x]
   (cond

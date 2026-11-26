@@ -13,8 +13,6 @@
             [multipart.core :as multipart]
             [seon.web.mcp :as wmcp]))
 
-(defn ^{:seon.code/reexport 'seon.web.mcp/parse-kw-input} parse-kw-input [& args] (apply wmcp/parse-kw-input args))
-
 (defn async-action
   {:malli/schema [:=> [:cat :map :map :any :any] :map]}
   [st req slot format-fn]
@@ -47,13 +45,6 @@
   [st mode]
   (async-action (assoc st :branch-feedback nil)
                 {:op :show-user :mode mode :clear-inspect true}
-                nil nil))
-
-(defn ^:seon/callable select-branch!
-  {:malli/schema [:=> [:cat :map :any] :map]}
-  [st branch]
-  (async-action (assoc st :branch-feedback nil)
-                {:op :show-user :selected-branch branch}
                 nil nil))
 
 (defn ^:seon/callable switch-tab!
@@ -185,31 +176,15 @@
   {:malli/schema [:function [:=> [:cat [:map [:conn :seon.host/conn]] :map] :map] [:=> [:cat [:map [:conn {:optional true} :seon.host/conn]] :any :map] :map]]}
   ([st form] (spawn-agent-form! st (ui/entry-agent-id @(:conn st)) form))
   ([st parent-id form]
-   (let [aid (parse-kw-input (:agent_id form) (keyword "agent" (str "w" (mod (System/currentTimeMillis) 10000))))
+   (let [aid (wmcp/parse-kw-input (:agent_id form) (keyword "agent" (str "w" (mod (System/currentTimeMillis) 10000))))
          branch (keyword "branch" (str (or (namespace aid) "agent") "." (name aid)))
          scope (when-not (str/blank? (:scope form)) (symbol (str/trim (:scope form))))
          goal (str/trim (str (:goal form "")))]
      (async-action
       (assoc st :branch-feedback {:ok? true :text (str "Spawned " aid " under " parent-id " on " branch)})
-      (cond-> {:op :spawn-agent :id aid :parent parent-id :branch branch :role :worker :goal goal}
+      (cond-> {:op :spawn-agent :id aid :parent parent-id :branch branch :goal goal}
         scope (assoc :scope scope))
       nil nil))))
-
-(defn ^:seon/callable register-schema-form!
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [st form]
-  (let [k (parse-kw-input (:key form) :seon.custom/item)]
-    (async-action (assoc st :branch-feedback {:ok? true :text (str "Validating & deriving " k "...")})
-                  (cond-> {:op :register-schema :key k :form (:form form "")}
-                    (not (str/blank? (:doc form))) (assoc :doc (:doc form)))
-                  :branch-feedback
-                  (fn [ans]
-                    {:ok? (:ok? ans)
-                     :text (if (:ok? ans)
-                             (str "Registered " (:key ans)
-                                  (when (seq (:derived-attributes ans)) (str " + derived Datahike attr " (:derived-attributes ans)))
-                                  " — seed=42 sample: " (:sample ans))
-                             (str "Rejected: " (:error ans)))}))))
 
 (defn ^:seon/callable jump-canvas-live!
   {:malli/schema [:=> [:cat :map] :map]}
@@ -220,13 +195,6 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   {:st (assoc st :branch-feedback nil)})
-
-(defn ^:seon/callable unpin-tile!
-  {:malli/schema [:=> [:cat [:map [:conn :seon.host/conn]] :keyword :any] :map]}
-  [st agent-id ref-val]
-  (let [cur (vec (or (:seon.agent/pinned (d/pull @(:conn st) '[:seon.agent/pinned] [:seon.agent/id agent-id])) []))
-        nxt (vec (remove #(= % ref-val) cur))]
-    (async-action st {:op :transact :tx-data [{:seon.agent/id agent-id :seon.agent/pinned nxt}]} nil nil)))
 
 (def mcp-tools wmcp/mcp-tools)
 

@@ -46,15 +46,9 @@
     (let [s (subs path (count "resources/seon/tasks/"))]
       (subs s 0 (- (count s) 4)))))
 
-(defn task-owner-path
-  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
-  [task-id]
-  (when (qualified-keyword? task-id)
-    "resources/seon/tasks.edn"))
-
 (def durable-agent-keys
   [:seon.agent/id :seon.agent/parent :seon.agent/entry? :seon.agent/label
-   :seon.agent/hero-title :seon.agent/read-branch :seon.agent/router?
+   :seon.agent/hero-title :seon.agent/router?
    :seon.agent/seed-path :seon.agent/scope :seon.agent/focus :seon.agent/branch
    :seon.agent/tasks :seon.agent/interactive? :seon.agent/goal :seon.agent/system-prompt
    :seon.agent/examples :seon.agent/pinned
@@ -199,7 +193,7 @@
     (when (and (or global? prefix) (contains? (:schema db) :seon.task/id))
       (let [tasks (->> (d/datoms db :aevt :seon.task/id)
                        (filter #(or global? (= prefix (namespace (:v %)))))
-                       (map #(dissoc (d/pull db '[*] (:e %)) :db/id))
+                       (map #(dissoc (d/pull db '[*] (:e %)) :db/id :seon.task/refs :seon.task/test-vars))
                        (map (fn [t]
                               (cond-> t
                                 (contains? t :seon.task/needs) (update :seon.task/needs set)
@@ -252,7 +246,7 @@
                                         (if (seq ts) (assoc m :seon.agent/tasks ts) (dissoc m :seon.agent/tasks)))))
                             evals (when (and ex? (contains? (:schema db) :seon.agent.eval/agent))
                                     (->> (d/datoms db :avet :seon.agent.eval/agent aid)
-                                         (map #(dissoc (d/pull db '[*] (:e %)) :db/id :seon.agent.eval/agent))
+                                         (map #(dissoc (d/pull db '[*] (:e %)) :db/id :seon.agent.eval/agent :seon.agent.eval/agent-ref))
                                          (sort-by (juxt #(or (:seon.agent.eval/turn %) 0)
                                                         #(or (:seon.agent.eval/call-index %) 0)))
                                          vec))]
@@ -340,7 +334,6 @@
                                               :seon.rule/enabled?
                                               :seon.rule/target
                                               :seon.rule/query
-                                              :seon.rule/when
                                               :seon.rule/assert] (:e %)) :db/id))
                      (filter :seon.rule/id)
                      (sort-by (juxt #(long (or (:seon.rule/stratum %) 50)) #(str (:seon.rule/id %))))
@@ -361,9 +354,8 @@
    :cost/ticks 200000}
   [rule-map]
   (let [query-c (:seon.rule/query rule-map)
-      when-c (:seon.rule/when rule-map)
       assert-c (:seon.rule/assert rule-map)
-      all-nodes (tree-seq coll? seq [query-c when-c assert-c])
+      all-nodes (tree-seq coll? seq [query-c assert-c])
       assert-nodes (tree-seq coll? seq assert-c)]
   {:schemas (into #{} (filter qualified-keyword?) all-nodes),
    :fns (into #{} (filter qualified-symbol?) assert-nodes)}))

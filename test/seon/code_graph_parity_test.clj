@@ -34,12 +34,12 @@
             doc-src "## Overview\nCalls `demo.svc/handle` using `:seon.task/id`.\n"
             _ (d/transact conn {:tx-data (code/file-import-tx @conn "docs/demo.md" doc-src false)})
             rule-map {:seon.rule/id :rule.demo/view
-                      :seon.rule/category :present
-                      :seon.rule/stratum 40
-                      :seon.rule/enabled? true
-                      :seon.rule/target :any
-                      :seon.rule/when '[[?e :ctx/kind :seon.task/entity]]
-                      :seon.rule/assert '[[?e :view/fn demo.svc/handle]]}
+                     :seon.rule/category :present
+                     :seon.rule/stratum 40
+                     :seon.rule/enabled? true
+                     :seon.rule/target :any
+                     :seon.rule/query '[:find ?e :in $wm :where [$wm ?e :ctx/kind :seon.task/entity]]
+                     :seon.rule/assert '[[?e :view/fn demo.svc/handle]]}
             _ (d/transact conn {:tx-data (files/enrich-rule-tx @conn rule-map)})
             verdict (first (stest/attach-var-refs @conn
                                                   [{:seon.test/digest "dg-parity-0001"
@@ -50,7 +50,7 @@
                                                     :seon.test/report "PASS"}]))
             _ (d/transact conn {:tx-data [verdict]})
             ev-res (code/eval-forms @conn {:agent-id :agent/parity :turn 1}
-                                    "[{:seon.task/id :t/1 :seon.task/title \"T\"} {:seon.rule/id :r/1 :seon.rule/stratum 10 :seon.rule/enabled? true :seon.rule/when [] :seon.rule/assert []}]")
+                                    "[{:seon.task/id :t/1 :seon.task/title \"T\"} {:seon.rule/id :r/1 :seon.rule/stratum 10 :seon.rule/enabled? true :seon.rule/query '[:find ?e :where [?e :seon.task/id]] :seon.rule/assert []}]")
             _ (d/transact conn {:tx-data (:tx-data ev-res)})
             db @conn]
         ;; Schema AST edges + reverse refs
@@ -193,12 +193,12 @@
                      "  (try {:op :parity/run :br (pa/leaf (:seon.task/id m))} (catch Exception _ :fallback)))\n")
           doc-src "## Guide\nUse `demo.parity-b/entry` on `:seon.task/entity` in `demo.parity-a`.\n"
           rule-map {:seon.rule/id :rule.parity/card
-                    :seon.rule/category :present
-                    :seon.rule/stratum 40
-                    :seon.rule/enabled? true
-                    :seon.rule/target :any
-                    :seon.rule/when '[[?e :ctx/kind :seon.task/entity]]
-                    :seon.rule/assert '[[?e :view/fn demo.parity-b/entry]]}
+                   :seon.rule/category :present
+                   :seon.rule/stratum 40
+                   :seon.rule/enabled? true
+                   :seon.rule/target :any
+                   :seon.rule/query '[:find ?e :in $wm :where [$wm ?e :ctx/kind :seon.task/entity]]
+                   :seon.rule/assert '[[?e :view/fn demo.parity-b/entry]]}
           rules-edn (pr-str [rule-map])]
       (try
         (.mkdirs (io/file repo-dir "src/demo"))

@@ -152,32 +152,6 @@
      {:text txt :entries ke :from-tx (if (seq txs) (apply min txs) 0) :to-tx (if (seq txs) (apply max txs) 0)
       :truncated? (boolean (or tr? (> (count raw) mx))) :chars (count txt)})))
 
-(defn merge-chronicle-entries
-  "Unifies summaries with un-summarized merges (newest first, zero duplicates)."
-  {:malli/schema [:=> [:cat [:sequential :map] [:sequential :map]] [:vector :map]] :cost/ticks 1500000 :cost/bytes 2097152}
-  [summaries recent-merges]
-  (let [sl (vec (filter map? summaries))
-        cov? #(boolean (and (integer? %) (some (fn [s] (let [a (:seon.summary/from-tx s) b (:seon.summary/to-tx s)]
-                                                         (and (integer? a) (integer? b) (<= (long a) (long %) (long b))))) sl)))
-        se (mapv #(hash-map :entry-kind (if (keyword? (:seon.summary/kind %)) (:seon.summary/kind %) :system-pulse)
-                            :source :summary :id (:seon.summary/id %) :title (or (:seon.summary/title %) "Summary")
-                            :body (or (:seon.summary/body %) "") :from-tx (int-or (:seon.summary/from-tx %) 0)
-                            :to-tx (int-or (:seon.summary/to-tx %) 0) :ms (int-or (:seon.summary/created-ms %) 0)
-                            :agent (when (keyword? (:seon.summary/agent %)) (:seon.summary/agent %))
-                            :refs (if (sequential? (:seon.summary/refs %)) (vec (:seon.summary/refs %)) []) :visual (:seon.summary/visual %)) sl)
-        me (keep #(when (map? %) (let [mtx (or (:main-tx %) (:merged-tx %))]
-                                   (when-not (cov? mtx)
-                                     (let [aid (:id %) tx (int-or mtx 0)]
-                                       {:entry-kind :merge :source :merge :id (or aid tx) :title (friendly-kw (or aid :branch/merged))
-                                        :body (str (or (:goal %) "")) :from-tx tx :to-tx tx :ms (int-or (:ms %) 0)
-                                        :agent (when (keyword? aid) aid) :refs (vec (remove nil? [aid (:scope %)]))})))) recent-merges)]
-    (vec (sort-by #(vector (- (int-or (:to-tx %) 0)) (- (int-or (:ms %) 0)) (if (= :summary (:source %)) 0 1)) (concat se me)))))
-
-(defn ^{:seon.code/reexport (quote seon.store.gc/tx-instant-ms)} tx-instant-ms
-  "Re-exports `seon.store.gc/tx-instant-ms`."
-  [db tx]
-  (store/tx-instant-ms db tx))
-
 (defn latest-summaries
   "Recorded `:seon.summary/*` entities newest-first (`to-tx` desc). Opts: `:limit :kind :agent :since-tx :until-tx`."
   {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :map]] [:=> [:cat :seon.host/db :map] [:vector :map]]]}
@@ -218,7 +192,7 @@
          (mapv #(let [p (d/pull db '[:seon.agent/id :seon.agent/branch :seon.agent/scope :seon.agent/goal] (:e %))
                       mtx (long (:tx %))]
                   {:id (:seon.agent/id p) :branch (:seon.agent/branch p) :scope (:seon.agent/scope p)
-                   :goal (:seon.agent/goal p) :branch-tx (long (:v %)) :main-tx mtx :ms (tx-instant-ms db mtx)})))))
+                   :goal (:seon.agent/goal p) :branch-tx (long (:v %)) :main-tx mtx :ms (store/tx-instant-ms db mtx)})))))
 
 (defn distill-tx-window
   "Single-pass Datahike distillation over `(from-tx .. to-tx]`: merges, touched namespaces/schemas, health, metrics."
@@ -252,7 +226,7 @@
          lm (when conn (try (select-keys (hmetrics/agent-learning-metrics conn edb {:window 10})
                                          [:attempted :merged :merge-rate-pct :effective-turns-per-merged
                                           :median-turns-merged :kv-cache-hit-pct :eval-error-rate-pct]) (catch Throwable _ nil)))]
-     (cond-> {:from-tx lo :to-tx hi :from-ms (tx-instant-ms main-db lo) :to-ms (tx-instant-ms main-db hi)
+     (cond-> {:from-tx lo :to-tx hi :from-ms (store/tx-instant-ms main-db lo) :to-ms (store/tx-instant-ms main-db hi)
               :merges merges :touched-forms (count te) :touched-nss tnss :touched-schemas tsch
               :total-forms (count fd) :total-schemas (count sd) :health hn
               :refs (vec (distinct (concat (keep :id (take 5 merges)) (map :ns (take 5 tnss)))))}
