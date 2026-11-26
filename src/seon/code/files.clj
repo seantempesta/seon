@@ -298,16 +298,19 @@
              "{"
              (str/join "\n\n "
                        (map (fn [{:keys [:seon.schema/key :seon.schema/form :seon.schema/doc]}]
-                              (let [f' (if (and (vector? form) doc)
-                                         (let [has-props? (map? (second form))
-                                               props (cond-> (if has-props? (second form) {})
-                                                       (and doc (not (:seon.schema/doc (if has-props? (second form) {}))))
-                                                       (assoc :seon.schema/doc doc))]
-                                           (if has-props?
-                                             (assoc form 1 props)
-                                             (into [(first form) props] (rest form))))
-                                         form)]
-                                (str (pr-str key) "\n " (pr-str f'))))
+                              (let [f' (cond
+                                       (and (vector? form) doc)
+                                       (let [has-props? (map? (second form))
+                                             props (cond-> (if has-props? (second form) {})
+                                                     (and doc (not (:seon.schema/doc (if has-props? (second form) {}))))
+                                                     (assoc :seon.schema/doc doc))]
+                                         (if has-props?
+                                           (assoc form 1 props)
+                                           (into [(first form) props] (rest form))))
+                                       (and (or (keyword? form) (symbol? form)) (string? doc) (not (str/blank? doc)))
+                                       [form {:seon.schema/doc doc}]
+                                       :else form)]
+                              (str (pr-str key) "\n " (pr-str f'))))
                             matching))
              "}\n")))))
 

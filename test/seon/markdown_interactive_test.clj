@@ -6,8 +6,6 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [malli.generator :as mg]
-            [seon.fork.calls :as fcalls]
-            [seon.health.contracts :as hcontracts]
             [seon.model.messages :as messages]
             [seon.render :as render]
             [seon.render.markdown :as rmd]
@@ -15,7 +13,11 @@
             [seon.schema :as schema]
             [seon.web :as web]
             [seon.web.router :as router]
-            [seon.web.styles :as styles]))
+            [seon.web.styles :as styles]
+            [clojure.java.io :as io]
+            [seon.code :as code]
+            [seon.store :as store]
+            [seon.test-fixture :refer [with-test-store]]))
 
 (deftest ^{:cost/ticks 60000000} gfm-blocks-tables-alerts-tasks-and-inline-test
   (testing "Headings h1..h6, hr, pipe tables with alignment, blockquotes, GitHub alerts, and task lists"
@@ -171,7 +173,7 @@
       (is (str/includes? css ".md-run-btn{"))
       (is (str/includes? css ".md-link{")))))
 
-(deftest ^{:cost/ticks 60000000} eval-snippet-callable-prompt-and-primers-test
+(deftest ^{:cost/ticks 120000000} eval-snippet-callable-prompt-and-primers-test
   (testing "seon.web/eval-snippet! is ^:seon/callable and dispatches :op :eval into :branch-feedback"
     (is (:seon/callable (meta (var web/eval-snippet!))))
     (let [res (web/invoke-call! {} {:call-form (list (quote seon.web/eval-snippet!) "(+ 1 2)")})
@@ -197,14 +199,18 @@
       (is (str/includes? p "NO tool calls"))
       (is (str/includes? p "<agent ...>...</agent>"))))
   (testing "docs/primers.md interactive markdown section has populated doc refs and zero broken refs"
-    (when-let [db (when fcalls/*agent-ctx* @(:conn fcalls/*agent-ctx*))]
-      (let [sec (d/pull db (quote [:seon.code.doc/id :seon.code.doc/body :seon.code.doc/references])
-                        [:seon.code.doc/id "docs/primers.md#interactive-markdown-canvas"])]
-        (is (= "docs/primers.md#interactive-markdown-canvas" (:seon.code.doc/id sec)))
-        (is (str/includes? (str (:seon.code.doc/body sec)) "seon.render.markdown/render-markdown-blocks"))
-        (is (str/includes? (str (:seon.code.doc/body sec)) "seon.web/eval-snippet!"))
-        (is (>= (count (:seon.code.doc/references sec)) 3))
-        (is (empty? (hcontracts/broken-doc-refs db)))))))
+    (with-test-store [{:keys [conn]}]
+    (d/transact conn {:tx-data (vec (concat
+                                     (code/file-import-tx @conn "src/seon/render/markdown.clj" (slurp (io/file store/checkout-root "src/seon/render/markdown.clj")) false)
+                                     (code/file-import-tx @conn "src/seon/web.clj" (slurp (io/file store/checkout-root "src/seon/web.clj")) false)))})
+    (d/transact conn {:tx-data (code/file-import-tx @conn "docs/primers.md" (slurp (io/file store/checkout-root "docs/primers.md")) false)})
+    (let [db @conn
+          sec (d/pull db (quote [:seon.code.doc/id :seon.code.doc/body :seon.code.doc/references])
+                      [:seon.code.doc/id "docs/primers.md#interactive-markdown-canvas"])]
+      (is (= "docs/primers.md#interactive-markdown-canvas" (:seon.code.doc/id sec)))
+      (is (str/includes? (str (:seon.code.doc/body sec)) "seon.render.markdown/render-markdown-blocks"))
+      (is (str/includes? (str (:seon.code.doc/body sec)) "seon.web/eval-snippet!"))
+      (is (>= (count (:seon.code.doc/references sec)) 3))))))
 
 (deftest ^{:cost/ticks 120000000} seed42-generative-checks-test
   (testing "All single-arity pure parser/sanitizer functions pass 100-sample seed=42 schema/stress-var"

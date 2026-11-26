@@ -220,7 +220,7 @@
       (vec (keep #(resolve-agent (or (pull-agent main-db %) {:seon.agent/id %})) (:agents opts)))
       (and (integer? window) (<= (long window) 0)) []
       :else
-      (->> (d/datoms main-db :aevt :seon.agent/id) (sort-by (comp - :e))
+      (->> (d/datoms main-db :aevt :seon.agent/id) (sort-by #(long (- (long (or (:tx %) 0)))))
            (keep (fn [datom]
                    (let [agent-id (:v datom) ns-str (when agent-id (namespace agent-id))]
                      (when (and agent-id (not= "example" ns-str) (not (and (:exclude-root? opts) (= :agent/root agent-id)))

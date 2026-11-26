@@ -196,7 +196,7 @@
 
 (defn distill-tx-window
   "Single-pass Datahike distillation over `(from-tx .. to-tx]`: merges, touched namespaces/schemas, health, metrics."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :map] :map] [:=> [:cat :seon.host/db [:maybe :int] [:maybe :int]] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :map] :map] [:=> [:cat :seon.host/db [:maybe :int] [:maybe :int]] :map]], :seon.flow/edge true}
   ([main-db] (distill-tx-window main-db {}))
   ([main-db from-tx to-tx] (distill-tx-window main-db {:from-tx from-tx :to-tx to-tx}))
   ([main-db {:keys [from-tx to-tx conn include-health-delta? merge-limit preloaded-merges] :or {merge-limit 12}}]

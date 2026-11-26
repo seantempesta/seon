@@ -106,8 +106,8 @@
       :test-failing (str "- " task ": required test " (:var detail) " FAILED"
                          (when (and (string? (:report detail)) (not (str/blank? (:report detail))))
                            (str " — " (first (str/split-lines (:report detail))))))
-      (:review-hijacked-ready :review-no-op
-       :refinement-missing-parent :refinement-missing-proofs :refinement-missing-refs)
+      (:review-hijacked-ready :review-no-op :rule-generality-violation :corpus-regression
+      :refinement-missing-parent :refinement-missing-proofs :refinement-missing-refs)
       (str "- " task ": " (or (:message detail) (name reason)))
       (str "- " task ": " (name (or reason :blocked)) " " (pr-str detail)))))
 
@@ -118,8 +118,8 @@
   [status gate agent-id head-tx gate-notified-set]
   (when (and (= status :gate-blocked)
              (not (contains? gate-notified-set [agent-id head-tx])))
-    (let [fixable (filterv #(contains? #{:test-missing :test-failing :review-hijacked-ready :review-no-op
-                                         :refinement-missing-parent :refinement-missing-proofs :refinement-missing-refs}
+    (let [fixable (filterv #(contains? #{:test-missing :test-failing :review-hijacked-ready :review-no-op :rule-generality-violation :corpus-regression
+                                       :refinement-missing-parent :refinement-missing-proofs :refinement-missing-refs}
                                        (:reason %))
                            (:blockers gate))]
       (when (seq fixable)
@@ -238,11 +238,24 @@
              rev-out (when (some #{:template/review-and-improve :template/tune-context} tids)
                        (evaluate-review-outcome main-db branch-db agent-id))
              tuner-gen-bs (when (and branch-db (some #{:template/tune-context} tids))
-                            (when-let [lint (requiring-resolve 'seon.health.coverage/lint-rule-generality)]
-                              (let [iss (lint (rules/load-rules branch-db))]
-                                (when (seq iss)
-                                  [{:task :template/tune-context :reason :rule-generality-violation :rule :rule.gate/tuner-generality
-                                    :detail {:issues (vec (take 5 iss)) :message (str "Context Tuner introduced non-general hardcoded rule literal(s): " (pr-str (mapv :literal iss)))}}]))))
+             (let [gen-b (when-let [lint (requiring-resolve 'seon.health.coverage/lint-rule-generality)]
+                           (let [iss (lint (rules/load-rules branch-db))]
+                             (when (seq iss)
+                               [{:task :template/tune-context :reason :rule-generality-violation :rule :rule.gate/tuner-generality
+                                 :detail {:issues (vec (take 5 iss)) :message (str "Context Tuner introduced non-general hardcoded rule literal(s): " (pr-str (mapv :literal iss)))}}])))
+                   corp-b (when (and main-db (not (identical? branch-db main-db))
+                                     (contains? (:schema main-db) :seon.rule/id)
+                                     (not= (rules/rules-db-sig main-db) (rules/rules-db-sig branch-db)))
+                            (when-let [cr (requiring-resolve 'seon.health.corpus/corpus-report)]
+                              (let [mc (get-in (cr main-db) [:counts :corpus-passed] 0)
+                                    bc-rep (cr branch-db)
+                                    bc (get-in bc-rep [:counts :corpus-passed] 0)]
+                                (when (< (long bc) (long mc))
+                                  (let [failed-ids (vec (keep #(when-not (:pass? %) (:id %)) (:corpus bc-rep)))]
+                                    [{:task :template/tune-context :reason :corpus-regression :rule :rule.gate/tuner-corpus
+                                      :detail {:main-passed mc :branch-passed bc :failed failed-ids
+                                               :message (str "Context Tuner regressed situation corpus (" mc " -> " bc ", failed: " (pr-str failed-ids) ")")}}])))))]
+               (vec (concat gen-b corp-b))))
              ref-outs (vec (keep #(refine/evaluate-refinement-gate main-db branch-db %) tids))
              all-bs (concat
                      (mapv #(if-let [rid (:rule (first (get prov [(:task %) :gate/blocker %])))] (assoc % :rule rid) %) ab)
