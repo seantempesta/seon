@@ -1188,7 +1188,7 @@
             (d/transact conn {:tx-data (code/file-import-tx @conn "test/seon/cboot_demo_test.clj"
                                                            "(ns seon.cboot-demo-test (:require [clojure.test :refer [deftest is]]))
 (deftest sample-test (is true))" false)})
-            (let [delta ((requiring-resolve 'seon.main/cold-boot-overlay-delta) @conn t-mid)
+            (let [delta ((requiring-resolve 'seon.code.overlay/cold-boot-overlay-delta) @conn t-mid)
                   ukeys (set (map :seon.code.form/key (:upserts delta)))]
               (is (contains? ukeys "seon.cboot.demo/keep-fn") (pr-str delta))
               (is (not (some #(str/includes? % "-test") ukeys)) (pr-str delta))
