@@ -42,7 +42,8 @@
             [seon.bench.golden :as bgolden]
             [seon.bench.lab :as blab]
             [seon.task.gate :as tgate]
-            [seon.health.metrics :as hmetrics]))
+            [seon.health.metrics :as hmetrics]
+            [seon.code.overlay]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -1132,3 +1133,42 @@
       (let [sel @#'hmetrics/select-agent-targets
             targets (sel conn @conn {:window 2})]
         (is (= [:w/newer-tx :w/older-tx] (mapv :agent-id targets)))))))
+
+(deftest load-delta-skips-forms-identical-to-main-test
+  (testing "load-delta! skips branch forms already identical to :main (preventing O(codebase) recompile on long-lived router branches)"
+    (seon.test-util/with-test-store
+      (fn [conn cfg]
+        (let [ns-sym 'seon.delta.skip.demo
+              path "src/seon/delta/skip/demo.clj"
+              src0 "(ns seon.delta.skip.demo)
+(defn a [] 1)
+(defn b [] 2)"
+              src1 "(ns seon.delta.skip.demo)
+(defn a [] 10)
+(defn b [] 2)"
+              src-br "(ns seon.delta.skip.demo)
+(defn a [] 10)
+(defn b [] 20)"]
+          (try
+            (d/transact conn {:tx-data (seon.code/file-import-tx @conn path src0 false)})
+            (seon.code.overlay/apply-overlay! @conn {:upserts (seon.code/ns-forms @conn ns-sym) :retracted-keys #{}} true)
+            (seon.store/branch! conn :main :branch/router-sim)
+            ;; Advance :main (simulating merged child work) and load into runtime
+            (d/transact conn {:tx-data (seon.code/file-import-tx @conn path src1 false)})
+            (seon.code.overlay/apply-overlay! @conn {:upserts (seon.code/ns-forms @conn ns-sym) :retracted-keys #{}} true)
+            ;; Sync :main's edit to `a` onto router branch AND add branch-local edit to `b`
+            (let [bc (seon.store/connect cfg :branch/router-sim)]
+              (try
+                (d/transact bc {:tx-data (seon.code/file-import-tx @bc path src-br false)})
+                (let [base (d/merge-base bc :main :branch/router-sim)
+                      head (d/commit-id @bc)
+                      res (seon.code.overlay/load-delta! bc base head false)]
+                  (is (empty? (:errors res)) (pr-str res))
+                  ;; `a` matches :main and is loaded -> skipped; `b` differs from :main -> loaded!
+                  (is (not (some #{"seon.delta.skip.demo/a"} (:loaded res))) (pr-str res))
+                  (is (some #{"seon.delta.skip.demo/b"} (:loaded res)) (pr-str res))
+                  (is (= 10 ((ns-resolve ns-sym 'a))))
+                  (is (= 20 ((ns-resolve ns-sym 'b)))))
+                (finally (d/release bc))))
+            (finally
+              (try (remove-ns ns-sym) (catch Throwable _ nil)))))))))
