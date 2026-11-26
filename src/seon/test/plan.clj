@@ -50,8 +50,8 @@
  (let [ours-db @conn
        theirs-db (d/branch-as-db (:store ours-db) theirs-branch)
        rule-pull '[:seon.rule/id :seon.rule/doc :seon.rule/category :seon.rule/stratum
-                   :seon.rule/enabled? :seon.rule/target :seon.rule/query :seon.rule/when
-                   :seon.rule/assert]
+                 :seon.rule/enabled? :seon.rule/target :seon.rule/query
+                 :seon.rule/assert]
        raw (reduce
             (fn [acc {:keys [entity status path]}]
               (let [[id-attr id-val] entity

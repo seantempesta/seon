@@ -67,10 +67,6 @@
   {:malli/schema [:=> [:cat :map] [:map [:refs [:set :symbol]] [:keywords [:set :qualified-keyword]]]]}
   [& args] (apply parse/ir-unit-refs args))
 
-(defn clean-edn-for-hash [& args] (apply parse/clean-edn-for-hash args))
-
-(def watched-runtime-syms parse/watched-runtime-syms)
-
 (defn read-clj [& args] (apply parse/read-clj args))
 
 (defn md-path? [& args] (apply parse/md-path? args))
@@ -86,8 +82,6 @@
 (defn ns-forms [& args] (apply cio/ns-forms args))
 
 (defn ns-vars [& args] (apply cio/ns-vars args))
-
-(defn- retract-stale-many-ops [& args] (apply cio/retract-stale-many-ops args))
 
 (defn file-import-tx
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] :string :string :boolean] [:vector :any]] [:=> [:cat [:maybe :seon.host/db] :string :string :boolean [:maybe :map]] [:vector :any]]]}
@@ -106,10 +100,6 @@
 (defn changed-form-ops [& args] (apply reach/changed-form-ops args))
 
 (defn load-delta! [& args] (apply overlay/load-delta! args))
-
-(defn schema-kw->node-key [& args] (apply reach/schema-kw->node-key args))
-
-(defn dep-sym->key [& args] (apply reach/dep-sym->key args))
 
 (defn build-reach-graph [& args] (apply reach/build-reach-graph args))
 
@@ -142,8 +132,6 @@
            (get-in ix [:identity-schemas (first v)]))))))
 
 (defn reaching-tests [& args] (apply reach/reaching-tests args))
-
-(defn ns-linked-docs [& args] (apply reach/ns-linked-docs args))
 
 (defn- next-result-handle [db agent-id]
   (let [n (inc (:eval-count (store/agent-eval-history-stats db (or agent-id :repl))))]

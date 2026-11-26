@@ -12,8 +12,6 @@
           [seon.render.text :refer [one-line round1]]
           [seon.store :as store :refer [db-cache-sig db-schema]]))
 
-(def learning-metrics-cache (store/lru-cache 8))
-
 (defn pct-val
   {:malli/schema [:=> [:cat [:sequential [:or :int :double]] [:double {:min 0.0, :max 1.0}]] :double], :cost/ticks 200000, :cost/bytes 524288}
   [xs p]

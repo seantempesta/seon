@@ -148,6 +148,7 @@
       cur)))
 
 (defn- proxy-gate-proc
+  {:seon.flow/edge true}
   ([] {:params {:req-ch "Gate command channel" :cap "Max in-flight" :limits "Budget limits" :init-stats "Initial stats" :final-stats "Final stats promise"}
        :ins {} :outs {} :workload :compute
        :doc "Serialized Flow gate enforcing atomic concurrency + request/token budgets and upstream stream teardown."})

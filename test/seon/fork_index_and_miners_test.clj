@@ -221,20 +221,17 @@
                                        :seon.agent/scope 'seon.mine-demo.a
                                        :seon.agent/tasks #{[:seon.task/id :seon.mine-demo/t1]}}
                                       {:seon.agent.eval/id (random-uuid)
-                                       :seon.agent.eval/agent :seon.mine-demo/worker
-                                       :seon.agent.eval/turn 1
-                                       :seon.agent.eval/code "(seon.mine-demo.a/helper 1)"
-                                       :seon.agent.eval/touched [helper-eid ns-eid]}
+                                      :seon.agent.eval/agent :seon.mine-demo/worker
+                                      :seon.agent.eval/turn 1
+                                      :seon.agent.eval/code "(seon.mine-demo.a/helper 1)"}
                                       {:seon.agent.eval/id (random-uuid)
-                                       :seon.agent.eval/agent :seon.mine-demo/worker
-                                       :seon.agent.eval/turn 2
-                                       :seon.agent.eval/code ":seon.task/title"
-                                       :seon.agent.eval/touched [helper-eid]}
+                                      :seon.agent.eval/agent :seon.mine-demo/worker
+                                      :seon.agent.eval/turn 2
+                                      :seon.agent.eval/code ":seon.task/title"}
                                       {:seon.agent.eval/id (random-uuid)
-                                       :seon.agent.eval/agent :seon.mine-demo/worker
-                                       :seon.agent.eval/turn 3
-                                       :seon.agent.eval/code "(seon.mine-demo.a/caller {})"
-                                       :seon.agent.eval/touched [helper-eid]}]})
+                                      :seon.agent.eval/agent :seon.mine-demo/worker
+                                      :seon.agent.eval/turn 3
+                                      :seon.agent.eval/code "(seon.mine-demo.a/caller {})"}]})
           (let [db @conn
                 ;; 1. mine-schema-examples-tx
                 ex-tx (mine/mine-schema-examples-tx db)

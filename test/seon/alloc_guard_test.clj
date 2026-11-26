@@ -36,7 +36,8 @@
             [seon.ctx.diff :as cdiff]
             [seon.code.cst :as cst]
             [seon.health.contracts :as hctr]
-            [datahike.versioning :as dv]))
+            [datahike.versioning :as dv]
+            [seon.code.files :as cfiles]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -1011,3 +1012,29 @@
     (is (nil? (resolve 'seon.health.contracts/fast-valid-malli?)))
     (let [vfn @#'hctr/validate-contract-schema]
       (is (some? (vfn nil (volatile! nil) [:=> [:cat :set] :any])) "Real Malli rejects bare :set that leaky fast-valid-malli? accepted"))))
+
+(deftest wave-c-clean-seeds-dead-schemas-and-dedup-test
+  (testing "render-tasks-file and render-agent-file never leak raw {:db/id N} maps"
+    (with-test-store [{:keys [conn]}]
+      (d/transact conn {:tx-data (code/file-import-tx @conn "src/demo/seed_x.clj" "(ns demo.seed-x) (defn f [] 1)" false)})
+      (let [ve (:e (first (d/datoms @conn :avet :seon.code.var/name 'demo.seed-x/f)))]
+        (d/transact conn {:tx-data [{:seon.task/id :demo/seed-t :seon.task/title "Seed" :seon.task/plan "Plan" :seon.task/done? false
+                                     :seon.task/refs #{ve} :seon.task/test-vars #{ve}}
+                                    {:seon.agent/id :example/seed-ex :seon.agent/branch :main :seon.agent/seed-path "resources/seon/agents/examples.edn"
+                                     :seon.agent/goal "Ex" :seon.agent/paused? true}]})
+        (let [ae (:e (first (d/datoms @conn :avet :seon.agent/id :example/seed-ex)))]
+          (d/transact conn {:tx-data [{:seon.agent.eval/id (random-uuid) :seon.agent.eval/agent :example/seed-ex
+                                       :seon.agent.eval/agent-ref ae :seon.agent.eval/turn 1 :seon.agent.eval/code "1"}]})
+          (let [t-edn (cfiles/render-tasks-file @conn "resources/seon/tasks.edn")
+                a-edn (cfiles/render-agent-file @conn "resources/seon/agents/examples.edn")]
+            (is (string? t-edn))
+            (is (not (str/includes? t-edn ":db/id")) "tasks.edn export must strip derived :refs/:test-vars eids")
+            (is (string? a-edn))
+            (is (not (str/includes? a-edn ":db/id")) "agents/examples.edn export must strip :agent-ref eid"))))))
+
+  (testing "Dead schemas and duplicate helpers removed cleanly"
+    (is (var? (resolve 'seon.code.overlay/merge-3way-map)))
+    (is (nil? (resolve 'seon.fork.worker-support/merge-3way-map)))
+    (is (nil? (resolve 'seon.code/clean-edn-for-hash)))
+    (is (nil? (resolve 'seon.store/db-at)))
+    (is (nil? (resolve 'seon.web/http-routes)))))

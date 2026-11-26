@@ -78,12 +78,6 @@
        (sort-by #(str (:seon.code.var/name %)))
        vec)))
 
-(defn render-schema-file
-  "Renders all `:seon.schema/key` entities whose owner path is `path` into a clean EDN map."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]], :cost/ticks 15000000}
-  [db path]
-  (files/render-schema-file db path))
-
 (defn retract-stale-many-ops
 "Retracts removed values from `:db.cardinality/many` set attributes (`attrs`) on updated entities
  (normalizing ref lookup-refs to integer eids so ref comparisons never false-retract)."
@@ -457,7 +451,7 @@
     (str/join "\n\n" (concat kept-m added-b))))
 
 (defn resolve-form-target
-  {:malli/schema [:=> [:cat :seon.host/conn :keyword :any] :map], :cost/ticks 10000000}
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword :any] :map], :cost/ticks 10000000, :seon.flow/edge true}
   [conn branch target]
   (let [s (cond
             (var? target) (str (symbol target))

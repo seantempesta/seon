@@ -26,13 +26,18 @@
                                  s (when-let [rs (src-fn f)] (str/triml (str rs)))
                                  ns-s (form-ns-name nsym k)]
                              (if (and ns-s s (str/starts-with? s "(declare "))
-                               (let [parsed (try (read-string s) (catch Throwable _ nil))
-                                     syms (when (seq? parsed) (filter symbol? (rest parsed)))]
-                                 (reduce (fn [m sym]
-                                           (let [qs (symbol ns-s (name sym))]
-                                             (if (contains? m qs) m (assoc m qs {:key k :idx i}))))
-                                         acc syms))
-                               acc)))
+                             (let [nd (try (p/parse-string s) (catch clojure.lang.ExceptionInfo _ nil))
+                                   syms (when (and nd (= :list (n/tag nd)))
+                                          (keep #(when (= :token (n/tag %))
+                                                   (let [ts (n/string %)]
+                                                     (when (and (not= ts "declare") (not (str/starts-with? ts ":")))
+                                                       (symbol ts))))
+                                                (rest (remove n/whitespace-or-comment? (n/children nd)))))]
+                               (reduce (fn [m sym]
+                                         (let [qs (symbol ns-s (name sym))]
+                                           (if (contains? m qs) m (assoc m qs {:key k :idx i}))))
+                                       acc syms))
+                             acc)))
                          {} (vec body))
             sym->key (reduce
                       (fn [acc f]

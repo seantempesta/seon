@@ -12,39 +12,6 @@
   (let [v (vec (remove nil? xs))]
     (if (> (count v) 16) (subvec v (- (count v) 16)) v)))
 
-(defn- next-inspect-state [cur msg clear-nav?]
-  (let [cr (norm-ref (:seon.user/inspect-ref cur))
-        ct (vec (keep norm-ref (:seon.user/inspect-trail cur)))
-        clp (if (map? (:seon.user/lab-prefs cur)) (:seon.user/lab-prefs cur) {})
-        cf (vec (keep norm-ref (:inspect-forward clp)))
-        pr (norm-ref (:push-inspect msg)) dr (norm-ref (:inspect-ref msg))
-        [nr nt nf ret?]
-        (cond
-          (:clear-inspect msg) [nil [] [] (some? cr)]
-          pr (if (= pr cr) [cr ct cf false] [pr (if cr (cap16 (conj ct cr)) ct) [] false])
-          (:pop-inspect msg) (if (seq ct) [(peek ct) (pop ct) (if cr (cap16 (conj cf cr)) cf) false] [nil [] [] (some? cr)])
-          (:forward-inspect msg) (if (seq cf) [(peek cf) (if cr (cap16 (conj ct cr)) ct) (pop cf) false] [cr ct cf false])
-          (integer? (:jump-trail msg))
-          (let [i (long (:jump-trail msg))]
-            (if (and (>= i 0) (< i (count ct)))
-              [(nth ct i) (subvec ct 0 i) (cap16 (concat cf (reverse (concat (subvec ct (inc i)) (when cr [cr]))))) false]
-              [cr ct cf false]))
-          (contains? msg :inspect-ref) (if dr [dr ct [] false] [nil [] [] (some? cr)])
-          clear-nav? [nil [] [] (some? cr)]
-          :else [cr ct cf false])
-        lp1 (cond
-              (:reset-lab-prefs msg) {}
-              (map? (:lab-prefs msg)) (into {} (remove #(nil? (val %)))
-                                            (if (:replace-lab-prefs? msg) (:lab-prefs msg) (merge clp (:lab-prefs msg))))
-              :else clp)
-        lp2 (if-let [rid (when (qualified-keyword? (:toggle-lab-rule msg)) (:toggle-lab-rule msg))]
-              (let [s (set (:disabled-rules lp1)) s' (if (s rid) (disj s rid) (conj s rid))]
-                (if (seq s') (assoc lp1 :disabled-rules (vec (sort s'))) (dissoc lp1 :disabled-rules)))
-              lp1)
-        lp3 (if (seq nf) (assoc lp2 :inspect-forward nf) (dissoc lp2 :inspect-forward))]
-    {:ref nr :trail nt :lp lp3 :ret? ret? :cur-ref (:seon.user/inspect-ref cur)
-     :ref-ch? (not= nr cr) :tr-ch? (not= nt ct) :lp-ch? (not= lp3 clp)}))
-
 (defn- cap-n [n xs]
   (let [v (vec (remove nil? xs))]
     (if (> (count v) n) (subvec v (- (count v) n)) v)))

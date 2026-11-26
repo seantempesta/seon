@@ -112,7 +112,7 @@
         ev-map (fn [a] (reduce #(assoc %1 (:e %2) (:v %2)) {} (d/datoms db :aevt a)))
         ids (ev-map :seon.rule/id)
         attrs [:seon.rule/doc :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
-               :seon.rule/target :seon.rule/query :seon.rule/when :seon.rule/assert]
+              :seon.rule/target :seon.rule/query :seon.rule/assert]
         by-a (into {} (map (fn [a] [a (if (contains? dh a) (ev-map a) {})])) attrs)]
     (reduce-kv (fn [acc e rid]
                  (assoc acc rid

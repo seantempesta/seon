@@ -112,21 +112,18 @@
                 db
                 :seon.rule/id
                 '[:seon.rule/id
-                  :seon.rule/query
-                  :seon.rule/when
-                  :seon.rule/assert
-                  :seon.rule/doc]
+                :seon.rule/query
+                :seon.rule/assert
+                :seon.rule/doc]
                 (fn [e]
                   (cond->
-                    e
-                    (:seon.rule/query e)
-                    (update :seon.rule/query rw/rewrite-edn-data np)
-                    (:seon.rule/when e)
-                    (update :seon.rule/when rw/rewrite-edn-data np)
-                    (:seon.rule/assert e)
-                    (update :seon.rule/assert rw/rewrite-edn-data np)
-                    (:seon.rule/doc e)
-                    (update :seon.rule/doc rw/rewrite-doc-text np))))
+                  e
+                  (:seon.rule/query e)
+                  (update :seon.rule/query rw/rewrite-edn-data np)
+                  (:seon.rule/assert e)
+                  (update :seon.rule/assert rw/rewrite-edn-data np)
+                  (:seon.rule/doc e)
+                  (update :seon.rule/doc rw/rewrite-doc-text np))))
                 [])
         tasks (if (:rewrite-tasks? np)
                 (scan-entity-rewrites db :seon.task/id

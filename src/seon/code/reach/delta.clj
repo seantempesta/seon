@@ -62,7 +62,7 @@
 
 (def rule-hash-attrs
   [:seon.rule/id :seon.rule/category :seon.rule/stratum :seon.rule/enabled?
-   :seon.rule/target :seon.rule/query :seon.rule/when :seon.rule/assert])
+  :seon.rule/target :seon.rule/query :seon.rule/assert])
 
 (defonce ^:private ^:seon.flow/edge changed-form-ops-cache (store/lru-cache 32))
 

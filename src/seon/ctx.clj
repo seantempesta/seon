@@ -42,12 +42,6 @@
   [main-db branch-db agent-id]
   (proj/agent-world-datoms main-db branch-db agent-id))
 
-(defn entity-world-datoms
-  "Generic 2-read focal world discovery for any entity lookup ref."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :any] :map] :cost/ticks 12000000}
-  [main-db branch-db focal-ref]
-  (proj/entity-world-datoms main-db branch-db focal-ref))
-
 (defn merge-pull-patterns
   "Monotonic union of Datahike `:pull` patterns."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]] :cost/ticks 500000}
@@ -67,12 +61,6 @@
           m-rs (rules/load-rules main-db (rseed/starter-rules))
           all (if (= ms bs) m-rs (rules/load-rules bdb m-rs))]
       (filterv (fn [r] (or (= :context (:seon.rule/category r)) (some map? (:seon.rule/assert r)))) all))))
-
-(defn diff-entity-tx
-  "Diffs pulled 2-index tree maps `old-m`/`new-m` for `eid` into Datahike tx-data."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map :map] [:vector :any]] :cost/ticks 10000000}
-  [db eid old-m new-m]
-  (tree/diff-entity-tx db eid old-m new-m))
 
 (defn- ^:seon.flow/edge branch-caused-health-facts [main-db branch-db derived-touches]
   (let [wnss (:written-nss derived-touches)]

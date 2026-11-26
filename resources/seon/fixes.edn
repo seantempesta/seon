@@ -13,6 +13,13 @@
   :seon.fix/regression-test seon.alloc-guard-test/wave-b-silent-bugs-kv-stability-run-tests-and-arm-var-test,
   :seon.fix/root-cause "Props-map blind schema destructuring, store-global max-tx threshold + single-parent-only ancestor walk, unfiltered branch ops in run-tests!, inline anonymous closure in arm-var!, 2-way branch preference in resolve-form-target, and leaky fast-valid-malli? / naive single-pass form sorter",
   :seon.fix/symptom "renderer-input-schema bypassed validation on :examples renderers; rules-db-sig busted KV cache across >65 sibling TXs and 2-parent merges; run-tests! ignored {:ns} and stale-diffed OOM; arm-var! closed over stale report fn; resolve-form-target overwrote newer :main; CST/topo had duplicate broken sorters and silent metadata wipe"}
+ {:seon.fix/before-after "Before: 57 raw {:db/id} leaks in seeds, 5 dead schemas, 4 :silent-catch-all, 30+ dead vars. After: 0 {:db/id} leaks, 0 :silent-catch-all, clean active seeds, deduplicated overlay/chronicle/actions",
+  :seon.fix/change-summary "Stripped derived :seon.task/{refs,test-vars} and :seon.agent.eval/agent-ref in seon.code.files exports; cleaned active seeds (root.edn, examples.edn, templates, default.edn); retracted 5 dead schemas + :mode; removed 30+ zero-caller dead vars & stubs; deduplicated merge-3way-map onto seon.code.overlay; cleared all 4 :silent-catch-all warnings",
+  :seon.fix/error-class :seed-corruption-and-dead-weight,
+  :seon.fix/id #uuid "20261126-c001-4000-8000-000000000003",
+  :seon.fix/regression-test seon.alloc-guard-test/wave-c-clean-seeds-dead-schemas-and-dedup-test,
+  :seon.fix/root-cause "render-tasks-file and render-agent-file serialized raw derived ref sets; legacy schema attributes and split-stub vars were never pruned after migrations",
+  :seon.fix/symptom "49 raw {:db/id N} leaks in tasks.edn and 8 in agents/examples.edn; stale refs to deleted helpers/namespaces in active seeds; 5 dead/owner-ruling-violating schemas (:seon.rule/when, :seon.agent/read-branch, :seon.agent.eval/{touched,touched-refs}, :seon.code.var/doc-ref-order) + :mode in context-prefs; 30+ dead vars & verbatim duplicate merge-3way-map; 4 :silent-catch-all warnings"}
  {:seon.fix/change-summary "Resolved both test reads via seon.store/checkout-root and fixed build-ab-tasks caller :timeout-ms override, in-place deftype/defrecord REPL replacement, /op :timeout-ms, :explore-scope, and automatic :error-samples/:failing-tests persistence.",
   :seon.fix/error-class :bench/cwd-relative-test-slurp,
   :seon.fix/id #uuid "269efac2-ee2d-4d95-b1b2-3a761e17daca",

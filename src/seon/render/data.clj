@@ -161,15 +161,10 @@
                :else nil)]
      (or (not-empty lbl) (friendly-agent-name aid)))))
 
-(defn router-agent?
-  {:malli/schema [:=> [:cat [:maybe :map]] :boolean], :cost/ticks 500000, :cost/bytes 1048576}
-  [ag]
-  (boolean (:seon.agent/router? ag)))
-
 (defn reads-main?
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean], :cost/ticks 500000, :cost/bytes 1048576}
   [ag]
-  (boolean (or (= :main (:seon.agent/read-branch ag)) (:seon.agent/router? ag))))
+  (boolean (:seon.agent/router? ag)))
 
 (defn user-view-state
   {:malli/schema [:=> [:cat :any [:? [:maybe :map]]] :map] :cost/ticks 5000000}
@@ -293,16 +288,6 @@
   (when-not (str/blank? (str s))
     (let [line (-> (str s) str/trim str/split-lines first str/trim)]
       (if (> (count line) max-len) (str (subs line 0 max-len) "…") line))))
-
-(defn compact-entity-preview
-  {:malli/schema [:=> [:cat :map [:int {:min 1 :max 500}]] :string] :cost/ticks 1000000}
-  [m max-len]
-  (let [cleaned (into {} (keep (fn [[k v]]
-                                 (when (and (not= k :db/id) (some? v))
-                                   (let [vs (pr-str v)] [k (if (> (count vs) 60) (str (subs vs 0 60) "…") v)]))))
-                      (take 6 (sort-by (comp str key) m)))
-        s (pr-str cleaned)]
-    (if (> (count s) max-len) (str (subs s 0 max-len) "…") s)))
 
 (defn- branch-test-summary [main-db branch]
   (when (and main-db branch ((db-schema main-db) :seon.test.run/branch))

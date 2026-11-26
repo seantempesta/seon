@@ -19,7 +19,7 @@
           (doseq [dt (d/datoms bdb :aevt :seon.code.form/src)
                   :let [info (get @by-e (:e dt))] :when info
                   :let [src (str (:v dt)) fk (:key info)]]
-            (vswap! out conj {:key fk :sym (try (symbol fk) (catch Throwable _ nil))
+            (vswap! out conj {:key fk :sym (when (and (string? fk) (not (str/blank? fk))) (symbol fk))
                               :ns (or (:ns info) (first (str/split fk #"/|#"))) :src src :low (str/lower-case src)}))
           @out)))))
 

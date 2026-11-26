@@ -32,5 +32,4 @@
  :seon.config/viewport-screenshot? true,
  :seon.config.build/jolt-cache-mb 32768,
  :seon.config.build/jolt-compiler-options {:image-fn-forms false, :no-inline-ns-prefixes [seon my]},
- :seon.config.build/jolt-whole-program-inference false,
- :seon.config.source/tree-excludes ["claude_scratch" "runs" "target"]}
+ :seon.config.build/jolt-whole-program-inference false}

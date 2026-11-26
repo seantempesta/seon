@@ -241,14 +241,7 @@
     (into #{} (concat from-rs from-rsk from-code))))
 
 (defn- legacy-stored-eval-eids [db dh ee]
-  (let [has-refs? (boolean (dh :seon.agent.eval/touched-refs))
-        has-vec? (boolean (dh :seon.agent.eval/touched))
-        r-ds (when has-refs? (seq (d/datoms db :eavt ee :seon.agent.eval/touched-refs)))]
-    (cond
-      r-ds (vec (keep #(let [e (:v %)] (when (integer? e) e)) r-ds))
-      has-vec? (when-let [tdt (first (d/datoms db :eavt ee :seon.agent.eval/touched))]
-                 (let [ts (:v tdt)] (when (coll? ts) (filterv integer? ts))))
-      :else nil)))
+  nil)
 
 (defn- ^:seon.flow/edge compute-branch-writes-for-base [branch-db base bc]
   (store/without-agent-eval-reads

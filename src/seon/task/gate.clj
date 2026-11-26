@@ -128,16 +128,6 @@
                     " — fix these required proof blocker(s) and reply concisely when done:\n"
                     (str/join "\n" (map format-gate-blocker fixable)))}))))
 
-(def ^:private target-session-attrs
-  #{:seon.agent/pinned :seon.agent/curated :seon.agent/context-prefs :seon.agent/summary})
-
-(def ^:private domain-edit-attrs
-  [:seon.code.form/key :seon.code.form/src :seon.code.form/hash
-   :seon.code.var/name :seon.code.ns/name :seon.code.doc/id :seon.code.doc/body
-   :seon.code.file/path :seon.schema/key :seon.schema/form
-   :seon.rule/id :seon.rule/query :seon.rule/assert :seon.rule/enabled?
-   :seon.task/plan :seon.task/proofs :seon.task/tests :seon.task/summary])
-
 (defn ^:seon.flow/edge branch-latest-edit-info
   "Delegates to `seon.ctx.diff/branch-latest-edit-info`."
   {:malli/schema [:function [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :map]
