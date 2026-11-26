@@ -12,7 +12,8 @@
             [datahike.api :as d]
             [seon.git :as git]
             [seon.store :as store]
-            [seon.switchover :as switchover]))
+            [seon.switchover :as switchover]
+            [seon.git.forks :as forks]))
 
 (defn- reply! [ch val]
   (when ch
@@ -131,6 +132,35 @@
         (reply! (:reply-ch msg) {:ok? false :branch (:branch msg) :error (or (.getMessage ex) (str ex))})
         [st {::flow/error [{:proc :git :op :write-back :error (.getMessage ex)}]}]))))
 
+(defn- handle-push! [st msg]
+  (let [repo (:repo-dir st)]
+    (if-not repo
+      (do (reply! (:reply-ch msg) {:ok? false :error "No repo-dir configured"}) [st nil])
+      (do (reply! (:reply-ch msg)
+                  (try (forks/push-all! repo {:dry-run? (boolean (:dry-run? msg))})
+                       (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))})))
+          [st nil]))))
+
+(defn- handle-switch-over! [st msg]
+  (cond
+    (:switching-over? st)
+    (do (reply! (:reply-ch msg) {:ok? false :error "Switch-over already in progress"}) [st nil])
+
+    (and (nil? (:on-switch-over msg)) (not (pos? (:port st 0))))
+    (do (reply! (:reply-ch msg) {:ok? false :error "Switch-over not configured on this instance"}) [st nil])
+
+    :else
+    (let [done-ch (:sw-done-ch st)
+          sw-fn (or (:on-switch-over msg)
+                    #(switchover/run-switch-over! {:repo-dir (:repo-dir st) :store-path (:store-path st) :port (:port st)}))
+          rch (:reply-ch msg)]
+      (a/io-thread
+        (let [ans (try (sw-fn) (catch Throwable ex {:ok? false :error (or (.getMessage ex) (str ex))}))]
+          (reply! rch ans)
+          (a/put! done-ch ans)))
+      [(assoc st :switching-over? true)
+       {::flow/report ["[:git] initiating atomic build + --self-test + --take-over switch-over..."]}])))
+
 (defn git-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]], :seon.flow/edge true}
   ([] {:params {:conn "Read access to store via :main conn"
@@ -166,7 +196,10 @@
       :branch-refs {}
       :commits 0
       ::flow/in-ports {:sw-done sw-done-ch}}))
-  ([st _] st)
+  ([st transition]
+  (when (= transition ::flow/stop)
+    (when-let [ch (:sw-done-ch st)] (a/close! ch)))
+  st)
   ([st cid msg]
    (cond
      (nil? msg)
@@ -192,7 +225,7 @@
                      :message (str "Core binary switch-over failed (running server left untouched): " (:error msg))}]
                ::flow/report [(str "[:git] switch-over FAILED (running server untouched): " (:error msg))]}]))
 
-     (nil? (:repo-dir st))
+     (and (nil? (:repo-dir st)) (not= :switch-over (:op msg)))
      (do (when-let [rch (:reply-ch msg)]
            (if (= :delete-branch-ref (:op msg))
              (reply! rch {:ok? true :deleted [] :deleted-refs [] :results [] :skipped :no-repo-dir})
@@ -208,4 +241,6 @@
        :diff-branch (handle-diff-branch! st msg)
        :delete-branch-ref (handle-delete-branch-ref! st msg)
        :write-back (handle-write-back! st msg)
+       :push (handle-push! st msg)
+       :switch-over (handle-switch-over! st msg)
        [st nil]))))

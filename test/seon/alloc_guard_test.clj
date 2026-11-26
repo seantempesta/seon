@@ -23,7 +23,15 @@
             [seon.bench.sampler]
             [seon.code.errors]
             [seon.code.reach.delta]
-            [seon.code.cst.meta]))
+            [seon.code.cst.meta]
+            [clojure.core.async]
+            [jolt.http-client]
+            [ring-chez.adapter]
+            [seon.agent]
+            [seon.bench.proxy]
+            [seon.browser]
+            [seon.vector.flow]
+            [seon.web]))
 
 (deftest file-import-and-transact-allocation-budget-test
   (testing "Importing and transacting a ~30 KB multi-form namespace stays well below 64 MB"
@@ -834,3 +842,75 @@
         (finally
           (seon.store/close! st)
           (seon.store/rm-rf! tmp))))))
+
+(deftest ^{:cost/ticks 250000000 :cost/bytes 1073741824} wave-a1-flow-proxy-web-browser-agent-model-vector-test
+  (testing "seon.bench.proxy Flow gate enforces atomic max-requests under concurrency and cleans up on stop"
+    (let [up-srv (ring-chez.adapter/run-server
+                   (fn [_]
+                     (clojure.core.async/<!! (clojure.core.async/timeout 40))
+                     {:status 200 :headers {"Content-Type" "application/json"}
+                      :body "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}"})
+                   {:port 0 :host "127.0.0.1" :strategy :fibers})
+          up-url (str "http://127.0.0.1:" (:port up-srv))
+          p (seon.bench.proxy/start! {:upstream-url up-url :port 0 :max-in-flight 2 :max-requests 2})]
+      (try
+        (let [chs (mapv (fn [_]
+                          (let [ch (clojure.core.async/chan 1)]
+                            (clojure.core.async/io-thread
+                              (let [r (jolt.http-client/post (str (:base-url p) "/chat/completions")
+                                                             {:headers {"Content-Type" "application/json"}
+                                                              :body "{}" :throw false})]
+                                (clojure.core.async/put! ch (:status r))))
+                            ch))
+                        (range 4))
+              statuses (mapv #(clojure.core.async/<!! %) chs)
+              st (seon.bench.proxy/stats p)]
+          (is (= 2 (count (filter #(= 200 %) statuses))) "strictly 2 requests pass max-requests=2")
+          (is (= 2 (count (filter #(= 429 %) statuses))) "strictly 2 concurrent requests rejected with 429")
+          (is (= 2 (:requests st)))
+          (is (= 2 (:rejected st)))
+          (is (= 0 (:in-flight st)))
+          (seon.bench.proxy/stop! p)
+          (is (= 2 (:requests (seon.bench.proxy/stats p))) "final stats remain readable after stop!"))
+        (finally
+          (seon.bench.proxy/stop! p)
+          (try (ring-chez.adapter/stop-server up-srv {:drain-timeout-ms 500}) (catch Throwable _ nil))))))
+  (testing "seon.web/start-http-listener! serializes SSE tabs and flushes without cross-thread volatiles"
+    (let [l (seon.web/start-http-listener! 0)]
+      (try
+        ((:set-page! l) "<html>ok</html>")
+        (is (= 0 ((:tab-count l))))
+        (finally ((:stop! l))))))
+  (testing "seon.browser/browser-proc serializes concurrent requests via :queue and fails waiters on stop"
+    (let [sent (volatile! [])
+          st0 (assoc (seon.browser/browser-proc {:port 0})
+                     :handle {:send! (fn [cmd] (vswap! sent conj cmd) true) :stop! (fn [])})
+          r1 (clojure.core.async/chan 1)
+          r2 (clojure.core.async/chan 1)
+          [st1 _] (seon.browser/browser-proc st0 :req {:op :measure-dom :reply-ch r1})
+          [st2 _] (seon.browser/browser-proc st1 :req {:op :snapshot :reply-ch r2})]
+      (is (= 1 (count (:pending st2))) "only 1 op active on shared WKWebView")
+      (is (= 1 (count (:queue st2))) "2nd concurrent op queued FIFO")
+      (is (= 1 (count @sent)) "2nd command not sent until 1st finishes")
+      (seon.browser/browser-proc st2 :clojure.core.async.flow/stop)
+      (is (= :browser-stopped (:error (clojure.core.async/poll! r1))))
+      (is (= :browser-stopped (:error (clojure.core.async/poll! r2))))))
+  (testing "seon.agent fails :eval-waiters on worker crash and queues :eval instead of bypassing max-os-procs"
+    (let [fork-ch (clojure.core.async/chan 16)
+          st0 (seon.agent/agents-proc {:conn nil :cfg {} :fork-out fork-ch :fork-agent-in (clojure.core.async/chan 4) :max-os-procs 1})
+          r1 (clojure.core.async/chan 1)
+          st1 (-> st0
+                  (assoc-in [:live :agent/a] {:pid 999 :branch :branch/a :mode :repl :busy? true :turns 0 :last-active 1})
+                  (assoc-in [:eval-waiters "eval-1"] {:reply-ch r1 :keep-warm? true :agent-id :agent/a}))
+          [st2 _] (seon.agent/agents-proc st1 :fork-ev {:ev :child-exited :agent-id :agent/a :pid 999 :raw-status 9})]
+      (is (= false (:ok? (clojure.core.async/poll! r1))) "crashed worker immediately fails eval-waiter")
+      (is (empty? (:eval-waiters st2)))
+      (seon.agent/agents-proc st2 :clojure.core.async.flow/stop)))
+  (testing "seon.model removed global multimodal atoms and seon.vector.flow fails queued waiters on stop"
+    (is (nil? (resolve 'seon.model/multimodal-unsupported-endpoints)))
+    (is (nil? (resolve 'seon.model/multimodal-fallback-logged)))
+    (let [st0 (seon.vector.flow/vectors-proc {:conn nil :enabled? false})
+          rq (clojure.core.async/chan 1)
+          st1 (assoc st0 :interactive-queue [{:op :embed-query :query "x" :reply-ch rq}])]
+      (seon.vector.flow/vectors-proc st1 :clojure.core.async.flow/stop)
+      (is (= :vectors-stopped (:error (clojure.core.async/poll! rq)))))))

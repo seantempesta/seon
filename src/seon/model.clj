@@ -112,8 +112,6 @@
                                     (str "(user/send-message! " parent " :report \"Defined " fn-ns "/" fn-sym " with passing deftest\")\n"))
                                   "(user/ready!)")}]}))))
 
-(defonce ^:private ^:seon.flow/edge multimodal-fallback-logged (atom #{}))
-
 (defn- messages-have-image-parts? [messages]
   (boolean
    (some (fn [m]
@@ -190,8 +188,6 @@
                 "unsupported image"
                 "invalid image"])))))
 
-(defonce ^:private ^:seon.flow/edge multimodal-unsupported-endpoints (atom #{}))
-
 (defn sanitize-wire-image-parts
   "Drops malformed or non-image `data:` `image_url` blocks before live HTTP submission so fake/test base64 never causes HTTP 400 provider rejections."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]
@@ -229,8 +225,8 @@
 
 (defn openai-stream-chat!
   "Streams one OpenAI-compatible `/chat/completions` request via `jolt.http-client` with `jolt.http.sse`.
-   Automatically retries transient pre-response transport IO errors (`Broken pipe`, `Connection reset`, etc.)
-   on a fresh socket (`Connection: close`) and transparently retries text-only if an endpoint rejects `image_url` parts."
+   Sanitizes image parts, retries transient pre-response transport IO errors (`Broken pipe`, `Connection reset`, etc.)
+   on a fresh socket (`Connection: close`), and transparently retries text-only if an endpoint rejects `image_url` parts."
   {:malli/schema [:function [:=> [:cat :map [:maybe :string] [:maybe [:sequential :map]] [:maybe :string] [:maybe :seon.host/fn]] :map] [:=> [:cat :map [:maybe :string] [:maybe [:sequential :map]] [:maybe :string] [:maybe [:sequential :map]] [:maybe :seon.host/fn]] :map]], :seon.flow/edge true, :cost/ticks 100000000}
   ([prov system-prompt history user-prompt on-delta]
    (openai-stream-chat! prov system-prompt history user-prompt nil on-delta))
@@ -242,17 +238,21 @@
                        {:error :seon.model/missing-api-key :env api-key-env})))
      (let [base-url (or (:base-url prov) "https://api.deepseek.com")
            url (str (str/replace base-url #"/+$" "") "/chat/completions")
+           unsupported-set (or (:unsupported-endpoints prov) #{})
+           logged-set (or (:fallback-logged prov) #{})
+           stop-ch (:stop-ch prov)
            raw-req (build-request-body (cond-> prov wire-messages (assoc :messages wire-messages))
-                                       system-prompt history user-prompt)
+           system-prompt history user-prompt)
            endpoint-k [base-url (or (:model prov) (:model raw-req))]
-           init-req (if (and (contains? @multimodal-unsupported-endpoints endpoint-k)
+           init-req (if (and (contains? unsupported-set endpoint-k)
                              (messages-have-image-parts? (:messages raw-req)))
                       (update raw-req :messages strip-image-parts)
                       raw-req)]
        (loop [attempt 0
               req-map init-req
               unsupported-4xx? false
-              net-retries 0]
+              net-retries 0
+              did-log? false]
          (let [req-body (json/write-str req-map)
                hdrs (cond-> {"Authorization" (str "Bearer " api-key)
                              "Content-Type" "application/json"
@@ -271,18 +271,21 @@
              (and (zero? attempt)
                   (messages-have-image-parts? (:messages req-map)))
              (do
-               (when-not (contains? @multimodal-fallback-logged endpoint-k)
-                 (swap! multimodal-fallback-logged conj endpoint-k)
+               (when-not (or did-log? (contains? logged-set endpoint-k))
                  (binding [*out* *err*]
                    (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
                                  ") dropped connection on image_url parts (" (.getMessage ^Throwable (:ex post-res))
                                  "); stripping image parts and retrying text-only (transient, not cached)."))))
-               (recur 1 (update req-map :messages strip-image-parts) false net-retries))
+               (recur 1 (update req-map :messages strip-image-parts) false net-retries true))
 
              (and (< net-retries 2) (transient-network-error? (:ex post-res)))
-             (do
-               (Thread/sleep (long (* 250 (inc net-retries))))
-               (recur attempt req-map unsupported-4xx? (inc net-retries)))
+             (let [delay-ms (long (* 250 (inc net-retries)))
+                   stopped? (when stop-ch
+                              (= stop-ch (second (a/alts!! [stop-ch (a/timeout delay-ms)]))))]
+               (when-not stop-ch (a/<!! (a/timeout delay-ms)))
+               (if stopped?
+                 (throw (ex-info "Model stopped during retry" {:error :seon.model/stopped}))
+                 (recur attempt req-map unsupported-4xx? (inc net-retries) did-log?)))
 
              :else
              (throw ^Throwable (:ex post-res)))
@@ -298,15 +301,12 @@
                             (messages-have-image-parts? (:messages req-map))
                             (multimodal-unsupported-error? status body-str))
                      (let [payload-err? (boolean (re-find #"(?i)uploaded an unsupported|unsupported image|invalid image" body-str))]
-                       (when-not payload-err?
-                         (swap! multimodal-unsupported-endpoints conj endpoint-k))
-                       (when-not (contains? @multimodal-fallback-logged endpoint-k)
-                         (swap! multimodal-fallback-logged conj endpoint-k)
+                       (when-not (or did-log? (contains? logged-set endpoint-k))
                          (binding [*out* *err*]
                            (println (str "[:model] endpoint " url " (model=" (second endpoint-k)
                                          ") rejected image_url parts (HTTP " status
                                          "); stripping image parts and retrying text-only."))))
-                       (recur 1 (update req-map :messages strip-image-parts) (not payload-err?) net-retries))
+                       (recur 1 (update req-map :messages strip-image-parts) (not payload-err?) net-retries true))
                      (let [hdrs (:headers resp)
                            retry-after (some (fn [[k v]]
                                                (when (= "retry-after" (str/lower-case (str k)))
@@ -314,24 +314,20 @@
                                              hdrs)]
                        (throw (ex-info (str "Model HTTP " status ": " (subs body-str 0 (min 300 (count body-str))))
                                        {:error (if (= 429 status) :seon.model/rate-limited :seon.model/provider-error)
-                                        :status status
-                                        :retry-after-ms retry-after
-                                        :headers hdrs
-                                        :body body-str})))))
-                 (do
-                   (when (and (pos? attempt) unsupported-4xx?)
-                     (swap! multimodal-unsupported-endpoints conj endpoint-k))
-                   (let [st-vol (volatile! (make-stream-state))]
-                     (when body
-                       (with-open [rdr (io/reader body :encoding "UTF-8")]
-                         (sse/read-events!
-                          rdr
-                          {:on-event (fn [ev]
-                                       (when-let [parsed (wire/decode-sse-data (:data ev))]
-                                         (let [[st1 delta] (process-sse-chunk parsed @st-vol)]
-                                           (vreset! st-vol st1)
-                                           (when (and delta on-delta) (on-delta delta)))))})))
-                     (finalize-stream-state @st-vol))))))))))))
+                                        :status status :retry-after-ms retry-after :headers hdrs :body body-str})))))
+                 (let [st-vol (volatile! (make-stream-state))]
+                   (when body
+                     (with-open [rdr (io/reader body :encoding "UTF-8")]
+                       (sse/read-events!
+                        rdr
+                        {:on-event (fn [ev]
+                                     (when-let [parsed (wire/decode-sse-data (:data ev))]
+                                       (let [[st1 delta] (process-sse-chunk parsed @st-vol)]
+                                         (vreset! st-vol st1)
+                                         (when (and delta on-delta) (on-delta delta)))))})))
+                   (cond-> (finalize-stream-state @st-vol)
+                     (and (pos? attempt) unsupported-4xx?) (assoc :mark-unsupported-endpoint endpoint-k)
+                     did-log? (assoc :mark-fallback-logged endpoint-k))))))))))))
 
 (defn model-proc
   {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat :any] :any] [:=> [:cat :any :any] :any] [:=> [:cat :any :any :any] :any]]}
@@ -351,18 +347,27 @@
                      :errors (:errors st 0)})})
   ([{:keys [provider ctrl-ch max-slots latency-ms]}]
    (let [done-ch (a/chan 32)
-         delta-ch (a/chan (a/sliding-buffer 128))]
+         delta-ch (a/chan (a/sliding-buffer 128))
+         stop-ch (a/chan)]
      {:provider (or provider {:type :built-in})
-     :done-ch done-ch
-     :delta-ch delta-ch
-     :max-slots (or max-slots 4)
-     :latency-ms (or latency-ms 60)
-     :in-flight #{}
-     :completed 0
-     :errors 0
-     :ctx-windows {}
-     ::flow/in-ports (cond-> {:done done-ch :delta delta-ch} ctrl-ch (assoc :ctrl ctrl-ch))}))
-  ([st _] st)
+      :done-ch done-ch
+      :delta-ch delta-ch
+      :stop-ch stop-ch
+      :max-slots (or max-slots 4)
+      :latency-ms (or latency-ms 60)
+      :in-flight #{}
+      :completed 0
+      :errors 0
+      :ctx-windows {}
+      :unsupported-endpoints #{}
+      :fallback-logged #{}
+      ::flow/in-ports (cond-> {:done done-ch :delta delta-ch} ctrl-ch (assoc :ctrl ctrl-ch))}))
+  ([st transition]
+   (when (= transition ::flow/stop)
+     (when-let [ch (:stop-ch st)] (a/close! ch))
+     (when-let [ch (:done-ch st)] (a/close! ch))
+     (when-let [ch (:delta-ch st)] (a/close! ch)))
+   st)
   ([st cid msg]
    (if (nil? msg)
      [st nil]
@@ -381,7 +386,10 @@
        (let [{:keys [req-id agent-id system-prompt history user-prompt wire-messages]} msg
              done-ch (:done-ch st)
              delta-ch (:delta-ch st)
-             prov (:provider st)
+             prov (assoc (:provider st)
+                         :unsupported-endpoints (:unsupported-endpoints st)
+                         :fallback-logged (:fallback-logged st)
+                         :stop-ch (:stop-ch st))
              delay-ms (:latency-ms st)
              ctx-toks (long (or (:context-tokens msg)
                                 (when (seq wire-messages)
@@ -391,48 +399,51 @@
              known-cw (when cw-key (get (:ctx-windows st) cw-key))
              probe-cw? (and cw-key (not (contains? (:ctx-windows st) cw-key)))]
          (a/go
-         (let [cw (if probe-cw?
-                    (let [v (wire/fetch-model-context-window! prov)]
-                      (when v (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status :ctx-meta :context-tokens ctx-toks :max-context-tokens v}))
-                      v)
-                    known-cw)
-               ans (try
-                     (if (= :openai-compat (:type prov))
-                       (openai-stream-chat!
-                        prov
-                        (or system-prompt default-system-prompt)
-                        (or history [])
-                        (or user-prompt (pr-str (select-keys msg [:agent-id :scope :role :goal :unread :turn :health])))
-                        wire-messages
-                        (fn [{:keys [kind text]}]
-                          (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status kind :text text})))
-                       (do (when (pos? delay-ms) (a/<! (a/timeout delay-ms)))
-                           (built-in-agent-synthesis msg)))
-                     (catch Throwable ex
-                       (error/model-error-response {:exception ex :provider prov :agent-id agent-id :branch (:branch msg) :req-id req-id})))]
-           (a/>! done-ch (cond-> {:req-id req-id :agent-id agent-id :response ans :context-tokens ctx-toks}
-                           (:branch msg) (assoc :branch (:branch msg))
-                           probe-cw? (assoc :cw-key cw-key :max-context-tokens cw)))))
+           (let [cw (if probe-cw?
+                      (let [v (wire/fetch-model-context-window! prov)]
+                        (when v (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status :ctx-meta :context-tokens ctx-toks :max-context-tokens v}))
+                        v)
+                      known-cw)
+                 ans (try
+                       (if (= :openai-compat (:type prov))
+                         (openai-stream-chat!
+                         prov
+                         (or system-prompt default-system-prompt)
+                         (or history [])
+                         (or user-prompt (pr-str (select-keys msg [:agent-id :scope :role :goal :unread :turn :health])))
+                         (when wire-messages (sanitize-wire-image-parts wire-messages))
+                         (fn [{:keys [kind text]}]
+                           (a/offer! delta-ch {:agent-id agent-id :req-id req-id :status kind :text text})))
+                         (do (when (pos? delay-ms) (a/<! (a/timeout delay-ms)))
+                             (built-in-agent-synthesis msg)))
+                       (catch Throwable ex
+                         (error/model-error-response {:exception ex :provider prov :agent-id agent-id :branch (:branch msg) :req-id req-id})))]
+             (a/>! done-ch (cond-> {:req-id req-id :agent-id agent-id :response ans :context-tokens ctx-toks}
+                             (:branch msg) (assoc :branch (:branch msg))
+                             probe-cw? (assoc :cw-key cw-key :max-context-tokens cw)))))
          [(sync-model-filter (update st :in-flight conj req-id))
           {:stream [(cond-> {:agent-id agent-id :status :thinking :req-id req-id :context-tokens ctx-toks}
                       (pos? (long (or known-cw 0))) (assoc :max-context-tokens known-cw))]}])
 
        :done
        (let [resp (:response msg)
-           err? (or (:error-entity resp) (:error resp) (:seon.error/kind resp))
-           usage (:usage resp)
-           p-toks (long (or (:prompt-tokens usage) (:context-tokens msg) 0))
-           c-toks (long (or (:completion-tokens usage) 0))
-           tot-toks (if (pos? p-toks) (+ p-toks c-toks) 0)
-           st' (-> st
-                   (update :in-flight disj (:req-id msg))
-                   (update :completed inc)
-                   (cond-> err? (update :errors (fnil inc 0))
-                           (:cw-key msg) (assoc-in [:ctx-windows (:cw-key msg)] (:max-context-tokens msg)))
-                   sync-model-filter)]
-       (if err?
-         [st' (error/model-error-outputs msg)]
-         [st' {:response [msg]
-               :stream [(cond-> {:agent-id (:agent-id msg) :status :done :req-id (:req-id msg)}
-                          (pos? tot-toks) (assoc :context-tokens tot-toks)
-                          (pos? (long (or (:max-context-tokens msg) 0))) (assoc :max-context-tokens (:max-context-tokens msg)))]}]))))))
+             err? (or (:error-entity resp) (:error resp) (:seon.error/kind resp))
+             usage (:usage resp)
+             p-toks (long (or (:prompt-tokens usage) (:context-tokens msg) 0))
+             c-toks (long (or (:completion-tokens usage) 0))
+             tot-toks (if (pos? p-toks) (+ p-toks c-toks) 0)
+             clean-msg (update msg :response dissoc :mark-unsupported-endpoint :mark-fallback-logged)
+             st' (-> st
+                     (update :in-flight disj (:req-id msg))
+                     (update :completed inc)
+                     (cond-> err? (update :errors (fnil inc 0))
+                             (:cw-key msg) (assoc-in [:ctx-windows (:cw-key msg)] (:max-context-tokens msg))
+                             (:mark-unsupported-endpoint resp) (update :unsupported-endpoints conj (:mark-unsupported-endpoint resp))
+                             (:mark-fallback-logged resp) (update :fallback-logged conj (:mark-fallback-logged resp)))
+                     sync-model-filter)]
+         (if err?
+           [st' (error/model-error-outputs clean-msg)]
+           [st' {:response [clean-msg]
+                 :stream [(cond-> {:agent-id (:agent-id msg) :status :done :req-id (:req-id msg)}
+                            (pos? tot-toks) (assoc :context-tokens tot-toks)
+                            (pos? (long (or (:max-context-tokens msg) 0))) (assoc :max-context-tokens (:max-context-tokens msg)))]}]))))))

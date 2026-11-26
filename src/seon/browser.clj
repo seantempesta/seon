@@ -4,73 +4,16 @@
    pixel-exact DOM box measurement (`:measure-dom`, `:measure-snippet`), and multi-width
    Hiccup frame capture (`:render-hiccup-frames`)."
   (:require [clojure.core.async :as a]
-            [clojure.data.json :as json]
-            [clojure.string :as str]
             [seon.browser.measure :as measure]
-            [seon.store :as store]
-            [jolt.fs :as fs]
-            [jolt.process :as proc]))
+            [seon.browser.headless :as headless]))
 
-(defn default-binary-path
-  "Returns executable path to `target/seon-browser` (or `SEON_BROWSER_BIN`) if present, else nil."
-  {:malli/schema [:=> [:cat] [:maybe :string]], :seon.flow/edge true}
-  []
-  (let [env-bin (System/getenv "SEON_BROWSER_BIN")
-        candidates (remove str/blank?
-                           [env-bin
-                            (str store/checkout-root "/target/seon-browser")
-                            (str (System/getProperty "user.dir") "/target/seon-browser")])]
-    (some (fn [p]
-            (when (and (fs/regular-file? p) (fs/executable? p))
-              (str (fs/absolutize p))))
-          candidates)))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.browser.headless/default-binary-path} default-binary-path [& args] (apply headless/default-binary-path args))
 
-(defn ^:seon.flow/edge start-browser-process!
-  "Starts `seon-browser --headless` via `jolt.process/process` (with `:shutdown destroy-tree`) and pumps JSON-line responses into `resp-ch`."
-  {:malli/schema [:=> [:cat :string :string :map :seon.host/chan] :map], :seon.flow/edge true}
-  [binary-path url {:keys [width height] :or {width 1280 height 820}} resp-ch]
-  (let [p (proc/process [binary-path "--headless" "--url" (str url)
-                         "--width" (str width) "--height" (str height)]
-                        {:shutdown proc/destroy-tree})
-        raw-proc (:proc p)
-        stdin-w (java.io.BufferedWriter. (java.io.OutputStreamWriter. (:in p) "UTF-8"))
-        stdout-r (java.io.BufferedReader. (java.io.InputStreamReader. (:out p) "UTF-8"))
-        send-lock (Object.)
-        send! (fn [cmd-map]
-                (try
-                  (locking send-lock
-                    (.write stdin-w (str (json/write-str cmd-map) "\n"))
-                    (.flush stdin-w))
-                  true
-                  (catch Throwable _ false)))
-        stop! (fn []
-                (try (send! {:op "quit"}) (catch Throwable _))
-                (try (.close stdin-w) (catch Throwable _))
-                (try (proc/destroy-tree p) (catch Throwable _)))]
-    (a/thread
-      (try
-        (loop []
-          (when-let [line (.readLine stdout-r)]
-            (when-not (str/blank? line)
-              (when-let [parsed (try (json/read-str line :key-fn keyword) (catch Throwable _ nil))]
-                (a/put! resp-ch parsed)))
-            (recur)))
-        (catch Throwable _ nil)
-        (finally
-          (try (.close stdout-r) (catch Throwable _))
-          (a/put! resp-ch {:event "exited"}))))
-    {:proc raw-proc :process p :binary binary-path :url url :send! send! :stop! stop!}))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.browser.headless/start-browser-process!} start-browser-process! [& args] (apply headless/start-browser-process! args))
 
-(defn- ^:seon.flow/edge safe-start-browser! [bin url dims ipc-ch]
-  (try (start-browser-process! bin url dims ipc-ch) (catch Throwable _ nil)))
+(defn- safe-start-browser! [& args] (apply headless/safe-start-browser! args))
 
-(defn- normalize-snapshot [msg]
-  (when (and (:ok msg) (not (str/blank? (str (:base64 msg)))))
-    {:route (or (get-in msg [:dom :url]) "/")
-     :width (:width msg 1280) :height (:height msg 820)
-     :mime (or (:mime msg) "image/jpeg") :bytes (:bytes msg) :ms (:ms msg)
-     :base64 (:base64 msg) :dom (or (:dom msg) {})
-     :captured-at (System/currentTimeMillis)}))
+(defn- normalize-snapshot [& args] (apply headless/normalize-snapshot args))
 
 (defn next-retry-delay
   "Bounded exponential backoff in ms for attempt `attempt` (0-based): 250, 500, 1000, capped at 2000."
@@ -79,17 +22,7 @@
   (let [a (max 0 (long (or attempt 0)))]
     (long (min 2000 (* 250 (bit-shift-left 1 (min a 6)))))))
 
-(defn loaded?
-  "True when an `eval_js` DOM-probe `:value` represents a rendered Seon document (has `#seon-app` or >=2 real children, rejecting 503 `<pre>Seon booting...</pre>`)."
-  {:malli/schema [:=> {:examples [[[{:app true, :children 5}] true] [[{:children 0, :readyState "complete"}] false] [[{:app false, :children 1, :booting true}] false]]} [:cat :any] :boolean]
-   :cost/ticks 5000 :cost/bytes 4096}
-  [value]
-  (boolean
-   (and (map? value)
-        (nil? (:error value))
-        (not (true? (:booting value)))
-        (or (true? (:app value))
-            (>= (long (or (:children value) 0)) 2)))))
+(defn ^{:seon.code/reexport 'seon.browser.headless/loaded?} loaded? [& args] (apply headless/loaded? args))
 
 (defn retry-exhausted?
   "True when `attempt` reached `max-attempts` or `now-ms` reached `deadline-ms`."
@@ -98,36 +31,13 @@
   (or (>= (long attempt) (long max-attempts))
       (>= (long now-ms) (long deadline-ms))))
 
-(defn- dom-probe-js []
-  (str "(function(){try{var b=document.body;var boot=!!(b&&b.children.length===1&&b.firstElementChild&&b.firstElementChild.tagName==='PRE');return{"
-       "readyState:document.readyState,children:b?b.children.length:0,booting:boot,"
-       "svgs:document.querySelectorAll('svg').length,"
-       "app:!!document.getElementById('seon-app'),url:location.href};"
-       "}catch(e){return{error:String(e)};}})()"))
+(defn- dom-probe-js [& args] (apply headless/dom-probe-js args))
 
-(defn- coerce-html [x]
-  (cond
-    (nil? x) ""
-    (string? x) x
-    (and (map? x) (contains? x :seon.ui/hiccup)) (coerce-html (:seon.ui/hiccup x))
-    :else (let [f (or (when-let [v (find-var 'seon.render/hiccup->html)] (when (bound? v) @v))
-                      (requiring-resolve 'seon.render/hiccup->html))]
-            (str (f x)))))
+(defn- coerce-html [& args] (apply headless/coerce-html args))
 
-(defn- normalize-widths [ws]
-  (let [raw (if (and (sequential? ws) (seq ws)) ws [360 640 1100])
-        cleaned (->> raw
-                     (keep #(when (number? %)
-                              (let [d (double %)]
-                                (when (and (== d d) (not (Double/isInfinite d)))
-                                  (max 120 (min 4096 (long (Math/round d))))))))
-                     (take 8) vec)]
-    (if (seq cleaned) cleaned [360 640 1100])))
+(defn- normalize-widths [& args] (apply headless/normalize-widths args))
 
-(defn- frame-label [prefix w]
-  (if (and (string? prefix) (not (str/blank? prefix)))
-    (str (str/trim prefix) " · " w "px")
-    (str w "px")))
+(defn- frame-label [& args] (apply headless/frame-label args))
 
 (defn- error-reply [st op err job]
   (case op
@@ -183,31 +93,7 @@
           [(assoc-in st [:verify :phase] :waiting)
            {:clojure.core.async.flow/report [(str "[:browser] viewport blank; re-navigating attempt " a " in " delay "ms")]}])))))
 
-(defn- ^:seon.flow/edge ipc-await! [ipc-ch pred timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) (long timeout-ms))]
-    (loop []
-      (let [rem (- deadline (System/currentTimeMillis))]
-        (if (<= rem 0)
-          {:ok false :error :timeout}
-          (let [[v ch] (a/alts!! [ipc-ch (a/timeout rem)])]
-            (cond
-              (not= ch ipc-ch) {:ok false :error :timeout}
-              (nil? v) {:ok false :error :closed}
-              (= "exited" (:event v)) {:ok false :error :browser-exited}
-              (pred v) v
-              :else (recur))))))))
-
-(defn- ^:seon.flow/edge ipc-call! [handle ipc-ch cmd-id cmd timeout-ms]
-  (if-not ((:send! handle) (assoc cmd :id cmd-id))
-    {:ok false :error :send-failed}
-    (ipc-await! ipc-ch #(= cmd-id (:id %)) timeout-ms)))
-
-(defn headless-url
-  "Appends `#seon-headless` when no `#` fragment is present so headless previews never overwrite `:viewport-w`."
-  {:malli/schema [:=> [:cat :string] :string] :cost/ticks 5000 :cost/bytes 4096}
-  [url]
-  (let [u (str url)]
-    (if (or (str/blank? u) (str/includes? u "#")) u (str u "#seon-headless"))))
+(defn ^{:seon.code/reexport 'seon.browser.headless/headless-url} headless-url [& args] (apply headless/headless-url args))
 
 (defn- reply! [ch v]
   (when ch (a/put! ch v) (a/close! ch)))
@@ -219,128 +105,13 @@
            req-id (assoc :agents-res [{:req-id req-id :agent-id agent-id :snapshot snap}])
            snap (assoc :web-snap [{:snapshot snap}]))]))
 
-(defn- clamp [v d lo hi]
-  (max lo (min hi (long (or v d)))))
+(defn- clamp [& args] (apply headless/clamp args))
 
-(defn- snap-height-for-dom [explicit-h dom]
-  (if (and (number? explicit-h) (pos? (long explicit-h)))
-  (clamp explicit-h 200 200 2400)
-  (clamp (+ (max 0 (long (or (:h dom) 240))) 24) 240 220 1200)))
+(defn- snap-height-for-dom [& args] (apply headless/snap-height-for-dom args))
 
-(defn- ^:seon.flow/edge with-headless-browser! [url o on-err f]
-  (let [bin (or (:binary-path o) (default-binary-path))
-        w (clamp (:width o) 1280 240 4096)
-        h (clamp (:height o) 820 240 4096)
-        tmo (clamp (:timeout-ms o) 8000 500 20000)
-        settle (clamp (:settle-ms o) 180 0 3000)
-        hurl (headless-url url)]
-    (if-not (and (string? bin) (fs/executable? bin))
-      (on-err :browser-unavailable)
-      (let [ipc-ch (a/chan 32)
-            handle (safe-start-browser! bin hurl {:width w :height h} ipc-ch)]
-        (if-not handle
-          (do (a/close! ipc-ch) (on-err :browser-spawn-failed))
-          (try
-            (let [rdy (ipc-await! ipc-ch #(= "ready" (:event %)) tmo)]
-              (if (:error rdy)
-                (on-err :ready-timeout)
-                (let [nav (ipc-call! handle ipc-ch 1 {:op "navigate" :url hurl} tmo)]
-                  (if-not (:ok nav)
-                    (on-err (or (:error nav) :navigate-failed))
-                    (let [next-id (loop [attempt 0 cid 2]
-                                    (let [pr (ipc-call! handle ipc-ch cid {:op "eval_js" :code (dom-probe-js)} 2500)]
-                                      (if (or (loaded? (:value pr)) (>= attempt 5))
-                                        (inc cid)
-                                        (do (Thread/sleep 120) (recur (inc attempt) (inc cid))))))]
-                      (when (pos? settle) (Thread/sleep settle))
-                      (f handle ipc-ch next-id tmo w h))))))
-            (finally
-              ((:stop! handle))
-              (a/close! ipc-ch))))))))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.browser.headless/measure-live-url!} measure-live-url! [& args] (apply headless/measure-live-url! args))
 
-(defn ^:seon.flow/edge measure-live-url!
-  "Spawns headless `seon-browser` against `url`, measures DOM boxes (and optional `:snippets`),
-   analyzes pixel fit + hint calibrations, and terminates the child process cleanly in `finally`."
-  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string [:maybe :map]] :map]]}
-  ([url] (measure-live-url! url nil))
-  ([url opts]
-   (let [o (if (map? opts) opts {})
-         on-err (fn [e] {:ok? false :error e :url url :analysis nil :calibration {} :snippets []})]
-     (with-headless-browser! url o on-err
-       (fn [handle ipc-ch next-id tmo w h]
-         (let [js (measure/measure-boxes-js (select-keys o [:selector :max-elements]))
-               dom-r (ipc-call! handle ipc-ch next-id {:op "eval_js" :code js} tmo)
-               analysis (measure/analyze-pixel-fit
-                         (if (:ok dom-r) (:value dom-r) {:error (or (:error dom-r) "eval_js failed")}))
-               snips (vec
-                      (map-indexed
-                       (fn [idx sn]
-                         (let [sw (max 32 (min 10000 (long (or (:slot-w sn) w))))
-                               sr (ipc-call! handle ipc-ch (+ next-id 1 idx)
-                                             {:op "eval_js"
-                                              :code (measure/measure-html-snippet-js
-                                                     (coerce-html (or (:html sn) (:hiccup sn))) sw)}
-                                             tmo)
-                               norm (if (:ok sr)
-                                      (measure/normalize-snippet-measurement (:value sr))
-                                      {:ok? false :error (or (:error sr) :eval-js-failed)
-                                       :w 0 :h 0 :area 0 :scroll-w 0 :scroll-h 0 :overflow-x? false})]
-                           (cond-> norm (contains? sn :id) (assoc :id (:id sn)))))
-                       (or (:snippets o) [])))]
-           {:ok? (:ok? analysis) :url url :width w :height h
-            :analysis analysis :calibration (measure/calibrate-hints analysis)
-            :snippets snips :raw (:value dom-r)}))))))
-
-(defn ^:seon.flow/edge render-hiccup-frames!
-  "Renders `html-or-hiccup` across display widths (default `[360 640 1100]`) using a `:browser`
-   `:req` channel or live URL, returning canonical `:seon.media/image` `:frames`."
-  {:malli/schema [:function [:=> [:cat :any :any] :map] [:=> [:cat :any :any [:maybe :map]] :map]]}
-  ([browser-or-url html-or-hiccup] (render-hiccup-frames! browser-or-url html-or-hiccup nil))
-  ([browser-or-url html-or-hiccup opts]
-   (let [o (if (map? opts) opts {})
-         html (coerce-html html-or-hiccup)
-         widths (normalize-widths (:widths o))
-         {:keys [theme height quality max-width label-prefix]} o
-         q (or quality 0.78)
-         tmo (clamp (:timeout-ms o) 8000 1000 20000)]
-     (if (instance? clojure.core.async.impl.channels.ManyToManyChannel browser-or-url)
-       (let [rch (a/chan 1)
-             total-tmo (max tmo (* (inc (count widths)) 3500))]
-         (a/put! browser-or-url
-                 {:op :render-hiccup-frames :html html :widths widths :theme theme
-                  :height height :quality q :max-width max-width
-                  :label-prefix label-prefix :step-timeout-ms (min 5000 tmo) :reply-ch rch})
-         (let [[v ch] (a/alts!! [rch (a/timeout total-tmo)])]
-           (a/close! rch)
-           (if (= ch rch) (or v {:ok? false :error :empty-reply :frames []})
-               {:ok? false :error :render-frames-timeout :frames []})))
-       (let [url (if (and (string? browser-or-url) (not (str/blank? browser-or-url)))
-                   browser-or-url "http://127.0.0.1:9998/")
-             fail (fn [e acc] {:ok? false :error e :url url :widths widths :frames acc})]
-         (with-headless-browser! url (assoc o :width (first widths) :height (or height 820)) #(fail % [])
-           (fn [handle ipc-ch next-id tmo _ _]
-             (try
-               (loop [ws widths cid next-id acc []]
-                 (if (empty? ws)
-                   {:ok? true :url url :widths widths :frames acc}
-                   (let [w (first ws)
-                         st-r (ipc-call! handle ipc-ch cid {:op "eval_js" :code (measure/stage-hiccup-js html w theme)} tmo)
-                         sdom (when (:ok st-r) (measure/normalize-snippet-measurement (:value st-r)))]
-                     (if-not (and (:ok st-r) (:ok? sdom))
-                       (fail (or (:error st-r) (:error sdom) :stage-failed) acc)
-                       (let [sw (max 200 (long w))
-                             sh (snap-height-for-dom height sdom)
-                             sn-r (ipc-call! handle ipc-ch (inc cid)
-                                             {:op "snapshot" :width sw :height sh
-                                              :max_width (max 320 (long (or max-width sw))) :quality q} tmo)
-                             snap (normalize-snapshot sn-r)]
-                         (if-not snap
-                           (fail (or (:error sn-r) :snapshot-failed) acc)
-                           (recur (rest ws) (+ cid 2)
-                                  (conj acc (measure/normalize-image-frame snap (frame-label label-prefix w) w sdom)))))))))
-               (finally
-                 (try (ipc-call! handle ipc-ch 99999 {:op "eval_js" :code (measure/clear-stage-js)} 1000)
-                      (catch Throwable _)))))))))))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.browser.headless/render-hiccup-frames!} render-hiccup-frames! [& args] (apply headless/render-hiccup-frames! args))
 
 (defn- send-verify-cmd [st phase attempt cmd tmo-ms]
   (let [cmd-id (inc (long (:cmd-seq st)))
@@ -364,7 +135,7 @@
                  (send-verify-probe 0))]
       [st {:clojure.core.async.flow/report ["[:browser] verifying rendered viewport after ready"]}])))
 
-(defn- handle-req [st {:keys [op req-id agent-id reply-ch wait-ms] :as msg}]
+(defn- dispatch-req [st {:keys [op req-id agent-id reply-ch wait-ms] :as msg}]
   (let [handle (:handle st)
         timer-ch (get-in st [:clojure.core.async.flow/in-ports :timer])]
     (cond
@@ -382,7 +153,7 @@
                  :max_width (or (:max-width msg) 1024) :quality (or (:quality msg) 0.74)}
             send! (:send! handle) delay-ms (long (or wait-ms 0))]
         (if (pos? delay-ms)
-          (a/go (a/<! (a/timeout delay-ms)) (when-not (send! cmd) (a/put! timer-ch {:ev :timeout :id cmd-id})))
+          (a/go (a/<! (a/timeout delay-ms)) (a/put! timer-ch {:ev :send-delayed :id cmd-id :cmd cmd}))
           (when-not (send! cmd) (a/put! timer-ch {:ev :timeout :id cmd-id})))
         (a/go (a/<! (a/timeout (+ delay-ms 2200))) (a/put! timer-ch {:ev :timeout :id cmd-id}))
         [(-> st (assoc :cmd-seq cmd-id)
@@ -421,6 +192,16 @@
 
       :else [st nil])))
 
+(defn- sync-browser-filter [st]
+  (if (>= (count (:queue st)) 32)
+    (assoc st :clojure.core.async.flow/input-filter #{:ipc :timer})
+    (dissoc st :clojure.core.async.flow/input-filter)))
+
+(defn- handle-req [st msg]
+  (if (and (:handle st) (seq (:pending st)))
+    [(sync-browser-filter (update st :queue conj msg)) nil]
+    (dispatch-req st msg)))
+
 (defn- maybe-auto-recover [st analysis raw-val]
   (if (and (nil? (:verify st))
            (get-in st [:handle :send!])
@@ -432,30 +213,6 @@
 (defn- restore-size! [st]
   (when-let [send! (get-in st [:handle :send!])]
     (send! {:id 0 :op "resize" :width (or (:width st) 1280) :height (or (:height st) 820)})))
-
-(defn- handle-timer [st msg]
-  (case (:ev msg)
-    :verify-navigate (if (= :waiting (get-in st [:verify :phase]))
-                       [(send-verify-navigate st (long (:attempt msg))) nil] [st nil])
-    :verify-timeout (if (and (:verify st) (= (:id msg) (get-in st [:verify :cmd-id])))
-                      (verify-probe-reply st {:error "verify-timeout"}) [st nil])
-    (let [cmd-id (:id msg)]
-      (if-let [{:keys [req-id agent-id reply-ch op phase job]} (get-in st [:pending cmd-id])]
-        (do
-          (when (and (= op :render-hiccup-frames) (not= phase :clear))
-            (when-let [send! (get-in st [:handle :send!])]
-              (send! {:id 0 :op "eval_js" :code (measure/clear-stage-js)}))
-            (restore-size! st))
-          (reply! reply-ch
-                  (if (and (= op :render-hiccup-frames) (= phase :clear) (nil? (:error job)) (seq (:frames job)))
-                    {:ok? true :widths (:all-widths job) :frames (vec (:frames job))}
-                    (error-reply st op (case op
-                                         (:measure-dom :measure-snippet) :measure-timeout
-                                         :render-hiccup-frames :render-frames-timeout
-                                         :snapshot-timeout) job)))
-          [(update st :pending dissoc cmd-id)
-           (when req-id {:agents-res [{:req-id req-id :agent-id agent-id :snapshot (:last-snap st)}]})])
-        [st nil]))))
 
 (defn- handle-render-frames-ipc [st {:keys [phase cur-width reply-ch job]} msg]
   (case phase
@@ -531,6 +288,46 @@
     (do (reply! reply-ch {:ok? (boolean (:ok msg)) :raw msg})
         [st (when req-id {:agents-res [{:req-id req-id :agent-id agent-id :snapshot nil}]})])))
 
+(defn- drain-browser-queue [st out]
+  (if (and (:handle st) (empty? (:pending st)) (seq (:queue st)))
+    (let [nxt (peek (:queue st))
+          st1 (sync-browser-filter (update st :queue pop))
+          [st2 out2] (dispatch-req st1 nxt)
+          merged (if (and out out2) (merge-with into out out2) (or out out2))]
+      (if (and (empty? (:pending st2)) (seq (:queue st2)))
+        (recur st2 merged)
+        [st2 merged]))
+    [(sync-browser-filter st) out]))
+
+(defn- handle-timer [st msg]
+  (case (:ev msg)
+    :verify-navigate (if (= :waiting (get-in st [:verify :phase]))
+                       [(send-verify-navigate st (long (:attempt msg))) nil] [st nil])
+    :verify-timeout (if (and (:verify st) (= (:id msg) (get-in st [:verify :cmd-id])))
+                      (verify-probe-reply st {:error "verify-timeout"}) [st nil])
+    :send-delayed (let [cmd-id (:id msg) send! (get-in st [:handle :send!])
+                        tch (get-in st [:clojure.core.async.flow/in-ports :timer])]
+                    (when (and send! (contains? (:pending st) cmd-id))
+                      (when-not (send! (:cmd msg)) (a/put! tch {:ev :timeout :id cmd-id})))
+                    [st nil])
+    (let [cmd-id (:id msg)]
+      (if-let [{:keys [req-id agent-id reply-ch op phase job]} (get-in st [:pending cmd-id])]
+        (do
+          (when (and (= op :render-hiccup-frames) (not= phase :clear))
+            (when-let [send! (get-in st [:handle :send!])]
+              (send! {:id 0 :op "eval_js" :code (measure/clear-stage-js)}))
+            (restore-size! st))
+          (reply! reply-ch
+                  (if (and (= op :render-hiccup-frames) (= phase :clear) (nil? (:error job)) (seq (:frames job)))
+                    {:ok? true :widths (:all-widths job) :frames (vec (:frames job))}
+                    (error-reply st op (case op
+                                         (:measure-dom :measure-snippet) :measure-timeout
+                                         :render-hiccup-frames :render-frames-timeout
+                                         :snapshot-timeout) job)))
+          (drain-browser-queue (update st :pending dissoc cmd-id)
+                               (when req-id {:agents-res [{:req-id req-id :agent-id agent-id :snapshot (:last-snap st)}]})))
+        [st nil]))))
+
 (defn- handle-ipc [st msg]
   (cond
     (= "ready" (:event msg))
@@ -539,12 +336,17 @@
       [st {:clojure.core.async.flow/report (into (get out :clojure.core.async.flow/report []) [ready])}])
 
     (= "exited" (:event msg))
-    (let [outs (keep (fn [[_ {:keys [req-id agent-id reply-ch op job]}]]
-                     (reply! reply-ch (error-reply st op :browser-exited job))
-                     (when req-id {:req-id req-id :agent-id agent-id :snapshot nil}))
-                     (:pending st))]
-      [(assoc st :handle nil :ready? false :pending {} :verify nil)
-       (when (seq outs) {:agents-res (vec outs)})])
+    (let [p-outs (keep (fn [[_ {:keys [req-id agent-id reply-ch op job]}]]
+                         (reply! reply-ch (error-reply st op :browser-exited job))
+                         (when req-id {:req-id req-id :agent-id agent-id :snapshot nil}))
+                       (:pending st))
+          q-outs (keep (fn [{:keys [req-id agent-id reply-ch op]}]
+                         (reply! reply-ch (error-reply st op :browser-exited nil))
+                         (when req-id {:req-id req-id :agent-id agent-id :snapshot nil}))
+                       (:queue st))
+          outs (vec (concat p-outs q-outs))]
+      [(sync-browser-filter (assoc st :handle nil :ready? false :pending {} :queue clojure.lang.PersistentQueue/EMPTY :verify nil))
+       (when (seq outs) {:agents-res outs})])
 
     (and (:verify st) (= (:id msg) (get-in st [:verify :cmd-id])))
     (if (= :navigate (get-in st [:verify :phase]))
@@ -554,8 +356,9 @@
       (verify-probe-reply st (:value msg)))
 
     (contains? (:pending st) (:id msg))
-    (let [cid (:id msg)]
-      (handle-pending-ipc (update st :pending dissoc cid) (get-in st [:pending cid]) msg))
+    (let [cid (:id msg)
+          [st1 out1] (handle-pending-ipc (update st :pending dissoc cid) (get-in st [:pending cid]) msg)]
+      (drain-browser-queue st1 out1))
 
     :else [st nil]))
 
@@ -569,11 +372,11 @@
        :outs {:agents-res "Snapshot replies {:req-id :agent-id :snapshot} back to :agents"
               :web-snap "Latest live viewport snapshot {:snapshot} for :web Debug View"}
        :workload :io
-       :doc "Native embedded macOS WKWebView host providing live viewport snapshots, pixel-exact DOM measurement, off-screen snippet probing, and multi-width Hiccup frame capture."
+       :doc "Native embedded macOS WKWebView host providing serialized live viewport snapshots, pixel-exact DOM measurement, off-screen snippet probing, and multi-width Hiccup frame capture."
        :ping-map-fn (fn [st]
                       {:enabled? (boolean (:handle st)) :ready? (boolean (:ready? st))
                        :verified? (:verified? st) :verify-phase (get-in st [:verify :phase])
-                       :snaps (:snap-count st 0) :pending (count (:pending st))
+                       :snaps (:snap-count st 0) :pending (count (:pending st)) :queued (count (:queue st))
                        :last-ms (get-in st [:last-snap :ms]) :last-bytes (get-in st [:last-snap :bytes])})})
   ([{:keys [port binary-path width height]}]
    (let [ipc-ch (a/chan 32) timer-ch (a/chan 32)
@@ -582,11 +385,16 @@
          url (when bin (headless-url (str "http://127.0.0.1:" port "/")))
          handle (when bin (safe-start-browser! bin url {:width w :height h} ipc-ch))]
      {:port port :url url :width w :height h :handle handle
-      :ready? false :verified? nil :verify nil :cmd-seq 0 :pending {} :snap-count 0 :last-snap nil
+      :ready? false :verified? nil :verify nil :cmd-seq 0 :pending {}
+      :queue clojure.lang.PersistentQueue/EMPTY :snap-count 0 :last-snap nil
       :clojure.core.async.flow/in-ports {:ipc ipc-ch :timer timer-ch}}))
   ([st transition]
    (when (= transition :clojure.core.async.flow/stop)
-     (when-let [stop! (get-in st [:handle :stop!])] (stop!)))
+     (doseq [[_ {:keys [reply-ch op job]}] (:pending st)] (reply! reply-ch (error-reply st op :browser-stopped job)))
+     (doseq [{:keys [reply-ch op]} (:queue st)] (reply! reply-ch (error-reply st op :browser-stopped nil)))
+     (when-let [stop! (get-in st [:handle :stop!])] (stop!))
+     (when-let [ch (get-in st [:clojure.core.async.flow/in-ports :ipc])] (a/close! ch))
+     (when-let [ch (get-in st [:clojure.core.async.flow/in-ports :timer])] (a/close! ch)))
    st)
   ([st cid msg]
    (if (nil? msg) [st nil]

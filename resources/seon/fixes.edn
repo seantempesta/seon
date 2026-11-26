@@ -634,4 +634,12 @@
   :seon.fix/error-class :stale-coordinator-branch-read-and-as-user-shadowing,
   :seon.fix/root-cause "1) ns-outline, tests-for, grep-src, ns-list, callers, callees read @conn (stale branch) instead of reading through to :main on clean coordinator branches. 2) [seon.transactor.user :as user] shadowed user/* REPL helpers and fuzzy-user-helper-hint echoed Did you mean: user/<same>. 3) seon.bench.sampler sampled/verified :seon.code/reexport stubs and lacked :multi-ns-tests. 4) check-examples-against-arities crashed on bare :variadic / vector arities.",
   :seon.fix/regression-test seon.alloc-guard-test/wave29b-clean-branch-read-through-reexport-sampler-and-as-user-test,
-  :seon.fix/id #uuid "9feaf249-7e03-451e-a32a-dc94605b7cd7"}]
+  :seon.fix/id #uuid "9feaf249-7e03-451e-a32a-dc94605b7cd7"}
+ {:seon.fix/created-ms 1795658905253,
+  :seon.fix/symptom "Independent 4-auditor sweep found active SSE volatile races in seon.web, TOCTOU budget overshoot + permit/stream leaks in seon.bench.proxy, unserialized WKWebView in seon.browser, crashed-worker waiter hangs & max-os-procs bypass in seon.agent, global atoms & Broken-pipe image stripping in seon.model, per-batch OS threads in seon.vector.flow, proxy/a/thread leaks in bench.{cluster,lab}, and racing :push/:switch-over threads in seon.server.",
+  :seon.fix/change-summary "Converted seon.bench.proxy to pure Flow :gate proc with atomic budget/slot grants & stream teardown; replaced 6 volatiles + live-st in seon.web with serialized hub channel & :render-page; serialized seon.browser via FIFO :queue + timer-ch (deleting send-lock, splitting seon.browser.headless); fixed seon.agent crash cleanup, max-os-procs :queued-evals, and awaiting-caller LRU priority; moved seon.model multimodal state into Flow + wired sanitize-wire-image-parts; routed :push/:switch-over into :git proc; moved seon.vector.flow onto single persistent io-thread worker with bounded interactive queue; serialized bench.cluster publisher & routed bench.lab async cycles to coordinator.",
+  :seon.fix/before-after "Before: 6 web volatiles, proxy TOCTOU + stuck :in-flight 1, concurrent WKWebView corruption, leaked crash waiters, global model atoms, COW-worker lab thread leak. After: 100% single-owner Flow/channel serialization, clean ::flow/stop teardown, zero permit/proxy/waiter leaks.",
+  :seon.fix/error-class :non-flow-concurrency-races-and-resource-leaks,
+  :seon.fix/root-cause "Ad-hoc cross-thread volatiles, channel semaphores, unbounded OS a/thread spawns, and unserialized shared edges bypassed clojure.core.async.flow single-owner state machines.",
+  :seon.fix/regression-test seon.alloc-guard-test/wave-a1-flow-proxy-web-browser-agent-model-vector-test,
+  :seon.fix/id #uuid "72991683-1b5a-40fb-b01a-9bb1a47de723"}]

@@ -73,26 +73,6 @@
           (>= (System/currentTimeMillis) deadline) {:outcome :intervene :reason :timeout :status wstatus :detail det}
           :else (recur))))))
 
-(defn- publish-lab-run!
-  {:seon.flow/edge true}
-  [coord-url run-id title tid started-ms status trial-map finished-ms]
-  (let [px (:proxy-stats trial-map)
-        ent (cond-> {:seon.bench.run/id run-id
-                     :seon.bench.run/title title
-                     :seon.bench.run/suite-id :lab/supervisor-cycle
-                     :seon.bench.run/status status
-                     :seon.bench.run/started-ms (long started-ms)
-                     :seon.bench.run/updated-ms (System/currentTimeMillis)
-                     :seon.bench.run/total 1
-                     :seon.bench.run/passed (if (= :passed status) 1 0)
-                     :seon.bench.run/failed (if (= :failed status) 1 0)
-                     :seon.bench.run/trials [(assoc trial-map :pair-id tid :arm :supervised)]}
-              (map? px) (assoc :seon.bench.run/proxy-stats px)
-              finished-ms (assoc :seon.bench.run/finished-ms (long finished-ms)))]
-    (try (cluster/instance-op! {:base-url coord-url}
-                               {:op :transact :tx-data [ent] :reason [:lab-run run-id]})
-         (catch Throwable _ nil))))
-
 (defn summarize-bench-run
   "Formats a `:seon.bench.run/*` entity map into a crisp summary with KV hit %, per-trial outcomes, `:error-samples`, and `:failing-tests`."
   {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :map]]
@@ -223,67 +203,88 @@
         worker-br (keyword "branch" (str "w-" slug))
         tuner-id (keyword "tune" (str "t-" slug))
         t0 (System/nanoTime)
-        proxy-inst (when-not (false? (:proxy? opts)) (proxy/start! {}))
-        inst (cluster/start-instance! (cond-> {:id (keyword "lab" slug) :seed-store seed-store :max-os-procs 3 :max-test-workers 2 :timeout-ms 60000}
-                                        proxy-inst (assoc :model-base-url (:base-url proxy-inst))))
-        base-mtx (long (or (:main-tx (cluster/instance-op! inst {:op :status})) 0))]
+        proxy-inst (when-not (false? (:proxy? opts)) (proxy/start! {}))]
     (try
-      (let [pre-ags (:agents (cluster/instance-op! inst {:op :status}))
-            p-tx (vec (keep #(when (and (:id %) (not= :paused (:status %))) {:seon.agent/id (:id %) :seon.agent/paused? true}) pre-ags))]
-        (when (seq p-tx) (cluster/instance-op! inst {:op :transact :tx-data p-tx :reason :lab-isolate})))
-      (cluster/instance-op! inst (assoc (select-keys inner [:id :scope :title :plan :tests :needs]) :op :create-task))
-      (cluster/instance-op! inst (cond-> {:op :spawn-agent :id worker-id :branch worker-br :task tid
-                                          :goal (str (or (:title inner) (name tid))) :auto-merge? true
-                                          :config {:seon.config/auto-refine-tasks? false :seon.config/max-tool-turns max-tool-turns}}
-                                   (:scope inner) (assoc :scope (:scope inner))))
-      (cluster/instance-op! inst {:op :send-message :from :user :to worker-id :type :chat
-                                  :body "Work your assigned task, verify your changes pass tests and health, then reply concisely with your summary."})
-      (let [watch (do (when-let [cb (:on-phase! opts)] (cb {:phase :watching :turns 0 :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
-                  (watch-worker-until-trigger! inst worker-id worker-br timeout-ms
-                                               {:trigger-on-errors trigger-on-errors :trigger-on-empty-turns trigger-on-empty-turns
-                                                :force-tune-after-turns force-tune-after-turns}))]
-        (if (= :cold-merged (:outcome watch))
-          (let [fh (cluster/instance-op! inst {:op :health})
-                vr (when-let [vs (or (:verify-spec task) (:verify-spec opts))] (cluster/instance-op! inst {:op :verify-task :spec (assoc vs :after-main-tx base-mtx)}))]
-            {:ok? (boolean (and (:ok? fh) (if vr (:ok? vr) true))) :phase :cold-merged :task tid :worker worker-id :merged? true
-             :health-ok? (boolean (:ok? fh)) :verify-ok? (if vr (boolean (:ok? vr)) true) :verify-reason (:reason vr)
-             :turns (long (:turns (:detail watch) 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))
-             :worker-pre (:detail watch) :elapsed-s (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e8)) 10.0)})
-          (run-tuner-intervention! inst tid worker-id worker-br tuner-id watch
-                                   {:tuner-timeout-ms tuner-timeout-ms :resume-timeout-ms resume-timeout-ms :tuner-max-turns tuner-max-turns :verify-spec (or (:verify-spec task) (:verify-spec opts)) :after-main-tx base-mtx :proxy-inst proxy-inst :on-phase! (:on-phase! opts)} t0)))
+      (let [inst (cluster/start-instance! (cond-> {:id (keyword "lab" slug) :seed-store seed-store :max-os-procs 3 :max-test-workers 2 :timeout-ms 60000}
+                                            proxy-inst (assoc :model-base-url (:base-url proxy-inst))))]
+        (try
+          (let [base-mtx (long (or (:main-tx (cluster/instance-op! inst {:op :status})) 0))
+                pre-ags (:agents (cluster/instance-op! inst {:op :status}))
+                p-tx (vec (keep #(when (and (:id %) (not= :paused (:status %))) {:seon.agent/id (:id %) :seon.agent/paused? true}) pre-ags))]
+            (when (seq p-tx) (cluster/instance-op! inst {:op :transact :tx-data p-tx :reason :lab-isolate}))
+            (cluster/instance-op! inst (assoc (select-keys inner [:id :scope :title :plan :tests :needs]) :op :create-task))
+            (cluster/instance-op! inst (cond-> {:op :spawn-agent :id worker-id :branch worker-br :task tid
+                                                :goal (str (or (:title inner) (name tid))) :auto-merge? true
+                                                :config {:seon.config/auto-refine-tasks? false :seon.config/max-tool-turns max-tool-turns}}
+                                         (:scope inner) (assoc :scope (:scope inner))))
+            (cluster/instance-op! inst {:op :send-message :from :user :to worker-id :type :chat
+                                        :body "Work your assigned task, verify your changes pass tests and health, then reply concisely with your summary."})
+            (let [watch (do (when-let [cb (:on-phase! opts)] (cb {:phase :watching :turns 0 :proxy-stats (when proxy-inst (proxy/stats proxy-inst))}))
+                            (watch-worker-until-trigger! inst worker-id worker-br timeout-ms
+                                                         {:trigger-on-errors trigger-on-errors :trigger-on-empty-turns trigger-on-empty-turns
+                                                          :force-tune-after-turns force-tune-after-turns}))]
+              (if (= :cold-merged (:outcome watch))
+                (let [fh (cluster/instance-op! inst {:op :health})
+                      vr (when-let [vs (or (:verify-spec task) (:verify-spec opts))] (cluster/instance-op! inst {:op :verify-task :spec (assoc vs :after-main-tx base-mtx)}))]
+                  {:ok? (boolean (and (:ok? fh) (if vr (:ok? vr) true))) :phase :cold-merged :task tid :worker worker-id :merged? true
+                   :health-ok? (boolean (:ok? fh)) :verify-ok? (if vr (boolean (:ok? vr)) true) :verify-reason (:reason vr)
+                   :turns (long (:turns (:detail watch) 0)) :proxy-stats (when proxy-inst (proxy/stats proxy-inst))
+                   :worker-pre (:detail watch) :elapsed-s (/ (Math/round (/ (double (- (System/nanoTime) t0)) 1e8)) 10.0)})
+                (run-tuner-intervention! inst tid worker-id worker-br tuner-id watch
+                                         {:tuner-timeout-ms tuner-timeout-ms :resume-timeout-ms resume-timeout-ms :tuner-max-turns tuner-max-turns :verify-spec (or (:verify-spec task) (:verify-spec opts)) :after-main-tx base-mtx :proxy-inst proxy-inst :on-phase! (:on-phase! opts)} t0))))
+          (finally
+            (cluster/stop-instance! inst {:keep-dir? keep-dir?}))))
       (finally
-        (try (cluster/stop-instance! inst {:keep-dir? keep-dir?}) (finally (when proxy-inst (proxy/stop! proxy-inst))))))))
+        (when proxy-inst (proxy/stop! proxy-inst))))))
+
+(defn ^:seon.flow/edge start-supervisor-cycle-async!
+  "Coordinator-owned async supervisor cycle runner streaming progress to `:seon.bench.run/entity` via `publish-fn`."
+  {:malli/schema [:=> [:cat :map :seon.host/fn] :map]}
+  [opts publish-fn]
+  (let [inner (if (map? (:task (:task opts))) (:task (:task opts)) (or (:task opts) opts))
+        tid (or (:id inner) :lab/task)
+        run-id (random-uuid)
+        started-ms (System/currentTimeMillis)
+        title (or (:title opts) (str "Supervisor Cycle: " tid))
+        emit! (fn [status trial-map finished-ms]
+                (let [px (:proxy-stats trial-map)
+                      ent (cond-> {:seon.bench.run/id run-id :seon.bench.run/title title
+                                   :seon.bench.run/suite-id :lab/supervisor-cycle :seon.bench.run/status status
+                                   :seon.bench.run/started-ms (long started-ms) :seon.bench.run/updated-ms (System/currentTimeMillis)
+                                   :seon.bench.run/total 1 :seon.bench.run/passed (if (= :passed status) 1 0)
+                                   :seon.bench.run/failed (if (= :failed status) 1 0)
+                                   :seon.bench.run/trials [(assoc trial-map :pair-id tid :arm :supervised)]}
+                            (map? px) (assoc :seon.bench.run/proxy-stats px)
+                            finished-ms (assoc :seon.bench.run/finished-ms (long finished-ms)))]
+                  (try (publish-fn ent) (catch Throwable _ nil))))]
+    (emit! :running {:id tid :status :booting :evals 0 :elapsed-ms 0 :merged? false :health-ok? false :alive? true} nil)
+    (a/io-thread
+      (try
+        (let [res (execute-supervisor-cycle!
+                   (assoc opts :on-phase! (fn [m] (emit! :running (merge {:id tid :status :running :evals 0 :elapsed-ms (- (System/currentTimeMillis) started-ms) :merged? false :health-ok? false :alive? true} m) nil))))
+              ok? (boolean (:ok? res))
+              ms (long (* 1000.0 (double (or (:elapsed-s res) 0.0))))]
+          (emit! (if ok? :passed :failed)
+                 (assoc res :id tid :status (if (:merged? res) :merged :failed) :elapsed-ms ms :alive? false)
+                 (System/currentTimeMillis)))
+        (catch Throwable ex
+          (emit! :failed {:id tid :status :failed :last-error (or (.getMessage ex) (str ex))
+                          :merged? false :health-ok? false :alive? false :elapsed-ms (- (System/currentTimeMillis) started-ms)}
+                 (System/currentTimeMillis)))))
+    {:ok? true :run-id run-id :status :running :task tid :title title}))
 
 (defn ^:seon.flow/edge run-supervisor-cycle!
-  "Live Pause-and-Fork Supervisor Lab: runs cold Worker on `:task`, intervenes with `:template/tune-context` on error/stall/miss, verifies rollback + context diff + corpus, and resumes Worker. Pass `:sync? false` to run asynchronously and stream progress to `:seon.bench.run/entity` (inspectable with `(user/bench-run run-id)`)."
+  "Live Pause-and-Fork Supervisor Lab: runs cold Worker on `:task`, intervenes with `:template/tune-context` on error/stall/miss, verifies rollback + context diff + corpus, and resumes Worker. Pass `:sync? false` to dispatch onto the standing coordinator daemon and stream progress to `:seon.bench.run/entity`."
   {:seon.repl/export true
    :malli/schema [:=> [:cat :map] :map]
    :seon.eval/budget-override {:ticks 2000000000 :bytes 1073741824}}
   [opts]
   (if (false? (:sync? opts))
-    (let [inner (if (map? (:task (:task opts))) (:task (:task opts)) (or (:task opts) opts))
-          tid (or (:id inner) :lab/task)
-          run-id (random-uuid)
-          started-ms (System/currentTimeMillis)
-          title (or (:title opts) (str "Supervisor Cycle: " tid))
-          port (or (:coordinator-port opts) (System/getenv "SEON_PORT") 9998)
-          coord-url (str "http://127.0.0.1:" port)]
-      (publish-lab-run! coord-url run-id title tid started-ms :running
-                        {:id tid :status :booting :evals 0 :elapsed-ms 0 :merged? false :health-ok? false :alive? true}
-                        nil)
-      (a/thread
-        (try
-          (let [res (execute-supervisor-cycle! (assoc opts :on-phase! (fn [m] (publish-lab-run! coord-url run-id title tid started-ms :running (merge {:id tid :status :running :evals 0 :elapsed-ms (- (System/currentTimeMillis) started-ms) :merged? false :health-ok? false :alive? true} m) nil))))
-                ok? (boolean (:ok? res))
-                ms (long (* 1000.0 (double (or (:elapsed-s res) 0.0))))]
-            (publish-lab-run! coord-url run-id title tid started-ms (if ok? :passed :failed)
-                              (assoc res :id tid :status (if (:merged? res) :merged :failed)
-                                     :elapsed-ms ms :alive? false)
-                              (System/currentTimeMillis)))
-          (catch Throwable ex
-            (publish-lab-run! coord-url run-id title tid started-ms :failed
-                              {:id tid :status :failed :last-error (or (.getMessage ex) (str ex))
-                               :merged? false :health-ok? false :alive? false :elapsed-ms (- (System/currentTimeMillis) started-ms)}
-                              (System/currentTimeMillis)))))
-      {:ok? true :run-id run-id :status :running :task tid :title title})
+    (let [port (or (:coordinator-port opts) (System/getenv "SEON_PORT") 9998)
+          coord-url (str "http://127.0.0.1:" port)
+          ans (cluster/instance-op! {:base-url coord-url}
+                                    {:op :start-supervisor-cycle :opts (dissoc opts :sync?)})]
+      (if (:ok? ans)
+        ans
+        (start-supervisor-cycle-async! opts (fn [ent] (cluster/instance-op! {:base-url coord-url} {:op :transact :tx-data [ent] :reason [:lab-run (:seon.bench.run/id ent)]})))))
     (execute-supervisor-cycle! opts)))

@@ -110,66 +110,107 @@
 (defn ^:seon.flow/edge start-http-listener!
   {:malli/schema [:=> [:cat :int] :map] :seon.gen/skip true}
   [port]
-  (let [delegate (volatile! nil)
-        latest-page (volatile! nil)
-        sse-tabs (volatile! {})
-        tab-seq (volatile! 0)
-        pending (volatile! [])
-        flushing? (volatile! false)
-        flush-now! (fn []
-                     (let [chunks @pending]
-                       (vreset! pending [])
-                       (when (seq chunks)
-                         (let [merged (apply str chunks)]
-                           (vswap! sse-tabs
-                                   (fn [tabs]
-                                     (reduce-kv
-                                      (fn [acc tid ch]
-                                        (if (a/offer! ch merged)
-                                          (assoc acc tid ch)
-                                          (do (a/close! ch) acc)))
-                                      {} tabs)))))))
-        schedule-flush! (fn []
-                          (when (not @flushing?)
-                            (vreset! flushing? true)
-                            (a/go (a/<! (a/timeout 8)) (vreset! flushing? false) (flush-now!))))
+  (let [hub-ch (a/chan 256)
+        ask-hub! (fn [msg]
+                   (let [rch (a/chan 1)]
+                     (when (a/put! hub-ch (assoc msg :reply-ch rch))
+                       (let [[v ch] (a/alts!! [rch (a/timeout 3000)])]
+                         (a/close! rch)
+                         (when (= ch rch) v)))))
+        _ (a/go-loop [st {:delegate nil :latest-page nil :tabs {} :tab-seq 0 :pending [] :flushing? false :stopped? false}]
+            (when-let [msg (a/<! hub-ch)]
+              (let [rch (:reply-ch msg)
+                    reply! (fn [v] (when rch (a/put! rch v) (a/close! rch)))]
+                (case (:op msg)
+                  :get-route-ctx
+                  (do (reply! {:delegate (:delegate st) :latest-page (:latest-page st)})
+                      (recur st))
+
+                  :tab-count
+                  (do (reply! (count (:tabs st)))
+                      (recur st))
+
+                  :set-page
+                  (recur (assoc st :latest-page (:html msg)))
+
+                  :set-delegate
+                  (do (reply! :ok)
+                      (recur (assoc st :delegate (:delegate msg))))
+
+                  :new-tab
+                  (if (:stopped? st)
+                    (do (reply! nil) (recur st))
+                    (let [ch (a/chan 64)
+                          tid (inc (long (:tab-seq st)))]
+                      (reply! {:ch ch :delegate (:delegate st)})
+                      (recur (-> st (assoc :tab-seq tid) (assoc-in [:tabs tid] ch)))))
+
+                  :broadcast
+                  (if (and (not (:stopped? st)) (seq (:tabs st)) (not (str/blank? (:chunk msg))))
+                    (let [st1 (update st :pending conj (:chunk msg))]
+                      (if (:flushing? st1)
+                        (recur st1)
+                        (do (a/go (a/<! (a/timeout 8)) (a/put! hub-ch {:op :flush}))
+                            (recur (assoc st1 :flushing? true)))))
+                    (recur st))
+
+                  :flush
+                  (let [chunks (:pending st)
+                        tabs' (if (seq chunks)
+                                (let [merged (apply str chunks)]
+                                  (reduce-kv (fn [acc tid ch]
+                                               (if (a/offer! ch merged)
+                                                 (assoc acc tid ch)
+                                                 (do (a/close! ch) acc)))
+                                             {} (:tabs st)))
+                                (:tabs st))]
+                    (recur (assoc st :pending [] :flushing? false :tabs tabs')))
+
+                  :stop
+                  (do (doseq [[_ ch] (:tabs st)] (a/close! ch))
+                      (reply! :stopped)
+                      nil)
+
+                  (recur st)))))
         handler (fn [req]
                   (let [m (:request-method req) uri (:uri req) qs (:query-string req)
-                        full-uri (if (str/blank? qs) uri (str uri "?" qs))
-                        d @delegate
-                        dl (when (= m :get) (parse-deep-link (when-let [df (:db-fn d)] (df)) full-uri))]
-                    (cond
-                      (= [:get "/events"] [m uri])
-                      (let [ch (a/chan 64) tid (vswap! tab-seq inc)]
-                        (vswap! sse-tabs assoc tid ch)
-                        (when d ((:on-new-tab! d) ch))
-                        (rsse/event-response ch))
-                      dl
-                      (if d
-                        {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"}
-                         :body ((:sync-deep-link! d) dl)}
-                        (if-let [html (when (or (= uri "/") (= uri "")) @latest-page)]
-                          {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
-                          {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon booting..."}))
-                      :else
-                      (if d
-                        ((:handle d) req)
-                        {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."}))))
+                        full-uri (if (str/blank? qs) uri (str uri "?" qs))]
+                    (if (= [:get "/events"] [m uri])
+                      (if-let [{:keys [ch delegate]} (ask-hub! {:op :new-tab})]
+                        (do (when delegate ((:on-new-tab! delegate) ch))
+                            (rsse/event-response ch))
+                        {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon stopping..."})
+                      (let [{:keys [delegate latest-page]} (or (ask-hub! {:op :get-route-ctx}) {})
+                            dl (when (= m :get) (parse-deep-link (when-let [df (:db-fn delegate)] (df)) full-uri))]
+                        (cond
+                          dl
+                          (if delegate
+                            {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"}
+                             :body ((:sync-deep-link! delegate) dl)}
+                            (if-let [html (when (or (= uri "/") (= uri "")) latest-page)]
+                              {:status 200 :headers {"Content-Type" "text/html; charset=utf-8" "Cache-Control" "no-store"} :body html}
+                              {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon booting..."}))
+                          :else
+                          (if delegate
+                            ((:handle delegate) req)
+                            {:status 503 :headers {"Content-Type" "text/plain"} :body "Seon rebooting..."}))))))
         handler (compress/wrap-compress handler)
         srv (when (not= 0 port)
               (adapter/run-server handler
                                   (cond-> {:port (if (neg? port) 0 port) :host "127.0.0.1"}
                                     (poller/available?) (assoc :strategy :fibers))))]
     {:server srv :port (if srv (:port srv) 0) :handler handler
-     :set-page! (fn [^String html] (vreset! latest-page html))
+     :set-page! (fn [^String html] (a/put! hub-ch {:op :set-page :html html}))
      :broadcast! (fn [^String chunk]
-                   (when (and (seq @sse-tabs) (not (str/blank? chunk)))
-                     (vswap! pending conj chunk) (schedule-flush!)))
-     :tab-count (fn [] (count @sse-tabs))
-     :set-delegate! (fn [d] (vreset! delegate d) (when d ((:on-delegate! d))))
+                   (when-not (str/blank? chunk)
+                     (a/put! hub-ch {:op :broadcast :chunk chunk})))
+     :tab-count (fn [] (long (or (ask-hub! {:op :tab-count}) 0)))
+     :set-delegate! (fn [d]
+                      (ask-hub! {:op :set-delegate :delegate d})
+                      (when d ((:on-delegate! d))))
      :stop! (fn []
-              (doseq [[_ ch] @sse-tabs] (a/close! ch))
-              (vreset! sse-tabs {})
+              (ask-hub! {:op :stop})
+              (a/close! hub-ch)
               (when srv (try (adapter/stop-server srv {:drain-timeout-ms 1500}) (catch Throwable _))))}))
 
 (defn- advance-walk-and-broadcast! [& args] (apply sse/advance-walk-and-broadcast! args))
@@ -327,6 +368,14 @@
                                      (namespace a))))
                   tx-ds)))))
 
+(defn- ^:seon.flow/edge render-page-sync! [ui-ch fallback-fn]
+  (let [rch (a/chan 1)]
+    (if (a/put! ui-ch {:ev :render-page :reply-ch rch})
+      (let [[html ch] (a/alts!! [rch (a/timeout 5000)])]
+        (a/close! rch)
+        (or (when (= ch rch) html) (fallback-fn)))
+      (fallback-fn))))
+
 (defn web-proc
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat :map] :map] [:=> [:cat :map :any] :map] [:=> [:cat :map :any :any] [:tuple :map :any]]]}
   ([] {:params {:port "Port" :listener "Listener" :conn "Main conn" :cfg "Store cfg" :repo-dir "Git dir" :store-path "LMDB path"
@@ -339,7 +388,6 @@
   ([{:keys [port listener conn cfg repo-dir store-path fork-parent-pid fork-parent-ceiling
             server-in-ch report-chan error-chan on-power-loss boot-seq]}]
    (let [ui-ch (a/chan 128)
-         live-st (volatile! nil)
          own-listener (when (and (nil? listener) (pos? (or port 0))) (start-http-listener! port))
          eff-listener (or listener own-listener)
          st-init {:conn conn :cfg cfg :repo-dir repo-dir :store-path store-path
@@ -347,7 +395,7 @@
                   :server-in-ch server-in-ch :ui-ch ui-ch :on-power-loss on-power-loss
                   :boot-seq (or boot-seq 1) :bound-port (:port eff-listener 0) :own-listener own-listener
                   :set-page! (:set-page! eff-listener) :broadcast! (:broadcast! eff-listener) :tab-count (:tab-count eff-listener)
-                  :walk (render/empty-walk) :live-st-vol live-st :live-streams {} :agent-states {}
+                  :walk (render/empty-walk) :live-streams {} :agent-states {}
                   :last-stream-emit-ns 0 :last-view-sig nil :last-agg-rate "" :viewport-screenshot nil
                   :reports [] :errors [] :frames 0}
          st0 (advance-walk-and-broadcast! st-init nil)]
@@ -360,25 +408,21 @@
          :on-delegate! (fn [] (a/put! ui-ch {:ev :broadcast-keyframe}))
          :on-new-tab!  (fn [ch] (a/put! ui-ch {:ev :new-tab :ch ch}))
          :sync-deep-link! (fn [show-op]
-         (let [db0 @conn
-               vs0 (rdata/user-view-state db0)
-               tgt-tx (let [t (:as-of-tx show-op)] (when (integer? t) (long t)))
-               already? (and (or (nil? (:viewing show-op)) (= (:viewing show-op) (:viewing-id vs0)))
-                             (or (nil? (:mode show-op)) (= (:mode show-op) (:view-mode vs0)))
-                             (= (:inspect-ref show-op) (:inspect-ref vs0))
-                             (= tgt-tx (:as-of-tx vs0)))]
-           (when-not already? (call-server-edge! server-in-ch show-op 5000))
-           (let [db @conn cur-st (or @live-st st0)]
-             (if (and (:walk cur-st) (= (:walk-tx cur-st) (:max-tx db)))
-               (page-shell (:walk cur-st) db)
-               (let [ue (:e (first (d/datoms db :avet :seon.user/id :user/default)))
-                     uds (when ue (vec (d/datoms db :eavt ue)))
-                     res (render/step-walk (or (:walk cur-st) (render/empty-walk)) db uds (ui/page-unit-specs cur-st))]
-                 (page-shell (:walk res) db))))))
+                            (let [db0 @conn
+                                  vs0 (rdata/user-view-state db0)
+                                  tgt-tx (let [t (:as-of-tx show-op)] (when (integer? t) (long t)))
+                                  already? (and (or (nil? (:viewing show-op)) (= (:viewing show-op) (:viewing-id vs0)))
+                                                (or (nil? (:mode show-op)) (= (:mode show-op) (:view-mode vs0)))
+                                                (= (:inspect-ref show-op) (:inspect-ref vs0))
+                                                (= tgt-tx (:as-of-tx vs0)))]
+                              (when-not already? (call-server-edge! server-in-ch show-op 5000))
+                              (render-page-sync! ui-ch #(page-shell (:walk st0) @conn))))
          :handle (fn [req] (handle-http-request! {:ui-ch ui-ch :server-in-ch server-in-ch :conn conn} req))}))
      (assoc st0 ::flow/in-ports (cond-> {:ui ui-ch} report-chan (assoc :report report-chan) error-chan (assoc :error error-chan)))))
   ([st transition]
-   (when (and (= transition ::flow/stop) (:own-listener st)) ((:stop! (:own-listener st))))
+   (when (= transition ::flow/stop)
+     (when-let [ol (:own-listener st)] ((:stop! ol)))
+     (when-let [uch (:ui-ch st)] (a/close! uch)))
    st)
   ([st cid msg]
    (if (nil? msg)
@@ -400,6 +444,17 @@
                    kf (render/datastar-patch-event (rwalk/compose-keyframe-html (:walk st) (when-let [c (:conn st)] @c)))
                    ar (or (:last-agg-rate st) "")]
                (a/offer! ch (if (str/blank? ar) kf (str kf (render/datastar-patch-signals {:aggRate ar}))))
+               [st nil])
+             :render-page
+             (let [rch (:reply-ch msg)
+                   db @(:conn st)
+                   html (if (and (:walk st) (= (:walk-tx st) (:max-tx db)))
+                          (page-shell (:walk st) db)
+                          (let [ue (:e (first (d/datoms db :avet :seon.user/id :user/default)))
+                                uds (when ue (vec (d/datoms db :eavt ue)))
+                                res (render/step-walk (or (:walk st) (render/empty-walk)) db uds (ui/page-unit-specs st))]
+                            (page-shell (:walk res) db)))]
+               (when rch (a/put! rch html) (a/close! rch))
                [st nil])
              :broadcast-keyframe
              (let [st1 (advance-walk-and-broadcast! st nil)
