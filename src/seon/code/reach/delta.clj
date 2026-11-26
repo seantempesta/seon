@@ -148,7 +148,7 @@
                   tx-span (when (and from-db to-db)
                             (Math/abs (- (long (or (:max-tx to-db) 0)) (long (or (:max-tx from-db) 0)))))
                   ds (when-not (and from-db to-db (> (long tx-span) 100))
-                       (try (d/changes conn from-cid to-cid) (catch Throwable _ ::fallback)))]
+                       (try (d/changes conn from-cid to-cid) (catch clojure.lang.ExceptionInfo ex (if (= :datahike/changes-not-ancestor (:type (ex-data ex))) ::fallback (throw ex)))))]
               (if (or (nil? ds) (= ::fallback ds))
                 (changed-form-ops-aevt from-db to-db)
                 (let [db to-db
