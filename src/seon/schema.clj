@@ -340,6 +340,32 @@
            (let [exs (when db (:seon.schema/examples (d/pull db '[:seon.schema/examples] [:seon.schema/key schema-key])))]
              (vec (take n exs)))))))))
 
+(defn ^:seon.flow/edge report-contract-violation!
+  "Throws a structured `:seon.schema/contract-violation` ExceptionInfo unless `*bypass-contracts*` is true.
+   Named top-level var so `arm-var!` wrappers invoke via var lookup and stay fresh across hot-reloads."
+  {:malli/schema [:=> [:cat :symbol :any :map :keyword :map] :any] :cost/ticks 5000000}
+  [var-sym sch-form opts phase data]
+  (when-not *bypass-contracts*
+    (let [in? (= :malli.core/invalid-input phase)
+          ar? (= :malli.core/invalid-arity phase)
+          blame (cond in? :input-contract ar? :arity-contract :else :output-contract)
+          target-sch (cond in? (:input data) ar? nil :else (:output data))
+          bad-val (if (or in? ar?) (:args data) (:value data))
+          vsch (first (sort-by str (schema-refs-in-form (when target-sch (m/form target-sch)))))
+          exp (when target-sch (m/explain target-sch bad-val opts))
+          human (cond exp (me/humanize exp) ar? (str "wrong arity (" (count (:args data)) " arg(s))") :else (str phase))
+          example (when (and in? target-sch) (safe-example target-sch opts))]
+      (throw (ex-info
+              (str "Schema contract violation in " var-sym
+                   " (" (cond in? "invalid arguments" ar? "invalid arity" :else "invalid return value") "): "
+                   (pr-str human)
+                   " | Got: " (pr-str bad-val)
+                   " | Contract: " (pr-str sch-form)
+                   (when example (str " | Valid example args: " (pr-str example))))
+              (cond-> {:error :seon.schema/contract-violation :blame blame :var var-sym :phase phase
+                       :contract sch-form :human human :got bad-val :example-args example}
+                vsch (assoc :violated-schema vsch)))))))
+
 (defn arm-var!
   "Wraps `v` (a Clojure `Var` with `:malli/schema` `[:=> ...]` metadata) via `m/-instrument` with typed contract blame."
   {:malli/schema [:function [:=> [:cat :any] :any] [:=> [:cat [:maybe :seon.host/db] :any] :any]], :seon.flow/edge true}
@@ -362,28 +388,8 @@
              (let [wrapped
                    (m/-instrument
                     {:schema fn-sch
-                     :report
-                     (fn [phase data]
-                       (when-not *bypass-contracts*
-                         (let [in? (= :malli.core/invalid-input phase)
-                               ar? (= :malli.core/invalid-arity phase)
-                               blame (cond in? :input-contract ar? :arity-contract :else :output-contract)
-                               target-sch (cond in? (:input data) ar? nil :else (:output data))
-                               bad-val (if (or in? ar?) (:args data) (:value data))
-                               vsch (first (sort-by str (schema-refs-in-form (when target-sch (m/form target-sch)))))
-                               exp (when target-sch (m/explain target-sch bad-val opts))
-                               human (cond exp (me/humanize exp) ar? (str "wrong arity (" (count (:args data)) " arg(s))") :else (str phase))
-                               example (when (and in? target-sch) (safe-example target-sch opts))]
-                           (throw (ex-info
-                                   (str "Schema contract violation in " var-sym
-                                        " (" (cond in? "invalid arguments" ar? "invalid arity" :else "invalid return value") "): "
-                                        (pr-str human)
-                                        " | Got: " (pr-str bad-val)
-                                        " | Contract: " (pr-str sch-form)
-                                        (when example (str " | Valid example args: " (pr-str example))))
-                                   (cond-> {:error :seon.schema/contract-violation :blame blame :var var-sym :phase phase
-                                            :contract sch-form :human human :got bad-val :example-args example}
-                                     vsch (assoc :violated-schema vsch)))))))}
+                     :report (fn [phase data]
+                               (report-contract-violation! var-sym sch-form opts phase data))}
                     raw-fn)]
                (alter-meta! v assoc :seon/raw-fn raw-fn :seon/instrumented? true)
                (alter-var-root v (constantly wrapped))

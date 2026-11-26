@@ -381,7 +381,7 @@
    :cost/bytes 4194304}
   [src]
   (let [s (str src)]
-    (if-not (re-find #"^\s*\(\s*(?:clojure\.core/)?do(?:\s|$)" s)
+    (if-not (str/includes? s "do")
       [s]
       (let [p (parse-non-ws-nodes s)]
         (if-not (and (:ok? p) (= 1 (count (:nodes p))))
@@ -409,12 +409,13 @@
                               out
                               (let [c (first xs) tag (n/tag c)]
                                 (cond
-                                  (= tag :newline) (recur (rest xs) seen-head? 0 true out)
-                                  (n/whitespace-or-comment? c)
-                                  (recur (rest xs) seen-head? (if at-sol? (+ cur-col (count (n/string c))) cur-col) at-sol? out)
-                                  (= tag :uneval) (recur (rest xs) seen-head? 0 false out)
-                                  (not seen-head?) (recur (rest xs) true 0 false out)
-                                  :else (recur (rest xs) true 0 false (into out (unwrap c (if at-sol? cur-col 0))))))))
+                                (= tag :newline) (recur (rest xs) seen-head? 0 true out)
+                                (= tag :comment) (recur (rest xs) seen-head? 0 true out)
+                                (n/whitespace? c)
+                                (recur (rest xs) seen-head? (if at-sol? (+ cur-col (count (n/string c))) cur-col) at-sol? out)
+                                (= tag :uneval) (recur (rest xs) seen-head? 0 false out)
+                                (not seen-head?) (recur (rest xs) true 0 false out)
+                                :else (recur (rest xs) true 0 false (into out (unwrap c (if at-sol? cur-col 0))))))))
                           [(dedent-by (n/string nd) col)]))
                       [(dedent-by (n/string nd) col)]))]
             (unwrap (first (:nodes p)) 0)))))))

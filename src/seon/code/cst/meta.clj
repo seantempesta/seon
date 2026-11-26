@@ -6,134 +6,130 @@
             [rewrite-clj.zip :as z]
             [malli.core :as m]))
 
+(defn- form-ns-name [nsym k]
+  (cond
+    (symbol? nsym) (name nsym)
+    (string? k) (let [i (.indexOf ^String k "/")
+                      j (.indexOf ^String k "#")]
+                  (cond (pos? i) (subs k 0 i) (pos? j) (subs k 0 j) :else nil))
+    :else nil))
+
+(defn- kahn-order-body [nsym body key-fn deps-fn src-fn strict-acyclic?]
+  (let [n (count body)]
+    (if (< n 2)
+      (vec body)
+      (let [idx-by-key (into {} (map-indexed (fn [i f] [(key-fn f) i])) body)
+            by-key (into {} (map (juxt key-fn identity)) body)
+            decl-by-sym (reduce-kv
+                         (fn [acc i f]
+                           (let [k (key-fn f)
+                                 s (when-let [rs (src-fn f)] (str/triml (str rs)))
+                                 ns-s (form-ns-name nsym k)]
+                             (if (and ns-s s (str/starts-with? s "(declare "))
+                               (let [parsed (try (read-string s) (catch Throwable _ nil))
+                                     syms (when (seq? parsed) (filter symbol? (rest parsed)))]
+                                 (reduce (fn [m sym]
+                                           (let [qs (symbol ns-s (name sym))]
+                                             (if (contains? m qs) m (assoc m qs {:key k :idx i}))))
+                                         acc syms))
+                               acc)))
+                         {} (vec body))
+            sym->key (reduce
+                      (fn [acc f]
+                        (let [k (key-fn f)
+                              ns-s (form-ns-name nsym k)
+                              s (when-let [rs (src-fn f)] (str/triml (str rs)))
+                              acc1 (if (and (string? k) (str/includes? k "/") (not (str/includes? k "#")))
+                                     (assoc acc (symbol k) k)
+                                     acc)]
+                          (if (and ns-s s (or (str/starts-with? s "(defrecord ") (str/starts-with? s "(deftype ")))
+                            (if-let [[_ kind tname] (re-find #"^\((defrecord|deftype)\s+([A-Za-z0-9_?!-]+)" s)]
+                              (cond-> (assoc acc1 (symbol ns-s (str "->" tname)) k)
+                                (= kind "defrecord") (assoc (symbol ns-s (str "map->" tname)) k))
+                              acc1)
+                            acc1)))
+                      {} body)
+            edges (reduce-kv
+                   (fn [acc fi f]
+                     (let [ck (key-fn f)
+                           raw-deps (deps-fn f)
+                           deps (when (coll? raw-deps) raw-deps)]
+                       (reduce
+                        (fn [a d]
+                          (let [decl (get decl-by-sym d)
+                                dk (cond
+                                     (and decl (< (:idx decl) fi)) (:key decl)
+                                     :else (get sym->key d))]
+                            (if (and dk (not= dk ck))
+                              (update a dk (fnil conj #{}) ck)
+                              a)))
+                        acc deps)))
+                   {} (vec body))
+            init-indeg (reduce
+                        (fn [acc [_ cs]]
+                          (reduce (fn [a c] (update a c (fnil inc 0))) acc cs))
+                        (into {} (map (fn [f] [(key-fn f) 0])) body)
+                        edges)
+            ordered-keys
+            (loop [ready (vec (sort-by #(get idx-by-key % 0) (keep (fn [[k d]] (when (zero? d) k)) init-indeg)))
+                   indeg init-indeg
+                   out []]
+              (if (empty? ready)
+                (if strict-acyclic?
+                  (when (= (count out) (count idx-by-key)) out)
+                  (into out (sort-by #(get idx-by-key % 0) (keys indeg))))
+                (let [nxt (first ready)
+                      rest-r (subvec ready 1)
+                      indeg1 (dissoc indeg nxt)
+                      [indeg2 newly]
+                      (reduce (fn [[m nr] c]
+                                (if (contains? m c)
+                                  (let [nd (dec (long (get m c 0)))]
+                                    [(assoc m c nd) (if (zero? nd) (conj nr c) nr)])
+                                  [m nr]))
+                              [indeg1 []]
+                              (get edges nxt))
+                      next-ready (if (seq newly) (vec (sort-by #(get idx-by-key % 0) (into rest-r newly))) rest-r)]
+                  (recur next-ready indeg2 (conj out nxt)))))]
+        (when ordered-keys (mapv by-key ordered-keys))))))
+
 (defn topo-order-ns-forms
-  "Given a sequence of `:seon.code.form/*` maps for one namespace, returns the minimal vector of\n       `{:seon.code.form/key k :seon.code.form/order new-idx}` updates needed to place every same-ns\n       callee before its callers (keeping `#ns` at order 0 and preserving original order on ties/cycles)."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]],
-   :cost/ticks 2000000,
+  "Given a sequence of `:seon.code.form/*` maps for one namespace, returns the minimal vector of
+   `{:seon.code.form/key k :seon.code.form/order new-idx}` updates needed to place every same-ns
+   callee before its callers (respecting `declare`/`defrecord`/`deftype`, keeping `#ns` at order 0,
+   and preserving original order on ties/cycles)."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]
+   :cost/ticks 4000000
    :cost/bytes 4194304}
   [forms]
-  (let [valid (vec
-                (sort-by
-                  #(long (or (:seon.code.form/order %) 0))
-                  (filter #(string? (:seon.code.form/key %)) forms)))
+  (let [safe-ord (fn [f] (let [o (:seon.code.form/order f)] (if (number? o) (long o) 0)))
+        valid (vec (sort-by safe-ord (filter #(string? (:seon.code.form/key %)) forms)))
         n (count valid)]
     (if (< n 2)
       []
-      (let [ns-hdrs (filterv
-                      #(str/ends-with? (:seon.code.form/key %) "#ns")
-                      valid)
-            body (filterv
-                   #(not
-                     (str/ends-with? (:seon.code.form/key %) "#ns"))
-                   valid)
-            idx-by-key (into
-                         {}
-                         (map-indexed
-                           (fn [i f] [(:seon.code.form/key f) i])
-                           body))
-            sym->key (into
-                       {}
-                       (keep
-                         (fn [f]
-                           (let [k (:seon.code.form/key f)]
-                             (when (str/includes? k "/")
-                               [(symbol k) k]))))
-                       body)
-            by-key (into
-                     {}
-                     (map (juxt :seon.code.form/key identity))
-                     body)
-            edges (reduce
-                    (fn [acc f]
-                      (let [ck (:seon.code.form/key f)
-                            raw-deps (:seon.code.form/deps f)
-                            deps (if (coll? raw-deps) raw-deps nil)]
-                        (reduce
-                          (fn [a d]
-                            (if-let [dk (get sym->key d)]
-                              (if (not= dk ck)
-                                (update a dk (fnil conj #{}) ck)
-                                a)
-                              a))
-                          acc
-                          deps)))
-                    {}
-                    body)
-            init-indeg (reduce
-                         (fn [acc [_ cs]]
-                           (reduce
-                             (fn [a c] (update a c (fnil inc 0)))
-                             acc
-                             cs))
-                         (into
-                           {}
-                           (map (fn [f] [(:seon.code.form/key f) 0]))
-                           body)
-                         edges)
-            ordered-keys (loop [indeg init-indeg out []]
-                           (let [ready
-                                 (sort-by
-                                   #(get idx-by-key % 0)
-                                   (keep
-                                     (fn [[k d]] (when (zero? d) k))
-                                     indeg))]
-                             (if-let [nxt (first ready)]
-                               (let 
-                                 [indeg1 (dissoc indeg nxt)
-                                  indeg2
-                                  (reduce
-                                    (fn 
-                                      [m c]
-                                      (if
-                                        (contains? m c)
-                                        (update m c dec)
-                                        m))
-                                    indeg1
-                                    (get edges nxt))]
-                                 (recur indeg2 (conj out nxt)))
-                               (into
-                                 out
-                                 (sort-by
-                                   #(get idx-by-key % 0)
-                                   (keys indeg))))))
-            final-forms (into (vec ns-hdrs) (map by-key ordered-keys))]
-        (vec
-          (keep-indexed
-            (fn [i f]
-              (when (not=
-                      (long i)
-                      (long (or (:seon.code.form/order f) -1)))
-                {:seon.code.form/key (:seon.code.form/key f),
-                 :seon.code.form/order (long i)}))
-            final-forms))))))
+      (let [ns-hdrs (filterv #(str/ends-with? (:seon.code.form/key %) "#ns") valid)
+            body (filterv #(not (str/ends-with? (:seon.code.form/key %) "#ns")) valid)
+            ordered-body (kahn-order-body nil body :seon.code.form/key :seon.code.form/deps :seon.code.form/src false)
+            final-forms (into (vec ns-hdrs) ordered-body)]
+        (vec (keep-indexed
+              (fn [i f]
+                (let [old-o (:seon.code.form/order f)]
+                  (when (or (not (number? old-o)) (not= (long i) (long old-o)))
+                    {:seon.code.form/key (:seon.code.form/key f)
+                     :seon.code.form/order (long i)})))
+              final-forms))))))
 
 (defn topo-sort-ns-forms
-  "Deterministic Kahn topological sort of non-`#ns` forms in `nsym` by same-ns `:deps`, preserving `:order` as tie-breaker. Returns ordered vec if acyclic, or `nil` on cycle."
+  "Deterministic Kahn topological sort of non-`#ns` forms in `nsym` by same-ns `:deps` (respecting
+   `declare`/`defrecord`/`deftype` and preserving original order as tie-breaker). Returns ordered vec if acyclic, or `nil` on cycle."
   {:malli/schema [:=> [:cat :symbol [:sequential :map]] [:maybe [:vector :map]]]
    :cost/ticks 5000000}
-  [_nsym body-forms]
-  (let [by-key (into {} (map (juxt :key identity)) body-forms)
-        sym->key (into {} (keep (fn [{:keys [key]}] (when (and key (not (str/includes? key "#"))) [(symbol key) key]))) body-forms)
-        in-deg (volatile! (into {} (map (fn [f] [(:key f) 0])) body-forms))
-        rdeps  (volatile! {})
-        _ (doseq [{:keys [key deps]} body-forms]
-            (let [local-deps (->> deps (keep #(get sym->key %)) (remove #(= % key)) distinct)]
-              (doseq [dk local-deps]
-                (vswap! in-deg update key (fnil inc 0))
-                (vswap! rdeps update dk (fnil conj []) key))))
-        orig-ord (into {} (map-indexed (fn [i f] [(:key f) i])) body-forms)]
-    (loop [ready (vec (sort-by orig-ord (keep (fn [[k d]] (when (zero? d) k)) @in-deg)))
-           deg @in-deg
-           out []]
-      (if (empty? ready)
-        (when (= (count out) (count body-forms)) (mapv by-key out))
-        (let [cur (first ready) rest-r (subvec ready 1) kids (get @rdeps cur)
-              [deg' newly] (reduce (fn [[dm nr] k]
-                                     (let [nd (dec (get dm k 0))]
-                                       [(assoc dm k nd) (if (zero? nd) (conj nr k) nr)]))
-                                   [deg []] kids)
-              next-ready (if (seq newly) (vec (sort-by orig-ord (into rest-r newly))) rest-r)]
-          (recur next-ready deg' (conj out cur)))))))
+  [nsym body-forms]
+  (let [indexed (mapv (fn [i f] (if (string? (:key f)) f (assoc f ::ord-key (str "#idx#" i))))
+                      (range) body-forms)
+        key-fn #(or (when (string? (:key %)) (:key %)) (::ord-key %))
+        ordered (kahn-order-body nsym indexed key-fn :deps :src true)]
+    (when ordered (mapv #(dissoc % ::ord-key) ordered))))
 
 (defn extract-defn-malli-schema
   "Extracts `:malli/schema` from a parsed `(defn ...)` / `(defn- ...)` form (var metadata or attr-map)."
@@ -241,12 +237,17 @@
                                            (= :map (:tag (nth non-ws attr-slot))))
                                   (nth non-ws attr-slot))]
               (if existing-attr
-                (let [old-map (try (read-string (n/string (:node existing-attr))) (catch Throwable _ {}))
-                      merged (quote-examples-for-src (merge old-map meta-map))
-                      new-map-nd (p/parse-string (binding [*print-namespace-maps* false] (pr-str merged)))
-                      updated (assoc raw (:i existing-attr) new-map-nd)
-                      z' (z/replace fn-loc (n/replace-children fn-nd updated))]
-                  {:ok? true :action :merged :src (z/root-string z')})
+                (let [old-res (try {:ok? true :val (read-string (n/string (:node existing-attr)))}
+                                 (catch Throwable ex {:ok? false :error :unreadable-attr-map
+                                                      :message (or (.getMessage ex) (str ex))}))]
+                (if-not (and (:ok? old-res) (map? (:val old-res)))
+                  {:ok? false :error :unreadable-attr-map
+                   :message (or (:message old-res) "Existing defn attr-map could not be parsed as a map")}
+                  (let [merged (quote-examples-for-src (merge (:val old-res) meta-map))
+                        new-map-nd (p/parse-string (binding [*print-namespace-maps* false] (pr-str merged)))
+                        updated (assoc raw (:i existing-attr) new-map-nd)
+                        z' (z/replace fn-loc (n/replace-children fn-nd updated))]
+                    {:ok? true :action :merged :src (z/root-string z')})))
                 (let [anchor-idx (:i (nth non-ws (dec attr-slot)))
                       next-raw (subvec raw (inc anchor-idx))
                       starts-nl? (and (seq next-raw) (= :newline (n/tag (first next-raw))))

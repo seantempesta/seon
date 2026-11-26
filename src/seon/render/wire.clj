@@ -31,9 +31,10 @@
       [(get-in main-db [:config :store :id]) agent-id mcid (:max-tx main-db)
        (if (= mcid bcid) :same-db [bcid (:max-tx branch-db)]) (boolean vision?)
        (when viewport-screenshot
-         [(:width viewport-screenshot) (:height viewport-screenshot) (:bytes viewport-screenshot)
-          (:captured-at viewport-screenshot) (hash (:data-url viewport-screenshot))
-          (hash (:base64 viewport-screenshot))])])))
+       [(:width viewport-screenshot) (:height viewport-screenshot) (:bytes viewport-screenshot)
+        (:captured-at viewport-screenshot)
+        (when-let [u (:data-url viewport-screenshot)] (store/sha256-hex (str u) 16))
+        (when-let [b (:base64 viewport-screenshot)] (store/sha256-hex (str b) 16))])])))
 
 (defn- resolve-walk-db [main-db branch-db conn ag]
   (let [branch (:seon.agent/branch ag :main)

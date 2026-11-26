@@ -133,7 +133,7 @@
                  fv (first fvs)
                  multi? (> (count fvs) 1)
                  src (if (and (not multi?) (string? form-src) (not (str/includes? raw-src "\n")) (>= (count raw-src) 200))
-                       (str/trim (with-out-str (pp/write fv :dispatch pp/code-dispatch))) raw-src)
+                       (binding [*print-meta* true *print-namespace-maps* false] (str/trim (with-out-str (pp/write (cst-ns/strip-reader-meta fv) :dispatch pp/code-dispatch)))) raw-src)
                  fhead (when (symbol? (first fv)) (symbol (name (first fv))))
                  vnames (vec (keep #(when (symbol? (second %)) (symbol (name nsym) (name (second %)))) fvs))
                  vname (first vnames)

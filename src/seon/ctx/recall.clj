@@ -3,7 +3,8 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.vector :as svec]
-            [seon.store :as store]))
+            [seon.store :as store]
+            [seon.ctx.diff :as diff]))
 
 (defn dh-has?
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :keyword] :boolean]}
@@ -141,7 +142,7 @@
   (when (and (instance? datahike.db.DB db)
              (not (instance? datahike.db.AsOfDB db))
              (not (instance? datahike.db.HistoricalDB db)))
-    [kind (get-in db [:config :store :id]) (get-in db [:config :branch]) (d/commit-id db) (:max-tx db)]))
+    [kind (or (diff/code-db-sig db) [(get-in db [:config :store :id]) (get-in db [:config :branch]) (d/commit-id db) (:max-tx db)])]))
 
 (defn- build-doc-tfidf-index [db]
   (store/without-agent-eval-reads
