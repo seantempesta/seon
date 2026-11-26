@@ -663,4 +663,12 @@
   :seon.fix/error-class :non-flow-concurrency-races-and-resource-leaks,
   :seon.fix/root-cause "Ad-hoc cross-thread volatiles, channel semaphores, unbounded OS a/thread spawns, and unserialized shared edges bypassed clojure.core.async.flow single-owner state machines.",
   :seon.fix/regression-test seon.alloc-guard-test/wave-a1-flow-proxy-web-browser-agent-model-vector-test,
-  :seon.fix/id #uuid "72991683-1b5a-40fb-b01a-9bb1a47de723"}]
+  :seon.fix/id #uuid "72991683-1b5a-40fb-b01a-9bb1a47de723"}
+ {:seon.fix/created-ms 1795663158073,
+  :seon.fix/symptom "Booting or waking :agent/root on long-lived :branch/root hung for 3m22s CPU and 2.05 GB RAM because load-delta! pulled and recompiled 2,000+ :main-identical forms back to merge-base tx 536876059; silent catch in sync-coordinator-branches! also let :branch/root drift by 3 forms.",
+  :seon.fix/change-summary "Added :skip-same-as-db/:skip-same-as-cid pre-pull hash filter in seon.code.reach.delta/changed-form-ops & changed-form-ops-aevt, wired from seon.code.overlay/load-delta! for non-:main branch overlays, and upgraded sync-coordinator-branches! error path to fall back to sync-main-into-branch!.",
+  :seon.fix/before-after "[M] Live :branch/root delta: >269 MB OOM + 3m22s (202,600 ms) CPU / 2.05 GB RAM -> 120.7 ms, 0 upserts, 0 retracts, 0 recompiles (>1,600x speedup).",
+  :seon.fix/error-class :seon.code.overlay/router-branch-full-recompile-boot-stall,
+  :seon.fix/root-cause "Long-lived router/reviewed branches synced from :main via 1-parent d/transact kept d/merge-base pinned thousands of TXs in the past, and changed-form-ops/load-delta! lacked a pre-pull skip check against the already-loaded :main db; sync-coordinator-branches! silently swallowed replay errors instead of catching up via 3-way sync.",
+  :seon.fix/regression-test seon.alloc-guard-test/load-delta-skips-forms-identical-to-main-test,
+  :seon.fix/id #uuid "20261126-d002-4000-8000-000000000005"}]

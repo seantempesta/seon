@@ -250,8 +250,8 @@
         (finally
           (d/release bconn))))))
 
-(defn sync-coordinator-branches!
-  "Propagates newly merged domain ops from `:main` onto active router branches without touching evals or memory."
+(defn ^:seon.flow/edge sync-coordinator-branches!
+  "Propagates newly merged domain ops from `:main` onto active router branches without touching evals or memory, falling back to full 3-way catch-up if incremental replay fails."
   {:malli/schema [:=> [:cat :seon.host/conn :map :map :keyword] :int]}
   [main-conn cfg plan merged-branch]
   (let [mdb @main-conn
@@ -271,7 +271,9 @@
              (let [bconn (store/connect cfg cbr)]
                (try (apply-domain-sync-tx! bconn plan nil) (inc n)
                     (finally (d/release bconn))))
-             (catch Throwable _ n)))
+             (catch Throwable _
+               (try (sync-main-into-branch! main-conn cfg cbr nil) (inc n)
+                    (catch Throwable _ n)))))
          0 coord-brs)))))
 
 (defn- next-msg-seq [st db]

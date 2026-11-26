@@ -361,11 +361,15 @@
   {:malli/schema [:function [:=> [:cat :seon.host/conn :any :any] :any] [:=> [:cat :seon.host/conn :any :any :boolean] :any]], :seon.flow/edge true}
   ([conn from-cid to-cid] (load-delta! conn from-cid to-cid false))
   ([conn from-cid to-cid tolerant?]
-   (let [delta (changed-form-ops conn from-cid to-cid)
-         to-db (or (try (d/commit-as-db conn to-cid) (catch Throwable _ nil)) @conn)
+   (let [to-db (or (try (d/commit-as-db conn to-cid) (catch Throwable _ nil)) @conn)
          main-db (try (store/head conn :main) (catch Throwable _ nil))
          main-cid (when main-db (d/commit-id main-db))
          to-real-cid (try (d/commit-id to-db) (catch Throwable _ nil))
+         skip-opts (when (and main-db main-cid to-real-cid (not= main-cid to-real-cid))
+                     {:skip-same-as-db main-db :skip-same-as-cid main-cid})
+         delta (if skip-opts
+                 (changed-form-ops conn from-cid to-cid skip-opts)
+                 (changed-form-ops conn from-cid to-cid))
          base-cid (when (and main-cid to-real-cid (not= main-cid to-real-cid))
                     (try (d/merge-base conn main-cid to-real-cid) (catch Throwable _ nil)))
          stale-branch? (and base-cid main-cid (not= base-cid main-cid))
