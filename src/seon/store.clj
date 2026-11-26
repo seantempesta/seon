@@ -28,7 +28,8 @@
             [jolt.fs :as fs]
             [seon.store.query :as query]
             [seon.store.config :as config :refer [*capturing-agent-eval-reads?*]]
-            [seon.store.gc :as gc]))
+            [seon.store.gc :as gc]
+            [datahike.writer]))
 
 (def checkout-root schema/checkout-root)
 
@@ -507,7 +508,7 @@
                  (d/release sc)))
            main-conn (-> (d/connect (-> cfg
                                         (assoc-in [:writer :streaming?] true)
-                                        (assoc-in [:writer :write-fn-map] {'transact! transact-checked})))
+                                        (assoc-in [:writer :write-fn-map] {'transact! #'transact-checked})))
                          attach-ids!)
            changed? (install-missing-schema-and-seeds! main-conn (:repo-dir opts))]
        (when (or created? changed?)
@@ -551,17 +552,23 @@
 (defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.store.gc/gc-store!} gc-store! [& args] (apply gc/gc-store! args))
 
 (defn ^:seon.flow/edge adopt-head!
-  "Atomically adopts `db` onto `conn`, preserving live `(:writer cur)` and monotonic `:max-tx`."
+  "Atomically adopts `db` onto `conn`, preserving live `(:writer cur)` and monotonic `:max-tx`, and advancing a `:sync` writer's `follow-head!` so subsequent commits chain onto the adopted head."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db] :seon.host/db]
    :cost/ticks 200000}
   [conn db]
-  (swap! (:wrapped-atom conn)
-         (fn [cur]
-           (if (and (= (get-in cur [:config :branch]) (get-in db [:config :branch]))
-                    (> (long (:max-tx cur 0)) (long (:max-tx db 0))))
-             cur
-             (let [w (:writer cur)]
-               (cond-> db w (assoc :writer w)))))))
+  (let [prev-cid (try (d/commit-id @conn) (catch Throwable _ nil))
+        adopted (swap! (:wrapped-atom conn)
+                       (fn [cur]
+                         (if (and (= (get-in cur [:config :branch]) (get-in db [:config :branch]))
+                                  (> (long (:max-tx cur 0)) (long (:max-tx db 0))))
+                           cur
+                           (let [w (:writer cur)]
+                             (cond-> db w (assoc :writer w))))))
+        new-cid (try (d/commit-id adopted) (catch Throwable _ nil))
+        w (:writer adopted)]
+    (when (and w new-cid (not= prev-cid new-cid) (datahike.writer/sync-writer? w))
+      (datahike.writer/follow-head! w new-cid))
+    adopted))
 
 (defn- ensure-lru! [cache-atom threshold]
   (when-not (satisfies? cache/CacheProtocol @cache-atom)

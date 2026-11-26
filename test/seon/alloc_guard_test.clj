@@ -1134,39 +1134,119 @@
             targets (sel conn @conn {:window 2})]
         (is (= [:w/newer-tx :w/older-tx] (mapv :agent-id targets)))))))
 
-(deftest load-delta-skips-forms-identical-to-main-test
-  (testing "load-delta! skips branch forms already identical to :main (preventing O(codebase) recompile on long-lived router branches)"
+(deftest ^{:cost/ticks 120000000} load-delta-skips-forms-identical-to-main-test
+  (testing "Datahike-native commit-DAG rebase advances merge-base to :main, preserves agent/evals/conflicts, and keeps adopt-head! SyncWriter linked"
     (with-test-store
       (fn [conn cfg]
-        (let [ns-sym 'seon.delta.skip.demo
-              path "src/seon/delta/skip/demo.clj"
-              src0 "(ns seon.delta.skip.demo)
+        (let [trebase (requiring-resolve 'seon.transactor.rebase/rebase-branch-onto-main!)
+              sync-main! (requiring-resolve 'seon.transactor.rebase/sync-main-into-branch!)
+              sync-coord! (requiring-resolve 'seon.transactor.rebase/sync-coordinator-branches!)
+              reset-router! (requiring-resolve 'seon.transactor.rebase/reset-router-branch-onto-main!)
+              ns-sym 'seon.dag.rebase.demo
+              path "src/seon/dag/rebase/demo.clj"
+              src0 "(ns seon.dag.rebase.demo)
 (defn a [] 1)
 (defn b [] 2)"
-              src1 "(ns seon.delta.skip.demo)
+              src1 "(ns seon.dag.rebase.demo)
 (defn a [] 10)
 (defn b [] 2)"
-              src-br "(ns seon.delta.skip.demo)
-(defn a [] 10)
-(defn b [] 20)"]
+              src-w "(ns seon.dag.rebase.demo)
+(defn a [] 1)
+(defn b [] 20)"
+              src-c "(ns seon.dag.rebase.demo)
+(defn a [] 99)
+(defn b [] 2)"]
           (try
-            (d/transact conn {:tx-data (code/file-import-tx @conn path src0 false)})
+            (d/transact conn {:tx-data (concat (code/file-import-tx @conn path src0 false)
+                                               [{:seon.agent/id :agent/dag-root :seon.agent/branch :branch/dag-root :seon.agent/router? true :seon.agent/goal "Root"}
+                                                {:seon.agent/id :w/dag :seon.agent/branch :branch/w-dag :seon.agent/goal "Initial"}
+                                                {:seon.agent/id :w/conf :seon.agent/branch :branch/w-conf :seon.agent/goal "Conf"}])})
             (code/apply-overlay! @conn {:upserts (code/ns-forms @conn ns-sym) :retracted-keys #{}} true)
-            (store/branch! conn :main :branch/router-sim)
-            (d/transact conn {:tx-data (code/file-import-tx @conn path src1 false)})
+            (store/branch! conn :main :branch/dag-root)
+            (store/branch! conn :main :branch/w-dag)
+            (store/branch! conn :main :branch/w-conf)
+            ;; Advance :main with code + :seon.agent/goal update on :w/dag (Subtlety A setup)
+            (d/transact conn {:tx-data (concat (code/file-import-tx @conn path src1 false)
+                                               [{:seon.agent/id :w/dag :seon.agent/goal "Updated on main"}])})
             (code/apply-overlay! @conn {:upserts (code/ns-forms @conn ns-sym) :retracted-keys #{}} true)
-            (let [bc (store/connect cfg :branch/router-sim)]
-              (try
-                (d/transact bc {:tx-data (code/file-import-tx @bc path src-br false)})
-                (let [base (d/merge-base bc :main :branch/router-sim)
-                      head (d/commit-id @bc)
-                      res (code/load-delta! bc base head false)]
-                  (is (empty? (:errors res)) (pr-str res))
-                  (is (not (some #{"seon.delta.skip.demo/a"} (:loaded res))) (pr-str res))
-                  (is (some #{"seon.delta.skip.demo/b"} (:loaded res)) (pr-str res))
-                  (is (= 10 ((ns-resolve ns-sym 'a))))
-                  (is (= 20 ((ns-resolve ns-sym 'b)))))
-                (finally (d/release bc))))
+            (let [m1 (d/commit-id @conn)]
+              ;; 1. Router sync rebases :branch/dag-root onto M1 -> merge-base == M1, 0 code changes, 0 load-delta! forms
+              (let [n (sync-coord! conn cfg {:tx-data [{:seon.code.form/key "seon.dag.rebase.demo/a"}]} :branch/other)
+                    bc (store/connect cfg :branch/dag-root)]
+                (try
+                  (is (= 1 n))
+                  (is (= m1 (d/merge-base conn :main :branch/dag-root)))
+                  (let [r-cid (d/commit-id @bc)
+                        ld (code/load-delta! bc m1 r-cid false)]
+                    (is (empty? (:loaded ld)) (pr-str ld))
+                    (is (empty? (:unmapped ld)) (pr-str ld))
+                    (is (empty? (:errors ld)) (pr-str ld)))
+                  ;; 4. adopt-head! + SyncWriter follow-head!: external rebase + warm conn commit chains onto C2 (not C1)
+                  (d/transact bc {:tx-data [{:seon.agent/id :agent/dag-root :seon.agent/summary "s1"}]})
+                  (let [c1 (d/commit-id @bc)]
+                    (d/transact conn {:tx-data [{:seon.agent/id :w/dag :seon.agent/goal "Updated on main v2"}]})
+                    (let [m2 (d/commit-id @conn)
+                          rb (trebase conn cfg :branch/dag-root {:reason "test-rebase"})
+                          c2 (d/commit-id (store/head conn :branch/dag-root))]
+                      (is (true? (:rebased? rb)))
+                      (is (not= c1 c2))
+                      (store/adopt-head! bc (store/head conn :branch/dag-root))
+                      (d/transact bc {:tx-data [{:seon.agent/id :agent/dag-root :seon.agent/summary "s2"}]})
+                      (let [c3 (d/commit-id @bc)]
+                        (is (= #{c2} (d/parent-commit-ids @bc)) "adopt-head! must advance SyncWriter follow-head!")
+                        (is (seq (d/changes conn m2 c3)) "d/changes from M2 to C3 must succeed after rebase"))))
+                  (finally (d/release bc))))
+              ;; 2. Subtlety A: worker edits `b` + touches :ready? after sync-main-into-branch! -> never retracts :main's :seon.agent/goal
+              (let [wc (store/connect cfg :branch/w-dag)]
+                (try
+                  (d/transact wc {:tx-data (concat (code/file-import-tx @wc path src-w false)
+                                                   [{:seon.agent/id :w/dag :seon.agent/summary "keep-me"}])})
+                  (finally (d/release wc))))
+              (let [m-now (d/commit-id @conn)
+                    sr (sync-main! conn cfg :branch/w-dag :rev/1)]
+                (is (true? (:rebased? sr)) (pr-str sr))
+                (is (= m-now (d/merge-base conn :main :branch/w-dag)))
+                (let [wc2 (store/connect cfg :branch/w-dag)]
+                  (try
+                    (is (= "keep-me" (:seon.agent/summary (d/pull @wc2 '[:seon.agent/summary] [:seon.agent/id :w/dag]))))
+                    (d/transact wc2 {:tx-data [{:seon.agent/id :w/dag :seon.agent/ready? true}]})
+                    (let [plan-back (merge/three-way conn cfg :branch/w-dag {:skip-health? true})]
+                      (is (true? (:ok? plan-back)) (pr-str (:conflicts plan-back)))
+                      (d/transact conn {:tx-data (:tx-data plan-back)})
+                      (is (= "Updated on main v2" (:seon.agent/goal (d/pull @conn '[:seon.agent/goal] [:seon.agent/id :w/dag]))))
+                      (is (str/includes? (code/render-path @conn path) "(defn b [] 20)")))
+                    (finally (d/release wc2)))))
+              ;; 3. Subtlety B: conflicting edit on `a` refuses rebase and preserves merge conflict
+              (let [cc (store/connect cfg :branch/w-conf)]
+                (try
+                  (d/transact cc {:tx-data (code/file-import-tx @cc path src-c false)})
+                  (finally (d/release cc))))
+              (let [m-before (d/commit-id @conn)
+                    sr-c (sync-main! conn cfg :branch/w-conf :rev/2)]
+                (is (false? (:rebased? sr-c)))
+                (is (not= m-before (d/merge-base conn :main :branch/w-conf)))
+                (let [plan-c (merge/three-way conn cfg :branch/w-conf {:skip-health? true})]
+                  (is (false? (:ok? plan-c)))
+                  (is (seq (:conflicts plan-c)))))
+              ;; 5. reset-router-branch-onto-main! heals drifted code while keeping eval + original error txInstant
+              (let [old-inst (java.util.Date. (- (System/currentTimeMillis) 600000))
+                    ev-id (random-uuid)
+                    rc (store/connect cfg :branch/dag-root)]
+                (try
+                  (d/transact rc {:tx-data (code/file-import-tx @rc path src-c false)})
+                  (d/transact rc {:tx-data [{:seon.agent.eval/id ev-id :seon.agent.eval/agent :agent/dag-root
+                                             :seon.agent.eval/turn 1 :seon.agent.eval/code "(boom)" :seon.agent.eval/error "old"}]
+                                  :tx-meta {:db/txInstant old-inst}})
+                  (finally (d/release rc)))
+                (let [hr (reset-router! conn :branch/dag-root)
+                      rdb (store/head conn :branch/dag-root)
+                      ev-dt (first (d/datoms rdb :avet :seon.agent.eval/id ev-id))
+                      ev-inst (:v (first (d/datoms rdb :eavt (:tx ev-dt) :db/txInstant)))]
+                  (is (true? (:healed? hr)))
+                  (is (= (d/commit-id @conn) (d/merge-base conn :main :branch/dag-root)))
+                  (is (str/includes? (code/render-path rdb path) "(defn a [] 10)") "Drifted code must reset to :main")
+                  (is (some? ev-dt) "Router eval must survive heal")
+                  (is (= (.getTime old-inst) (.getTime ^java.util.Date ev-inst)) "Original error txInstant must be preserved"))))
             (finally
               (try (remove-ns ns-sym) (catch Throwable _ nil)))))))))
 
