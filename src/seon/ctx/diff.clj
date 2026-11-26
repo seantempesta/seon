@@ -361,7 +361,7 @@
                                                     (and added? (= a :seon.error/status) (= :resolved (:v dt)))
                                                     (and added? (contains? target-session-attrs a) (not= e self-eid)))))]
                               (if hit? (max mx (long (or (:tx dt) 0))) mx)))
-                          0 (d/changes branch-db base bc))]
+                          0 (try (d/changes branch-db base bc) (catch Throwable _ [])))]
              (if (pos? max-tx)
                (let [inst (:v (first (d/datoms branch-db :eavt max-tx :db/txInstant)))
                      ms (cond (instance? java.util.Date inst) (.getTime ^java.util.Date inst)

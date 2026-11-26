@@ -23,7 +23,8 @@
             [seon.web :as web]
             [clojure.tools.cli :as cli]
             [seon.vector.flow :as vectors-flow]
-            [seon.code.overlay :as overlay]))
+            [seon.code.overlay :as overlay]
+            [seon.transactor.rebase :as trebase]))
 
 (defmacro ^{:private true} compile-epoch-ms []
   (System/currentTimeMillis))
@@ -122,6 +123,7 @@
              :let [b (:v dt)]
              :when (and (keyword? b) (not= b :main))]
        (store/branch! conn :main b))
+     (trebase/heal-stale-router-branches! conn)
      (when (and (contains? dh :seon.system/id)
                 (not (first (d/datoms db :avet :seon.system/id :root))))
        (call! sys {:op :transact

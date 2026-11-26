@@ -11,7 +11,8 @@
             [clojure.string :as str]
             [seon.error :as err]
             [seon.ctx.touches :as ctouches]
-            [seon.task.refine :as refine]))
+            [seon.task.refine :as refine]
+            [seon.transactor.rebase :as trebase]))
 
 (defn reply!
   {:malli/schema [:=> [:cat :map :any] :any]}
@@ -106,26 +107,6 @@
                       passed-tasks)]
       (into ops1 extra))))
 
-(defn- rebind-committed-schema-tempids
-  "After `r2` commits new `:seon.schema/key` entities, rewrites their `new/seon.schema/key/...`
-   tempids in `rest-ops` to committed lookup refs `[:seon.schema/key k]` so `r3` never creates orphan entities."
-  [schema-ops rest-ops]
-  (let [tid->lref (into {}
-                        (keep (fn [op]
-                                (when (and (map? op) (string? (:db/id op)) (:seon.schema/key op))
-                                  [(:db/id op) [:seon.schema/key (:seon.schema/key op)]])))
-                        schema-ops)]
-    (if (empty? tid->lref)
-      rest-ops
-      (let [rw (fn rw [x]
-                 (cond
-                   (and (string? x) (contains? tid->lref x)) (get tid->lref x)
-                   (set? x) (into #{} (map rw) x)
-                   (vector? x) (mapv rw x)
-                   (map? x) (reduce-kv (fn [a k v] (assoc a k (rw v))) {} x)
-                   :else x))]
-        (mapv rw rest-ops)))))
-
 (defn- format-merge-failure-body [branch msg-type conflicts]
   (str (if (= :health-block msg-type) (str "Health error(s) on " branch) (str "3-way merge conflict on " branch))
        " — fix and reply concisely:\n"
@@ -145,19 +126,6 @@
   (if-let [f (when (find-ns 'seon.git) (ns-resolve 'seon.git 'format-merge-commit-message))]
     (f db branch plan {:boot-affected? boot-touched?})
     (or fallback-msg (str "Merge " branch))))
-
-(def ^:private sync-domain-id-attrs
-  #{:seon.code.form/key :seon.code.var/name :seon.code.ns/name
-    :seon.code.doc/id :seon.code.file/path :seon.schema/key
-    :seon.rule/id :seon.fix/id :seon.config/key :seon.task/id :seon.summary/id})
-
-(defn- sync-domain-op? [op]
-  (cond
-    (map? op)
-    (boolean (some #(contains? op %) sync-domain-id-attrs))
-    (and (vector? op) (contains? #{:db/add :db/retract :db/retractEntity} (first op)) (vector? (second op)))
-    (contains? sync-domain-id-attrs (first (second op)))
-    :else false))
 
 (defn- extract-review-note-body [conn reviewer reviewer-branch sync-res]
   (let [rdb (when (and reviewer-branch (not= reviewer-branch :main) (store/branch? conn reviewer-branch)) (store/head conn reviewer-branch))
@@ -204,77 +172,9 @@
                 {:seon.error/id (:seon.error/id p) :seon.error/status :resolved})))
           (d/datoms db :avet :seon.error/kind :merge-error))))
 
-(defn- split-schema-ops [tx-ops]
-  (let [s-op? #(and (map? %) (contains? % :seon.schema/key))
-        schema-ops (filterv s-op? tx-ops)]
-    [schema-ops (rebind-committed-schema-tempids schema-ops (filterv (complement s-op?) tx-ops))]))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.transactor.rebase/sync-main-into-branch!} sync-main-into-branch! [& args] (apply trebase/sync-main-into-branch! args))
 
-(defn- apply-domain-sync-tx! [bconn plan tx-meta]
-  (let [s-tx (vec (:schema-tx plan))
-        d-ops (filterv sync-domain-op? (:tx-data plan))
-        [schema-ops rest-ops] (split-schema-ops d-ops)
-        tx-with (fn [ops]
-                  (if tx-meta
-                    (binding [store/*tx-meta* tx-meta] (d/transact bconn {:tx-data ops}))
-                    (d/transact bconn {:tx-data ops})))]
-    (when (seq s-tx) (d/transact bconn {:tx-data s-tx}))
-    (when (seq schema-ops) (tx-with schema-ops))
-    (cond
-      (seq rest-ops) (tx-with rest-ops)
-      tx-meta (let [allowed (select-keys tx-meta (keys (:schema @bconn)))]
-                (when (seq allowed)
-                  (d/transact bconn {:tx-data [(assoc allowed :db/id :db/current-tx)]}))))
-    (+ (count s-tx) (count d-ops))))
-
-(defn ^:seon.flow/edge sync-main-into-branch!
-  "Syncs newly merged `:main` domain entities into `target-branch` via 3-way merge (`:skip-health? true`)
-   while preserving 100% of `target-branch`'s eval history, edits, and `:seon.agent/memory`, stamping
-   `:seon.tx/merged :main` + `:seon.tx/synced-commit` on every synced transaction."
-  {:malli/schema [:=> [:cat :seon.host/conn :map :keyword [:maybe :keyword]] :map]}
-  [main-conn cfg target-branch reviewer]
-  (if (or (nil? target-branch) (= target-branch :main) (not (store/branch? main-conn target-branch)))
-    {:synced? false :ops 0 :conflicts []}
-    (let [bconn (store/connect cfg target-branch)]
-      (try
-        (let [plan (merge/three-way bconn cfg :main {:skip-health? true})
-              dom-conflicts (filterv #(and (vector? (:entity %))
-                                           (contains? sync-domain-id-attrs (first (:entity %))))
-                                     (:conflicts plan))
-              tx-meta (cond-> {:seon.tx/merged :main
-                               :seon.tx/reason (str "Sync :main into " target-branch
-                                                    (when reviewer (str " after review by " reviewer)))}
-                        (:theirs-commit plan) (assoc :seon.tx/synced-commit (:theirs-commit plan))
-                        reviewer (assoc :seon.tx/agent reviewer))
-              n-ops (apply-domain-sync-tx! bconn plan tx-meta)]
-          {:synced? true :ops n-ops :conflicts dom-conflicts :synced-commit (:theirs-commit plan) :branch-tx (:max-tx @bconn)})
-        (finally
-          (d/release bconn))))))
-
-(defn ^:seon.flow/edge sync-coordinator-branches!
-  "Propagates newly merged domain ops from `:main` onto active router branches without touching evals or memory, falling back to full 3-way catch-up if incremental replay fails."
-  {:malli/schema [:=> [:cat :seon.host/conn :map :map :keyword] :int]}
-  [main-conn cfg plan merged-branch]
-  (let [mdb @main-conn
-        has-ops? (or (seq (:schema-tx plan)) (some sync-domain-op? (:tx-data plan)))]
-    (if-not has-ops?
-      0
-      (let [coord-brs (->> (when (contains? (:schema mdb) :seon.agent/router?) (d/datoms mdb :avet :seon.agent/router? true))
-                           (keep (fn [dt]
-                                   (let [a (d/pull mdb '[:seon.agent/branch :seon.agent/archived?] (:e dt))
-                                         br (:seon.agent/branch a)]
-                                     (when (and br (not= br :main) (not= br merged-branch) (not (:seon.agent/archived? a)))
-                                       br))))
-                           distinct vec)]
-        (reduce
-         (fn [n cbr]
-           (try
-             (let [bconn (store/connect cfg cbr)]
-               (try (apply-domain-sync-tx! bconn plan nil) (inc n)
-                    (finally (d/release bconn))))
-             (catch Throwable _
-               (try (sync-main-into-branch! main-conn cfg cbr nil) (inc n)
-                    (catch Throwable _ n)))))
-         0 coord-brs)))))
+(defn ^:seon.flow/edge ^{:seon.code/reexport 'seon.transactor.rebase/sync-coordinator-branches!} sync-coordinator-branches! [& args] (apply trebase/sync-coordinator-branches! args))
 
 (defn- next-msg-seq [st db]
   (inc (long (or (:msg-seq st) (count (d/datoms db :aevt :seon.agent.message/id))))))
@@ -367,7 +267,7 @@
           has-edits? (boolean (or (seq s-tx) (seq tx-ops) (seq done-tasks) (seq auto-ops)))
           _ (try
               (when has-edits?
-                (let [[schema-ops raw-rest] (split-schema-ops tx-ops)
+                (let [[schema-ops raw-rest] (trebase/split-schema-ops tx-ops)
                       rest-ops (refine/strip-task-ops raw-rest done-tasks)
                       tmeta {:seon.tx/merged :fork-review :seon.tx/agent agent-id
                              :seon.tx/reason (str "Merge forked review " agent-id " into " target-branch)}]
@@ -433,7 +333,7 @@
         eff-btx (or branch-tx (:max-tx (safe-branch-head conn branch nil)))
         r1 (when (seq (:schema-tx plan))
              (d/transact conn {:tx-data (:schema-tx plan)}))
-        [schema-ops rest-ops] (split-schema-ops (:tx-data plan))
+        [schema-ops rest-ops] (trebase/split-schema-ops (:tx-data plan))
         r2 (when (seq schema-ops)
              (d/transact conn {:tx-data schema-ops}))
         cur-db @conn

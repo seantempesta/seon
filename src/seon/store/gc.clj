@@ -191,7 +191,14 @@
              (d/transact conn {:tx-data orphan-vecs}))
          pruned (prune-merged-branches! conn keep-n)
          cutoff (java.util.Date. (- (System/currentTimeMillis) (* hrs 3600 1000)))
-         swept @(d/gc-storage conn cutoff)
+         keep-commits (into #{}
+                              (keep (fn [b]
+                                      (when (and (not= b :main) (not= b :db))
+                                        (try (d/merge-base conn :main b) (catch Throwable _ nil)))))
+                              (d/branches conn))
+         swept (if (seq keep-commits)
+                 @(d/gc-storage conn cutoff {:datahike.gc/keep-commits keep-commits})
+                 @(d/gc-storage conn cutoff))
          n-swept (if (coll? swept) (count swept) swept)]
      {:ok? true :pruned pruned :pruned-branches (:pruned-branches (meta pruned) []) :swept n-swept :history-hours hrs})))
 
